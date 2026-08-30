@@ -28,6 +28,7 @@ export function useInvoice() {
 	const posOpeningShift = ref(null); // POS Opening Shift name
 	const additionalDiscount = ref(0);
 	const couponCode = ref(null);
+	const buyerName = ref(""); // Free-text buyer name (walk-in, behind enable_buyer_identity)
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -940,6 +941,7 @@ export function useInvoice() {
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
+			buyer_name: buyerName.value?.trim() || null,
 			is_pos: 1,
 			update_stock: 1,
 		};
@@ -1002,6 +1004,7 @@ export function useInvoice() {
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
+					buyer_name: buyerName.value?.trim() || null,
 					is_pos: 1,
 					update_stock: 1, // Critical: Ensures stock is updated
 				};
@@ -1164,6 +1167,7 @@ export function useInvoice() {
 		payments.value = [];
 		additionalDiscount.value = 0;
 		couponCode.value = null;
+		buyerName.value = "";
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1191,6 +1195,8 @@ export function useInvoice() {
 		payments.value = [];
 		additionalDiscount.value = 0;
 		couponCode.value = null;
+
+		buyerName.value = "";
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1266,6 +1272,7 @@ export function useInvoice() {
 		posOpeningShift,
 		additionalDiscount,
 		couponCode,
+		buyerName,
 		taxRules,
 		taxInclusive,
 		isSubmitting,

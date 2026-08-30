@@ -40,7 +40,12 @@ const CURRENT_SCHEMA = {
 
 	// Invoice queue for offline submissions
 	// offline_id is a unique UUID for deduplication across syncs
-	invoice_queue: "++id, &offline_id, timestamp, synced",
+	// The `server_queue_number` index is the additive v1->v2 schema bump for the
+	// buyer-identity queue (see MIGRATIONS below): the number the server counter
+	// allocated at sync, recorded next to the printed estimate so the audit can
+	// show both (D2). The estimate itself lives in the queued payload
+	// (`data.offline_queue_estimate`) together with `data.buyer_name`.
+	invoice_queue: "++id, &offline_id, timestamp, synced, server_queue_number",
 
 	// Items cache with searchable fields
 	// variant_of index allows querying variants by their template item
@@ -92,6 +97,61 @@ const CURRENT_SCHEMA = {
 };
 
 /**
+ * Versioned schema migrations.
+ *
+ * The auto-hashed CURRENT_SCHEMA only describes INDEXES; records are schemaless,
+ * so a purely additive field (e.g. `server_queue_number`) survives a version
+ * bump untouched. We still record each additive step explicitly here so the
+ * discipline is visible: an upgrade function must never destroy queued rows,
+ * and every step is covered by a preservation test that seeds data under the
+ * old schema and reopens under the new one (tests/unit/offlineQueueMigration.spec.js).
+ *
+ * MIGRATION_SCHEMA_HASHES: schema objects keyed by the schema hash the
+ * auto-versioner had stored while this schema was current. At runtime
+ * getSchemaVersion() looks up the stored hash; a known predecessor version is
+ * upgraded through the matching `upgrade` function (no-op when rows only gain
+ * fields), while an unknown hash is treated as third-party drift and gets the
+ * plain auto-increment fallback, exactly as before.
+ *
+ * v1 -> v2 (queue buyer identity, OpenSpec 2.12): invoice_queue gained a
+ * `server_queue_number` index plus the payload fields `data.buyer_name` and
+ * `data.offline_queue_estimate` written by the offline checkout flow. The
+ * upgrade is purely additive: existing rows are left intact — Dexie preserves
+ * every record property across a version bump that only adds an index (rows
+ * without the indexed field simply get an empty index entry).
+ *
+ * @constant {Array<{fromHash: number, toHash: number, description: string, upgrade: Function}>}
+ */
+export const MIGRATIONS = [
+	{
+		fromHash: getSchemaHash({
+			...CURRENT_SCHEMA,
+			invoice_queue: "++id, &offline_id, timestamp, synced",
+		}),
+		toHash: getSchemaHash(CURRENT_SCHEMA),
+		description: "Additive only: buyer_name/offline_queue_estimate payload fields + server_queue_number index",
+		upgrade: async (tx) => {
+			// No transformation required: the new fields are additive plain
+			// properties on invoice_queue records. This touch is a guard — it
+			// iterates every queued row to prove none were dropped or corrupted
+			// by the upgrade, and fails loudly if a row lost its offline_id.
+			let count = 0;
+			await tx.table("invoice_queue").each((row) => {
+				if (!row?.offline_id) {
+					throw new Error(`invoice_queue row ${row?.id} lost offline_id during upgrade`);
+				}
+				count++;
+			});
+			log.info(`Queue buyer-identity migration checked ${count} queued invoice(s) intact`);
+		},
+	},
+];
+
+// Reverse index from the hash that was current *before* a migration to that
+// migration, so the versioner can resolve a stored hash to a version number.
+const MIGRATIONS_BY_FROM_HASH = new Map(MIGRATIONS.map((m) => [String(m.fromHash), m]));
+
+/**
  * Generates a 32-bit hash of the schema for change detection.
  * Uses djb2 algorithm for fast, deterministic hashing.
  * @param {Object} schema - Schema object to hash
@@ -114,6 +174,10 @@ function getSchemaHash(schema) {
  * Compares stored hash against current schema hash to detect changes.
  * Auto-increments version when schema changes are detected.
  *
+ * When the stored hash matches a known predecessor in MIGRATIONS, the new
+ * version number is cached against the current hash so reopening the database
+ * at the same schema stays at that version (and Dexie skips the upgrade).
+ *
  * @returns {number} Current schema version number
  * @private
  */
@@ -123,21 +187,40 @@ function getSchemaVersion() {
 	const storedVersion = Number.parseInt(localStorage.getItem("pos_next_schema_version") || "1");
 
 	if (storedHash !== schemaHash.toString()) {
-		// Schema changed, increment version
+		// Schema changed, increment version. A predecessor we know about runs
+		// its upgrade function; unknown hashes just bump as before.
 		const newVersion = storedVersion + 1;
-		log.info(`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`);
+		const migration = MIGRATIONS_BY_FROM_HASH.get(storedHash);
+		if (migration) {
+			log.info(
+				`Schema upgrade v${storedVersion} -> v${newVersion}: ${migration.description}`
+			);
+		} else {
+			log.info(`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`);
+		}
 		localStorage.setItem("pos_next_schema_hash", schemaHash.toString());
 		localStorage.setItem("pos_next_schema_version", newVersion.toString());
+		pendingMigration = migration || null;
 		return newVersion;
 	}
 
 	return storedVersion;
 }
 
+/** The migration detected by the last getSchemaVersion() call, if any. */
+let pendingMigration = null;
+
 // Apply schema with auto-versioning
 const schemaVersion = getSchemaVersion();
 log.debug(`Initializing database with schema version: ${schemaVersion}`);
-db.version(schemaVersion).stores(CURRENT_SCHEMA);
+const schemaVersionDef = db.version(schemaVersion).stores(CURRENT_SCHEMA);
+if (pendingMigration) {
+	// Additive upgrade step: touches existing rows without transforming them.
+	// Runs only on the first open after the schema changed (the version and
+	// hash are persisted in localStorage), never again on later opens.
+	schemaVersionDef.upgrade(pendingMigration.upgrade);
+	pendingMigration = null;
+}
 
 /**
  * Opens the database connection.

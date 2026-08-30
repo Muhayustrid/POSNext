@@ -40,7 +40,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		customer,
 		posProfile,
 		appliedOffers = [],
-		draftId = null
+		draftId = null,
+		buyerName = null
 	) {
 		if (invoiceItems.length === 0) {
 			showWarning(__("Cannot save an empty cart as draft"));
@@ -53,6 +54,12 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				customer: customer,
 				items: invoiceItems,
 				applied_offers: appliedOffers, // Save applied offers
+				// Buyer name survives the hold/resume round trip (queue-buyer-
+				// identity spec). The queue NUMBER is deliberately not persisted:
+				// the server allocates it at submit from the shift counter, so a
+				// draft must not carry a stale real number — on resume the chip
+				// re-derives the next estimate from the live shift instead.
+				buyer_name: buyerName?.trim() || null,
 			};
 
 			let savedDraft;
@@ -82,6 +89,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				items: draft.items || [],
 				customer: draft.customer,
 				applied_offers: draft.applied_offers || [], // Restore applied offers
+				// Restored into the cart's buyer-name state on resume (2.10).
+				buyer_name: draft.buyer_name || null,
 			};
 		} catch (error) {
 			console.error("Error loading draft:", error);

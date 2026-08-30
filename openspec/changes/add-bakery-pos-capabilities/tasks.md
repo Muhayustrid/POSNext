@@ -11,19 +11,19 @@
 
 ## 2. Buyer identity and queue numbering
 
-- [ ] 2.1 Add server-side buyer-name validation in `pos_next/api/invoices.py` — reject over 60 characters and control characters, treat whitespace-only as absent — and verify `test_invoices.py` asserts a `frappe.ValidationError` for each case.
-- [ ] 2.2 Port `validate_walk_in_customer_name` so the buyer-name field only applies when `customer` equals the POS Profile default, and verify a test rejects a buyer name attached to a non-default customer.
-- [ ] 2.3 Allocate `queue_number` in `submit_invoice` from `POS Opening Shift.current_queue_number` read under `frappe.qb.get_query(..., for_update=True)` and written with `db_set(update_modified=False)` in the same transaction; verify two sequential submissions yield 1 then 2.
-- [ ] 2.4 Verify the concurrency case with a test where two connections submit to the same shift and receive distinct, unskipped numbers.
-- [ ] 2.5 Verify the counter resets for a second POS Opening Shift so a new shift's first sale is number 1.
-- [ ] 2.6 Expose the current queue number per shift through a type-hinted whitelisted API and verify an open shift returns its highest number and an unknown shift raises `DataError`.
-- [ ] 2.7 Add `buyer_name` and `queue_number` to `get_invoices` search and returned fields, and verify tests for search-by-name, search-by-number, and an unmatched number returning nothing.
-- [ ] 2.8 Gate the fields on `enable_buyer_identity` in `api/bootstrap.py` and verify the payload omits them entirely when off.
-- [ ] 2.9 Add the buyer-name input and queue chip to `InvoiceCart.vue` and `PaymentDialog.vue` behind the switch, and verify a Vitest test asserts absence when disabled, presence when enabled, and blocked submit when `require_buyer_name` is on.
-- [ ] 2.10 Persist buyer name and queue number through the held-order/draft flow and verify saving then resuming a draft restores the name.
-- [ ] 2.11 Carry buyer name and a locally-estimated queue number through the offline IndexedDB queue and sync, and verify an offline-then-synced sale stores the server-allocated number while retaining the printed estimate.
-- [ ] 2.12 Bump the Dexie schema in `POS/src/utils/offline/db.js` additively and verify a test migrating a database that already holds queued unsynced invoices preserves them intact.
-- [ ] 2.13 Add buyer name and queue number to the `POS Next Receipt` print format and verify a name renders when present and nothing renders when absent.
+- [x] 2.1 Add server-side buyer-name validation in `pos_next/api/invoices.py` — reject over 60 characters and control characters, treat whitespace-only as absent — and verify `test_invoices.py` asserts a `frappe.ValidationError` for each case.
+- [x] 2.2 Port `validate_walk_in_customer_name` so the buyer-name field only applies when `customer` equals the POS Profile default, and verify a test rejects a buyer name attached to a non-default customer.
+- [x] 2.3 Allocate `queue_number` in `submit_invoice` from `POS Opening Shift.current_queue_number` read under `frappe.qb.get_query(..., for_update=True)` and written with `db_set(update_modified=False)` in the same transaction; verify two sequential submissions yield 1 then 2.
+- [x] 2.4 Verify the concurrency case with a test where two connections submit to the same shift and receive distinct, unskipped numbers.
+- [x] 2.5 Verify the counter resets for a second POS Opening Shift so a new shift's first sale is number 1.
+- [x] 2.6 Expose the current queue number per shift through a type-hinted whitelisted API and verify an open shift returns its highest number and an unknown shift raises `DataError`.
+- [x] 2.7 Add `buyer_name` and `queue_number` to `get_invoices` search and returned fields, and verify tests for search-by-name, search-by-number, and an unmatched number returning nothing.
+- [x] 2.8 Gate the fields on `enable_buyer_identity` in `api/bootstrap.py` and verify the payload omits them entirely when off.
+- [x] 2.9 Add the buyer-name input and queue chip to `InvoiceCart.vue` and `PaymentDialog.vue` behind the switch, and verify a Vitest test asserts absence when disabled, presence when enabled, and blocked submit when `require_buyer_name` is on.
+- [x] 2.10 Persist buyer name and queue number through the held-order/draft flow and verify saving then resuming a draft restores the name.
+- [x] 2.11 Carry buyer name and a locally-estimated queue number through the offline IndexedDB queue and sync, and verify an offline-then-synced sale stores the server-allocated number while retaining the printed estimate.
+- [x] 2.12 Bump the Dexie schema in `POS/src/utils/offline/db.js` additively and verify a test migrating a database that already holds queued unsynced invoices preserves them intact.
+- [x] 2.13 Add buyer name and queue number to the `POS Next Receipt` print format and verify a name renders when present and nothing renders when absent.
 
 ## 3. Retiring implicit Customer provisioning (BREAKING)
 

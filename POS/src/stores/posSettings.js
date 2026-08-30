@@ -65,6 +65,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_negative_stock: 0,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
+		// Buyer Identity (queue & buyer name)
+		enable_buyer_identity: 0,
+		require_buyer_name: 0,
 		// Security
 		enable_session_lock: 0,
 		session_lock_timeout: 5,
@@ -175,6 +178,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		() => settings.value.enable_sales_persons === "Multiple"
 	);
 
+	// Computed - Buyer Identity (queue & buyer name)
+	const enableBuyerIdentity = computed(() => Boolean(settings.value.enable_buyer_identity));
+	const requireBuyerName = computed(() => Boolean(settings.value.require_buyer_name));
+
 	// Computed - Security
 	const enableSessionLock = computed(() => Boolean(settings.value.enable_session_lock));
 	const sessionLockTimeout = computed(
@@ -280,6 +287,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			input_qty: 0,
 			allow_negative_stock: 0,
 			enable_sales_persons: "Disabled",
+			// Buyer Identity (queue & buyer name)
+			enable_buyer_identity: 0,
+			require_buyer_name: 0,
 			// Security
 			enable_session_lock: 0,
 			session_lock_timeout: 5,
@@ -414,6 +424,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		salesPersonsMode,
 		isSingleSalesPerson,
 		isMultipleSalesPersons,
+
+		// Computed - Buyer Identity (queue & buyer name)
+		enableBuyerIdentity,
+		requireBuyerName,
 
 		// Computed - Security
 		enableSessionLock,

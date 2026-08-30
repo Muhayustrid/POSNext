@@ -4,6 +4,7 @@
 from __future__ import unicode_literals
 
 import json
+import re
 from functools import lru_cache
 
 import frappe
@@ -25,11 +26,22 @@ FIELD_ALLOW_USER_TO_EDIT_RATE = "allow_user_to_edit_rate"
 FIELD_MAX_DISCOUNT_ALLOWED = "max_discount_allowed"
 FIELD_DISABLE_ROUNDED_TOTAL = "disable_rounded_total"
 FIELD_ALLOW_NEGATIVE_STOCK = "allow_negative_stock"
+FIELD_ENABLE_BUYER_IDENTITY = "enable_buyer_identity"
+FIELD_REQUIRE_BUYER_NAME = "require_buyer_name"
+FIELD_BUYER_NAME = "buyer_name"
+FIELD_QUEUE_NUMBER = "queue_number"
+
+# Buyer name bounds enforced server-side. The Sales Invoice.buyer_name Custom Field
+# also declares length=60, but that check runs later and truncates instead of
+# failing loudly, so this module validates the limit itself.
+BUYER_NAME_MAX_LENGTH = 60
+BUYER_NAME_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 # Doctypes
 DOCTYPE_SALES_INVOICE = "Sales Invoice"
 DOCTYPE_POS_SETTINGS = "POS Settings"
 DOCTYPE_POS_PROFILE = "POS Profile"
+DOCTYPE_POS_OPENING_SHIFT = "POS Opening Shift"
 DOCTYPE_COMMENT = "Comment"
 
 
@@ -288,7 +300,158 @@ def _strip_server_managed_fields(payload):
 	# Packed Items are regenerated from Product Bundle definitions during save.
 	# Accepting client-side packed rows can reintroduce duplicates on re-save.
 	cleaned.pop("packed_items", None)
+	# Queue numbers are allocated server-side per shift; a client echo must never
+	# set or overwrite one. The offline estimate/reconciliation pair are client-side
+	# audit fields (POS/src/utils/offline/sync.js); strip them defensively.
+	cleaned.pop(FIELD_QUEUE_NUMBER, None)
+	cleaned.pop("offline_queue_estimate", None)
+	cleaned.pop("server_queue_number", None)
 	return cleaned
+
+
+def _get_buyer_identity_settings(pos_profile):
+	"""Return (enable_buyer_identity, require_buyer_name) for a POS Profile.
+
+	Filters on ``enabled: 1`` exactly like every other POS Settings consumer in the app
+	(`api/bootstrap.py`, `api/pos_profile.py`, `api/shifts.py`). The `enabled` flag decides
+	*which* settings row counts when a profile carries a disabled row; matching it here keeps
+	the server gate (sanitize + queue allocation) from ever disagreeing with the client gate
+	that bootstrap/pos_profile expose to the UI. Uses a direct two-column read rather than
+	`POS_SETTINGS_FIELDS` so the call stays cheap on the submit path.
+	"""
+	if not pos_profile:
+		return 0, 0
+	settings = frappe.db.get_value(
+		DOCTYPE_POS_SETTINGS,
+		{"pos_profile": pos_profile, "enabled": 1},
+		[FIELD_ENABLE_BUYER_IDENTITY, FIELD_REQUIRE_BUYER_NAME],
+		as_dict=True,
+	)
+	if not settings:
+		return 0, 0
+	return (
+		cint(settings.get(FIELD_ENABLE_BUYER_IDENTITY)),
+		cint(settings.get(FIELD_REQUIRE_BUYER_NAME)),
+	)
+
+
+def sanitize_buyer_name(invoice_doc):
+	"""Validate and normalise the buyer-name Custom Field in place.
+
+	Server authority over a client-supplied field (D4): whitespace-only input is
+	stored as absent, over-length and control-character input is rejected before any
+	write happens, and the feature gates in POS Settings decide whether the field is
+	honoured at all. When identity collection is disabled the client value is dropped
+	so submitted transactions leave the field empty.
+
+	The walk-in validator (`pos_next.walk_in.validate_walk_in_customer_name`, wired in
+	`hooks.py` doc_events) still owns the "only the profile's default customer may
+	carry a buyer name" rule; this runs first so a malformed name fails with a
+	buyer-name-specific message instead of masking that check.
+	"""
+	raw = cstr(invoice_doc.get(FIELD_BUYER_NAME) or "").strip()
+
+	# Malformed input is rejected outright whatever the gate says: a broken value
+	# must not slip through just because the profile happens to have the feature off.
+	if len(raw) > BUYER_NAME_MAX_LENGTH:
+		frappe.throw(_("Buyer name cannot exceed {0} characters.").format(BUYER_NAME_MAX_LENGTH))
+	if raw and BUYER_NAME_CONTROL_CHARS.search(raw):
+		frappe.throw(_("Buyer name cannot contain control characters."))
+
+	enable, require = _get_buyer_identity_settings(invoice_doc.get("pos_profile"))
+
+	# Identity collection off for this profile: whatever the client sent is dropped so
+	# submitted transactions leave the field empty.
+	if not enable:
+		invoice_doc.set(FIELD_BUYER_NAME, None)
+		return
+
+	if not raw:
+		if require:
+			frappe.throw(_("Buyer name is required for this POS Profile."))
+		invoice_doc.set(FIELD_BUYER_NAME, None)
+		return
+
+	invoice_doc.set(FIELD_BUYER_NAME, raw)
+
+
+def _read_shift_counter(shift, lock=True):
+	"""Read ``POS Opening Shift.current_queue_number``, optionally under a row lock.
+
+	``lock=True`` is the production path: on v16 this ``frappe.qb.get_query`` call maps
+	``for_update`` onto ``SELECT ... FOR UPDATE`` (frappe/database/query.py), which is
+	what serialises concurrent submissions on the shift row. Returns the counter, or
+	``None`` when the shift row does not exist.
+
+	The ``lock`` parameter exists ONLY as the negative-control seam for
+	``pos_next/api/test_queue_concurrency.py``, which re-runs the two-process scenario
+	with the lock disabled to prove that scenario can actually observe a race. No
+	production caller passes ``lock=False``; do not add one.
+	"""
+	rows = frappe.qb.get_query(
+		DOCTYPE_POS_OPENING_SHIFT,
+		filters={"name": shift},
+		fields=["current_queue_number"],
+		for_update=lock,
+	).run(as_dict=True)
+	if not rows:
+		return None
+	return cint(rows[0].get("current_queue_number") or 0)
+
+
+def _allocate_queue_number(invoice_doc):
+	"""Allocate the next per-shift queue number onto ``invoice_doc`` in place.
+
+	Design D2: ``POS Opening Shift.current_queue_number`` is the counter of record and
+	``Sales Invoice.queue_number`` is only its published copy. The shift row is locked
+	with ``SELECT ... FOR UPDATE`` and the counter is incremented in the *same* database
+	transaction as the invoice write, so concurrent submissions serialise on the shift
+	row and no two sales ever receive the same number. Uniqueness therefore comes from
+	construction (the lock), not a DB constraint — a Custom Field cannot carry a unique
+	index.
+
+	Allocation is a no-op when: the sale carries no shift (pos_next does not require an
+	opening shift), the profile has buyer identity disabled (the whole feature is
+	switch-gated), or the doc already has a queue number (idempotency guard against a
+	same-doc double-allocation). The write uses ``db_set(update_modified=False)`` because
+	``POS Opening Shift`` is submittable and the counter is operational data that must
+	stay out of the shift's audit trail.
+
+	The caller's transaction owns the commit: a later raise on the submit path (stock,
+	payment, etc.) rolls back the increment too, so failed submissions do not consume a
+	number and the sequence stays gap-free.
+	"""
+	shift = invoice_doc.get("posa_pos_opening_shift")
+	if not shift:
+		return
+
+	enable, _require = _get_buyer_identity_settings(invoice_doc.get("pos_profile"))
+	if not enable:
+		return
+
+	# Idempotency: never double-allocate on a doc that already carries a number
+	# (e.g. the same object saved twice, or a replay that kept a server value).
+	if cint(invoice_doc.get(FIELD_QUEUE_NUMBER)):
+		return
+
+	counter = _read_shift_counter(shift)
+	if counter is None:
+		# The referenced shift does not exist (or was deleted mid-flight); allocating
+		# against a phantom counter would silently start at 1 on a real shift, so leave
+		# the invoice unnumbered rather than mint a duplicate.
+		return
+
+	next_number = counter + 1
+
+	# The row is already locked in this transaction, so re-loading it as a Document
+	# cannot lose an update. ``db_set`` is used (rather than a bare ``frappe.db``
+	# write) because it is the Document-level API the design names, and
+	# ``update_modified=False`` keeps this operational counter out of the shift's audit
+	# trail without touching the shift's ``modified`` timestamp.
+	shift_doc = frappe.get_doc(DOCTYPE_POS_OPENING_SHIFT, shift)
+	shift_doc.db_set("current_queue_number", next_number, update_modified=False)
+
+	invoice_doc.set(FIELD_QUEUE_NUMBER, next_number)
 
 
 def get_payment_account(mode_of_payment, company):
@@ -782,6 +945,11 @@ def update_invoice(data):
 			except Exception as e:
 				frappe.log_error(f"Failed to create customer {customer_name}: {e}")
 
+		# Buyer-name validation/normalisation. Runs after the customer block above so
+		# the final `customer` is known, and before any save so a rejected value never
+		# reaches the database.
+		sanitize_buyer_name(invoice_doc)
+
 		# Disable automatic pricing rules (we handle discounts manually from POS)
 		invoice_doc.ignore_pricing_rule = 1
 		invoice_doc.flags.ignore_pricing_rule = True
@@ -1117,6 +1285,11 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 							"change_amount": getattr(existing_invoice, "change_amount", 0),
 							"duplicate_prevented": True,
 							"offline_id": offline_id,
+							# D2 audit: the client-side reconcileQueueAfterSync reads
+							# serverResult.queue_number on EVERY synced replay, including this
+							# dedup short-circuit. Echo the number the ORIGINAL submit allocated so
+							# a retried sync persists it instead of nulling the local copy.
+							FIELD_QUEUE_NUMBER: existing_invoice.get(FIELD_QUEUE_NUMBER) or None,
 						},
 					}
 
@@ -1330,6 +1503,11 @@ def submit_invoice(invoice=None, data=None):
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 			invoice_doc.update(invoice)
 
+		# Re-sanitise on the submit path: `invoice_doc.update(invoice)` above can
+		# re-inject an unsanitised buyer_name into a draft that was already clean, and
+		# the draft returned by update_invoice() may have been mutated in Desk since.
+		sanitize_buyer_name(invoice_doc)
+
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
@@ -1458,6 +1636,13 @@ def submit_invoice(invoice=None, data=None):
 				frappe.throw(_("Credit sales are not enabled for this POS Profile."))
 			invoice_doc.flags.pos_next_credit_sale = 1
 
+		# Allocate the per-shift queue number against this transaction's opening shift,
+		# locking the shift row and writing the counter in this same transaction (D2).
+		# Runs after ``_strip_server_managed_fields`` on the payload and after
+		# ``invoice_doc.update(invoice)``, so a client-echoed queue_number is already gone
+		# and cannot survive into here.
+		_allocate_queue_number(invoice_doc)
+
 		# Save before submit
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
@@ -1575,6 +1760,10 @@ def submit_invoice(invoice=None, data=None):
 			"outstanding_amount": getattr(invoice_doc, "outstanding_amount", 0),
 			"paid_amount": getattr(invoice_doc, "paid_amount", 0),
 			"change_amount": getattr(invoice_doc, "change_amount", 0),
+			# D2 audit contract: the client persists this as server_queue_number on the
+			# offline queue record (POS/src/utils/buyerIdentity.js#reconcileQueueAfterSync).
+			# It must be present even when allocation was skipped, where it is None.
+			FIELD_QUEUE_NUMBER: invoice_doc.get(FIELD_QUEUE_NUMBER) or None,
 		}
 
 		# Include offline_id in response for client-side tracking
@@ -1625,6 +1814,25 @@ def get_invoice(invoice_name):
 	return invoice.as_dict()
 
 
+def _build_invoice_search_clause(search, has_buyer_name, has_queue_number):
+	"""Build the search OR-chain for `get_invoices`; returns (clause_sql, params).
+
+	`buyer_name` joins the LIKE chain only when the Custom Field exists on this
+	site. `queue_number` is matched with an EXACT `=` (never LIKE) and only when
+	the term is a pure integer: LIKE on an Int column would turn a staff query
+	for "17" into a substring match against 170 and 217, which breaks the
+	queue-buyer-identity contract that an unknown queue number returns nothing.
+	"""
+	clauses = ["name LIKE %(search)s", "customer_name LIKE %(search)s", "customer LIKE %(search)s"]
+	params = {"search": f"%{cstr(search)}%"}
+	if has_buyer_name:
+		clauses.append("buyer_name LIKE %(search)s")
+	if has_queue_number and cstr(search).strip().isdigit():
+		clauses.append("queue_number = %(queue_number)s")
+		params["queue_number"] = cint(search)
+	return "(" + " OR ".join(clauses) + ")", params
+
+
 @frappe.whitelist()
 def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
 	"""
@@ -1632,7 +1840,8 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 	Args:
 		pos_profile: POS Profile name
-		search: Optional search term matched against invoice name or customer_name
+		search: Optional search term matched against invoice name, customer_name,
+			customer, buyer_name (LIKE) and, for pure-integer terms, queue_number (exact)
 		limit: Page size (default 20)
 		offset: Number of records to skip for pagination (default 0)
 		from_date: Optional start date filter (YYYY-MM-DD)
@@ -1658,6 +1867,13 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	limit = max(1, min(cint(limit) or 20, 100))
 	offset = max(0, cint(offset) or 0)
 
+	# Defensive: buyer_name / queue_number are Custom Fields installed by pos_next;
+	# a site that has not run after_migrate yet has no columns. Select and search
+	# them only when present so this endpoint keeps working instead of crashing
+	# (same guard idiom as api/shifts.py#get_current_queue_number).
+	has_buyer_name = frappe.db.has_column("Sales Invoice", "buyer_name")
+	has_queue_number = frappe.db.has_column("Sales Invoice", "queue_number")
+
 	# Build WHERE conditions and params
 	conditions = [
 		"pos_profile = %(pos_profile)s",
@@ -1676,10 +1892,9 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 		conditions.append("docstatus < 2")
 
 	if search:
-		conditions.append(
-			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s)"
-		)
-		params["search"] = f"%{cstr(search)}%"
+		search_clause, search_params = _build_invoice_search_clause(search, has_buyer_name, has_queue_number)
+		conditions.append(search_clause)
+		params.update(search_params)
 
 	if from_date:
 		conditions.append("posting_date >= %(from_date)s")
@@ -1693,21 +1908,30 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	params["limit"] = limit
 	params["offset"] = offset
 
+	select_fields = [
+		"name",
+		"customer",
+		"customer_name",
+		"posting_date",
+		"posting_time",
+		"grand_total",
+		"paid_amount",
+		"outstanding_amount",
+		"status",
+		"docstatus",
+		"is_return",
+		"return_against",
+	]
+	if has_buyer_name:
+		select_fields.append("buyer_name")
+	if has_queue_number:
+		select_fields.append("queue_number")
+	select_clause = ",\n\t\t\t".join(select_fields)
+
 	invoices = frappe.db.sql(
 		f"""
 		SELECT
-			name,
-			customer,
-			customer_name,
-			posting_date,
-			posting_time,
-			grand_total,
-			paid_amount,
-			outstanding_amount,
-			status,
-			docstatus,
-			is_return,
-			return_against
+			{select_clause}
 		FROM
 			`tabSales Invoice`
 		WHERE

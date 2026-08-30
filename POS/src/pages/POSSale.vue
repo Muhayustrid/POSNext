@@ -1087,6 +1087,7 @@ import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
+import { getOfflineQueueEstimate } from "@/utils/buyerIdentity";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
 // Initialize stores
@@ -2106,6 +2107,14 @@ async function handlePaymentCompleted(paymentData) {
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
+				buyer_name: cartStore.buyerName?.trim() || null,
+				// D2: the number printed on this terminal's receipt is a LOCAL
+				// estimate from the last known shift counter. The server never
+				// reads this field (queue_number is server-managed and stripped);
+				// it rides along in the queue record so the audit can compare
+				// what was printed with the server-allocated value synced back
+				// as `server_queue_number`.
+				offline_queue_estimate: getOfflineQueueEstimate(shiftStore.currentShift),
 			};
 
 			// Save to the offline queue first so we can use the worker's
@@ -2457,7 +2466,8 @@ async function handleSaveDraft() {
 		cartStore.customer,
 		cartStore.posProfile,
 		cartStore.appliedOffers,
-		cartStore.currentDraftId
+		cartStore.currentDraftId,
+		cartStore.buyerName
 	);
 	if (savedDraft) {
 		cartStore.clearCart();
@@ -2475,7 +2485,8 @@ async function handleLoadDraft(draft) {
 				cartStore.customer,
 				cartStore.posProfile,
 				cartStore.appliedOffers,
-				cartStore.currentDraftId
+				cartStore.currentDraftId,
+				cartStore.buyerName
 			);
 
 			if (!saved) {
@@ -2493,6 +2504,10 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
+		// Restore the held buyer name (queue-buyer-identity spec: "the resumed
+		// cart still shows the entered buyer name"). The queue number is NOT
+		// restored — the chip re-derives it from the live shift counter.
+		cartStore.buyerName = draftData.buyer_name || "";
 
 		// Rebuild incremental cache to recalculate totals
 		cartStore.rebuildIncrementalCache();

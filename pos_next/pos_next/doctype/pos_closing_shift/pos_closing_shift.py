@@ -639,6 +639,30 @@ def submit_closing_shift(closing_shift):
 
 
 def submit_printed_invoices(pos_opening_shift, doctype):
+	"""Submit the printed drafts left on an opening shift when it is closed.
+
+	This is a SECOND submit seam: it calls `Document.submit()` directly instead of
+	`pos_next.api.invoices.submit_invoice`, so everything that path does (payment
+	generation, offline dedup, wallet/credit handling) is skipped here by design — this
+	helper runs while a closing shift is being built, on drafts the POS client already
+	validated. Queue-number allocation is the one of those responsibilities that must NOT
+	be skipped: design D2 promises every submitted sale on a shift carries a number, and
+	POS/src/utils/buyerIdentity.js#reconcileQueueAfterSync reads the persisted column, so
+	a draft submitted only through this seam would be permanently unnumbered. Hence the
+	allocation call below. It is the same locked read + counter increment the primary path
+	uses, and it is idempotent, so a draft that already carries a number is untouched.
+	Buyer identity is gate-checked inside `_allocate_queue_number`, matching the primary
+	path.
+
+	`posa_is_printed` currently has no writer anywhere in the app, so this function is
+	dormant; keeping the seam correct is cheap insurance rather than a live behaviour
+	change.
+	"""
+	# Imported lazily: `api/invoices.py` imports ERPNext document controllers, and
+	# pulling that in at module scope here would tie POS Closing Shift's import graph to
+	# the whole submit path.
+	from pos_next.api.invoices import _allocate_queue_number
+
 	invoices_list = frappe.get_all(
 		doctype,
 		filters={
@@ -649,4 +673,8 @@ def submit_printed_invoices(pos_opening_shift, doctype):
 	)
 	for invoice in invoices_list:
 		invoice_doc = frappe.get_doc(doctype, invoice.name)
+		# `queue_number` is a Sales Invoice Custom Field; POS Invoice has no such column,
+		# so allocation is scoped to the doctype that actually carries it.
+		if doctype == "Sales Invoice":
+			_allocate_queue_number(invoice_doc)
 		invoice_doc.submit()

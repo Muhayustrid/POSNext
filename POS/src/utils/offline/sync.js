@@ -1,4 +1,5 @@
 import { call } from "@/utils/apiWrapper";
+import { reconcileQueueAfterSync } from "@/utils/buyerIdentity";
 import { logger } from "@/utils/logger";
 import { CoalescingMutex } from "@/utils/mutex";
 import { db } from "./db";
@@ -331,10 +332,16 @@ const syncInvoiceToServer = async (invoice, retryCount = 0) => {
 		if (response.message || response.name) {
 			const serverName = response.name || response.message;
 			await markInvoiceSynced(invoice.id, serverName, offlineId);
+			// D2 reconciliation: record the server-allocated queue_number next to
+			// the locally-estimated one the terminal printed. Both values stay on
+			// the invoice_queue row (server_queue_number vs data.offline_queue_estimate)
+			// so the audit shows what was printed and what was actually allocated.
+			await reconcileQueueAfterSync(invoice, response);
 			log.success("Invoice synced", {
 				id: invoice.id,
 				offline_id: offlineId,
 				sales_invoice: serverName,
+				server_queue_number: invoice.server_queue_number ?? null,
 			});
 			return { status: "success" };
 		}

@@ -320,3 +320,78 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 			"total_cash_diff": flt(totals.get("total_cash_diff", 0)),
 		},
 	}
+
+
+def _buyer_identity_enabled(pos_profile):
+	"""Return True when the buyer-identity feature is enabled for a POS Profile.
+
+	Reads POS Settings directly (single cheap lookup) rather than importing the
+	helper from `pos_next.api.invoices`, so this module stays decoupled from the
+	submission path. Uses the same `enabled=1` row filter as bootstrap's
+	`_get_pos_settings`, so the two gates can never disagree on which settings row
+	counts. A missing table or missing row means the feature is off.
+	"""
+	if not pos_profile or not frappe.db.table_exists("POS Settings"):
+		return False
+	value = frappe.db.get_value(
+		"POS Settings",
+		{"pos_profile": pos_profile, "enabled": 1},
+		"enable_buyer_identity",
+	)
+	return cint(value) == 1
+
+
+@frappe.whitelist()
+def get_current_queue_number(pos_opening_shift: str) -> int:
+	"""Return the highest queue number allocated for a POS Opening Shift.
+
+	A service counter calls this to ask for the latest number handed out for the
+	shift. `current_queue_number` is maintained server-side on POS Opening Shift
+	(incremented as invoices are submitted against the shift); this endpoint is a
+	read-only view of that counter.
+
+	Reading "an open shift returns its highest number" from the spec as *which
+	shift you ask about*, not as an enforced state filter: a Closed shift also
+	returns its stored counter so reprinting or after-the-fact calling still
+	works. Only an unknown shift name is an error.
+
+	The queue number is part of the buyer-identity capability, so this API is
+	gated on the shift's POS Profile having `enable_buyer_identity` on — the
+	server-side analogue of bootstrap omitting the field entirely when the flag
+	is off (single-gate principle with `api/bootstrap.py`). When disabled, the
+	response is 0 as if no queue had been allocated.
+
+	Args:
+		pos_opening_shift: Name of the POS Opening Shift.
+
+	Returns:
+		int: The shift's current queue number (0 when the counter is unset or the
+		feature is disabled for the shift's profile).
+
+	Raises:
+		frappe.DataError: If the shift does not exist.
+	"""
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Authentication required"), frappe.AuthenticationError)
+
+	if not frappe.has_permission("POS Opening Shift", ptype="read", throw=True):
+		# unreachable; has_permission(throw=True) already raised
+		frappe.throw(_("Insufficient permissions to view shift data"))
+
+	if not frappe.db.exists("POS Opening Shift", pos_opening_shift):
+		frappe.throw(_("POS Opening Shift {0} not found").format(pos_opening_shift), frappe.DataError)
+
+	shift_fields = ["pos_profile"]
+	# Defensive: current_queue_number is a Custom Field installed by pos_next;
+	# a site that has not run after_migrate yet has no column. Select it only
+	# when present so this endpoint degrades to 0 instead of crashing.
+	if frappe.db.has_column("POS Opening Shift", "current_queue_number"):
+		shift_fields.append("current_queue_number")
+
+	row = frappe.db.get_value("POS Opening Shift", pos_opening_shift, shift_fields, as_dict=True) or {}
+
+	if not _buyer_identity_enabled(row.get("pos_profile")):
+		return 0
+
+	return cint(row.get("current_queue_number"))
+

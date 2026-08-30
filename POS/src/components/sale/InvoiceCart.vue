@@ -463,6 +463,12 @@
 					</button>
 				</div>
 			</div>
+
+			<!-- Buyer Identity: buyer name input + next queue chip (behind enable_buyer_identity) -->
+			<BuyerIdentityFields
+				v-if="settingsStore.enableBuyerIdentity"
+				class="px-2.5 pb-2 bg-gray-50"
+			/>
 		</div>
 
 		<!-- Action Buttons Section -->
@@ -1498,6 +1504,7 @@ const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
+import BuyerIdentityFields from "./BuyerIdentityFields.vue";
 
 /**
  * ============================================================================

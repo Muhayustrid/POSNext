@@ -28,6 +28,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Coalesce
+from frappe.utils import cint
 
 from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 
@@ -79,12 +80,23 @@ def get_initial_data():
 	pos_profile = shift["pos_profile_doc"]
 	pos_profile_name = pos_profile.name
 
+	result["pos_settings"] = _get_pos_settings(pos_profile)
+
 	result["shift"] = {
 		"name": shift["name"],
 		"pos_profile": pos_profile_name,
 		"period_start_date": str(shift["period_start_date"]),
 		"status": shift["status"],
 	}
+
+	# Buyer-identity gate (queue number): when the feature is off for this
+	# profile, the shift payload carries no queue field at all — the dict has
+	# byte-identical keys to a pre-feature response. When on, expose the
+	# shift's highest allocated counter so the counter UI can render it at
+	# first paint without a second round trip (get_current_queue_number in
+	# api/shifts.py is the live-refresh path).
+	if result["pos_settings"].get("enable_buyer_identity") and "current_queue_number" in shift:
+		result["shift"]["current_queue_number"] = cint(shift.get("current_queue_number"))
 
 	result["pos_profile"] = {
 		"name": pos_profile.name,
@@ -102,7 +114,6 @@ def get_initial_data():
 		"ignore_pricing_rule": pos_profile.ignore_pricing_rule or 0,
 	}
 
-	result["pos_settings"] = _get_pos_settings(pos_profile)
 	result["payment_methods"] = _get_payment_methods(pos_profile_name)
 
 	return result
@@ -168,9 +179,18 @@ def _get_open_shift():
 				pos_profile: str,
 				period_start_date: datetime,
 				status: str,
+				current_queue_number: int,  # only when the column exists on this site
 				pos_profile_doc: Document
 			}
 	"""
+	fields = ["name", "pos_profile", "period_start_date", "status"]
+	# current_queue_number is a Custom Field installed by pos_next; a fresh or
+	# partially migrated site may not have the column yet. Only select it when
+	# present so bootstrap never crashes on the core query; the gate in
+	# get_initial_data is the sole consumer and treats a missing key as "off".
+	if frappe.db.has_column("POS Opening Shift", "current_queue_number"):
+		fields.append("current_queue_number")
+
 	shift = frappe.db.get_value(
 		"POS Opening Shift",
 		{
@@ -179,7 +199,7 @@ def _get_open_shift():
 			"docstatus": 1,
 			"status": "Open",
 		},
-		["name", "pos_profile", "period_start_date", "status"],
+		fields,
 		as_dict=True,
 		order_by="period_start_date desc",
 	)

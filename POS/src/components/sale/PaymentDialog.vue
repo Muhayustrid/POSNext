@@ -511,6 +511,17 @@
 							<div v-if="customer" class="text-gray-600 text-xs mt-0.5 text-start">
 								{{ customer?.customer_name || customer?.name || customer }}
 							</div>
+							<!-- Buyer name + next queue number (opt-in per profile) -->
+							<div
+								v-if="settingsStore.enableBuyerIdentity"
+								class="mt-1"
+							>
+								<BuyerIdentityFields
+									:model-value="buyerName"
+									:focus-signal="buyerNameFocusSignal"
+									@update:model-value="buyerName = $event"
+								/>
+							</div>
 						</div>
 
 						<!-- Promotional offers & coupons (same entry points as cart — usable while paying) -->
@@ -1638,6 +1649,7 @@
 								"
 								@click="completePayment"
 								:disabled="isSubmitting || !canComplete"
+								:title="buyerNameBlockHint"
 								:class="[
 									'w-full font-bold rounded-lg flex items-center justify-center',
 									isSubmitting
@@ -1900,6 +1912,7 @@
 						<button
 							@click="completePayment"
 							:disabled="!canComplete || isSubmitting"
+							:title="buyerNameBlockHint"
 							:class="[
 								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
 								dynamicButtonHeight,
@@ -2000,6 +2013,8 @@
 
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSCartStore } from "@/stores/posCart";
+import BuyerIdentityFields from "./BuyerIdentityFields.vue";
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
@@ -2007,6 +2022,7 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { getPaymentIcon } from "@/utils/payment";
+import { isBuyerNameRequiredButMissing } from "@/utils/buyerIdentity";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { Dialog, createResource, call } from "frappe-ui";
@@ -2019,6 +2035,19 @@ import { useQuickAmounts } from "@/composables/useQuickAmounts";
 
 const log = logger.create("PaymentDialog");
 const settingsStore = usePOSSettingsStore();
+const cartStore = usePOSCartStore();
+
+// Buyer name (walk-in, opt-in): single source of truth is the invoice state
+// in the cart store, shared with the cart UI.
+const buyerName = computed({
+	get: () => cartStore.buyerName,
+	set: (val) => {
+		cartStore.buyerName = val;
+	},
+});
+// Bumped when completion is blocked only by the missing mandatory buyer name,
+// so the shared field can focus itself (spec: "the buyer name field is focused").
+const buyerNameFocusSignal = ref(0);
 const { showWarning, showInfo } = useToast();
 
 const props = defineProps({
@@ -2849,9 +2878,27 @@ const isExactAmountValid = computed(() => {
 	return totalPaid.value <= roundCurrency(props.grandTotal);
 });
 
+// Buyer name gating (opt-in): only when the feature is on and the name is
+// mandatory and missing. Rules live in utils/buyerIdentity for testability.
+const isBuyerNameBlocked = computed(() =>
+	isBuyerNameRequiredButMissing({
+		enableBuyerIdentity: settingsStore.enableBuyerIdentity,
+		requireBuyerName: settingsStore.requireBuyerName,
+		buyerName: buyerName.value,
+	})
+);
+const buyerNameBlockHint = computed(() =>
+	isBuyerNameBlocked.value ? __("Buyer name is required") : undefined
+);
+
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)
 	if (!isSalesPersonValid.value) {
+		return false;
+	}
+
+	// Buyer name (opt-in): mandatory when POS Settings requires it
+	if (isBuyerNameBlocked.value) {
 		return false;
 	}
 
@@ -2877,6 +2924,14 @@ const canComplete = computed(() => {
 
 	// Otherwise require full payment
 	return remainingAmount.value === 0 && paymentEntries.value.length > 0;
+});
+
+// Safety net: if completion ever becomes blocked solely by the missing mandatory
+// buyer name (e.g. Enter key), tell the shared field to focus itself.
+watch(canComplete, (allowed, previous) => {
+	if (!allowed && previous && isBuyerNameBlocked.value) {
+		buyerNameFocusSignal.value += 1;
+	}
 });
 
 const paymentButtonText = computed(() => {
@@ -3341,6 +3396,14 @@ function applyCustomerCredit() {
 
 // Add "Pay on Account" - Credit Sale (invoice with outstanding amount)
 function addCreditAccountPayment() {
+	// Mandatory buyer name also blocks the credit-sale path (it skips canComplete)
+	if (isBuyerNameBlocked.value) {
+		log.warn("[PaymentDialog] Credit sale blocked - buyer name required");
+		showWarning(__("Buyer name is required"));
+		buyerNameFocusSignal.value += 1;
+		return;
+	}
+
 	log.debug("[PaymentDialog] Add credit account payment (Pay Later):", {
 		grandTotal: props.grandTotal,
 		currentPaid: totalPaid.value,
