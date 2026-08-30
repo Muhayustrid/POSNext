@@ -1,0 +1,230 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "PROMO-.#####",
+ "creation": "2026-08-19 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "intro_help",
+  "section_break_header",
+  "promotion_name",
+  "enabled",
+  "column_break_01",
+  "root_company",
+  "currency",
+  "section_break_parent",
+  "parent_item",
+  "base_price",
+  "column_break_validity",
+  "valid_from",
+  "valid_to",
+  "max_instances_per_invoice",
+  "section_break_components",
+  "components",
+  "section_break_choice_groups",
+  "choice_groups",
+  "section_break_options",
+  "options",
+  "section_break_outlets",
+  "outlets"
+ ],
+ "fields": [
+  {
+   "fieldname": "intro_help",
+   "fieldtype": "HTML"
+  },
+  {
+   "fieldname": "section_break_header",
+   "fieldtype": "Section Break",
+   "label": "Promotion Details"
+  },
+  {
+   "fieldname": "promotion_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Promotion Name",
+   "reqd": 1,
+   "unique": 1,
+   "description": "Name shown at POS, e.g. Breakfast Bundle"
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled",
+   "description": "Master switch. Unchecked = cannot be used at any outlet"
+  },
+  {
+   "fieldname": "column_break_01",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "root_company",
+   "fieldtype": "Link",
+   "label": "Root Company",
+   "options": "Company",
+   "reqd": 1,
+   "description": "Organisation fence: every outlet below must belong under this company"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "reqd": 1,
+   "description": "Must match the default currency of every outlet company"
+  },
+  {
+   "fieldname": "section_break_parent",
+   "fieldtype": "Section Break",
+   "label": "Promo Product & Price",
+   "description": "The customer pays one package price: Base Price plus any choice adjustments below"
+  },
+  {
+   "fieldname": "parent_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Parent Item",
+   "options": "Item",
+   "reqd": 1,
+   "description": "Non-stock sellable item that represents this package at POS. It must not have any selling Item Price"
+  },
+  {
+   "fieldname": "base_price",
+   "fieldtype": "Currency",
+   "label": "Base Price",
+   "options": "currency",
+   "reqd": 1,
+   "description": "Package price before choice adjustments (must be greater than 0)"
+  },
+  {
+   "fieldname": "column_break_validity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Valid From",
+   "description": "Leave empty for no start limit"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Valid To",
+   "description": "Leave empty for no end date"
+  },
+  {
+   "default": "0",
+   "fieldname": "max_instances_per_invoice",
+   "fieldtype": "Int",
+   "label": "Max Packages Per Invoice",
+   "non_negative": 1,
+   "description": "Maximum packages of this promotion in one sales invoice. 0 = unlimited"
+  },
+  {
+   "fieldname": "section_break_components",
+   "fieldtype": "Section Break",
+   "label": "Fixed Components",
+   "description": "Items always included in every package, in fixed quantity. Leave empty if everything is customer-chosen"
+  },
+  {
+   "fieldname": "components",
+   "fieldtype": "Table",
+   "label": "Components",
+   "options": "Promotion Component"
+  },
+  {
+   "fieldname": "section_break_choice_groups",
+   "fieldtype": "Section Break",
+   "label": "Customer Choices — Groups",
+   "description": "Each group is one decision the customer makes, e.g. Pick 1 Bread. Every group needs at least 2 options"
+  },
+  {
+   "fieldname": "choice_groups",
+   "fieldtype": "Table",
+   "label": "Choice Groups",
+   "options": "Promotion Choice Group"
+  },
+  {
+   "fieldname": "section_break_options",
+   "fieldtype": "Section Break",
+   "label": "Customer Choices — Options",
+   "description": "The selectable items of each group. Price Adjustment is added to (or subtracted from) Base Price per unit chosen"
+  },
+  {
+   "fieldname": "options",
+   "fieldtype": "Table",
+   "label": "Options",
+   "options": "Promotion Option"
+  },
+  {
+   "fieldname": "section_break_outlets",
+   "fieldtype": "Section Break",
+   "label": "Where Active (Outlets)",
+   "description": "The promotion only applies at the exact Company + Warehouse pairs listed here with Enabled checked. No rows = not available anywhere"
+  },
+  {
+   "fieldname": "outlets",
+   "fieldtype": "Table",
+   "label": "Outlets",
+   "options": "Promotion Outlet"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-08-26 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "Promotion",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Administrator",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "POSNext Cashier"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "promotion_name",
+ "track_changes": 1
+}

@@ -156,16 +156,28 @@ doc_events = {
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
 			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
+			# walk_in FIRST among the promotion-related validate handlers, engine
+			# re-assertion last (establishes the frozen promotion representation as
+			# the final word of the validate phase). Materialization of the pending
+			# payload happens at ``before_validate`` below, which Frappe runs before
+			# every ``validate`` handler, so promotion rows exist before any of the
+			# item-touching validators above run.
+			"pos_next.walk_in.validate_walk_in_customer_name",
+			"pos_next.promotions.engine.on_validate",
 		],
+		"before_validate": "pos_next.promotions.engine.on_before_validate",
+		"before_submit": "pos_next.promotions.engine.on_before_submit",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet",
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
+			"pos_next.promotions.facts.on_submit",
 		],
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.sales_invoice_hooks.release_one_time_offer_usage",
+			"pos_next.promotions.facts.on_cancel",
 		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},

@@ -39,6 +39,11 @@ POS_SETTINGS_FIELDS = [
 	"enable_session_lock",
 	"session_lock_timeout",
 	"show_variants_as_items",
+	"enable_buyer_identity",
+	"require_buyer_name",
+	"enable_promotions",
+	"enable_price_groups",
+	"enable_direct_print",
 ]
 
 # Default POS Settings values
@@ -69,4 +74,9 @@ DEFAULT_POS_SETTINGS = {
 	"enable_session_lock": 0,
 	"session_lock_timeout": 5,
 	"show_variants_as_items": 0,
+	"enable_buyer_identity": 0,
+	"require_buyer_name": 0,
+	"enable_promotions": 0,
+	"enable_price_groups": 0,
+	"enable_direct_print": 0,
 }

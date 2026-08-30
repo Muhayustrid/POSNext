@@ -1,0 +1,63 @@
+{
+  "actions": [],
+  "creation": "2026-08-19 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "choice_group_key",
+    "item_code",
+    "price_adjustment",
+    "max_per_option"
+  ],
+  "fields": [
+    {
+      "fieldname": "choice_group_key",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Choice Group",
+      "reqd": 1,
+      "description": "Which choice group this item belongs to"
+    },
+    {
+      "fieldname": "item_code",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "label": "Item Code",
+      "options": "Item",
+      "reqd": 1,
+      "description": "Stock item the customer gets when choosing this option"
+    },
+    {
+      "default": "0",
+      "fieldname": "price_adjustment",
+      "fieldtype": "Currency",
+      "in_list_view": 1,
+      "label": "Price Adjustment",
+      "options": "currency",
+      "description": "Added to Base Price per unit chosen. May be negative, e.g. 2000 or -1500"
+    },
+    {
+      "default": "0",
+      "fieldname": "max_per_option",
+      "fieldtype": "Int",
+      "in_list_view": 0,
+      "label": "Max Per Option",
+      "non_negative": 1,
+      "description": "Max units of this option per package. 0 = unlimited"
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "istable": 1,
+  "links": [],
+  "modified": "2026-08-22 17:30:00.000000",
+  "modified_by": "Administrator",
+  "module": "POS Next",
+  "name": "Promotion Option",
+  "owner": "Administrator",
+  "permissions": [],
+  "row_format": "Dynamic",
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "states": []
+}

@@ -66,6 +66,11 @@
   "allow_submissions_in_background_job",
   "allow_delete_offline_invoice",
   "allow_change_posting_date",
+  "enable_buyer_identity",
+  "require_buyer_name",
+  "enable_promotions",
+  "enable_price_groups",
+  "enable_direct_print",
   "section_break_misc",
   "input_qty",
   "allow_negative_stock",
@@ -496,6 +501,42 @@
    "label": "Allow Change Posting Date"
   },
   {
+   "default": "0",
+   "description": "Collect buyer name and queue number on each sale for this profile",
+   "fieldname": "enable_buyer_identity",
+   "fieldtype": "Check",
+   "label": "Enable Buyer Identity"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.enable_buyer_identity",
+   "description": "Require the buyer name to be filled in before a sale can be submitted",
+   "fieldname": "require_buyer_name",
+   "fieldtype": "Check",
+   "label": "Require Buyer Name"
+  },
+  {
+   "default": "0",
+   "description": "Enable POS promotions for this profile",
+   "fieldname": "enable_promotions",
+   "fieldtype": "Check",
+   "label": "Enable Promotions"
+  },
+  {
+   "default": "0",
+   "description": "Apply outlet price groups instead of standard pricing",
+   "fieldname": "enable_price_groups",
+   "fieldtype": "Check",
+   "label": "Enable Price Groups"
+  },
+  {
+   "default": "0",
+   "description": "Print receipts directly to bound terminal hardware instead of the browser",
+   "fieldname": "enable_direct_print",
+   "fieldtype": "Check",
+   "label": "Enable Direct Print"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_misc",
    "fieldtype": "Section Break",
@@ -550,7 +591,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:09.903964",
+ "modified": "2026-08-31 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

@@ -275,3 +275,130 @@ def get_customer_details(customer):
 		frappe.throw(_("Customer is required"))
 
 	return frappe.get_cached_doc("Customer", customer).as_dict()
+
+
+# WHERE clause for the ad-hoc walk-in heuristic (see report_ad_hoc_walk_in_customers).
+# Shared between the capped row query and the total-count query so they cannot drift.
+# %(max_invoices)s is bound by the callers.
+_AD_HOC_WALK_IN_WHERE = """
+	WHERE c.customer_type = 'Individual'
+		AND (c.mobile_no IS NULL OR c.mobile_no = '')
+		AND (c.email_id IS NULL OR c.email_id = '')
+		AND NOT EXISTS (
+			SELECT 1 FROM `tabDynamic Link` dl
+			WHERE dl.parenttype = 'Address'
+				AND dl.link_doctype = 'Customer'
+				AND dl.link_name = c.name
+		)
+		AND (
+			SELECT COUNT(*) FROM `tabSales Invoice` si
+			WHERE si.customer = c.name AND si.docstatus < 2
+		) <= %(max_invoices)s
+"""
+
+
+@frappe.whitelist()
+def report_ad_hoc_walk_in_customers(limit=500, max_invoices=1):
+	"""
+	Read-only pre-migration report of Customer rows that look like ad-hoc walk-ins.
+
+	Context: `update_invoice` (pos_next/api/invoices.py) auto-creates a bare
+	`Customer` (customer_type="Individual", no contact details, no address) when
+	it receives an unknown customer string. A later release retires that
+	auto-create, so operators need to review the affected rows before upgrading
+	(OpenSpec change add-bakery-pos-capabilities, design decision D1 / risk R2).
+
+	A customer is reported when ALL of the following hold:
+	- customer_type is "Individual"
+	- mobile_no and email_id are both empty
+	- no Address links to it (no `tabDynamic Link` row with parenttype="Address")
+	- at most `max_invoices` non-cancelled Sales Invoices (docstatus < 2)
+	  reference it (default 1, the "single-invoice history" heuristic; raise it
+	  to catch repeat walk-ins, or pass a very large number to ignore history)
+
+	The rows also carry `customer_group`: the auto-create path in `update_invoice`
+	uses "All Customer Groups", so that value (or NULL) is the strongest signal
+	that a row was auto-created rather than deliberately entered. It is reported,
+	not filtered on, to avoid over-constraining the heuristic.
+
+	This function performs SELECT queries only. It never creates, edits, renames,
+	or deletes any document, and never commits.
+
+	Args:
+	    limit (int): Maximum number of rows to return (capped at 2000). Use 0 or
+	        None to fetch all matched rows.
+	    max_invoices (int): Upper bound on non-cancelled Sales Invoice count.
+
+	Returns:
+	    dict: {
+	        "total_customers": int,   # total Customer rows on the site
+	        "total_matched": int,     # rows passing all heuristics (uncapped)
+	        "returned": int,          # rows in "customers" (min(total_matched, limit))
+	        "limit": int | None,      # effective cap applied
+	        "max_invoices": int,      # effective invoice-history bound used
+	        "customers": [
+	            {"name", "customer_name", "customer_group", "creation",
+	             "invoice_count"}, ...
+	        ]  # ordered newest-creation first
+	    }
+	"""
+	if not (frappe.has_permission("Customer", "read") or frappe.session.user == "Administrator"):
+		frappe.throw(_("You don't have permission to view this report"), frappe.PermissionError)
+
+	try:
+		limit = int(limit) if limit not in (None, "") else 0
+	except (TypeError, ValueError):
+		limit = 500
+	if limit < 0:
+		limit = 0
+	if limit > 2000:
+		limit = 2000
+
+	try:
+		max_invoices = int(max_invoices) if max_invoices not in (None, "") else 1
+	except (TypeError, ValueError):
+		max_invoices = 1
+	if max_invoices < 0:
+		max_invoices = 1
+
+	params = {"max_invoices": max_invoices}
+
+	total_customers = frappe.db.count("Customer")
+
+	total_matched = frappe.db.sql(
+		f"SELECT COUNT(*) FROM `tabCustomer` c{_AD_HOC_WALK_IN_WHERE}",
+		params,
+		as_list=True,
+	)[0][0]
+
+	limit_clause = ""
+	if limit:
+		limit_clause = "LIMIT %(limit)s"
+		params["limit"] = limit
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			c.name,
+			c.customer_name,
+			c.customer_group,
+			c.creation,
+			(SELECT COUNT(*) FROM `tabSales Invoice` si
+				WHERE si.customer = c.name AND si.docstatus < 2) AS invoice_count
+		FROM `tabCustomer` c
+		{_AD_HOC_WALK_IN_WHERE}
+		ORDER BY c.creation DESC
+		{limit_clause}
+		""",
+		params,
+		as_dict=True,
+	)
+
+	return {
+		"total_customers": total_customers,
+		"total_matched": total_matched,
+		"returned": len(rows),
+		"limit": limit or None,
+		"max_invoices": max_invoices,
+		"customers": rows,
+	}
