@@ -142,7 +142,9 @@ class TestPromotionPricing(IntegrationTestCase):
 			"enabled": 1,
 			"max_instances_per_invoice": 2,
 			"components": [{"item_code": self.bread_a, "qty": 1.0}],
-			"choice_groups": [{"group_key": group_key, "label": "Pilih Roti", "pick_count": 2}],
+			"choice_groups": [
+				{"group_key": group_key, "label": "Pilih Roti", "pick_count": 2, "allow_repeats": 1}
+			],
 			"options": [
 				{
 					"choice_group_key": group_key,
@@ -422,3 +424,102 @@ class TestPromotionPricing(IntegrationTestCase):
 			]
 			with self.assertRaisesRegex(frappe.ValidationError, r"greater than zero|positive integer"):
 				pricing.quote(self.promo, choices, self._context())
+
+	# --- allow_repeats enforcement (Task 4.1) -----------------------------
+	#
+	# The base fixture's group is allow_repeats=1, which is why the repeated-qty
+	# quotes above succeed. These cases pin the distinct branch, including the
+	# aggregate guard that a repeat split across rows cannot bypass.
+
+	def _repeat_group_promo(self, *, allow_repeats, pick_count, option_caps=None):
+		"""Build a single-group Promotion over the shared items.
+
+		``enabled=0`` skips the I11 one-enabled-promotion-per-parent-item fence so
+		this helper can coexist with the fixture master; ``pricing.quote`` never
+		consults the enabled flag, only eligibility does.
+		"""
+		caps = option_caps or {}
+		group_key = f"grp_rep_{self.suffix}"
+		promo = (
+			frappe.get_doc(
+				{
+					"doctype": "Promotion",
+					"promotion_name": f"Promo Repeats {allow_repeats}-{pick_count} {self.suffix}",
+					"root_company": self.root_company,
+					"parent_item": self.parent_item,
+					"base_price": 10000.0,
+					"currency": "IDR",
+					"enabled": 0,
+					"components": [{"item_code": self.bread_a, "qty": 1.0}],
+					"choice_groups": [
+						{
+							"group_key": group_key,
+							"label": "Pilih Roti",
+							"pick_count": pick_count,
+							"allow_repeats": allow_repeats,
+						}
+					],
+					"options": [
+						{
+							"choice_group_key": group_key,
+							"item_code": self.bread_b,
+							"price_adjustment": 0.0,
+							"max_per_option": caps.get("b", 0),
+						},
+						{
+							"choice_group_key": group_key,
+							"item_code": self.bread_c,
+							"price_adjustment": 1500.0,
+							"max_per_option": caps.get("c", 0),
+						},
+					],
+					"outlets": [
+						{"company": self.outlet_company, "warehouse": self.outlet_warehouse, "enabled": 1}
+					],
+				}
+			)
+			.insert(ignore_permissions=True)
+		)
+		return promo, promo.choice_groups[0].group_key, promo.options[0].name, promo.options[1].name
+
+	def test_distinct_group_accepts_two_distinct_options(self):
+		promo, gk, opt_b, opt_c = self._repeat_group_promo(allow_repeats=0, pick_count=2)
+		choices = [
+			{"choice_group_key": gk, "options": [{"option_id": opt_b, "qty": 1}, {"option_id": opt_c, "qty": 1}]}
+		]
+		result = pricing.quote(promo, choices, self._context())
+		self.assertAlmostEqual(result["total_price"], 11500.0)
+
+	def test_distinct_group_rejects_repeated_option(self):
+		# pick_count is met exactly, so only the repeats guard can reject this.
+		promo, gk, opt_b, _opt_c = self._repeat_group_promo(allow_repeats=0, pick_count=2)
+		choices = [{"choice_group_key": gk, "options": [{"option_id": opt_b, "qty": 2}]}]
+		with self.assertRaisesRegex(frappe.ValidationError, r"does not allow repeats"):
+			pricing.quote(promo, choices, self._context())
+
+	def test_distinct_group_rejects_repeat_split_across_rows(self):
+		# A repeat expressed as two single-unit rows must not slip past either
+		# per-row check: the guard aggregates per option.
+		promo, gk, opt_b, _opt_c = self._repeat_group_promo(allow_repeats=0, pick_count=2)
+		choices = [
+			{"choice_group_key": gk, "options": [{"option_id": opt_b, "qty": 1}, {"option_id": opt_b, "qty": 1}]}
+		]
+		with self.assertRaisesRegex(frappe.ValidationError, r"does not allow repeats"):
+			pricing.quote(promo, choices, self._context())
+
+	def test_repeats_group_allows_repeated_option_within_max(self):
+		promo, gk, opt_b, _opt_c = self._repeat_group_promo(
+			allow_repeats=1, pick_count=2, option_caps={"b": 2}
+		)
+		choices = [{"choice_group_key": gk, "options": [{"option_id": opt_b, "qty": 2}]}]
+		result = pricing.quote(promo, choices, self._context())
+		self.assertAlmostEqual(result["total_price"], 10000.0)
+		self.assertEqual(len(result["component_rows"]), 2)
+
+	def test_repeats_group_still_bounded_by_max_per_option(self):
+		promo, gk, opt_b, _opt_c = self._repeat_group_promo(
+			allow_repeats=1, pick_count=3, option_caps={"b": 2}
+		)
+		choices = [{"choice_group_key": gk, "options": [{"option_id": opt_b, "qty": 3}]}]
+		with self.assertRaisesRegex(frappe.ValidationError, r"max_per_option"):
+			pricing.quote(promo, choices, self._context())

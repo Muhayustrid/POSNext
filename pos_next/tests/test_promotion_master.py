@@ -318,6 +318,90 @@ class TestPromotionMasterValidations(IntegrationTestCase):
 		with self.assertRaisesRegex(frappe.ValidationError, r"Pick count must be at least one"):
 			promo.insert(ignore_permissions=True)
 
+	# --- choice-group repeat states (Task 4.1 / design D3) ------------------
+
+	def test_allow_repeats_defaults_to_off(self):
+		# Unset allow_repeats must land as 0 (distinct-by-default), not None.
+		promo = self._base_promotion()
+		promo.insert(ignore_permissions=True)
+		self.assertEqual(int(promo.choice_groups[0].allow_repeats or 0), 0)
+
+	def test_pick_count_one_group_saves(self):
+		# State 1: single choice — pick_count 1, two options, repeats irrelevant.
+		group_key = f"grp_{self.suffix}"
+		promo = self._base_promotion(
+			choice_groups=[{"group_key": group_key, "label": "Pilih Satu", "pick_count": 1}]
+		)
+		promo.insert(ignore_permissions=True)
+		self.assertEqual(int(promo.choice_groups[0].pick_count), 1)
+
+	def test_pick_many_distinct_group_saves(self):
+		# State 2: pick-many-distinct — allow_repeats off, pick_count equals the
+		# number of options so a full distinct selection is satisfiable.
+		group_key = f"grp_{self.suffix}"
+		promo = self._base_promotion(
+			choice_groups=[
+				{
+					"group_key": group_key,
+					"label": "Pilih Dua Beda",
+					"pick_count": 2,
+					"allow_repeats": 0,
+				}
+			]
+		)
+		promo.insert(ignore_permissions=True)
+		self.assertEqual(int(promo.choice_groups[0].allow_repeats or 0), 0)
+
+	def test_pick_many_with_repeats_group_saves(self):
+		# State 3: pick-many-any — allow_repeats on, same option may repeat.
+		group_key = f"grp_{self.suffix}"
+		promo = self._base_promotion(
+			choice_groups=[
+				{
+					"group_key": group_key,
+					"label": "Pilih Dua Boleh Sama",
+					"pick_count": 2,
+					"allow_repeats": 1,
+				}
+			]
+		)
+		promo.insert(ignore_permissions=True)
+		self.assertEqual(int(promo.choice_groups[0].allow_repeats or 0), 1)
+
+	def test_distinct_group_rejects_unsatisfiable_pick_count(self):
+		# Distinct guard: allow_repeats off but pick_count exceeds the number of
+		# options, so no selection could ever satisfy the group — reject at save.
+		group_key = f"grp_{self.suffix}"
+		promo = self._base_promotion(
+			choice_groups=[
+				{
+					"group_key": group_key,
+					"label": "Pilih Tiga Beda",
+					"pick_count": 3,
+					"allow_repeats": 0,
+				}
+			]
+		)
+		with self.assertRaisesRegex(frappe.ValidationError, r"cannot be satisfied"):
+			promo.insert(ignore_permissions=True)
+
+	def test_repeats_group_allows_pick_count_exceeding_options(self):
+		# Counter-case to the guard above: the same oversubscribed pick_count is
+		# legal once repeats are allowed.
+		group_key = f"grp_{self.suffix}"
+		promo = self._base_promotion(
+			choice_groups=[
+				{
+					"group_key": group_key,
+					"label": "Pilih Tiga Boleh Sama",
+					"pick_count": 3,
+					"allow_repeats": 1,
+				}
+			]
+		)
+		promo.insert(ignore_permissions=True)
+		self.assertTrue(frappe.db.exists("Promotion", promo.name))
+
 	# --- physical item guards (plan item 1, I12/D13) ---------------------
 
 	def test_component_item_must_be_stock(self):

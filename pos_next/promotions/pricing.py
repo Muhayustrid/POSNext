@@ -6,7 +6,7 @@ No whitelisted HTTP surface.
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 
 def quote(promotion, choices, context):
@@ -103,6 +103,10 @@ def quote(promotion, choices, context):
 		gk = grp_entry["group_key"]
 		group_doc = groups_by_key[gk]
 		pick_count = int(group_doc.pick_count or 0)
+		# Repeats gate (design D3 enhancement): default off means the group is
+		# "pick-N-distinct" — no option may be chosen more than once. On means
+		# "pick-N-any", capped by each option's max_per_option.
+		allow_repeats = cint(group_doc.allow_repeats or 0)
 
 		picks = grp_entry.get("picks") or []
 		if not picks:
@@ -152,6 +156,25 @@ def quote(promotion, choices, context):
 					),
 					frappe.ValidationError,
 				)
+
+		# Repeats semantics (design D3): when allow_repeats is off the group is
+		# pick-N-distinct. Aggregate by option so a crafted client cannot slip a
+		# repeated pick past as two single-unit rows.
+		if not allow_repeats:
+			per_option_qty: dict[str, int] = {}
+			for pick in picks:
+				pick_name = str(pick.get("option_row") or pick.get("option_id") or pick.get("option") or "").strip()
+				if pick_name:
+					per_option_qty[pick_name] = per_option_qty.get(pick_name, 0) + int(pick.get("qty"))
+			for opt_name, total_qty in per_option_qty.items():
+				if total_qty > 1:
+					frappe.throw(
+						_(
+							"Choice group {0} does not allow repeats: option {1}"
+							" was picked {2} times but each option may be picked at most once"
+						).format(gk, opt_name, total_qty),
+						frappe.ValidationError,
+					)
 
 		# Validate each option
 		for pick in picks:

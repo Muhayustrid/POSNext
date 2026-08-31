@@ -9,7 +9,7 @@ No direct Mobile POS HTTP surface.
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import cint, flt, nowdate
 
 from pos_next.promotions import eligibility, pricing
 
@@ -127,6 +127,7 @@ def promotion_detail(promotion_name, pos_profile=None, on_date=None):
 				"group_key": gk,
 				"label": grp.label,
 				"pick_count": int(grp.pick_count or 0),
+				"allow_repeats": cint(getattr(grp, "allow_repeats", 0)),
 				"options": options_by_group.get(gk, []),
 			}
 		)

@@ -5,7 +5,7 @@ import uuid
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 
 class Promotion(Document):
@@ -93,6 +93,19 @@ class Promotion(Document):
 						group.idx, group.group_key
 					)
 				)
+			# Master-side satisfiability for distinct groups: an unchecked
+			# allow_repeats makes the group "pick-N-distinct", so it cannot be
+			# fulfilled if N exceeds the number of distinct options offered.
+			if not cint(getattr(group, "allow_repeats", 0)):
+				if len(options_by_group.get(group.group_key, [])) < int(group.pick_count or 0):
+					frappe.throw(
+						_(
+							"Row {0}: Choice group {1} cannot be satisfied: distinct picks"
+							" required {2} but only {3} options exist"
+						).format(
+							group.idx, group.group_key, group.pick_count, len(options_by_group.get(group.group_key, []))
+						)
+					)
 
 	# --- physical items (D13 / I12) ----------------------------------------------
 

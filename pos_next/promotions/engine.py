@@ -16,7 +16,7 @@ import uuid
 
 import frappe
 from frappe import _
-from frappe.utils import flt, now_datetime
+from frappe.utils import cint, flt, now_datetime
 
 from pos_next.promotions import eligibility, pricing
 
@@ -256,7 +256,12 @@ def _build_snapshot(promo, quote):
 		"max_instances_per_invoice": promo.max_instances_per_invoice,
 		"parent_item": promo.parent_item,
 		"choice_groups": [
-			{"group_key": g.group_key, "label": g.label, "pick_count": g.pick_count}
+			{
+				"group_key": g.group_key,
+				"label": g.label,
+				"pick_count": g.pick_count,
+				"allow_repeats": cint(getattr(g, "allow_repeats", 0)),
+			}
 			for g in promo.choice_groups or []
 		],
 		"fixed_components": [{"item_code": c.item_code, "qty": flt(c.qty)} for c in promo.components or []],

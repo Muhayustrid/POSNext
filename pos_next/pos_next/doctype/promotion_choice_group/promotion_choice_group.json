@@ -7,6 +7,7 @@
   "field_order": [
     "label",
     "pick_count",
+    "allow_repeats",
     "group_key"
   ],
   "fields": [
@@ -28,6 +29,14 @@
       "description": "How many option units the customer must choose from this group"
     },
     {
+      "default": "0",
+      "fieldname": "allow_repeats",
+      "fieldtype": "Check",
+      "in_list_view": 1,
+      "label": "Allow Repeats",
+      "description": "When unchecked, each option may be picked at most once from this group (pick-many-distinct). When checked, the same option may be picked multiple times, capped by that option's Max Per Option (pick-many-any)."
+    },
+    {
       "fieldname": "group_key",
       "fieldtype": "Data",
       "in_list_view": 0,
@@ -39,7 +48,7 @@
   "index_web_pages_for_search": 0,
   "istable": 1,
   "links": [],
-  "modified": "2026-08-22 17:30:00.000000",
+  "modified": "2026-08-31 10:19:56.000000",
   "modified_by": "Administrator",
   "module": "POS Next",
   "name": "Promotion Choice Group",
