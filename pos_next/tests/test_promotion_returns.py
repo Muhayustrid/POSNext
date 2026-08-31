@@ -9,6 +9,9 @@ Covers:
 - A promotion instance absent from the source invoice throws.
 - The source invoice's selections and snapshots are never rewritten.
 - The sale-side instance cap is never re-checked on a return.
+- Quantity-proportional returns: an instance sold at quantity 2 returns 2 of
+  every component (whole instances only), stock and refund scale with the
+  sold quantity, and a return cannot halve a quantity-2 instance.
 
 Conventions:
 - self.addCleanup(frappe.db.rollback) registered FIRST in setUp.
@@ -246,11 +249,14 @@ class TestPromotionReturns(IntegrationTestCase):
 		self.option_b = self.promo.options[0].name
 		self.option_c = self.promo.options[1].name
 
-	def _instance(self, option_row):
-		return {
+	def _instance(self, option_row, quantity=None):
+		row = {
 			"promotion": self.promo.name,
 			"selections": [{"group_key": self.group_key, "picks": [{"option_row": option_row, "qty": 1}]}],
 		}
+		if quantity is not None:
+			row["quantity"] = quantity
+		return row
 
 	def _new_invoice(self, pending=None, items=None):
 		doc = {
@@ -285,10 +291,18 @@ class TestPromotionReturns(IntegrationTestCase):
 		ret.paid_amount = amount
 		return ret
 
-	def _sell(self, options=(None,)):
-		"""Submit one paid Sales Invoice carrying one instance per given option row."""
+	def _sell(self, options=(None,), quantities=None):
+		"""Submit one paid Sales Invoice carrying one instance per given option row.
+
+		``quantities``, when given, pairs positionally with ``options`` and sets the
+		instance-level ``quantity`` key (an instance sold at quantity 2 carries two
+		of every component and a qty-2 parent row).
+		"""
 		option_rows = [opt or self.option_b for opt in options]
-		pending = json.dumps({"instances": [self._instance(opt) for opt in option_rows]})
+		quantities = quantities or [None] * len(option_rows)
+		pending = json.dumps(
+			{"instances": [self._instance(opt, quantity=qty) for opt, qty in zip(option_rows, quantities)]}
+		)
 		inv = self._new_invoice(pending=pending)
 		inv.insert()
 		return self._submit_paid(inv)
@@ -633,3 +647,119 @@ class TestPromotionReturns(IntegrationTestCase):
 		self.assertEqual(ret.docstatus, 1)
 		self.assertEqual(len(ret.items), 1)
 		self.assertEqual(flt(ret.grand_total), -30000.0)
+
+	# --- Quantity-proportional returns (instance sold at quantity > 1) --------
+	#
+	# ``_source_promotion_rows`` sums qty per (instance_id, item_code) from the
+	# source invoice's child rows, so an instance sold at quantity 2 demands
+	# -2 of the parent and -2 x per-unit of every component on the return. The
+	# whole-instance guard measures against that SOLD quantity, not against a
+	# fixed shape: proportional means proportional to the instance quantity.
+
+	def test_full_return_of_quantity_two_instance_passes_and_reverses_exactly(self):
+		sale = self._sell(quantities=(2,))
+		ret = make_sales_return(sale.name)
+		ret.insert()
+		ret.submit()
+
+		self.assertEqual(ret.docstatus, 1)
+		self.assertEqual(len(ret.items), 3)
+		parent = next(r for r in ret.items if r.get(ROLE_FIELD) == "Promotion Parent")
+		self.assertEqual(flt(parent.qty), -2.0)
+		self.assertEqual(flt(parent.rate), 20000.0)
+		self.assertEqual(flt(parent.amount), -40000.0)
+		component_qty = {row.item_code: flt(row.qty) for row in ret.items if row.item_code != self.parent_item}
+		# The fixed component sells 2 per unit, so at quantity 2 it returns -4.
+		self.assertEqual(component_qty[self.bread_a], -4.0)
+		self.assertEqual(component_qty[self.bread_b], -2.0)
+		self.assertEqual(flt(ret.grand_total), -40000.0)
+		self.assertEqual(flt(ret.paid_amount), -40000.0)
+
+	def test_returning_one_unit_of_a_quantity_two_instance_throws(self):
+		"""Halving every row is a half instance, not a complete one.
+
+		This is the case that proves the guard measures against the sold
+		quantity and not against a shape: every role and item is present, and
+		the component ratios still match the promotion's recipe, yet the
+		return is short of what the source invoice recorded.
+		"""
+		sale = self._sell(quantities=(2,))
+		ret = make_sales_return(sale.name)
+		for row in ret.items:
+			row.qty = flt(row.qty) / 2
+		self._repay(ret, -20000.0)
+
+		with self.assertRaisesRegex(frappe.ValidationError, r"must be returned in full"):
+			ret.insert()
+
+	def test_quantity_two_return_with_short_parent_throws(self):
+		sale = self._sell(quantities=(2,))
+		ret = make_sales_return(sale.name)
+		parent = next(r for r in ret.items if r.get(ROLE_FIELD) == "Promotion Parent")
+		self.assertEqual(flt(parent.qty), -2.0)
+		parent.qty = -1.0
+		self._repay(ret, -20000.0)
+
+		with self.assertRaisesRegex(frappe.ValidationError, r"must be returned in full"):
+			ret.insert()
+
+	def test_quantity_two_return_with_short_components_throws(self):
+		sale = self._sell(quantities=(2,))
+		ret = make_sales_return(sale.name)
+		for row in ret.items:
+			if row.get(ROLE_FIELD) == "Promotion Component":
+				row.qty = flt(row.qty) / 2
+
+		with self.assertRaisesRegex(frappe.ValidationError, r"must be returned in full"):
+			ret.insert()
+
+	def test_full_return_of_mixed_quantities_passes(self):
+		"""One instance at quantity 2, one at quantity 1: 40,000 + 23,000 sold."""
+		sale = self._sell(options=(self.option_b, self.option_c), quantities=(2, 1))
+		ret = make_sales_return(sale.name)
+		ret.insert()
+		ret.submit()
+
+		self.assertEqual(ret.docstatus, 1)
+		self.assertEqual(len(ret.items), 6)
+		self.assertEqual(flt(ret.grand_total), -63000.0)
+
+	def test_return_of_one_whole_quantity_two_instance_out_of_two_passes(self):
+		"""Absent is as valid as complete at any sold quantity."""
+		sale = self._sell(options=(self.option_b, self.option_c), quantities=(2, 1))
+		ret = make_sales_return(sale.name)
+		qty_by_instance = {}
+		for row in ret.items:
+			if row.get(ROLE_FIELD) == "Promotion Parent":
+				qty_by_instance[row.get(INSTANCE_FIELD)] = abs(flt(row.qty))
+		kept_instance = next(inst for inst, qty in qty_by_instance.items() if qty == 2.0)
+		ret.items = [row for row in ret.items if row.get(INSTANCE_FIELD) == kept_instance]
+		self._repay(ret, -40000.0)
+		ret.insert()
+		ret.submit()
+
+		self.assertEqual(ret.docstatus, 1)
+		self.assertEqual(len(ret.items), 3)
+		self.assertEqual(flt(ret.grand_total), -40000.0)
+
+	def test_quantity_two_return_reverses_stock_proportionally(self):
+		sale = self._sell(quantities=(2,))
+		ret = make_sales_return(sale.name)
+		ret.insert()
+		ret.submit()
+
+		self.assertEqual(ret.docstatus, 1)
+		reversal = {row.item_code: flt(row.stock_qty) for row in ret.items}
+		self.assertEqual(reversal[self.bread_a], -4.0)
+		self.assertEqual(reversal[self.bread_b], -2.0)
+		self.assertEqual(reversal[self.parent_item], -2.0)
+
+	def test_quantity_two_return_never_rewrites_the_source_invoice(self):
+		sale = self._sell(options=(self.option_b, self.option_c), quantities=(2, 1))
+		before = self._source_snapshot(sale.name)
+
+		ret = make_sales_return(sale.name)
+		ret.insert()
+		ret.submit()
+
+		self.assertEqual(before, self._source_snapshot(sale.name))
