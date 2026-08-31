@@ -1,13 +1,14 @@
 # Status: add-bakery-pos-capabilities
 
-Date: 2026-08-31 (resumed). Orchestrated execution per operator instruction: group 3 only, started after the operator read the decisions below and gave the go for 3.1, and STOP after it - group 4 continues in another session.
+Date: 2026-08-31 (resumed twice). Orchestrated execution per operator instruction. Session 2 ran group 3 only. Session 3 ran group 4 tasks 4.1-4.2 and stopped there; 4.3 onward continues in another session.
 
 ## Progress
 
 - Group 1 (port foundation): 8/8 done, commit `7a201b4`
 - Group 2 (buyer identity + queue): 13/13 done, commit `cc49e91`
-- Group 3 (retire implicit Customer provisioning - BREAKING): 4/4 done, uncommitted
-- Groups 4-8: untouched. 25/77 tasks checked.
+- Group 3 (retire implicit Customer provisioning - BREAKING): 4/4 done, commit `bb165b6`
+- Group 4 (promotions, ported package model): 2/13 done - 4.1 commit `eb6296d`, 4.2 commit `9677e72`
+- Groups 5-8: untouched. 27/77 tasks checked.
 
 ## Per-group summary
 
@@ -72,11 +73,71 @@ Date: 2026-08-31 (resumed). Orchestrated execution per operator instruction: gro
   auto-create block was restored verbatim and re-run  -  both rejection tests go red against it,
   so they pin behaviour rather than restating the implementation.
 
+### Group 4 - promotions (ported package model), 4.1-4.2 only
+
+- **4.1 (`eb6296d`)**: `allow_repeats` Check added to `Promotion Choice Group`
+  (`field_order` + `modified` bumped, otherwise migrate skips a child DocType whose file
+  stamp is older than the DB row). **Operator ruling: default 0 (distinct-by-default)**,
+  chosen over default 1 knowing it changes the meaning of every existing choice group -
+  repeats were previously implicit whenever `max_per_option` was 0. One fixture line in
+  `test_promotion_pricing.py` now declares `allow_repeats: 1`; no ported assertion was
+  touched, so R1 ("original tests pass") holds in substance.
+  - Enforcement in `promotions/pricing.py` is **aggregated per option**, not per row: a
+    client sending the same option as two `qty 1` rows is rejected too. A per-row check
+    alone would have missed that.
+  - `promotion.py` gained a save-time satisfiability guard (**second operator ruling**):
+    `allow_repeats` off with `pick_count` > option count is rejected at configuration
+    time, naming the group, instead of saving cleanly and failing at the till on every
+    sale.
+  - The flag is exposed through `promotions/api.py::promotion_detail` (the dialog reads
+    group constraints from there, task 4.10) and frozen into the `_build_snapshot`
+    `choice_groups` entry, so a sale records the repeat rule it was made under.
+  - Tests: 6 new master tests (default-off, the three states, guard + repeats
+    counter-case), 5 new pricing tests (distinct accepts distinct / rejects repeat /
+    rejects split-row repeat; repeats within cap; `max_per_option` still binds under
+    repeats).
+- **4.2 (`9677e72`)**: `pricing.quote` already **was** the single core (reached by
+  `quote_promotion` and by the engine's materialization), so the task reduced to proving
+  it at the API boundary and closing one injection gap.
+  - `_strip_server_managed_fields` now pops a client-supplied `pos_promotion_selections`,
+    so a forged `total_amount`/`snapshot` can never become the frozen record of the sale.
+    **Popping the key, not assigning `[]`**, is load-bearing: `Document.update` only
+    rewrites a child table for keys present in the payload, so a draft replay keeps its
+    stored selections.
+  - **Two deliberate non-strips, both commented in place.** `pos_pending_promotions`
+    stays (the only validated promotion input; stripping it disables promotions
+    entirely). The per-item `pos_promotion_instance`/`pos_promotion_role` markers stay:
+    `update_invoice` replaces the whole `items` child table, so stripping them would
+    strip a legitimate promotion sale of its identity on the update-then-submit replay
+    and then trip its own integrity guard ("parent cannot be sold on its own"). The
+    first implementer attempt proposed stripping them and was corrected.
+  - Frontend trace: `POS/src` has **zero** references to any promotion field today, so
+    no live client sends these yet - the injection risk is forward-looking, and the
+    client wiring arrives in 4.10-4.12.
+  - Tests: new `pos_next/tests/test_promotion_api_validation.py`, 6 tests - over
+    `pick_count`, over `max_per_option`, foreign option, `max_instances_per_invoice`
+    breach, direct-selections injection stripped, plus the same over-pick through
+    `submit_invoice` to prove one core serves both entry points.
+- **Open gap deliberately left for the reviewer (in scope for group 4, not for 4.2):** a
+  forged per-item marker naming an instance that **genuinely exists** on the same draft
+  is not reconciled against the snapshot. `_validate_promotion_row_integrity` rejects an
+  *unknown* instance only, so an extra component row attached to a real instance is
+  re-rated to 0 and would ship as free stock. Fixing it needs snapshot-vs-rows
+  reconciliation, not a wider strip in `invoices.py`.
+
 ## Final test evidence (all run by the orchestrator, serial; the bench test bootstrap is not concurrency-safe - parallel runs deadlock on `tabSingles`)
 
 - Backend group-2 sweep: `Ran 79 tests ... OK` (test_invoices 28, test_queue_concurrency 6, test_queue_api 7, test_receipt_buyer_fields 7, test_promotions 18, test_install_custom_fields 3, tests.test_walk_in 10)
 - Ported group-1 suite: `Ran 213 tests ... OK` (189 ported + regression pair + fact-link test)
 - Frontend: vitest `Test Files 4 passed (4) / Tests 18 passed (18)`
+- Group-4 sessions so far, serial:
+  - 4.1/4.2: `pos_next.tests.test_promotion_api_validation` `Ran 6 tests ... OK`,
+    `pos_next.tests.test_promotion_master` `Ran 44 tests ... OK`,
+    `pos_next.tests.test_promotion_pricing` `Ran 18 tests ... OK`,
+    `pos_next.tests.test_pos_promo_api` `Ran 8 tests ... OK`,
+    `pos_next.tests.test_promotion_expansion` `Ran 29 tests ... OK`.
+    A parallel `docker exec ... _pn_run_tests.py` run produced `Deadlock ... try restarting transaction` +
+    3-4 errors and was discarded; the serial re-run of the same suites is the evidence.
 - `bench --site erpnext16.localhost migrate`: green after each schema step.
 - Concurrency reviewer: all nine checks APPROVE (two rejections resolved; re-review verified the test cannot be satisfied without a real lock).
 
@@ -94,10 +155,44 @@ Date: 2026-08-31 (resumed). Orchestrated execution per operator instruction: gro
 3. **1020/508 retry posture**: concurrent same-shift submits can surface "Record has changed" to the cashier (MariaDB snapshot isolation on this bench). Offline queue self-heals; the online path has no automatic retry (only CSRF). Reviewer judged it non-blocking; product decision pending whether to add a one-shot retry on `QueryDeadlockError` in `useInvoice`/`apiWrapper`.
 4. **Gate-filter debt (pre-existing, low severity)**: `allow_credit_sale`, edit-rate and negative-stock reads in `invoices.py` still query POS Settings without `enabled: 1` (buyer-identity reads were aligned; a stale disabled row could win on multi-row profiles). Four one-line fixes whenever allowed.
 5. **Version sync**: `POS/package.json` gained a devDependency (`fake-indexeddb`); if the three-file version bump ritual matters here, run `scripts/version-bump.sh` before release.
-6. **Cashier-facing message for the retired provisioning (new, group 3).** An unknown `customer` now raises a `ValidationError` whose text names `buyer_name` and the POS Profile, written for an operator reading an error log. A cashier who hits it sees that whole sentence in the failure toast. Options: (a) keep it as-is; (b) add a short cashier-facing first line ("This customer is not in the list - pick one, or use the buyer name field") with the technical detail after it; (c) pre-empt it by disabling free text at the client where it is already a picker. The frontend trace says no normal path can produce an unknown customer, so today this fires mainly on a stale tab. A since-deleted Customer usually surfaces earlier, as Frappe's own `LinkValidationError` when the existing draft is re-saved, not as this message. Needs a product call before group 4.
+7. **Three group-4 tasks are worded "Verify" but need real implementation (found by exploration, 2026-08-31).** Reading them as test-only work will understate the change:
+   - **4.4 (quantity scaling)**: no code scales components when a promotion line goes to qty 2. `pricing.quote` builds one instance and hardcodes `parent_row["qty"] = 1`; the engine appends rows at the descriptor qty. Needs a real change to pricing/engine plus a decision on where scaling lives.
+   - **4.5 (fixed-component shortage)**: no pre-submit shortage check exists; today it surfaces as ERPNext's generic `NegativeStockError` at submit. The task wants a fail-closed rejection **naming the component item code**. Note the repo's timezone trap applies: `tabBin.actual_qty` and the SLE balance disagree when the site clock is behind the wall clock, so the read source must be chosen deliberately (`docs/` + CLAUDE.md debugging traps).
+   - **4.7 (edit selection in place)**: the current behaviour is the deliberate **opposite**. `engine._materialize_pending_promotions` throws on a second non-empty payload for a draft that already holds selections (invariant I8, "one materialization pass per invoice"), pinned by `test_promotion_expansion.py::test_second_payload_on_draft_with_selections_fails_closed` and `..._g7_point_11`. Turning this into replace-components-keep-price-and-qty **reverses a guard the port put in on purpose** and will require retiring or narrowing those two tests. Needs an explicit operator decision: relax I8 for an edit path, or implement edit as a distinct operation that replaces selections atomically.
+
+   Genuinely verification-only with strong existing coverage: **4.3, 4.6, 4.8** (returns alone are 636 lines / 20+ cases in `test_promotion_returns.py`).
+
+8. **Group 4 frontend (4.9-4.12) is greenfield, not a port.** `PromotionSelectionDialog.vue` does **not** exist - the similarly-named `POS/src/components/sale/PromotionManagement.vue` is coupon/offer management and unrelated. Also missing: any `promotions` store in the Dexie schema (`POS/src/utils/offline/db.js` has `offers` only, so 4.9 needs a new store plus a `MIGRATIONS` entry following the `server_queue_number` precedent), a promotion branch in `posCart.js::addItem`, promotion tiles/barcode in the catalogue, and an `enable_promotions` computed in `POS/src/stores/posSettings.js` - the switch exists in `api/constants.py` defaults but is **not exposed through bootstrap**, so 4.12's gate has no client-side value to read yet.
+
+9. **Cashier-facing message for the retired provisioning (new, group 3).** An unknown `customer` now raises a `ValidationError` whose text names `buyer_name` and the POS Profile, written for an operator reading an error log. A cashier who hits it sees that whole sentence in the failure toast. Options: (a) keep it as-is; (b) add a short cashier-facing first line ("This customer is not in the list - pick one, or use the buyer name field") with the technical detail after it; (c) pre-empt it by disabling free text at the client where it is already a picker. The frontend trace says no normal path can produce an unknown customer, so today this fires mainly on a stale tab. A since-deleted Customer usually surfaces earlier, as Frappe's own `LinkValidationError` when the existing draft is re-saved, not as this message. Needs a product call before group 4.
 
 ## How to resume
 
-`/opsx:apply add-bakery-pos-capabilities` starting at task 4.1, honoring the same rules (group order; reviewer mandatory for group 5.4; `invoices.py` single-writer; serial test execution - never run two test processes at once, they deadlock on `tabSingles`; explicit-path commits; `pos_next/api/test_items.py` stays out).
+Mulai task 4.3, dengan aturan yang sama (group order; reviewer mandatory untuk 5.4; `invoices.py` single-writer sudah selesai di 4.2; eksekusi serial — jangan pernah jalankan 2 `pos_next/_pn_run_tests.py` paralel, deadlock di `tabSingles`; explicit-path commits; `pos_next/api/test_items.py` stays out).
 
-Group 3 is the session's stopping point per operator instruction; groups 4-8 continue in a later session. Group 3 is committed as its own revert-able unit (decision 1's requirement) - revert that one commit to restore the old provisioning.
+**Prompt untuk sesi lain (copy-paste):**
+
+```
+/opsx:apply add-bakery-pos-capabilities mulai task 4.3, dengan aturan yang sama (group order; reviewer mandatory untuk 5.4; invoices.py single-writer sudah selesai di 4.2; eksekusi serial; explicit-path commits; pos_next/api/test_items.py stays out)
+```
+
+Versi lengkap bila perlu konteks penuh:
+
+```
+Lanjutkan OpenSpec change add-bakery-pos-capabilities mulai task 4.3.
+
+Konteks: 4.1 (eb6296d - allow_repeats default 0) dan 4.2 (9677e72 - _strip pos_promotion_selections di api/invoices.py + test_promotion_api_validation.py 6 test) sudah commit di branch develop. Jangan kerjakan ulang.
+
+Aturan tetap:
+- group order (selesaikan group 4 dulu sebelum lompat ke 5)
+- reviewer mandatory untuk 5.4
+- invoices.py single-writer sudah selesai di 4.2
+- eksekusi serial - jangan pernah jalankan 2 proses pos_next/_pn_run_tests.py paralel (bench deadlock di tabSingles). Selalu: docker exec erpnext16_dev-frappe-1 bash -lc 'cd /workspace/development/frappe-bench && ./env/bin/python apps/pos_next/pos_next/_pn_run_tests.py ...'
+- explicit-path commits (sebutkan Paths di pesan commit)
+- pos_next/api/test_items.py tetap untracked, jangan di-stage
+- bench ada di Docker (erpnext16_dev-frappe-1, site erpnext16.localhost)
+
+Catatan untuk 4.3-4.13: 4.3/4.6/4.8 murni verifikasi, tapi 4.4 (qty 2 scaling), 4.5 (shortage sebut item_code), 4.7 (edit in place) butuh implementasi baru - 4.7 bahkan membalik guard I8 "satu materialisasi per invoice" yang sengaja dibuat di group 2. Celah 4.2 (baris palsu pakai instance_id valid belum direkonsiliasi dengan snapshot) sengaja dibiarkan untuk reviewer.
+```
+
+4.1 dan 4.2 sudah commit sebagai unit masing-masing di atas `bb165b6` (group 3, BREAKING). Sisa group 4 (4.3-4.13) dan group 5-8 berlanjut di sesi berikutnya.
