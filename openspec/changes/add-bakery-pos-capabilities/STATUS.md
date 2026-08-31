@@ -1,12 +1,13 @@
 # Status: add-bakery-pos-capabilities
 
-Date: 2026-08-31. Orchestrated execution per operator instruction: complete group 1 (gate) then group 2, then STOP. Groups 3-8 are NOT started.
+Date: 2026-08-31 (resumed). Orchestrated execution per operator instruction: group 3 only, started after the operator read the decisions below and gave the go for 3.1, and STOP after it - group 4 continues in another session.
 
 ## Progress
 
 - Group 1 (port foundation): 8/8 done, commit `7a201b4`
 - Group 2 (buyer identity + queue): 13/13 done, commit `cc49e91`
-- Groups 3-8: untouched. 21/77 tasks checked.
+- Group 3 (retire implicit Customer provisioning - BREAKING): 4/4 done, uncommitted
+- Groups 4-8: untouched. 25/77 tasks checked.
 
 ## Per-group summary
 
@@ -34,6 +35,43 @@ Date: 2026-08-31. Orchestrated execution per operator instruction: complete grou
 - 2.12: `invoice_queue` index additively extended (`server_queue_number`) via a documented `MIGRATIONS` table with `fromHash`; v1->v2 upgrade test (fake-indexeddb devDep, the only dependency added) seeds two queued unsynced invoices and asserts row integrity + index usability. Note: `POS/yarn.lock` is not tracked in git.
 - 2.13: `POS Next Receipt` (code-tracked print format) renders queue number under the header and buyer name as the primary customer line; nothing renders when absent (queue 0 included).
 
+### Group 3 - retiring implicit Customer provisioning (BREAKING)
+
+- Precondition from decision #1 satisfied first: `report_ad_hoc_walk_in_customers` re-run
+  read-only on this bench before the removal  -  17 Customers, 8 matched, **all 8 ERPNext demo
+  fixtures with `invoice_count=0`** (`_Test NC`, `_Test Customer USD`, `Test Loyalty Customer`,
+  ...). No real ad-hoc walk-in row exists here, so the removal is unopposed locally. On a live
+  site this step must be repeated and reviewed.
+- 3.1: auto-create block at the head of `update_invoice` replaced by
+  `_validate_customer_exists`, which throws `frappe.ValidationError` naming the buyer-name
+  field as the replacement. Runs at the same point in the flow  -  after POS Profile defaults,
+  before any save  -  so a rejected `customer` writes nothing.
+- 3.2: two counter-cases prove the scope is unknown values only: the profile's walk-in
+  default still books with a buyer name, and a deliberately selected non-default Customer
+  still books unchanged (docstatus 1, grand total, no buyer name, no provisioning).
+- Two adjacent paths were probed rather than assumed, and need no test because Frappe rejects
+  them before the new validator is reached, provisioning nothing in either case: a draft whose
+  stored `customer` no longer exists fails `LinkValidationError` on re-save; an empty
+  `customer` fails `MandatoryError` on the draft. `submit_invoice` now checks existing drafts after refresh and before any save, so the message contract is honored there too. Two adjacent paths were probed: a deleted-customer draft would otherwise fail `LinkValidationError`, and an empty `customer` still fails `MandatoryError` - both provision nothing.
+  through its `update_invoice` call, so the draft path is the guard.)
+- Frontend and backend traces found **no** code path that ever supplied an unknown `customer`:
+  `posCart.customer` is only ever null, a POS Profile default-customer object, or an object
+  from a server Customer list (`CustomerDialog` selection, or `create_customer`'s returned
+  doc). `Offline Invoice Sync.customer` is a Link field, so an offline sale with an unknown
+  customer already hard-failed there before this change.
+- 3.3: full backend sweep, serial  -  `Ran 122 tests ... FAILED (errors=1)`, `Ran 146 tests ...
+  OK`, `Ran 145 tests ... FAILED (failures=1)`. Both reds reproduced identically at HEAD via
+  `git stash` and are the ones already recorded below (packed-items INR/IDR demo clash;
+  test_customers AsyncMock coroutine). `test_offers.py` never calls the invoice APIs (grep
+  count 0), so its recorded MagicMock red is unaffected by this change. Zero new regressions;
+  no previously passing test was edited or deleted.
+- 3.4: `CHANGELOG.md` gains a `### Breaking Changes` heading under `[Unreleased]` with both
+  migration paths (buyer_name, or create the Customer explicitly), the review-report pointer,
+  and the note that existing rows are left in place.
+- Tests: 4 new tests in `pos_next.api.test_invoices` (32 total, OK). Mutation check: the legacy
+  auto-create block was restored verbatim and re-run  -  both rejection tests go red against it,
+  so they pin behaviour rather than restating the implementation.
+
 ## Final test evidence (all run by the orchestrator, serial; the bench test bootstrap is not concurrency-safe - parallel runs deadlock on `tabSingles`)
 
 - Backend group-2 sweep: `Ran 79 tests ... OK` (test_invoices 28, test_queue_concurrency 6, test_queue_api 7, test_receipt_buyer_fields 7, test_promotions 18, test_install_custom_fields 3, tests.test_walk_in 10)
@@ -49,14 +87,17 @@ Date: 2026-08-31. Orchestrated execution per operator instruction: complete grou
 - `pos_next/test_packed_items_regression.py` - 1 of 3 errors: `_Test Company` accounts are INR while the site currency is IDR (demo-data clash).
 - `pos_next/api/test_items.py` - untracked, hardcoded demo assumptions; deliberately excluded from all commits per operator instruction.
 
-## Decisions needed from the operator before resuming (groups 3+)
+## Decisions needed from the operator before resuming (groups 4+)
 
-1. **Group 3 is the BREAKING group** (retire auto-create Customer at `invoices.py:766`). Design mandates: buyer-name UI first (landed in 2.9), removal in its own revert-able commit, operator review of the 1.8 report first. Confirm go / adjust message / defer.
+1. **Group 3 go/no-go - RESOLVED 2026-08-31.** Operator gave the go; the 1.8 report was re-run and reviewed before the removal (see the group 3 summary), and the removal is its own revert-able commit. One consequence still needs a product call: decision 6.
 2. **Desk-POS assets deliberately NOT ported** from `selling_additional`: `public/js/pos_promotions.js`, `pos_walk_in_customer.js`, `pos_payment_shortcuts.js`, and the `point-of-sale` `get_past_order_list` override (`overrides/pos_overrides.py`). pos_next is a Sales-Invoice + Vue SPA stack; the equivalents arrive via groups 2.9/4.10-4.12 and 2.7. The 8 source tests that pinned those browser assets were dropped (documented in `pos_next/tests/test_walk_in_asset.py`); their hook-side replacements are ported. If Desk-POS parity was actually wanted, this needs an explicit decision.
 3. **1020/508 retry posture**: concurrent same-shift submits can surface "Record has changed" to the cashier (MariaDB snapshot isolation on this bench). Offline queue self-heals; the online path has no automatic retry (only CSRF). Reviewer judged it non-blocking; product decision pending whether to add a one-shot retry on `QueryDeadlockError` in `useInvoice`/`apiWrapper`.
 4. **Gate-filter debt (pre-existing, low severity)**: `allow_credit_sale`, edit-rate and negative-stock reads in `invoices.py` still query POS Settings without `enabled: 1` (buyer-identity reads were aligned; a stale disabled row could win on multi-row profiles). Four one-line fixes whenever allowed.
 5. **Version sync**: `POS/package.json` gained a devDependency (`fake-indexeddb`); if the three-file version bump ritual matters here, run `scripts/version-bump.sh` before release.
+6. **Cashier-facing message for the retired provisioning (new, group 3).** An unknown `customer` now raises a `ValidationError` whose text names `buyer_name` and the POS Profile, written for an operator reading an error log. A cashier who hits it sees that whole sentence in the failure toast. Options: (a) keep it as-is; (b) add a short cashier-facing first line ("This customer is not in the list - pick one, or use the buyer name field") with the technical detail after it; (c) pre-empt it by disabling free text at the client where it is already a picker. The frontend trace says no normal path can produce an unknown customer, so today this fires mainly on a stale tab. A since-deleted Customer usually surfaces earlier, as Frappe's own `LinkValidationError` when the existing draft is re-saved, not as this message. Needs a product call before group 4.
 
 ## How to resume
 
-`/opsx:apply add-bakery-pos-capabilities` starting at task 3.1, honoring the same rules (group order; reviewer mandatory for group 3 and 5.4; `invoices.py` single-writer; serial test execution; explicit-path commits; `pos_next/api/test_items.py` stays out).
+`/opsx:apply add-bakery-pos-capabilities` starting at task 4.1, honoring the same rules (group order; reviewer mandatory for group 5.4; `invoices.py` single-writer; serial test execution - never run two test processes at once, they deadlock on `tabSingles`; explicit-path commits; `pos_next/api/test_items.py` stays out).
+
+Group 3 is the session's stopping point per operator instruction; groups 4-8 continue in a later session. Group 3 is committed as its own revert-able unit (decision 1's requirement) - revert that one commit to restore the old provisioning.

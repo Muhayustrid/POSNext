@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+- **Implicit Customer provisioning on POS sales**
+  - `pos_next.api.invoices.update_invoice` (and `submit_invoice`'s draft branch)
+    no longer creates a `Customer` when the submitted `customer` value is not an
+    existing Customer record. The sale is now rejected with a validation error naming
+    `buyer_name`, so a mistyped or free-text name can never become master data.
+  - Migration path — one of:
+    1. Record the buyer's name in `buyer_name` (the buyer-identity field on the
+       sale) and keep the POS Profile's default walk-in Customer. The name appears
+       on the receipt and in invoice search, and creates no Customer record. Enable
+       it per profile with the `enable_buyer_identity` POS Settings switch.
+    2. Create the Customer deliberately first — the POS "Create customer" dialog
+       (`pos_next.api.customers.create_customer`) or the Desk — then select it.
+  - Existing auto-created `Customer` rows are left in place, not deleted or
+    merged. Review them before upgrading with the read-only report
+    `pos_next.api.customers.report_ad_hoc_walk_in_customers`, which lists Individual
+    Customers with no contact details, no address, and a single-invoice history.
+  - No other behaviour changes: every sale that names an existing Customer — the
+    walk-in default or a selected one — books exactly as before.
+  - Removed behaviour: a try/except block in `update_invoice` that `insert()`'d a
+    bare `Individual` Customer (group "All Customer Groups", territory "All Territories")
+    and silently logged failures; the surrounding code then hit Frappe's own link
+    validation. On ERPNext v16 (current `Customer Group` validation forbids selecting the
+    "All Customer Groups" root), that insert has thrown since ERPNext 2026-03 and the
+    sale was already rejected with a raw link error — now it is rejected earlier with
+    the buyer-name-naming message. On ERPNext v15/later with the same guard (2026-03
+    PR #53811), the behaviour was the same as v16. Nothing else in POS Next or the Vue
+    SPA depended on the provisioning: the client only ever submits a selected,
+    explicitly created, or profile-default Customer, and an offline sale with an unknown
+    customer was already rejected by `Offline Invoice Sync`'s Link validation.
+
 ## [1.16.0] - 2026-04-01
 
 ### Added

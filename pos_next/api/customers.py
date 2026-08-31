@@ -302,10 +302,10 @@ def report_ad_hoc_walk_in_customers(limit=500, max_invoices=1):
 	"""
 	Read-only pre-migration report of Customer rows that look like ad-hoc walk-ins.
 
-	Context: `update_invoice` (pos_next/api/invoices.py) auto-creates a bare
-	`Customer` (customer_type="Individual", no contact details, no address) when
-	it receives an unknown customer string. A later release retires that
-	auto-create, so operators need to review the affected rows before upgrading
+	Context: `update_invoice` (pos_next/api/invoices.py) previously auto-created a
+	bare `Customer` (customer_type="Individual", no contact details, no address)
+	when it received an unknown customer string. That provisioning has been retired,
+	so operators upgrading an older site should review the affected rows
 	(OpenSpec change add-bakery-pos-capabilities, design decision D1 / risk R2).
 
 	A customer is reported when ALL of the following hold:
@@ -316,8 +316,8 @@ def report_ad_hoc_walk_in_customers(limit=500, max_invoices=1):
 	  reference it (default 1, the "single-invoice history" heuristic; raise it
 	  to catch repeat walk-ins, or pass a very large number to ignore history)
 
-	The rows also carry `customer_group`: the auto-create path in `update_invoice`
-	uses "All Customer Groups", so that value (or NULL) is the strongest signal
+	The rows also carry `customer_group`: the retired auto-create path in
+	`update_invoice` used "All Customer Groups", so that value (or NULL) is the strongest signal
 	that a row was auto-created rather than deliberately entered. It is reported,
 	not filtered on, to avoid over-constraining the heuristic.
 

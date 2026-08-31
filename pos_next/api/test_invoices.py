@@ -15,6 +15,16 @@ Covers OpenSpec tasks 2.1 and 2.2 of `add-bakery-pos-capabilities`:
   Sales Invoice `validate` doc_event, firing inside the save. The document-level
   version of this rule is already covered in `pos_next/tests/test_walk_in.py`.
 
+Group 3 (tasks 3.1-3.2, the change's one BREAKING item) is covered at the end of the
+class: an unknown `customer` is rejected instead of auto-creating a bare Individual
+Customer, and the counter-cases prove the retirement is scoped to unknown values only
+(the walk-in default and a deliberately selected customer both still book unchanged).
+
+Two adjacent paths were probed and need no test of their own, because Frappe rejects
+them before `_validate_customer_exists` is reached and neither provisions a Customer:
+a draft whose stored customer no longer exists fails link validation on re-save
+(`LinkValidationError`), and an empty `customer` fails `MandatoryError` on the draft.
+
 Also locks in two adjacent contracts from the same design decisions:
 * `queue_number` is server-managed, so a client echo is stripped (allocation itself
   is task 2.3).
@@ -859,3 +869,96 @@ class TestInvoicesBuyerName(FrappeTestCase):
 		# The legacy chain is always there.
 		for legacy in ("name LIKE %(search)s", "customer_name LIKE %(search)s", "customer LIKE %(search)s"):
 			self.assertIn(legacy, clause)
+
+	# ------------------------------------------------------------------ 3.1 / 3.2
+
+	def test_unknown_customer_is_rejected_without_provisioning(self):
+		"""Group 3 (BREAKING): an unknown `customer` no longer creates a Customer row.
+
+		The retired behaviour auto-created a bare Individual Customer whenever the client
+		sent a string that was not an existing Customer, swallowing failures into the error
+		log. Now the sale is rejected, the Customer count is unchanged, and nothing is
+		written — so a mistyped name cannot silently become master data. The message names
+		`buyer_name`, which is where a name-only walk-in belongs.
+		"""
+		before = frappe.db.count("Customer")
+		invoices = self._invoice_count()
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			update_invoice(json.dumps(self._payload(customer="Budi Santoso")))
+
+		message = str(raised.exception)
+		self.assertIn("Budi Santoso", message)
+		self.assertIn("buyer name", message)
+		self.assertEqual(frappe.db.count("Customer"), before, "no Customer may be provisioned")
+		self.assertEqual(self._invoice_count(), invoices, "no draft may be written")
+
+	def test_submit_path_rejects_unknown_customer(self):
+		"""The submit path rejects an unknown customer on both branches (review finding).
+
+		Branch 1: `submit_invoice` creates the draft internally, so the check in
+		`update_invoice` fires. Branch 2: a draft already exists and that customer was
+		since deleted - the check in `submit_invoice` itself fires, so the message stays
+		the buyer-name-guided one rather than a raw link error. Both branches must leave
+		the Customer count unchanged.
+		"""
+		before = frappe.db.count("Customer")
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			submit_invoice(
+				invoice=json.dumps(self._payload(customer="Chandra Wijaya")),
+				data=json.dumps({"change_amount": 0, "write_off_amount": 0}),
+			)
+		self.assertIn("Chandra Wijaya", str(raised.exception))
+		self.assertIn("buyer name", str(raised.exception))
+
+		# Branch 2: an existing draft with a since-deleted customer.
+		draft = update_invoice(json.dumps(self._payload()))
+		frappe.db.set_value("Sales Invoice", draft["name"], "customer", "Ghost Customer")
+		# Refresh, so we do not send a stale `modified` timestamp (which would raise
+		# `TimestampMismatchError` before the validation is reached).
+		draft = frappe.get_doc("Sales Invoice", draft["name"]).as_dict()
+		with savepoint(catch=frappe.ValidationError):
+			with self.assertRaises(frappe.ValidationError) as raised:
+				submit_invoice(
+					invoice=json.dumps(draft, default=str),
+					data=json.dumps({"change_amount": 0, "write_off_amount": 0}),
+				)
+			message = str(raised.exception)
+		self.assertIn("buyer name", message)
+
+		self.assertEqual(frappe.db.count("Customer"), before)
+
+	def test_known_non_default_customer_still_books(self):
+		"""3.2 scoped to a deliberately selected customer, not just the walk-in default.
+
+		The retirement must only affect unknown values. A real Customer the cashier
+		picked from the dialog loads, prices and books exactly as it did before, with no
+		provisioning and no buyer-name involvement.
+		"""
+		customers_before = frappe.db.count("Customer")
+
+		name = self._submit(self._payload(customer=self.ctx.other_customer))
+
+		doc = frappe.get_doc("Sales Invoice", name)
+		self.assertEqual(doc.customer, self.ctx.other_customer)
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(flt(doc.grand_total), flt(ITEM_PRICE))
+		self.assertFalse(doc.get("buyer_name"))
+		self.assertEqual(frappe.db.count("Customer"), customers_before)
+
+	def test_existing_walk_in_customer_still_books(self):
+		"""The counter-case that makes this a scope change, not a feature removal.
+
+		The profile's default walk-in customer is a real Customer row, so the ordinary
+		name-only sale still books against exactly the same customer as before and still
+		creates nothing.
+		"""
+		self._set_buyer_identity(enable=1, require=0)
+		customers_before = frappe.db.count("Customer")
+
+		name = self._submit(self._payload(buyer_name="Budi"))
+
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "customer"), self.ctx.customer)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "buyer_name"), "Budi")
+		self.assertEqual(frappe.db.count("Customer"), customers_before)

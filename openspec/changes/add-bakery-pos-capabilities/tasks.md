@@ -27,10 +27,10 @@
 
 ## 3. Retiring implicit Customer provisioning (BREAKING)
 
-- [ ] 3.1 Replace the auto-create-Customer block at `pos_next/api/invoices.py:766` with validation rejecting an unknown `customer` value whose message names `buyer_name` as the replacement, and verify a test asserts no `Customer` row is created and the count is unchanged.
-- [ ] 3.2 Verify a known `customer` value still loads and books exactly as before, scoping the change to unknown values only.
-- [ ] 3.3 Run the full existing backend suite and verify no previously passing test regressed, fixing any that depended on the old provisioning rather than deleting them.
-- [ ] 3.4 Document the behaviour change in `CHANGELOG.md` under a breaking-changes heading, naming the migration path.
+- [x] 3.1 Replace the auto-create-Customer block at `pos_next/api/invoices.py:766` with validation rejecting an unknown `customer` value whose message names `buyer_name` as the replacement, and verify a test asserts no `Customer` row is created and the count is unchanged.
+- [x] 3.2 Verify a known `customer` value still loads and books exactly as before, scoping the change to unknown values only.
+- [x] 3.3 Run the full existing backend suite and verify no previously passing test regressed, fixing any that depended on the old provisioning rather than deleting them.
+- [x] 3.4 Document the behaviour change in `CHANGELOG.md` under a breaking-changes heading, naming the migration path.
 
 ## 4. Promotions (ported package model)
 

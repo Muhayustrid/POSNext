@@ -335,6 +335,31 @@ def _get_buyer_identity_settings(pos_profile):
 	)
 
 
+def _validate_customer_exists(customer):
+	"""Reject a sale whose customer is not an existing Customer record.
+
+	Replacement for the retired auto-create path (OpenSpec add-bakery-pos-capabilities
+	group 3, design D1 / risk R2): an unknown `customer` no longer provisions a
+	master row. The message names `buyer_name` because that is the field a cashier
+	who meant "a walk-in called Budi" should have used, and it is the migration
+	path an operator reading an error log needs. An empty customer is left alone:
+	Frappe's own mandatory-field check reports that, and only `customer` is required.
+	"""
+	if not customer:
+		return
+	if frappe.db.exists("Customer", customer):
+		return
+
+	frappe.throw(
+		_(
+			"Customer {0} does not exist. Select an existing customer, or record the "
+			"buyer's name in the buyer name field to take the sale on the POS Profile's "
+			"walk-in customer."
+		).format(customer),
+		frappe.ValidationError,
+	)
+
+
 def sanitize_buyer_name(invoice_doc):
 	"""Validate and normalise the buyer-name Custom Field in place.
 
@@ -925,25 +950,12 @@ def update_invoice(data):
 			if not validation.get("valid"):
 				frappe.throw(validation.get("message"))
 
-		# Ensure customer exists
-		customer_name = invoice_doc.get("customer")
-		if customer_name and not frappe.db.exists("Customer", customer_name):
-			try:
-				cust = frappe.get_doc(
-					{
-						"doctype": "Customer",
-						"customer_name": customer_name,
-						"customer_group": "All Customer Groups",
-						"territory": "All Territories",
-						"customer_type": "Individual",
-					}
-				)
-				cust.flags.ignore_permissions = True
-				cust.insert()
-				invoice_doc.customer = cust.name
-				invoice_doc.customer_name = cust.customer_name
-			except Exception as e:
-				frappe.log_error(f"Failed to create customer {customer_name}: {e}")
+		# A POS sale must reference a Customer that already exists. This used to
+		# provision a bare Individual Customer from any unknown string the client sent,
+		# which turned every mistyped name into a permanent master row. Provisioning is now
+		# an explicit act (api/customers.create_customer, or the Desk); a name-only walk-in
+		# belongs in `buyer_name`, which never touches the Customer master (design D1).
+		_validate_customer_exists(invoice_doc.get("customer"))
 
 		# Buyer-name validation/normalisation. Runs after the customer block above so
 		# the final `customer` is known, and before any save so a rejected value never
@@ -1503,9 +1515,14 @@ def submit_invoice(invoice=None, data=None):
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 			invoice_doc.update(invoice)
 
-		# Re-sanitise on the submit path: `invoice_doc.update(invoice)` above can
-		# re-inject an unsanitised buyer_name into a draft that was already clean, and
-		# the draft returned by update_invoice() may have been mutated in Desk since.
+		# Re-validate on the submit path: `invoice_doc.update(invoice)` above can
+		# re-inject an unsanitised buyer_name or an unknown customer into a draft that
+		# was already clean, and the draft returned by update_invoice() may have been
+		# mutated in Desk since. The known-customer gate in `update_invoice` only covers
+		# the no-draft branch, so an existing draft with a stale customer must be checked
+		# here too; otherwise the cashier would see a raw LinkValidationError instead of
+		# the buyer-name-guided message (review finding, group 3).
+		_validate_customer_exists(invoice_doc.get("customer"))
 		sanitize_buyer_name(invoice_doc)
 
 		# Keep permission bypass consistent for POS API flow.
