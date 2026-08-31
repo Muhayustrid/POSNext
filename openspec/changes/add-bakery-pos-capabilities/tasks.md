@@ -40,8 +40,8 @@
 - [x] 4.4 Verify quantity scaling: setting a promotion line to quantity 2 doubles every component quantity and stock deduction.
 - [x] 4.5 Verify fixed-component shortage is rejected and names the component item code in the error.
 - [x] 4.6 Verify the `Pos Promotion Selection` snapshot and per-item `Promotion Selection Fact` are written on submit and reproduce the exact selection when the invoice is re-read.
-- [ ] 4.7 Verify editing a selection in place replaces the components while leaving parent price and quantity unchanged.
-- [ ] 4.8 Verify promotion returns at proportional component quantities, reusing the ported `test_promotion_returns.py` expectations.
+- [x] 4.7 Verify editing a selection in place replaces the components while leaving parent price and quantity unchanged.
+- [x] 4.8 Verify promotion returns at proportional component quantities, reusing the ported `test_promotion_returns.py` expectations.
 - [ ] 4.9 Cache promotion definitions in the offline store and verify an offline sale expands from cache and syncs with the stored snapshot, deducting the components as sold.
 - [ ] 4.10 Build the selection UI — port/replace with `PromotionSelectionDialog.vue` driven by group constraints and `quote_promotion` — and verify a Vitest test asserts confirm stays disabled below/above pick count and that `allow_repeats`/`max_per_option` gate double-tapping an option.
 - [ ] 4.11 Wire `posCart.js:addItem` to open the dialog before a promotion enters the cart while a plain item still adds with no dialog, and show promotion tiles in the catalogue with barcode entry.
