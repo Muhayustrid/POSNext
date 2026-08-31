@@ -58,6 +58,8 @@ def on_before_submit(doc, method=None):
 	"""Re-assert only: submission must not be the first time an invariant is checked."""
 	_reassert_promotion_invariants(doc)
 	_validate_promotion_row_integrity(doc)
+	_validate_parent_rows_move_no_stock(doc)
+	_validate_promotion_stock(doc)
 
 
 # --- materialization -------------------------------------------------------
@@ -69,14 +71,6 @@ def _materialize_pending_promotions(doc):
 	if not raw_payload:
 		return
 
-	# I8: one materialization pass per invoice. A second non-empty payload on a
-	# draft that already holds selections is refused, never merged or ignored.
-	if doc.get(SELECTIONS_FIELD):
-		frappe.throw(
-			_("Cannot apply new promotion payload to an invoice with existing promotion selections"),
-			frappe.ValidationError,
-		)
-
 	try:
 		payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
 	except Exception as e:
@@ -87,19 +81,37 @@ def _materialize_pending_promotions(doc):
 		doc.set(PENDING_FIELD, None)
 		return
 
+	# I8: one materialization pass per invoice, with the Task 4.7 edit-in-place
+	# exception. On a draft that already carries selections the payload may only
+	# hold in-place replacements: every instance must name an existing instance
+	# via "replace_instance". An instance without the key still hits the
+	# original I8 refusal, so fresh promotions fail closed exactly as before.
+	existing = {row.instance_id: row for row in (doc.get(SELECTIONS_FIELD) or [])}
+	replace_targets = _validate_replacements(instances, existing)
+	quantities = _resolve_instance_quantities(instances, existing, replace_targets)
+
 	company, outlet_warehouse = eligibility.resolve_outlet_context(doc.get("pos_profile"))
 	currency = _resolve_transaction_currency(doc, company)
 	_apply_currency_defaults(doc, currency)
 	accounts = _resolve_row_accounts(doc)
 
 	promotions = _load_payload_promotions(doc, instances, company, outlet_warehouse, currency)
-	_enforce_instance_cap(instances, promotions)
+	_validate_replacement_promotions(replace_targets, instances, existing, promotions)
+	_enforce_instance_cap(instances, promotions, quantities)
+
+	# Atomicity per instance: every validation above ran before anything was
+	# dropped, so a rejection anywhere in the payload leaves the draft's
+	# existing rows and selections untouched.
+	for target in replace_targets:
+		_drop_instance(doc, target)
 
 	context = {"company": company, "warehouse": outlet_warehouse}
-	for inst in instances:
+	for index, inst in enumerate(instances):
 		promo = promotions[inst["promotion"]]
-		quote = pricing.quote(promo, inst.get("selections") or [], context)
-		instance_id = f"inst_{uuid.uuid4().hex[:12]}"
+		quote = pricing.quote(promo, inst.get("selections") or [], context, quantity=quantities[index])
+		# A replacement keeps the old instance identity; the selection row and
+		# every regenerated item row carry the same id as before the edit.
+		instance_id = inst.get("replace_instance") or f"inst_{uuid.uuid4().hex[:12]}"
 
 		doc.append(
 			SELECTIONS_FIELD,
@@ -121,6 +133,101 @@ def _materialize_pending_promotions(doc):
 
 	if hasattr(doc, "set_missing_values"):
 		doc.set_missing_values()
+
+
+def _validate_replacements(instances, existing):
+	"""Gate the payload against the document's current selections (Task 4.7).
+
+	Returns the ordered list of instance ids being replaced. On a draft with
+	existing selections any instance lacking ``replace_instance`` triggers the
+	long-standing I8 refusal; unknown and doubly-targeted replacements are
+	rejected with their own named errors.
+	"""
+	targets = []
+	seen = set()
+	for inst in instances:
+		target = inst.get("replace_instance")
+		if not target:
+			if existing:
+				frappe.throw(
+					_("Cannot apply new promotion payload to an invoice with existing promotion selections"),
+					frappe.ValidationError,
+				)
+			continue
+		if target not in existing:
+			frappe.throw(
+				_("Promotion instance {0} does not exist on this invoice").format(target),
+				frappe.ValidationError,
+			)
+		if target in seen:
+			frappe.throw(
+				_("Promotion instance {0} is replaced more than once in one payload").format(target),
+				frappe.ValidationError,
+			)
+		seen.add(target)
+		targets.append(target)
+	return targets
+
+
+def _validate_replacement_promotions(replace_targets, instances, existing, promotions):
+	"""A replacement must target the same promotion the instance was sold under."""
+	if not replace_targets:
+		return
+	by_target = {inst["replace_instance"]: inst for inst in instances if inst.get("replace_instance")}
+	for target in replace_targets:
+		inst = by_target[target]
+		if promotions[inst["promotion"]].name != existing[target].promotion:
+			frappe.throw(
+				_(
+					"Promotion instance {0} belongs to Promotion {1} and cannot be re-selected under Promotion {2}"
+				).format(target, existing[target].promotion, inst["promotion"]),
+				frappe.ValidationError,
+			)
+
+
+def _resolve_instance_quantities(instances, existing, replace_targets):
+	"""Effective per-instance quantity, keyed by payload index (Task 4.4/4.7).
+
+	New instances take ``quantity`` from the payload (default 1), validated to a
+	positive integer before any mutation. Replacements are pinned to the
+	quantity stored in the original snapshot — editing a selection cannot
+	change how many units were ordered, only which options fill them.
+	"""
+	quantities = {}
+	for index, inst in enumerate(instances):
+		target = inst.get("replace_instance")
+		if not target:
+			quantities[index] = pricing.validate_instance_quantity(inst.get("quantity", 1))
+			continue
+		stored = _stored_instance_quantity(existing[target])
+		requested = inst.get("quantity")
+		if requested is not None and pricing.validate_instance_quantity(requested) != stored:
+			frappe.throw(
+				_(
+					"Promotion instance {0} was sold at quantity {1}; editing its selection cannot change the quantity"
+				).format(target, stored),
+				frappe.ValidationError,
+			)
+		quantities[index] = stored
+	return quantities
+
+
+def _stored_instance_quantity(selection_row):
+	"""Quantity recorded on a selection's frozen snapshot (pre-4.4 rows: 1)."""
+	try:
+		snapshot = json.loads(selection_row.get("snapshot") or "{}")
+	except Exception:
+		snapshot = {}
+	return pricing.validate_instance_quantity(snapshot.get("quantity", 1))
+
+
+def _drop_instance(doc, instance_id):
+	"""Remove one instance's selection and every row it backs, as a unit."""
+	doc.set(
+		SELECTIONS_FIELD,
+		[row for row in doc.get(SELECTIONS_FIELD) or [] if row.instance_id != instance_id],
+	)
+	doc.set("items", [row for row in doc.get("items") or [] if row.get(INSTANCE_FIELD) != instance_id])
 
 
 def _resolve_transaction_currency(doc, company):
@@ -175,17 +282,19 @@ def _load_payload_promotions(doc, instances, company, outlet_warehouse, currency
 	return promotions
 
 
-def _enforce_instance_cap(instances, promotions):
+def _enforce_instance_cap(instances, promotions, quantities):
 	"""I16 / D19: reject an over-cap payload before any row or selection exists.
 
-	Instances are counted, never rows, so identical choices still count
-	separately and duplicated invoice rows cannot influence the count.
+	Instances are summed by quantity (Task 4.4), never by invoice rows, so
+	identical choices still count separately, duplicated rows cannot influence
+	the count, and one instance at quantity N consumes N cap slots — the cap
+	cannot be circumvented by folding units into a single instance.
 	``max_instances_per_invoice = 0`` means unlimited.
 	"""
 	counts = {}
-	for inst in instances:
+	for index, inst in enumerate(instances):
 		promo_name = inst["promotion"]
-		counts[promo_name] = counts.get(promo_name, 0) + 1
+		counts[promo_name] = counts.get(promo_name, 0) + quantities[index]
 
 	for promo_name, requested in counts.items():
 		cap = int(flt(promotions[promo_name].max_instances_per_invoice))
@@ -255,6 +364,13 @@ def _build_snapshot(promo, quote):
 		"base_price": flt(promo.base_price),
 		"max_instances_per_invoice": promo.max_instances_per_invoice,
 		"parent_item": promo.parent_item,
+		# Task 4.4: the instance multiplier lives HERE. The per-component
+		# ``fixed_components[].qty`` and ``chosen_options[].qty`` below stay
+		# PER-UNIT on purpose — facts.py consumes them as selection-shape data
+		# (a qty-2 instance must still report the same chosen option qty as the
+		# same sale at qty 1), and the row-level scaling is applied in
+		# pricing.quote. Consumers needing totals multiply by ``quantity``.
+		"quantity": quote["quantity"],
 		"choice_groups": [
 			{
 				"group_key": g.group_key,
@@ -408,6 +524,119 @@ def _validate_promotion_row_integrity(doc):
 		if instance_id not in component_instances:
 			frappe.throw(
 				_("Row {0}: promotion instance {1} carries no component rows").format(idx, instance_id),
+				frappe.ValidationError,
+			)
+
+
+# --- stock pre-check --------------------------------------------------------
+
+
+def _validate_parent_rows_move_no_stock(doc):
+	"""Task 4.3: a promotion parent must never reach the stock ledger.
+
+	Model C recognises the whole revenue on the parent line and moves stock only
+	for the components, so the parent must contribute no Stock Ledger Entry.
+	``Promotion._validate_parent_item`` (D12 / I11) enforces that at master-save
+	time by rejecting a stock parent, but that is a save-time rule on the master:
+	an Item flipped to ``is_stock_item = 1`` after the Promotion was saved leaves
+	an already-valid Promotion selling a stock parent, and nothing downstream
+	notices. Measured on this bench, such a sale writes an SLE of -1 per unit for
+	the parent item — ERPNext's ``SellingController.update_stock_ledger`` keys
+	purely on ``is_stock_item`` plus a warehouse, and the parent row legitimately
+	carries the outlet warehouse (I13 re-asserts it, and
+	``test_warehouse_reassertion_after_manual_change`` pins it).
+
+	The fix is to refuse the submission rather than to blank the parent row's
+	warehouse: dropping the warehouse would silently contradict I13 and let a
+	misconfigured master keep selling, whereas a named refusal points at the Item
+	that has to be corrected. Checked at ``before_submit`` because that is where
+	the ledger write becomes reachable; a draft carrying the same rows is still
+	fixable by correcting the Item.
+	"""
+	parent_rows = [row for row in doc.get("items") or [] if row.get(ROLE_FIELD) == PARENT_ROLE]
+	if not parent_rows:
+		return
+
+	for row in parent_rows:
+		if cint(frappe.get_cached_value("Item", row.item_code, "is_stock_item")):
+			frappe.throw(
+				_(
+					"Row {0}: promotion parent item {1} is a stock item, so submitting this sale"
+					" would move stock for the promotion itself. Only its components may move"
+					" stock — clear Maintain Stock on the item."
+				).format(row.idx, row.item_code),
+				frappe.ValidationError,
+			)
+
+
+def _validate_promotion_stock(doc):
+	"""Task 4.5: fixed components must exist at the outlet before submission.
+
+	Scoped to fixed components deliberately. Chosen options are explicit lines
+	the cashier picked; they already fail at submit with ERPNext's own per-row
+	message and duplicating that check here would only change the wording of
+	someone else's error. Fixed components are implicit — nothing on the UI
+	names them — so the generic NegativeStockError is the only feedback a
+	cashier would get, and it points at a row they never added.
+
+	The whole check is skipped when ``Stock Settings.allow_negative_stock`` is
+	on: that setting is the site's explicit decision to tolerate shortages at
+	postings time, and a fail-closed pre-check would override it. The item-level
+	``allow_negative_stock`` exempts a component the same way ERPNext does.
+
+	Balance comes from ``erpnext.stock.utils.get_stock_balance`` — the ledger
+	sum the submit path enforces against — not ``tabBin.actual_qty``: on a site
+	whose timezone trails the wall clock the bin and the ledger disagree (the
+	NegativeStockError debugging trap), so a bin-based pre-check could wave
+	through a submit that then fails, or block one that would succeed.
+
+	Required quantity multiplies through the instance quantity (Task 4.4): an
+	instance sold at quantity 2 consumes two of each fixed component.
+	"""
+	if not cint(doc.get("update_stock")):
+		return
+	if cint(frappe.db.get_single_value("Stock Settings", "allow_negative_stock")):
+		return
+
+	required = {}
+	for selection in doc.get(SELECTIONS_FIELD) or []:
+		try:
+			snapshot = json.loads(selection.get("snapshot") or "{}")
+		except Exception:
+			continue  # malformed snapshots are caught by the integrity guards
+		quantity = flt(snapshot.get("quantity") or 1)
+		for component in snapshot.get("fixed_components") or []:
+			item_code = component.get("item_code")
+			if item_code:
+				required[item_code] = required.get(item_code, 0.0) + flt(component.get("qty")) * quantity
+
+	if not required:
+		return
+
+	warehouse = _resolve_outlet_warehouse(doc)
+	if not warehouse:
+		return
+
+	from erpnext.stock.utils import get_stock_balance
+
+	for item_code, needed in sorted(required.items()):
+		if not cint(frappe.db.get_value("Item", item_code, "is_stock_item")):
+			continue
+		if cint(frappe.db.get_value("Item", item_code, "allow_negative_stock")):
+			continue
+		available = flt(
+			get_stock_balance(
+				item_code,
+				warehouse,
+				posting_date=doc.get("posting_date"),
+				posting_time=doc.get("posting_time"),
+			)
+		)
+		if available < needed:
+			frappe.throw(
+				_(
+					"Insufficient stock for promotion component {0} at warehouse {1}: required {2}, available {3}"
+				).format(item_code, warehouse, needed, available),
 				frappe.ValidationError,
 			)
 

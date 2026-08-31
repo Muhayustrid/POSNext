@@ -9,7 +9,7 @@ from frappe import _
 from frappe.utils import cint, flt
 
 
-def quote(promotion, choices, context):
+def quote(promotion, choices, context, quantity=1):
 	"""Validate choices and compute total price + row descriptors.
 
 	Args:
@@ -19,14 +19,20 @@ def quote(promotion, choices, context):
 			- [{"group_key": "grp1", "picks": [{"option_row": "opt1", "qty": 2}]}]
 			- [{"group": "grp1", "options": [{"option": "opt1", "qty": 2}]}]
 		context: dict or object with ``warehouse`` attribute/key.
+		quantity: how many units of this instance are being quoted (Task 4.4).
+			Must be a positive integer (default 1). It scales every row qty and
+			the parent ``amount``; ``rate`` and ``total_price`` stay PER-UNIT
+			because the engine stores the per-unit price as the selection's
+			``total_amount`` and re-asserts the parent row's rate from it.
 
 	Returns:
 		dict with promotion, parent_item, base_price, total_price, currency,
-		max_instances_per_invoice, parent_row, component_rows, choices_summary.
+		max_instances_per_invoice, quantity, parent_row, component_rows, choices_summary.
 
 	Raises:
 		frappe.ValidationError: on any choice validation failure or negative total.
 	"""
+	quantity = validate_instance_quantity(quantity)
 	if isinstance(promotion, str):
 		if not frappe.db.exists("Promotion", promotion):
 			frappe.throw(_("Promotion {0} does not exist").format(promotion), frappe.ValidationError)
@@ -90,7 +96,7 @@ def quote(promotion, choices, context):
 		component_rows.append(
 			{
 				"item_code": comp.item_code,
-				"qty": flt(comp.qty),
+				"qty": flt(comp.qty) * quantity,
 				"rate": 0.0,
 				"amount": 0.0,
 				"is_free_item": 1,
@@ -211,7 +217,7 @@ def quote(promotion, choices, context):
 			component_rows.append(
 				{
 					"item_code": opt_doc.item_code,
-					"qty": flt(qty_val),
+					"qty": flt(qty_val) * quantity,
 					"rate": 0.0,
 					"amount": 0.0,
 					"is_free_item": 1,
@@ -234,9 +240,9 @@ def quote(promotion, choices, context):
 
 	parent_row = {
 		"item_code": promotion.parent_item,
-		"qty": 1,
+		"qty": quantity,
 		"rate": flt(total_price),
-		"amount": flt(total_price),
+		"amount": flt(total_price) * quantity,
 		"is_free_item": 0,
 		"warehouse": warehouse,
 		"role": "Promotion Parent",
@@ -249,10 +255,36 @@ def quote(promotion, choices, context):
 		"total_price": flt(total_price),
 		"currency": promotion.currency,
 		"max_instances_per_invoice": int(getattr(promotion, "max_instances_per_invoice", 0) or 0),
+		"quantity": quantity,
 		"parent_row": parent_row,
 		"component_rows": component_rows,
 		"choices_summary": choices_summary,
 	}
+
+
+def validate_instance_quantity(quantity):
+	"""Coerce and validate the instance quantity (Task 4.4).
+
+	Accepts int, integral float, or numeric string; rejects zero, negatives,
+	fractions, and non-numeric values with one named error so every invalid
+	vector is killable by the same test regex.
+	"""
+	invalid = _("Promotion instance quantity must be a positive integer")
+	if isinstance(quantity, bool):
+		frappe.throw(invalid, frappe.ValidationError)
+	if isinstance(quantity, str):
+		text = quantity.strip()
+		try:
+			quantity = int(text)
+		except ValueError:
+			frappe.throw(invalid, frappe.ValidationError)
+	try:
+		value = flt(quantity)
+	except (TypeError, ValueError):
+		frappe.throw(invalid, frappe.ValidationError)
+	if value != int(value) or int(value) <= 0:
+		frappe.throw(invalid, frappe.ValidationError)
+	return int(value)
 
 
 def _normalize_choices(choices):
