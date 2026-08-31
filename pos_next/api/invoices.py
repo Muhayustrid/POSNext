@@ -306,6 +306,25 @@ def _strip_server_managed_fields(payload):
 	cleaned.pop(FIELD_QUEUE_NUMBER, None)
 	cleaned.pop("offline_queue_estimate", None)
 	cleaned.pop("server_queue_number", None)
+	# 4.2: the promotion selection table is server-derived — the engine
+	# materializes it from `pos_pending_promotions` through the single validation
+	# core (`pos_next.promotions.pricing.quote`). A client-injected
+	# `pos_promotion_selections` must never reach the document, or a forged
+	# `total_amount`/`snapshot` would become the frozen record of what was sold.
+	# Popping the key (rather than assigning an empty list) leaves an existing
+	# stored child table untouched on a draft replay: Document.update only
+	# rewrites a child table for keys actually present in the payload.
+	#
+	# Two deliberate non-strips:
+	# - `pos_pending_promotions` stays, because it is the only promotion input
+	#   the server validates; stripping it would disable promotions entirely.
+	# - the per-item `pos_promotion_instance` / `pos_promotion_role` markers stay,
+	#   because `update_invoice` on an existing draft replaces the whole items
+	#   child table, so dropping them would strip a legitimate promotion sale of
+	#   its identity on the update-then-submit replay and then fail its own
+	#   integrity guard. Forged markers are the engine's job to reject
+	#   (`_validate_promotion_row_integrity`).
+	cleaned.pop("pos_promotion_selections", None)
 	return cleaned
 
 

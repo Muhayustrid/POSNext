@@ -35,7 +35,7 @@
 ## 4. Promotions (ported package model)
 
 - [x] 4.1 Port and extend `Promotion Choice Group` with an explicit `allow_repeats` Check, and verify `test_promotion_master.py` covers the three states: pick-count 1, pick-many-distinct, and pick-many-with-repeats.
-- [ ] 4.2 Keep the promotion validation core as the single source, called both by `quote_promotion` and by `update_invoice`/`submit_invoice`, and verify a directly-posted invalid selection (over pick_count, over `max_per_option`, foreign option, `max_instances_per_invoice` breach) is rejected server-side regardless of the client.
+- [x] 4.2 Keep the promotion validation core as the single source, called both by `quote_promotion` and by `update_invoice`/`submit_invoice`, and verify a directly-posted invalid selection (over pick_count, over `max_per_option`, foreign option, `max_instances_per_invoice` breach) is rejected server-side regardless of the client.
 - [ ] 4.3 Verify expansion sets the parent line to `base_price + sum(price_adjustment)` and deducts stock per component with no stock entry for the parent item, covering the paperbag + flavour scenario.
 - [ ] 4.4 Verify quantity scaling: setting a promotion line to quantity 2 doubles every component quantity and stock deduction.
 - [ ] 4.5 Verify fixed-component shortage is rejected and names the component item code in the error.
