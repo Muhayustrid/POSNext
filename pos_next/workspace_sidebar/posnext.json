@@ -77,6 +77,17 @@
    "collapsible": 1,
    "indent": 0,
    "keep_closed": 0,
+   "label": "Pos Package",
+   "link_to": "POS Package",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Pos Opening Shift",
    "link_to": "POS Opening Shift",
    "link_type": "DocType",
@@ -117,7 +128,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-08-31 22:00:00.000000",
+ "modified": "2026-09-01 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",

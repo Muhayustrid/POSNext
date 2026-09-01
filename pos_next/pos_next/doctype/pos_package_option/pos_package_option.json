@@ -15,15 +15,16 @@
   "max_qty"
  ],
  "fields": [
-  {
-   "columns": 2,
-   "description": "Must match a Group Key from the Choice Groups table.",
-   "fieldname": "group_key",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Group Key",
-   "reqd": 1
-  },
+   {
+    "columns": 2,
+    "description": "Pick the group from the Choice Groups table above.",
+    "fieldname": "group_key",
+    "fieldtype": "Select",
+    "in_list_view": 1,
+    "label": "Group Key",
+    "options": "",
+    "reqd": 1
+   },
   {
    "columns": 2,
    "fieldname": "item_code",
@@ -81,7 +82,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-08-31 00:00:00.000000",
+ "modified": "2026-09-01 09:30:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Package Option",

@@ -52,6 +52,7 @@ doctype_js = {
 	"Customer": "public/js/customer.js",
 	"Pricing Rule": "public/js/pricing_rule.js",
 	"Promotional Scheme": "public/js/promotional_scheme.js",
+	"POS Package": "public/js/pos_package.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
