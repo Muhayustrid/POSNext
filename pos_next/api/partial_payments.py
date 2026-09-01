@@ -613,6 +613,7 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
 			"name",
 			"customer",
 			"customer_name",
+			"buyer_name",
 			"posting_date",
 			"posting_time",
 			"grand_total",

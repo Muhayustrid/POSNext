@@ -463,6 +463,50 @@
 					</button>
 				</div>
 			</div>
+
+			<!-- Optional buyer name: a receipt-only label, NOT saved as a Customer -->
+			<div class="mt-1.5">
+				<label
+					for="cart-buyer-name"
+					class="block text-[10px] font-medium text-gray-500 mb-0.5"
+				>
+					{{ __("Buyer name (optional)") }}
+				</label>
+				<div class="relative">
+					<div
+						class="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none"
+					>
+						<svg
+							class="w-4 h-4 text-gray-400"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+							/>
+						</svg>
+					</div>
+					<input
+						id="cart-buyer-name"
+						name="cart-buyer-name"
+						v-model="cartStore.buyerName"
+						type="text"
+						:placeholder="__('e.g. Budi (not saved as a customer)')"
+						class="w-full h-9 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
+						autocomplete="off"
+						:aria-label="__('Buyer name')"
+					/>
+				</div>
+				<p class="mt-0.5 text-[10px] text-gray-400">
+					{{
+						__("Only shown on the receipt. The sale uses the walk-in customer.")
+					}}
+				</p>
+			</div>
 		</div>
 
 		<!-- Action Buttons Section -->

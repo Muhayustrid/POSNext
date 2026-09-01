@@ -356,6 +356,7 @@
 																/>
 															</svg>
 															{{
+																invoice.buyer_name ||
 																invoice.customer_name ||
 																invoice.customer
 															}}
@@ -625,12 +626,17 @@
 												</svg>
 												<div class="flex-1">
 													<div class="text-xs text-gray-500">
-														{{ __("Customer") }}
+														{{
+															invoice.buyer_name
+																? __("Buyer / Customer")
+																: __("Customer")
+														}}
 													</div>
 													<div
 														class="text-sm font-semibold text-gray-900"
 													>
 														{{
+															invoice.buyer_name ||
 															invoice.customer_name ||
 															invoice.customer
 														}}

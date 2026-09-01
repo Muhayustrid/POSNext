@@ -38,6 +38,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	async function saveDraftInvoice(
 		invoiceItems,
 		customer,
+		buyerName,
 		posProfile,
 		appliedOffers = [],
 		draftId = null
@@ -50,7 +51,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		try {
 			const draftData = {
 				pos_profile: posProfile,
-				customer: customer,
+				customer,
+				buyer_name: buyerName?.trim() || "",
 				items: invoiceItems,
 				applied_offers: appliedOffers, // Save applied offers
 			};
@@ -81,6 +83,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			return {
 				items: draft.items || [],
 				customer: draft.customer,
+				buyer_name: draft.buyer_name || "",
 				applied_offers: draft.applied_offers || [], // Restore applied offers
 			};
 		} catch (error) {

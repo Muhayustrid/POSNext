@@ -1677,7 +1677,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 	if search:
 		conditions.append(
-			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s)"
+			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s OR buyer_name LIKE %(search)s)"
 		)
 		params["search"] = f"%{cstr(search)}%"
 
@@ -1699,6 +1699,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			name,
 			customer,
 			customer_name,
+			buyer_name,
 			posting_date,
 			posting_time,
 			grand_total,

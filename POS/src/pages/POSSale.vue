@@ -100,6 +100,26 @@
 						<span>{{ __("Invoice History") }}</span>
 					</button>
 					<button
+						v-if="canAccessShiftActions"
+						@click="handleManagementMenuClick('invoices')"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-indigo-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+							/>
+						</svg>
+						<span>{{ __("Invoice Management") }}</span>
+					</button>
+					<button
 						@click="navigateToShiftHistory"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
 					>
@@ -2131,6 +2151,7 @@ async function handlePaymentCompleted(paymentData) {
 				posa_pos_opening_shift: cartStore.posOpeningShift,
 				company: shiftStore.profileCompany,
 				customer: customerValue || shiftStore.profileCustomer,
+				buyer_name: (cartStore.buyerName || "").trim(),
 				items: preparedItems,
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
 				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
@@ -2181,6 +2202,7 @@ async function handlePaymentCompleted(paymentData) {
 				posting_date: new Date().toISOString().slice(0, 10),
 				company: shiftStore.profileCompany || undefined,
 				customer_name: customerLabel,
+				buyer_name: (cartStore.buyerName || "").trim(),
 				items: preparedItems.map((item) => ({
 					...item,
 					quantity: item.qty ?? item.quantity,
@@ -2491,6 +2513,7 @@ async function handleSaveDraft() {
 	const savedDraft = await draftsStore.saveDraftInvoice(
 		cartStore.invoiceItems,
 		cartStore.customer,
+		cartStore.buyerName,
 		cartStore.posProfile,
 		cartStore.appliedOffers,
 		cartStore.currentDraftId
@@ -2509,6 +2532,7 @@ async function handleLoadDraft(draft) {
 			const saved = await draftsStore.saveDraftInvoice(
 				cartStore.invoiceItems,
 				cartStore.customer,
+				cartStore.buyerName,
 				cartStore.posProfile,
 				cartStore.appliedOffers,
 				cartStore.currentDraftId
@@ -2528,6 +2552,7 @@ async function handleLoadDraft(draft) {
 		const draftData = await draftsStore.loadDraft(draft);
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
+		cartStore.buyerName = draftData.buyer_name || "";
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
 
 		// Rebuild incremental cache to recalculate totals
@@ -2929,22 +2954,19 @@ function restoreBodyStyles() {
 }
 
 // Management and Promotion handlers
-function handleManagementMenuClick(menuItem) {
-	if (menuItem === "promotions") {
-		showPromotionManagement.value = true;
-	} else if (menuItem === "settings") {
-		showPOSSettings.value = true;
-	} else if (menuItem === "invoices") {
-		// Load invoice history data before showing
-		loadInvoiceHistoryData();
-		// Load drafts data
-		draftsStore.loadDrafts();
-		showInvoiceManagement.value = true;
-	} else if (menuItem === "products") {
-		// Open Stock Lookup dialog in search mode
-		showStockLookup.value = true;
+	function handleManagementMenuClick(menuItem) {
+		if (menuItem === "promotions") {
+			showPromotionManagement.value = true;
+		} else if (menuItem === "settings") {
+			showPOSSettings.value = true;
+		} else if (menuItem === "invoices") {
+			loadInvoiceHistoryData();
+			draftsStore.loadDrafts();
+			showInvoiceManagement.value = true;
+		} else if (menuItem === "products") {
+			showStockLookup.value = true;
+		}
 	}
-}
 
 // Load invoice history data
 async function loadInvoiceHistoryData() {

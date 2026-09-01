@@ -28,7 +28,8 @@ export function useInvoiceFilters(invoices) {
 				(inv) =>
 					inv.name?.toLowerCase().includes(search) ||
 					inv.customer_name?.toLowerCase().includes(search) ||
-					inv.customer?.toLowerCase().includes(search)
+					inv.customer?.toLowerCase().includes(search) ||
+					(inv.buyer_name || "").toLowerCase().includes(search)
 			);
 		}
 
@@ -164,7 +165,8 @@ export function useInvoiceFilters(invoices) {
 			const matchesSearch =
 				invoice.name?.toLowerCase().includes(search) ||
 				invoice.customer_name?.toLowerCase().includes(search) ||
-				invoice.customer?.toLowerCase().includes(search);
+				invoice.customer?.toLowerCase().includes(search) ||
+				(invoice.buyer_name || "").toLowerCase().includes(search);
 			if (!matchesSearch) return false;
 		}
 

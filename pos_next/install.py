@@ -28,6 +28,19 @@ logger = logging.getLogger(__name__)
 # Custom Fields live here, not in fixtures: hooks.py:fixtures exports only Role /
 # Custom DocPerm, and pos_next/pos_next/custom/*.json is never applied.
 CUSTOM_FIELDS = {
+	"Sales Invoice": [
+		{
+			"fieldname": "buyer_name",
+			"label": "Buyer Name",
+			"fieldtype": "Data",
+			"insert_after": "customer_name",
+			"read_only": 0,
+			"no_copy": 0,
+			"print_hide": 0,
+			"translatable": 0,
+			"description": "Optional walk-in buyer label shown on POS receipts without creating a Customer.",
+		},
+	],
 	"Sales Invoice Item": [
 		{
 			"fieldname": "pos_package",

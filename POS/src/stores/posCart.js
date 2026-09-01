@@ -82,6 +82,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const {
 		invoiceItems,
 		customer,
+		buyerName,
 		subtotal,
 		totalTax,
 		totalDiscount,
@@ -1894,6 +1895,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// State
 		invoiceItems,
 		customer,
+		buyerName,
 		subtotal,
 		totalTax,
 		totalDiscount,

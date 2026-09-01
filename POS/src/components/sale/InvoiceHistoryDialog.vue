@@ -8,7 +8,7 @@
 						<Input
 							v-model="searchTerm"
 							type="text"
-							:placeholder="__('Search by invoice number or customer...')"
+							:placeholder="__('Search by invoice number, buyer, or customer...')"
 							@input="onSearchInput"
 						>
 							<template #prefix>
@@ -77,7 +77,7 @@
 									</span>
 								</div>
 								<p class="text-xs text-gray-600 text-start">
-									{{ invoice.customer_name }}
+									{{ invoice.buyer_name || invoice.customer_name }}
 								</p>
 								<p class="text-xs text-gray-500 text-start">
 									{{
@@ -285,7 +285,8 @@ const filteredInvoices = computed(() => {
 	return invoices.value.filter(
 		(inv) =>
 			inv.name.toLowerCase().includes(term) ||
-			inv.customer_name?.toLowerCase().includes(term),
+			inv.customer_name?.toLowerCase().includes(term) ||
+			(inv.buyer_name || "").toLowerCase().includes(term),
 	)
 })
 

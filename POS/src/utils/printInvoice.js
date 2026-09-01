@@ -66,6 +66,7 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
 		company: raw.company,
 		customer_name: raw.customer,
+		buyer_name: (raw.buyer_name || "").trim() || null,
 		items: items.map((item) => ({
 			...item,
 			quantity: item.quantity ?? item.qty,
@@ -157,6 +158,9 @@ const RECEIPT_STYLES = `
 export function buildReceiptHTML(invoiceData) {
 	const items = invoiceData.items || [];
 	const paidAmount = derivePaidAmount(invoiceData);
+	const buyerName = (invoiceData.buyer_name || "").trim();
+	const partyLabel = buyerName ? __("Buyer:") : __("Customer:");
+	const partyValue = buyerName || invoiceData.customer_name || invoiceData.customer || "";
 	const itemsHtml = items
 		.map((item) => {
 			const hasDiscount =
@@ -214,10 +218,8 @@ export function buildReceiptHTML(invoiceData) {
 		invoiceData.posting_date || Date.now()
 	).toLocaleString()}</span></div>
 					${
-						invoiceData.customer_name || invoiceData.customer
-							? `<div><span>${__("Customer:")}</span><span>${
-									invoiceData.customer_name || invoiceData.customer
-							  }</span></div>`
+						partyValue
+							? `<div><span>${partyLabel}</span><span>${partyValue}</span></div>`
 							: ""
 					}
 					${

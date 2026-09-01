@@ -28,6 +28,7 @@ export function useInvoice() {
 	const posProfile = ref(null);
 	const posOpeningShift = ref(null); // POS Opening Shift name
 	const additionalDiscount = ref(0);
+	const buyerName = ref("");
 	const couponCode = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
@@ -1013,6 +1014,7 @@ export function useInvoice() {
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
 			customer: customer.value?.name || customer.value,
+			buyer_name: buyerName.value.trim(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
@@ -1075,12 +1077,13 @@ export function useInvoice() {
 					pos_profile: posProfile.value,
 					posa_pos_opening_shift: posOpeningShift.value,
 					customer: customer.value?.name || customer.value,
+					buyer_name: buyerName.value.trim(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
 					is_pos: 1,
-					update_stock: 1, // Critical: Ensures stock is updated
+					update_stock: 1, // Critical: ensures stock is updated
 				};
 
 				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
@@ -1240,6 +1243,7 @@ export function useInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
 		additionalDiscount.value = 0;
+		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
 
 		// Reset incremental cache
@@ -1267,6 +1271,7 @@ export function useInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
 		additionalDiscount.value = 0;
+		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
 
 		// Reset incremental cache
@@ -1337,6 +1342,7 @@ export function useInvoice() {
 		// State
 		invoiceItems,
 		customer,
+		buyerName,
 		payments,
 		salesTeam,
 		posProfile,
