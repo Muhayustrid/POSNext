@@ -1380,6 +1380,7 @@ async function getCachedPackages(posProfile) {
 			.toArray();
 
 		const validPackages = allPackages.filter((pkg) => {
+			if (pkg.is_lifetime) return true;
 			if (pkg.valid_from && pkg.valid_from > today) return false;
 			if (pkg.valid_upto && pkg.valid_upto < today) return false;
 			return true;

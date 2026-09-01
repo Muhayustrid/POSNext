@@ -54,6 +54,10 @@ class POSPackage(Document):
 			seen.add(group.group_key)
 
 	def validate_dates(self):
+		if cint(getattr(self, "is_lifetime", 0)):
+			self.valid_from = None
+			self.valid_upto = None
+			return
 		if self.valid_from and self.valid_upto and getdate(self.valid_from) > getdate(self.valid_upto):
 			frappe.throw(_("Valid Upto cannot be earlier than Valid From."))
 
@@ -194,6 +198,8 @@ class POSPackage(Document):
 			seen.add(outlet.pos_profile)
 
 			profile_company = frappe.db.get_value("POS Profile", outlet.pos_profile, "company")
+			if cint(getattr(self, "is_cross_company", 0)):
+				continue
 			if profile_company != self.company:
 				frappe.throw(
 					_("Row {0}: POS Profile {1} belongs to company {2}, not {3}.").format(

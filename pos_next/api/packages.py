@@ -63,6 +63,8 @@ def _assert_profile_access(pos_profile):
 
 
 def _package_is_valid_on(package, on_date):
+	if cint(package.get("is_lifetime")):
+		return True
 	if package.get("valid_from") and getdate(on_date) < getdate(package["valid_from"]):
 		return False
 	if package.get("valid_upto") and getdate(on_date) > getdate(package["valid_upto"]):
@@ -98,6 +100,8 @@ def _serialize_package(doc):
 		"description": doc.description,
 		"valid_from": str(doc.valid_from) if doc.valid_from else None,
 		"valid_upto": str(doc.valid_upto) if doc.valid_upto else None,
+		"is_lifetime": cint(getattr(doc, "is_lifetime", 0)),
+		"is_cross_company": cint(getattr(doc, "is_cross_company", 0)),
 		"items": [
 			{
 				"item_code": row.item_code,
@@ -147,11 +151,13 @@ def _eligible_package_names(pos_profile, on_date=None):
 
 	on_date = on_date or nowdate()
 
-	packages = frappe.get_all(
-		"POS Package",
-		filters={"disabled": 0, "company": profile.company},
-		fields=["name", "valid_from", "valid_upto"],
-	)
+	POSPackage = frappe.qb.DocType("POS Package")
+	packages = (
+		frappe.qb.from_(POSPackage)
+		.select(POSPackage.name, POSPackage.valid_from, POSPackage.valid_upto, POSPackage.is_lifetime)
+		.where(POSPackage.disabled == 0)
+		.where((POSPackage.company == profile.company) | (POSPackage.is_cross_company == 1))
+	).run(as_dict=True)
 	if not packages:
 		return []
 

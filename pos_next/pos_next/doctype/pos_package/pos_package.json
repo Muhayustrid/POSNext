@@ -11,14 +11,16 @@
   "package_name",
   "disabled",
   "column_break_header",
-  "company",
-  "currency",
-  "parent_section",
-  "parent_item",
-  "base_price",
-  "column_break_parent",
-  "valid_from",
-  "valid_upto",
+   "company",
+   "currency",
+   "is_cross_company",
+   "parent_section",
+   "parent_item",
+   "base_price",
+   "column_break_parent",
+   "is_lifetime",
+   "valid_from",
+   "valid_upto",
   "description",
   "items_section",
   "items",
@@ -72,6 +74,13 @@
    "reqd": 1
   },
   {
+   "default": "0",
+   "description": "If checked, this package can be assigned to POS Profiles from any company.",
+   "fieldname": "is_cross_company",
+   "fieldtype": "Check",
+   "label": "Allow Cross Company"
+  },
+  {
    "fieldname": "parent_section",
    "fieldtype": "Section Break",
    "label": "Package Item & Price"
@@ -98,6 +107,13 @@
   {
    "fieldname": "column_break_parent",
    "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "If checked, the package is valid indefinitely. Valid From and Valid Upto will be cleared.",
+   "fieldname": "is_lifetime",
+   "fieldtype": "Check",
+   "label": "Lifetime (No Expiry)"
   },
   {
    "fieldname": "valid_from",
@@ -150,7 +166,7 @@
    "options": "POS Package Option"
   },
   {
-   "description": "Leave empty to make the package available on every POS Profile of the company.",
+   "description": "Leave empty to make the package available on every POS Profile of its company — and of any company when Allow Cross Company is checked.",
    "fieldname": "outlets_section",
    "fieldtype": "Section Break",
    "label": "Outlets"
