@@ -2166,29 +2166,52 @@ def _parse_item_wise_tax_detail(raw_detail):
 	return raw_detail
 
 
-def _build_item_tax_map(taxes: list) -> dict:
-	"""Build item_code -> tax_amount map from taxes child table.
+def _build_item_tax_map(taxes: list, original_invoice: str | None = None) -> dict:
+	"""Build an item -> tax_amount map for return-refund calculation.
+
+	The map is keyed so the frontend can compute a tax-inclusive ``rate_with_tax``
+	for each returned line. Two ERPNext storage layouts are supported:
+
+	- v16+: per-item tax lives in the "Item Wise Tax Detail" child table on the
+	  Sales Invoice (columns: item_row, tax_row, rate, amount, taxable_amount).
+	  The deprecated JSON field on the tax row no longer exists there.
+	- v15 and earlier: a JSON ``item_wise_tax_detail`` blob on each tax row.
 
 	Args:
-	    taxes: List of tax row dicts containing item_wise_tax_detail
+	    taxes: List of tax row dicts (from the return document's "taxes" table).
+	        Used only for the v15 JSON fallback.
+	    original_invoice: Name of the original Sales Invoice. Preferred source on
+	        v16+, because the freshly prepared (unsaved) return document has an
+	        EMPTY item_wise_tax_details table, so the original invoice must be
+	        read to recover per-item tax amounts.
 
 	Returns:
-	    Dict mapping item_code to total tax amount (absolute value)
-
-	Note:
-	    item_wise_tax_detail format: {"ITEM-CODE": [tax_rate, tax_amount]}
-	    Return documents have negative amounts, hence abs() is used.
+	    dict mapping item_row id and/or item_code to total tax amount (abs value).
 	"""
 	from collections import defaultdict
 
 	tax_map = defaultdict(float)
 
+	# v16+ path: read the child table from the (submitted) original invoice.
+	if original_invoice and frappe.db.exists("Sales Invoice", original_invoice):
+		inv_doc = frappe.get_doc("Sales Invoice", original_invoice)
+		if inv_doc.meta.has_field("item_wise_tax_details"):
+			for row in inv_doc.get("item_wise_tax_details") or []:
+				if row.get("item_row"):
+					tax_map[row.item_row] += abs(flt(row.amount))
+				if row.get("item_code"):
+					tax_map[row.item_code] += abs(flt(row.amount))
+			if tax_map:
+				return dict(tax_map)
+
+	# v15 / legacy path: parse the JSON blob on each tax row.
 	for tax_row in taxes:
 		try:
 			details = _parse_item_wise_tax_detail(tax_row.get("item_wise_tax_detail"))
-			for item_code, (_, tax_amount) in details.items():
+			for item_code, value in details.items():
+				tax_amount = value[1] if isinstance(value, (list, tuple)) else value.get("tax_amount")
 				tax_map[item_code] += abs(flt(tax_amount))
-		except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+		except (json.JSONDecodeError, TypeError, ValueError, KeyError, AttributeError):
 			continue
 
 	return dict(tax_map)
@@ -2477,7 +2500,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		"total_taxes_and_charges": invoice_info.total_taxes_and_charges,
 	}
 
-	item_tax_map = _build_item_tax_map(return_dict.get("taxes", []))
+	item_tax_map = _build_item_tax_map(return_dict.get("taxes", []), original_invoice=invoice_name)
 
 	# Check if taxes are inclusive by inspecting the tax rows copied from the original
 	# invoice (immutable after submission, unlike POS Settings which can change later).
@@ -2502,9 +2525,8 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		# Get rate breakdown for display
 		price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), precision)
 		net_rate = flt(item.get("net_rate") or item.get("rate"), precision)
-		tax_per_unit = (
-			flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, precision) if original_qty else 0
-		)
+		item_tax = item_tax_map.get(item_ref) or item_tax_map.get(item.get("item_code"), 0)
+		tax_per_unit = flt(item_tax / original_qty, precision) if original_qty else 0
 
 		# For inclusive taxes, use the original rate (already includes tax) to prevent
 		# ERPNext from back-calculating and double-reducing the tax.
