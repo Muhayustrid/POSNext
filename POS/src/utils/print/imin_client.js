@@ -1,12 +1,22 @@
 /**
  * iMin driver — the SOLE location for iMin JS SDK v1.4.0 specifics.
  *
- * v1.4.0 facts this encodes (all provisional on the Phase 0 probe — see spec):
+ * v1.4.0 facts this encodes (probe-verified on device 2026-09-02):
  *   - transport: ws://<host>:8081/websocket + POST http://<host>:8081/upload
- *   - printSingleBitmap resolves on QUEUE, not on print. NEVER feed after it.
+ *   - printSingleBitmap resolves on QUEUE, not on print.
  *   - completion is detected by polling getPrinterStatus() back to 0.
- *   - v1.4.0 does not auto-cut; partialCut() is explicit.
+ *   - THIS v1.4.0 build does NOT cut or feed inside printSingleBitmap.
+ *     A feed after the bitmap is REQUIRED, not forbidden — without it the
+ *     receipt stays inside the mechanism until the NEXT job pushes it out
+ *     (observed on-device as "nothing comes out, second run prints").
  *   - setPageFormat: 1 = 58mm, 0 = 80mm.
+ *
+ * Correction history: an earlier revision forbade feeding, taken from the
+ * note at the top of iMin's demo imin-customer-odoo.js ("printSingleBitmap
+ * 内部已经做了 partialCut"). That claim does not hold for this build — the
+ * same demo's sendPrintingJobFixed() appends printAndFeedPaper(100) +
+ * partialCut(), and the code confirms no cut inside printSingleBitmap. The
+ * prohibition was correct only for SDK builds that really do auto-cut.
  */
 import { dotsForPaper } from "./paper"
 import { renderHTMLToBitmap } from "./receipt_renderer"
@@ -14,6 +24,13 @@ import { renderHTMLToBitmap } from "./receipt_renderer"
 const DEVICE_CONFIG_KEY = "pos_imin_device_config"
 const STATUS_POLL_MS = 500
 const STATUS_TIMEOUT_MS = 15000
+// Dots to feed after a bitmap so the printed content clears the tear-off bar.
+// 8 dots/mm (205 DPI) -> 100 dots ~= 12.5mm. Matches the value in iMin's own
+// sendPrintingJobFixed() reference flow.
+const DEFAULT_FEED_DOTS = 100
+// The bitmap command resolves once queued; give the head a moment to commit it
+// to the print buffer before feeding, or the feed can overtake the raster.
+const SETTLE_MS = 200
 
 /** 58mm -> pageFormat 1; 80mm -> 0; custom keeps 58mm's value by dot count. */
 function pageFormatFor(paper, dots) {
@@ -127,8 +144,17 @@ export function createIminDriver(deps = {}) {
 			const bitmap = await render(html, { paper, customDots })
 			await p.printSingleBitmap(bitmap.dataURL, 1) // 1 = centre alignment
 
+			// Resolve above means "queued" — the raster may not be in the print
+			// buffer yet. Reference flows wait before advancing the paper.
+			await new Promise((r) => setTimeout(r, SETTLE_MS))
+
+			// The feed is what makes the receipt physically leave the printer.
+			// Omitting it is what caused the "first run prints nothing, second
+			// run prints the first one" behaviour seen on device.
+			const feedDots = cfg.feedDots ?? serverCfg.feedDots ?? DEFAULT_FEED_DOTS
+			p.printAndFeedPaper(feedDots)
 			if (cut) p.partialCut()
-			// No feeds here — under v1.4.0 they land on the NEXT receipt.
+
 			await waitIdle(p)
 			return { paper, dots }
 		},

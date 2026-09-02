@@ -73,7 +73,14 @@ against the actual POSNext device:
   succeeds and the command is written to the socket. The SDK ships its own bug report about
   this (`imin-customer-odoo.js`): a customer appended three `printAndLineFeed()` calls after
   awaiting `printSingleBitmap`, and those feeds executed *after* the cut, so every following
-  receipt began with blank lines. **Never append feeds after a bitmap** (under v1.4.0).
+  receipt began with blank lines in that demo build (it did `partialCut()` inside
+  `printSingleBitmap` before the extra feeds). In THIS vendored build
+  (`1.4.0/imin-printer.js`) `printSingleBitmap` only queues the bitmap
+  (upload + type 26) — it does not feed or cut — so a **feed after the
+  bitmap IS required** to push the receipt past the tear bar; otherwise
+  the content sits inside the mechanism until the next job drags it out
+  (probe v2→v3). The safe recipe for this build is bitmap -> 200 ms
+  settle -> `printAndFeedPaper(100)` -> optional `partialCut()`.
   Use `getPrinterStatus()` returning `0` as the completion gate before starting the next job.
 - v1.4.0 does **not** auto-cut (older SDK versions did). Cutting is explicit: `partialCut()`
   → command type `5`.

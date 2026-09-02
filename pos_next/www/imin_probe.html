@@ -419,8 +419,17 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 						return;
 					}
 					sendCmd(25, 1, "setPageFormat 58mm before print");
+					log("Sending bitmap (type " + alignmentType + ") ...");
 					sendCmd(alignmentType, alignmentValue, "print bitmap " + label);
-					return pollStatus(15000);
+					return new Promise(function (res) { setTimeout(function () { res(null); }, 200); }).then(function () {
+						// Feed 100 dots ~= 12.5mm so the bitmap clears the tear bar — without
+						// this the content sits inside the mechanism until the next job
+						// drags it out ("first run prints nothing, second prints it").
+						sendCmd(4, 100, "printAndFeedPaper(100)");
+						// The vendored v1.4.0 build does not cut inside
+						// printSingleBitmap, so probe prints without cutting.
+						return pollStatus(15000);
+					});
 				});
 			});
 		}).catch(function (err) { log("Probe error: " + err); });
@@ -446,8 +455,13 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 					}
 					log("STEP 4 OK: upload accepted — response body echoes the saved file path.");
 					sendCmd(26, -1, "print bitmap, no alignment");
-					log("STEP 5: print command (type 26) sent. LOOK AT THE PRINTER — does paper come out?");
-					return pollStatus(20000);
+					log("STEP 5: print command (type 26) sent. LOOK AT THE PRINTER.");
+					return new Promise(function (res) { setTimeout(function () { res(null); }, 200); }).then(function () {
+						// Feed after the bitmap: without this the receipt stays
+						// inside the mechanism and only the NEXT job drags it out.
+						sendCmd(4, 100, "printAndFeedPaper(100)");
+						return pollStatus(20000);
+					});
 				});
 			});
 		}).then(function () {

@@ -52,6 +52,17 @@ Open `/pos/direct-print` from the POSNext home shortcut.
   session with no profile leaves the transport on defaults until reload.
 - Direct Print page: logs-error state replaces cached rows; paper pill shows the transport
   (server) value, not the just-saved device value.
+- **Feed rule corrected by the device (probe v3 run).** First press printed all-green
+  logs (WS OK · upload A 200 · status 0 = job complete) yet NO paper came out; the second
+  press produced the first run's receipt. Cause: the driver forbade feeding after
+  `printSingleBitmap`, on the strength of a claim in the iMin demo header
+  ("内部已经做了 partialCut") that does **not** hold for the vendored v1.4.0 build
+  (verified: no `partialCut` call inside it). With no feed, content stays inside the
+  mechanism until the next job drags it out — and `getPrinterStatus()==0` is a useless
+  completion signal for "has paper physically left the printer" because the service
+  considers the job done the moment it is queued. Fixed in `imin_client.js` and probe v3:
+  bitmap -> 200 ms settle -> `printAndFeedPaper(100)` -> optional `partialCut()`, matching
+  iMin's own `sendPrintingJobFixed()` reference flow.
 - ~~`POS Print Log` Fallback row dropped `error_message`~~ — **fixed**: the transport now
   records why earlier drivers failed (and marks a skipped driver) on the Fallback row, so
   "why did this not come out of the iMin" is answerable from the log. See `transport.js`.

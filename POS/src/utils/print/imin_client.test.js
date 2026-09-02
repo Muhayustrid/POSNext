@@ -40,11 +40,37 @@ describe("createIminDriver", () => {
 		)
 	})
 
-	it("never feeds paper after the bitmap", async () => {
+	it("advances paper after the bitmap so the receipt clears the tear bar (probe v3)", async () => {
 		await driver.printHTML("<div/>", {
 			render: async () => ({ dataURL: "data:,", width: 384 }),
 		})
-		expect(printer.printAndFeedPaper).not.toHaveBeenCalled()
+		// The vendored v1.4.0 build does NOT auto-feed inside printSingleBitmap.
+		// Without this the bitmap sits inside the mechanism until the next job
+		// drags it out (observed as "first run prints nothing, second prints it").
+		expect(printer.printAndFeedPaper).toHaveBeenCalled()
+	})
+
+	it("feeds before waiting for idle, so the status gate covers paper advance", async () => {
+		const order = []
+		const tracked = { ...printer }
+		tracked.printSingleBitmap = async (...args) => {
+			order.push("bitmap")
+			return printer.printSingleBitmap(...args)
+		}
+		tracked.printAndFeedPaper = (...args) => {
+			order.push("feed")
+			return printer.printAndFeedPaper(...args)
+		}
+		const d = createIminDriver({
+			factory: () => tracked,
+			loadConfig: () => ({ paper: "58mm", cut: false }),
+		})
+		// Resolve waitIdle immediately so we can see the command order
+		tracked.getPrinterStatus = async () => ({ value: 0 })
+		await d.printHTML("<div/>", {
+			render: async () => ({ dataURL: "x", width: 384 }),
+		})
+		expect(order).toEqual(["bitmap", "feed"])
 	})
 
 	it("cuts only when the device config enables it", async () => {
@@ -60,7 +86,11 @@ describe("createIminDriver", () => {
 		await noCut.printHTML("<div/>", {
 			render: async () => ({ dataURL: "x", width: 384 }),
 		})
+		// First run fed+cut, second run fed but did not cut — copy the count
+		// before running the full fallback suite below, so mocks remain intact.
 		expect(printer.partialCut).toHaveBeenCalledTimes(1)
+		// Feed is paper-advance (not cut-path dependent) — it always happens.
+		expect(printer.printAndFeedPaper.mock.calls.length).toBeGreaterThanOrEqual(2)
 	})
 
 	it("waits for status to reach 0 before resolving", async () => {
@@ -71,7 +101,6 @@ describe("createIminDriver", () => {
 			render: async () => ({ dataURL: "x", width: 384 }),
 		})
 		expect(printer.getPrinterStatus.mock.calls.length).toBeGreaterThan(1)
-		expect(printer.printAndFeedPaper).not.toHaveBeenCalled()
 	})
 
 	it("applies the page format for the chosen paper", async () => {
