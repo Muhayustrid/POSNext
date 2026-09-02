@@ -57,6 +57,11 @@
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
+  "print_driver",
+  "imin_paper_width",
+  "imin_custom_dots",
+  "imin_cut_paper",
+  "print_fallback_enabled",
   "section_break_delivery",
   "use_delivery_charges",
   "auto_set_delivery_charges",
@@ -440,6 +445,44 @@
    "label": "Enable Silent Print"
   },
   {
+   "default": "browser",
+   "description": "Driver used for silent printing",
+   "fieldname": "print_driver",
+   "fieldtype": "Select",
+   "label": "Print Driver",
+   "options": "browser\nqz\nimin"
+  },
+  {
+   "default": "58mm",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "fieldname": "imin_paper_width",
+   "fieldtype": "Select",
+   "label": "iMin Paper Width",
+   "options": "58mm\n80mm\ncustom"
+  },
+  {
+   "default": "384",
+   "depends_on": "eval:doc.imin_paper_width==='custom'",
+   "description": "Effective print width in dots (multiple of 8, max 576)",
+   "fieldname": "imin_custom_dots",
+   "fieldtype": "Int",
+   "label": "iMin Custom Dots"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "fieldname": "imin_cut_paper",
+   "fieldtype": "Check",
+   "label": "Cut Paper After Print"
+  },
+  {
+   "default": "1",
+   "description": "On failure, fall back down the chain (iMin \u2192 QZ \u2192 Browser)",
+   "fieldname": "print_fallback_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Print Fallback"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_delivery",
    "fieldtype": "Section Break",
@@ -559,7 +602,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:09.903964",
+ "modified": "2026-09-02 13:07:56.990173",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
