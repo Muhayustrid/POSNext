@@ -53,9 +53,20 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 			const driver = drivers[id]
 			if (!driver) continue
 			let ok = true
+			let effectivePaper = current.paper
 			try {
 				if (!(await driver.isAvailable())) continue
-				await driver.printHTML(html, opts)
+				const result = await driver.printHTML(html, {
+					...opts,
+					config: {
+						paper: current.paper,
+						customDots: current.custom_dots,
+						cut: current.cut,
+					},
+				})
+				if (result && typeof result.paper === "string") {
+					effectivePaper = result.paper
+				}
 			} catch (err) {
 				ok = false
 				errors.push(`${id}: ${err?.message || err}`)
@@ -65,7 +76,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 					...opts.logContext,
 					driver: id,
 					status: idx === 0 ? "Success" : "Fallback",
-					paper_width: current.paper,
+					paper_width: effectivePaper,
 					duration_ms: Date.now() - started,
 				})
 				return { driver: id }

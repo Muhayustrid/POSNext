@@ -86,3 +86,42 @@ it("skips an unavailable driver and moves to the next", async () => {
 	expect(imin.printHTML).not.toHaveBeenCalled()
 	expect(browser.printHTML).toHaveBeenCalled()
 })
+
+it("passes the server transport config to the driver and logs the effective paper", async () => {
+	const imin = {
+		id: "imin",
+		isAvailable: vi.fn().mockResolvedValue(true),
+		getStatus: vi.fn().mockResolvedValue({ ok: true, code: 0 }),
+		printHTML: vi.fn().mockResolvedValue({ paper: "80mm", dots: 576 }),
+		describe: () => ({ id: "imin" }),
+	}
+	const t = createTransport({
+		drivers: { imin, qz: okDriver("qz"), browser: okDriver("browser") },
+		config: {
+			driver: "imin",
+			paper: "80mm",
+			custom_dots: undefined,
+			cut: true,
+		},
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	expect(imin.printHTML).toHaveBeenCalledWith(
+		"<html/>",
+		expect.objectContaining({
+			config: { paper: "80mm", customDots: undefined, cut: true },
+		}),
+	)
+	expect(log.attempts.at(-1).paper_width).toBe("80mm")
+})
+
+it("falls back to transport paper when the driver does not report the effective value", async () => {
+	const imin = okDriver("imin") // mockResolvedValue(true)
+	const t = createTransport({
+		drivers: { imin },
+		config: { driver: "imin", paper: "58mm" },
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	expect(log.attempts.at(-1).paper_width).toBe("58mm")
+})

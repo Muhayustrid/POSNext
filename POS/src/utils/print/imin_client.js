@@ -104,23 +104,33 @@ export function createIminDriver(deps = {}) {
 		 * @param {string} html
 		 * @param {object} [opts]
 		 * @param {(html, o) => Promise<{dataURL:string}>} [opts.render] - injected for tests
+		 * @param {object} [opts.config] - server (transport) config used as the
+		 *   fallback below each device value. An explicit device value
+		 *   (including false / "58mm") always wins; only an ABSENT device key
+		 *   falls through to the server value. `??` (not `||`) keeps that
+		 *   distinction. Returns the EFFECTIVE { paper, dots } so the caller
+		 *   can log what was actually printed.
+		 * @returns {Promise<{paper:string, dots:number}>}
 		 */
 		async printHTML(html, opts = {}) {
 			const cfg = loadConfig()
-			const paper = cfg.paper || "58mm"
-			const dots = dotsForPaper(paper, cfg.customDots)
+			const serverCfg = opts.config || {}
+			const paper = cfg.paper ?? serverCfg.paper ?? "58mm"
+			const customDots = cfg.customDots ?? serverCfg.customDots ?? undefined
+			const cut = cfg.cut ?? serverCfg.cut ?? false
+			const dots = dotsForPaper(paper, customDots)
 			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
 			const p = await ensurePrinter()
 			p.setPageFormat(pageFormatFor(paper, dots))
 
-			const bitmap = await render(html, { paper, customDots: cfg.customDots })
+			const bitmap = await render(html, { paper, customDots })
 			await p.printSingleBitmap(bitmap.dataURL, 1) // 1 = centre alignment
 
-			if (cfg.cut) p.partialCut()
+			if (cut) p.partialCut()
 			// No feeds here — under v1.4.0 they land on the NEXT receipt.
 			await waitIdle(p)
-			return true
+			return { paper, dots }
 		},
 
 		describe() {

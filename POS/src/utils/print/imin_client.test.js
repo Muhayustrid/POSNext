@@ -104,4 +104,76 @@ describe("createIminDriver", () => {
 			}),
 		).rejects.toThrow(/not connected/i)
 	})
+
+	describe("server config fallback (Finding 2)", () => {
+		it("uses the server paper when the device has none", async () => {
+			const blank = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ host: "127.0.0.1" }), // no paper, no cut
+			})
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 576 })
+			const res = await blank.printHTML("<div/>", {
+				render,
+				config: { paper: "80mm", cut: false },
+			})
+			expect(printer.setPageFormat).toHaveBeenCalledWith(0) // 80mm
+			expect(render).toHaveBeenCalledWith("<div/>", {
+				paper: "80mm",
+				customDots: undefined,
+			})
+			expect(res).toEqual({ paper: "80mm", dots: 576 })
+		})
+
+		it("device paper overrides the server paper", async () => {
+			// beforeEach device config sets paper "58mm"
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			const res = await driver.printHTML("<div/>", {
+				render,
+				config: { paper: "80mm", cut: true },
+			})
+			expect(printer.setPageFormat).toHaveBeenCalledWith(1) // device 58mm wins
+			expect(res).toEqual({ paper: "58mm", dots: 384 })
+		})
+
+		it("device cut:false wins over server cut:true", async () => {
+			const noCut = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await noCut.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+				config: { paper: "58mm", cut: true },
+			})
+			expect(printer.partialCut).not.toHaveBeenCalled()
+		})
+
+		it("falls back to server cut when the device key is absent", async () => {
+			const noDeviceCut = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm" }), // cut absent
+			})
+			await noDeviceCut.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+				config: { paper: "58mm", cut: true },
+			})
+			expect(printer.partialCut).toHaveBeenCalledTimes(1)
+		})
+
+		it("uses the server customDots when the device key is absent", async () => {
+			const blank = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "custom" }), // customDots absent
+			})
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 512 })
+			const res = await blank.printHTML("<div/>", {
+				render,
+				config: { paper: "custom", customDots: 512, cut: false },
+			})
+			expect(render).toHaveBeenCalledWith("<div/>", {
+				paper: "custom",
+				customDots: 512,
+			})
+			expect(res).toEqual({ paper: "custom", dots: 512 })
+		})
+	})
 })
