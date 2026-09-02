@@ -22,7 +22,7 @@
    "fieldname": "reference_doctype",
    "fieldtype": "Link",
    "label": "Reference DocType",
-   "options": "Sales Invoice"
+   "options": "DocType"
   },
   {
    "fieldname": "reference_name",
@@ -80,7 +80,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-02 00:00:00.000000",
+ "modified": "2026-09-02 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Print Log",
