@@ -299,7 +299,7 @@ import { binarize, normalizeWidthPlan } from "./receipt_renderer";
 describe("normalizeWidthPlan", () => {
 	it("keeps an exact-width source untouched", () => {
 		const plan = normalizeWidthPlan(384, 384);
-		expect(plan).toEqual({ action: "none", targetWidth: 384 });
+		expect(plan).toEqual({ action: "none", targetWidth: 384, offsetX: 0 });
 	});
 
 	it("pads a narrower source centred", () => {
@@ -322,14 +322,14 @@ describe("binarize", () => {
 		const data = new Uint8ClampedArray([
 			255, 255, 255, 255, // white stays white
 			10, 10, 10, 255, // dark stays black
-			127, 127, 127, 255, // mid grey -> white (default threshold 128)
-			128, 128, 128, 255, // at threshold -> black
+			127, 127, 127, 255, // below threshold -> black (ink)
+			128, 128, 128, 255, // at threshold -> white (background)
 		]);
 		binarize({ data, width: 4, height: 1 }, 128);
 		expect(Array.from(data.slice(0, 3))).toEqual([255, 255, 255]);
 		expect(Array.from(data.slice(4, 7))).toEqual([0, 0, 0]);
-		expect(Array.from(data.slice(8, 11))).toEqual([255, 255, 255]);
-		expect(Array.from(data.slice(12, 15))).toEqual([0, 0, 0]);
+		expect(Array.from(data.slice(8, 11))).toEqual([0, 0, 0]);
+		expect(Array.from(data.slice(12, 15))).toEqual([255, 255, 255]);
 	});
 
 	it("respects a custom threshold", () => {
@@ -385,7 +385,9 @@ export function normalizeWidthPlan(sourceWidth, targetDots) {
 export function binarize(imageData, threshold = DEFAULT_THRESHOLD) {
 	const { data } = imageData;
 	for (let i = 0; i < data.length; i += 4) {
-		const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+		// Math.round: the coefficient sum is 0.999... in float, which would push
+		// an exact-threshold grey (128 at t=128) below the line and misclassify it.
+		const luminance = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
 		const v = luminance < threshold ? 0 : 255;
 		data[i] = v;
 		data[i + 1] = v;
