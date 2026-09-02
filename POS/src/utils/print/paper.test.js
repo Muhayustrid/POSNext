@@ -34,6 +34,10 @@ describe("dotsForPaper", () => {
 	it("rejects an unknown paper key", () => {
 		expect(() => dotsForPaper("60mm")).toThrow()
 	})
+
+	it("rejects prototype-chain keys", () => {
+		expect(() => dotsForPaper("constructor")).toThrow(/Unknown paper/)
+	})
 })
 
 describe("PAPER_PROFILES", () => {

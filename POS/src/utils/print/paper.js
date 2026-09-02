@@ -36,7 +36,7 @@ export function dotsForPaper(paper, customDots) {
 		return snapped
 	}
 
-	const profile = PAPER_PROFILES[paper]
-	if (!profile) throw new Error(`Unknown paper profile: ${paper}`)
-	return profile.dots
+	if (!Object.hasOwn(PAPER_PROFILES, paper))
+		throw new Error(`Unknown paper profile: ${paper}`)
+	return PAPER_PROFILES[paper].dots
 }
