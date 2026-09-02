@@ -5,7 +5,7 @@ frappe.ui.form.on("POS Package", {
 	refresh(frm) {
 		pn_update_group_options(frm);
 		pn_toggle_lifetime_fields(frm);
-		pn_toggle_outlet_filter(frm);
+		pn_filter_warehouse(frm);
 	},
 	groups_add(frm) {
 		pn_update_group_options(frm);
@@ -16,9 +16,6 @@ frappe.ui.form.on("POS Package", {
 	is_lifetime(frm) {
 		pn_toggle_lifetime_fields(frm);
 	},
-	is_cross_company(frm) {
-		pn_toggle_outlet_filter(frm);
-	},
 });
 
 function pn_toggle_lifetime_fields(frm) {
@@ -26,29 +23,32 @@ function pn_toggle_lifetime_fields(frm) {
 	frm.set_df_property("valid_from", "read_only", lifetime);
 	frm.set_df_property("valid_upto", "read_only", lifetime);
 	if (lifetime) {
-		frm.set_value("valid_from", "");
-		frm.set_value("valid_upto", "");
+		if (frm.doc.valid_from) frm.set_value("valid_from", "");
+		if (frm.doc.valid_upto) frm.set_value("valid_upto", "");
 	}
 	frm.refresh_field("valid_from");
 	frm.refresh_field("valid_upto");
 }
 
-function pn_toggle_outlet_filter(frm) {
-	const grid = frm.fields_dict.outlets?.grid;
-	if (!grid) return;
-
-	const df = grid.get_field("pos_profile");
-
-	if (cint(frm.doc.is_cross_company)) {
-		df.get_query = null;
-		frm.set_query("pos_profile", "outlets", () => ({}));
-	} else {
-		frm.set_query("pos_profile", "outlets", () => ({
-			filters: { company: frm.doc.company },
-		}));
-	}
-	frm.refresh_field("outlets");
+function pn_filter_warehouse(frm) {
+	frm.fields_dict.outlets.grid.get_field("warehouse").get_query = (doc, cdt, cdn) => {
+		const row = locals[cdt][cdn];
+		return {
+			filters: {
+				company: row.company || frm.doc.company || "",
+				is_group: 0,
+			},
+		};
+	};
 }
+
+frappe.ui.form.on("POS Package Outlet", {
+	company(frm, cdt, cdn) {
+		frappe.model.set_value(cdt, cdn, "warehouse", "");
+		frappe.model.set_value(cdt, cdn, "pos_profile", "");
+		frappe.model.set_value(cdt, cdn, "status", "");
+	},
+});
 
 frappe.ui.form.on("POS Package Group", {
 	group_key(frm) {

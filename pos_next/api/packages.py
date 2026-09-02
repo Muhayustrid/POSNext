@@ -101,7 +101,6 @@ def _serialize_package(doc):
 		"valid_from": str(doc.valid_from) if doc.valid_from else None,
 		"valid_upto": str(doc.valid_upto) if doc.valid_upto else None,
 		"is_lifetime": cint(getattr(doc, "is_lifetime", 0)),
-		"is_cross_company": cint(getattr(doc, "is_cross_company", 0)),
 		"items": [
 			{
 				"item_code": row.item_code,
@@ -142,40 +141,53 @@ def _serialize_package(doc):
 def _eligible_package_names(pos_profile, on_date=None):
 	"""Names of enabled, in-date packages available on this POS Profile.
 
-	A package with no outlet rows is available to every profile of its company;
-	otherwise the profile must be listed with ``enabled = 1``.
+	A package with no outlet rows is available to every profile of its package
+	company (legacy behaviour); otherwise it is scoped by outlet Company +
+	Warehouse — an outlet applies to every POS Profile sharing that pair.
 	"""
-	profile = frappe.db.get_value("POS Profile", pos_profile, ["name", "company"], as_dict=True)
+	profile = frappe.db.get_value(
+		"POS Profile", pos_profile, ["name", "company", "warehouse"], as_dict=True
+	)
 	if not profile:
 		frappe.throw(_("POS Profile {0} not found.").format(frappe.bold(pos_profile)))
 
 	on_date = on_date or nowdate()
 
-	POSPackage = frappe.qb.DocType("POS Package")
-	packages = (
-		frappe.qb.from_(POSPackage)
-		.select(POSPackage.name, POSPackage.valid_from, POSPackage.valid_upto, POSPackage.is_lifetime)
-		.where(POSPackage.disabled == 0)
-		.where((POSPackage.company == profile.company) | (POSPackage.is_cross_company == 1))
-	).run(as_dict=True)
+	packages = frappe.get_all(
+		"POS Package",
+		filters={"disabled": 0},
+		fields=["name", "company", "valid_from", "valid_upto", "is_lifetime"],
+	)
 	if not packages:
 		return []
 
 	names = [p.name for p in packages]
+	packages_by_name = {p.name: p for p in packages}
 
 	outlet_rows = frappe.get_all(
 		"POS Package Outlet",
 		filters={"parent": ["in", names], "parenttype": "POS Package"},
-		fields=["parent", "pos_profile", "enabled"],
+		fields=["parent", "company", "warehouse", "pos_profile", "enabled"],
 	)
 	restricted = {row.parent for row in outlet_rows}
-	allowed = {row.parent for row in outlet_rows if row.enabled and row.pos_profile == profile.name}
+	allowed = {
+		row.parent
+		for row in outlet_rows
+		if row.enabled
+		and (
+			(row.company == profile.company and (row.warehouse or "") == (profile.warehouse or ""))
+			or row.pos_profile == profile.name
+		)
+	}
 
-	return [
-		p.name
-		for p in packages
-		if _package_is_valid_on(p, on_date) and (p.name not in restricted or p.name in allowed)
-	]
+	def _is_available(p):
+		if _package_is_valid_on(p, on_date) is False:
+			return False
+		if p.name not in restricted:
+			return p.company == profile.company
+		return p.name in allowed
+
+	return [p.name for p in packages if _is_available(packages_by_name[p.name])]
 
 
 @frappe.whitelist()
