@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="robots" content="noindex, nofollow">
+	<title>iMin Direct Print — Device Probe</title>
+	<style>
+		body {
+			font-family: system-ui, -apple-system, sans-serif;
+			margin: 16px;
+			background: #ffffff;
+			color: #111111;
+		}
+		h1 {
+			font-size: 18px;
+			margin: 0 0 12px;
+		}
+		section {
+			margin-bottom: 12px;
+		}
+		.info {
+			font-size: 12px;
+			word-break: break-all;
+			background: #f4f4f4;
+			border: 1px solid #dddddd;
+			border-radius: 6px;
+			padding: 8px;
+		}
+		.info div {
+			margin: 4px 0;
+		}
+		button {
+			margin: 4px 6px 4px 0;
+			padding: 10px 14px;
+			font-size: 14px;
+			border-radius: 6px;
+			border: 1px solid #333333;
+			background: #eeeeee;
+		}
+		button:active {
+			background: #dddddd;
+		}
+		button.primary {
+			background: #4F46E5;
+			border-color: #4F46E5;
+			color: #ffffff;
+		}
+		pre {
+			background: #101010;
+			color: #e8e8e8;
+			padding: 10px;
+			border-radius: 6px;
+			min-height: 240px;
+			max-height: 60vh;
+			overflow: auto;
+			font-size: 12px;
+			line-height: 1.5;
+			white-space: pre-wrap;
+			word-break: break-word;
+		}
+		.hint {
+			font-size: 12px;
+			color: #555555;
+			margin: 6px 0;
+		}
+	</style>
+</head>
+<body>
+	<h1>iMin Direct Print — Device Probe</h1>
+	<section class="info">
+		<div><strong>Device user agent:</strong> <span id="ua"></span></div>
+		<div><strong>Page origin:</strong> <span id="origin"></span></div>
+	</section>
+	<section>
+		<button class="primary" id="run-all">Run full probe</button>
+		<button id="print-centered">Print centered (type 27, value 1)</button>
+		<button id="pf58">setPageFormat 58mm (type 25, value 1)</button>
+		<button id="pf80">setPageFormat 80mm (type 25, value 0)</button>
+		<button id="status">Get printer status (type 2)</button>
+		<button id="clear">Clear log</button>
+	</section>
+	<p class="hint">
+		After "setPageFormat 58mm/80mm", run a print again and compare the output width.
+		Expected status values (v1.4.0): 0 normal, 1 not powered on, 3 head open,
+		7 no paper feed, 8 paper running out, -1 not connected, 99 other error.
+	</p>
+	<pre id="log">log starts here...</pre>
+
+	<script>
+	(function () {
+		"use strict";
+
+		var WS_URL = "ws://127.0.0.1:8081/websocket";
+		var UPLOAD_URL = "http://127.0.0.1:8081/upload";
+		var IMG_W = 384;
+		var IMG_H = 120;
+
+		var logEl = document.getElementById("log");
+		document.getElementById("ua").textContent = navigator.userAgent;
+		document.getElementById("origin").textContent = window.location.origin;
+
+		var ws = null;
+		var wsReady = false;
+		var nextReply = null;
+
+		function log(msg) {
+			var t = new Date().toISOString().substring(11, 23);
+			logEl.textContent += "[" + t + "] " + msg + "\n";
+			logEl.scrollTop = logEl.scrollHeight;
+		}
+
+		function sendCmd(type, value, note) {
+			if (!ws || ws.readyState !== WebSocket.OPEN) {
+				log("WS not open — cannot send command type " + type);
+				return;
+			}
+			var payload = JSON.stringify({ data: { text: "", value: value }, type: type });
+			ws.send(payload);
+			log("WS sent type " + type + " value " + value + (note ? " (" + note + ")" : ""));
+		}
+
+		function waitForReply(timeoutMs, note) {
+			return new Promise(function (resolve) {
+				var settled = false;
+				nextReply = function (data) {
+					if (settled) return;
+					settled = true;
+					resolve(data);
+				};
+				setTimeout(function () {
+					if (settled) return;
+					settled = true;
+					nextReply = null;
+					resolve(null);
+				}, timeoutMs);
+				log("Waiting up to " + timeoutMs + " ms for reply" + (note ? " (" + note + ")" : "") + "...");
+			});
+		}
+
+		function connectWS() {
+			return new Promise(function (resolve) {
+				wsReady = false;
+				log("Connecting WebSocket " + WS_URL + " ...");
+				try {
+					ws = new WebSocket(WS_URL);
+				} catch (e) {
+					log("WS constructor threw: " + e);
+					resolve(false);
+					return;
+				}
+				var settled = false;
+				function done(ok) {
+					if (settled) return;
+					settled = true;
+					resolve(ok);
+				}
+				ws.onopen = function () {
+					wsReady = true;
+					log("WS open — CONNECTED");
+					done(true);
+				};
+				ws.onerror = function () {
+					log("WS error event (connection refused or closed before open)");
+					done(false);
+				};
+				ws.onclose = function () {
+					wsReady = false;
+					log("WS closed");
+					done(false);
+				};
+				ws.onmessage = function (ev) {
+					var parsed = null;
+					try {
+						parsed = JSON.parse(ev.data);
+					} catch (e) {
+						parsed = null;
+					}
+					var preview = typeof ev.data === "string"
+						? ev.data.substring(0, 160)
+						: "(non-text frame)";
+					log("WS recv: " + preview);
+					if (nextReply) {
+						var handler = nextReply;
+						nextReply = null;
+						handler(parsed);
+					}
+				};
+			});
+		}
+
+		function sendPing() {
+			var payload = JSON.stringify({ data: { text: "ping" }, type: 0 });
+			log("Sending v1 ping: " + payload);
+			ws.send(payload);
+			return waitForReply(3000, "ping reply");
+		}
+
+		function renderTestBitmap() {
+			var canvas = document.createElement("canvas");
+			canvas.width = IMG_W;
+			canvas.height = IMG_H;
+			var ctx = canvas.getContext("2d");
+			ctx.fillStyle = "#ffffff";
+			ctx.fillRect(0, 0, IMG_W, IMG_H);
+			ctx.fillStyle = "#000000";
+			ctx.textBaseline = "top";
+			ctx.font = "bold 16px monospace";
+			ctx.fillText("iMin Direct Print probe", 8, 8);
+			ctx.font = "12px monospace";
+			ctx.fillText("384 x 120 dots @ 205 DPI", 8, 32);
+			ctx.fillText("Line: 1234567890", 8, 52);
+			ctx.font = "bold 24px monospace";
+			ctx.fillText("384 dots", 8, 76);
+			ctx.fillRect(8, 112, IMG_W - 16, 4);
+			return canvas.toDataURL("image/png");
+		}
+
+		function uploadBitmap(dataUrl) {
+			var fd = new FormData();
+			fd.append("file", dataUrl);
+			log("POSTing bitmap (384x120 PNG data URL, " + dataUrl.length + " chars) to " + UPLOAD_URL + " ...");
+			return fetch(UPLOAD_URL, { method: "POST", body: fd }).then(function (resp) {
+				return resp.text().then(function (body) {
+					return { status: resp.status, body: body };
+				});
+			});
+		}
+
+		function pollStatus() {
+			var started = Date.now();
+			function attempt() {
+				if (Date.now() - started > 10000) {
+					log("Status polling timed out after 10 s without value 0.");
+					return Promise.resolve();
+				}
+				sendCmd(2, -1, "getPrinterStatus poll");
+				return waitForReply(1500, "status reply").then(function (data) {
+					if (data && typeof data.value !== "undefined") {
+						log("Printer status value: " + data.value);
+						if (data.value === 0) {
+							log("Status 0 — printer normal / job complete.");
+							return;
+						}
+					} else {
+						log("Status reply missing value field.");
+					}
+					return new Promise(function (resolve) {
+						setTimeout(function () {
+							resolve(attempt());
+						}, 700);
+					});
+				});
+			}
+			return attempt();
+		}
+
+		function printFlow(alignmentType, alignmentValue, label) {
+			log("=== " + label + " ===");
+			return connectWS().then(function (connected) {
+				if (!connected) {
+					log("ABORT: WebSocket did not connect — is the iMin print service running?");
+					return;
+				}
+				var dataUrl = renderTestBitmap();
+				log("Test bitmap rendered (" + IMG_W + "x" + IMG_H + ").");
+				return uploadBitmap(dataUrl).then(function (resp) {
+					log("Upload HTTP status: " + resp.status + " — body: " + resp.body.substring(0, 200));
+					if (resp.status < 200 || resp.status >= 300) {
+						log("ABORT: upload failed, not sending print command.");
+						return;
+					}
+					sendCmd(alignmentType, alignmentValue, "print bitmap " + label);
+					return pollStatus();
+				}).catch(function (err) {
+					log("Upload failed: " + err + " — is the print service reachable at :8081?");
+				});
+			}).catch(function (err) {
+				log("Probe error: " + err);
+			});
+		}
+
+		function runFullProbe() {
+			log("=== Full probe (WS connect -> ping -> upload -> print type 26 -> status poll) ===");
+			log("userAgent: " + navigator.userAgent);
+			log("origin: " + window.location.origin);
+			return connectWS().then(function (connected) {
+				if (!connected) {
+					log("STEP 1 FAILED: WebSocket did not connect. Check whether the iMin print service is running, or whether a different port/endpoint answers.");
+					return;
+				}
+				log("STEP 1 OK: WebSocket connected.");
+				return sendPing().then(function (reply) {
+					if (reply) {
+						log("STEP 2 OK: ping reply received within 3 s: " + JSON.stringify(reply));
+					} else {
+						log("STEP 2 FAILED: no ping reply within 3 s.");
+					}
+					var dataUrl = renderTestBitmap();
+					log("Test bitmap rendered (" + IMG_W + "x" + IMG_H + ").");
+					return uploadBitmap(dataUrl).then(function (resp) {
+						log("STEP 3 upload HTTP status: " + resp.status + " — body: " + resp.body.substring(0, 200));
+						if (resp.status < 200 || resp.status >= 300) {
+							log("ABORT: upload failed, skipping print.");
+							return;
+						}
+						sendCmd(26, -1, "print bitmap, no alignment");
+						log("STEP 4: print command sent (type 26, value -1).");
+						return pollStatus();
+					}).catch(function (err) {
+						log("STEP 3 FAILED: upload error: " + err);
+					});
+				});
+			}).then(function () {
+				log("=== Full probe finished. Record findings in docs/superpowers/specs/2026-09-02-imin-device-probe.md ===");
+			}).catch(function (err) {
+				log("Probe error: " + err);
+			});
+		}
+
+		document.getElementById("run-all").addEventListener("click", runFullProbe);
+
+		document.getElementById("print-centered").addEventListener("click", function () {
+			printFlow(27, 1, "print centered (type 27, value 1)");
+		});
+
+		document.getElementById("pf58").addEventListener("click", function () {
+			sendCmd(25, 1, "setPageFormat 58mm");
+		});
+
+		document.getElementById("pf80").addEventListener("click", function () {
+			sendCmd(25, 0, "setPageFormat 80mm");
+		});
+
+		document.getElementById("status").addEventListener("click", function () {
+			if (!ws || ws.readyState !== WebSocket.OPEN) {
+				connectWS().then(function (connected) {
+					if (connected) {
+						sendCmd(2, -1, "getPrinterStatus");
+						waitForReply(3000, "status reply").then(function (data) {
+							if (data && typeof data.value !== "undefined") {
+								log("Printer status value: " + data.value);
+							} else {
+								log("No status reply within 3 s.");
+							}
+						});
+					}
+				});
+				return;
+			}
+			sendCmd(2, -1, "getPrinterStatus");
+			waitForReply(3000, "status reply").then(function (data) {
+				if (data && typeof data.value !== "undefined") {
+					log("Printer status value: " + data.value);
+				} else {
+					log("No status reply within 3 s.");
+				}
+			});
+		});
+
+		document.getElementById("clear").addEventListener("click", function () {
+			logEl.textContent = "";
+		});
+
+		log("Probe page loaded. userAgent: " + navigator.userAgent);
+		log("Page origin: " + window.location.origin);
+		log("Press 'Run full probe' to begin.");
+	})();
+	</script>
+</body>
+</html>

@@ -278,4 +278,5 @@ scheduler_events = {
 
 website_route_rules = [
 	{"from_route": "/pos/<path:app_path>", "to_route": "pos"},
+	{"from_route": "/imin-probe", "to_route": "imin_probe"},
 ]
