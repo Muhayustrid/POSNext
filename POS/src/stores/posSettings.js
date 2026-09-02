@@ -51,6 +51,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Printing
 		allow_print_last_invoice: 0,
 		silent_print: 0,
+		print_driver: "browser",
+		imin_paper_width: "58mm",
+		imin_custom_dots: 384,
+		imin_cut_paper: 1,
+		print_fallback_enabled: 1,
 		// Delivery
 		use_delivery_charges: 0,
 		auto_set_delivery_charges: 0,
@@ -143,6 +148,15 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Computed - Printing
 	const allowPrintLastInvoice = computed(() => Boolean(settings.value.allow_print_last_invoice));
 	const silentPrint = computed(() => Boolean(settings.value.silent_print));
+	const printDriver = computed(() => settings.value.print_driver || "browser");
+	const iminPaper = computed(() => settings.value.imin_paper_width || "58mm");
+	const iminCustomDots = computed(() => Number.parseInt(settings.value.imin_custom_dots) || 384);
+	const iminCutPaper = computed(() => Boolean(settings.value.imin_cut_paper));
+	const printFallbackEnabled = computed(() =>
+		settings.value.print_fallback_enabled == null
+			? true
+			: Boolean(settings.value.print_fallback_enabled),
+	);
 
 	// Computed - Delivery
 	const useDeliveryCharges = computed(() => Boolean(settings.value.use_delivery_charges));
@@ -270,6 +284,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			fetch_coupon: 0,
 			allow_print_last_invoice: 0,
 			silent_print: 0,
+			print_driver: "browser",
+			imin_paper_width: "58mm",
+			imin_custom_dots: 384,
+			imin_cut_paper: 1,
+			print_fallback_enabled: 1,
 			use_delivery_charges: 0,
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,
@@ -393,6 +412,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Printing
 		allowPrintLastInvoice,
 		silentPrint,
+		printDriver,
+		iminPaper,
+		iminCustomDots,
+		iminCutPaper,
+		printFallbackEnabled,
 
 		// Computed - Delivery
 		useDeliveryCharges,

@@ -207,7 +207,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-01 09:00:00.000000",
+ "modified": "2026-09-02 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
@@ -296,6 +296,13 @@
    "link_to": "POS Package",
    "stats_filter": "[]",
    "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Direct Print",
+   "type": "URL",
+   "url": "/pos/direct-print"
   }
  ],
  "title": "POSNext"
