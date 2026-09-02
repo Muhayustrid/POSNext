@@ -53,12 +53,19 @@ def get_print_config(pos_profile):
 	if not settings:
 		settings = {field: None for field in PRINT_CONFIG_FIELDS}
 
+	# A Check field defaulting to 1 means "unset is enabled": when the POS
+	# Settings row is missing or the column is NULL, fallback stays on so a
+	# broken iMin/QZ chain still reaches the browser driver. Only an explicit
+	# 0 disables it. `cut` keeps the strict bool() — default-off is correct
+	# there (cutting on an uncut-capable printer is worse than not cutting).
+	raw_fallback = getattr(settings, "print_fallback_enabled", None)
+
 	return {
 		"driver": getattr(settings, "print_driver", None) or "browser",
 		"paper": getattr(settings, "imin_paper_width", None) or "58mm",
 		"custom_dots": getattr(settings, "imin_custom_dots", None) or 384,
 		"cut": bool(getattr(settings, "imin_cut_paper", None)),
-		"fallback_enabled": bool(getattr(settings, "print_fallback_enabled", None)),
+		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 
 

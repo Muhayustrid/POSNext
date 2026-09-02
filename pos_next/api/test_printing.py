@@ -26,6 +26,46 @@ class TestPrintingAPI(FrappeTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			get_print_config(None)
 
+	def _has_fallback_column(self):
+		# The Task 7 print fields may not be migrated on every site; the API
+		# guards on meta, and tests that write those columns must too.
+		meta = frappe.get_meta("POS Settings")
+		return any(df.fieldname == "print_fallback_enabled" for df in meta.get("fields"))
+
+	def test_fallback_enabled_defaults_to_true_when_unset(self):
+		# print_fallback_enabled defaults to 1 on the doctype. When no POS
+		# Settings row exists for the profile, or the column is NULL, the
+		# transport must still get fallback_enabled=True — a False there
+		# silently disables the whole fallback chain.
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if settings_name and self._has_fallback_column():
+			frappe.db.set_value("POS Settings", settings_name, "print_fallback_enabled", None)
+
+		cfg = get_print_config(self.profile)
+		self.assertTrue(cfg["fallback_enabled"])
+
+	def test_fallback_enabled_false_only_when_explicit(self):
+		# Only meaningful when the real column exists — on unmigrated sites
+		# the meta guard makes the field unreachable (skipped, not failed).
+		if not self._has_fallback_column():
+			self.skipTest("print_fallback_enabled column not migrated on this site")
+
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if not settings_name:
+			settings_name = (
+				frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.profile, "enabled": 1})
+				.insert(ignore_permissions=True)
+				.name
+			)
+		frappe.db.set_value("POS Settings", settings_name, "print_fallback_enabled", 0)
+
+		cfg = get_print_config(self.profile)
+		self.assertFalse(cfg["fallback_enabled"])
+
 	def test_log_print_attempt_creates_row(self):
 		before = frappe.db.count("POS Print Log")
 		name = log_print_attempt(
