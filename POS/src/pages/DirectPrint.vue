@@ -288,6 +288,7 @@ import { loadDeviceConfig, saveDeviceConfig } from "@/utils/print/imin_client"
 import { PAPER_PROFILES } from "@/utils/print/paper"
 import { useBootstrapStore } from "@/stores/bootstrap"
 import {
+	ensureIminSdk,
 	getTransport,
 	initTransportFromServer,
 	printHTML as transportPrint,
@@ -525,10 +526,17 @@ onMounted(async () => {
 	// the race with the non-blocking preload started in main.js.
 	try {
 		await bootstrap.loadInitialData()
-		await initTransportFromServer(
+		const cfg = await initTransportFromServer(
 			bootstrap.getPreloadedPOSProfile()?.name || null,
 		)
 		configError.value = ""
+		// Load the iMin SDK before the first status poll whenever the chain can
+		// reach it. Without this the very first poll throws "not a constructor"
+		// and the card reads "Unavailable / code -1" on a perfectly healthy
+		// device — misleading for anyone diagnosing a till.
+		if (cfg?.driver === "imin" || cfg?.fallback_enabled !== false) {
+			await ensureIminSdk()
+		}
 	} catch (e) {
 		configError.value = __("Could not load print config from the server: {0}", [
 			e?.message || String(e),

@@ -115,19 +115,35 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 	}
 }
 
-function loadIminFactory() {
-	// window.IminPrinter is defined by the vendored SDK, injected once by
-	// ensureIminSdk() below on first iMin use.
-	return typeof window !== "undefined" && window.IminPrinter
-		? () => new window.IminPrinter()
-		: undefined
+/**
+ * Build an iMin printer instance. Resolved LAZILY (at print/status time), not
+ * when the transport singleton is created: the Direct Print page polls printer
+ * status on mount, which can happen before the vendored SDK script has
+ * finished loading. Binding `() => new window.IminPrinter()` eagerly made that
+ * first poll throw "window.IminPrinter is not a constructor", which surfaced
+ * as "Connection unavailable / code -1" even on a healthy device.
+ */
+function iminFactory() {
+	if (
+		typeof window === "undefined" ||
+		typeof window.IminPrinter !== "function"
+	) {
+		throw new Error("iMin SDK not loaded yet")
+	}
+	return new window.IminPrinter()
 }
 
 let _sdkPromise = null
-function ensureIminSdk() {
+/** Inject the vendored iMin SDK once. Resolves false if it cannot be loaded. */
+export function ensureIminSdk() {
 	if (_sdkPromise) return _sdkPromise
 	_sdkPromise = new Promise((resolve) => {
-		if (loadIminFactory()) return resolve(true)
+		if (
+			typeof window !== "undefined" &&
+			typeof window.IminPrinter === "function"
+		) {
+			return resolve(true)
+		}
 		const s = document.createElement("script")
 		s.src = "/assets/pos_next/js/lib/imin/1.4.0/imin-printer.js"
 		s.onload = () => resolve(true)
@@ -142,7 +158,7 @@ export function getTransport() {
 	if (_singleton) return _singleton
 	_singleton = createTransport({
 		drivers: {
-			imin: createIminDriver({ factory: () => new window.IminPrinter() }),
+			imin: createIminDriver({ factory: iminFactory }),
 			qz: createQzDriver(),
 			browser: createBrowserDriver(),
 		},
