@@ -65,6 +65,8 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						paper: current.paper,
 						customDots: current.custom_dots,
 						cut: current.cut,
+						copies: current.copies,
+						copyDelayMs: current.copy_delay_ms,
 					},
 				})
 				if (result && typeof result.paper === "string") {
@@ -180,6 +182,8 @@ export async function initTransportFromServer(posProfile) {
 		paper: cfg.paper,
 		custom_dots: cfg.custom_dots,
 		cut: cfg.cut,
+		copies: cfg.copies,
+		copy_delay_ms: cfg.copy_delay_ms,
 		fallback_enabled: cfg.fallback_enabled,
 	})
 	return cfg

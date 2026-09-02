@@ -16,8 +16,15 @@ PRINT_CONFIG_FIELDS = (
 	"imin_paper_width",
 	"imin_custom_dots",
 	"imin_cut_paper",
+	"imin_print_copies",
+	"imin_copy_delay_ms",
 	"print_fallback_enabled",
 )
+
+# Sensible operational bounds so a mis-typed value cannot make the cashier
+# wait for ever (copies) or block the lane (delay).
+MAX_COPIES = 5
+MAX_COPY_DELAY_MS = 10000
 
 
 @frappe.whitelist()
@@ -60,11 +67,26 @@ def get_print_config(pos_profile):
 	# there (cutting on an uncut-capable printer is worse than not cutting).
 	raw_fallback = getattr(settings, "print_fallback_enabled", None)
 
+	try:
+		copies = int(getattr(settings, "imin_print_copies", None) or 1)
+	except (TypeError, ValueError):
+		copies = 1
+	copies = max(1, min(copies, MAX_COPIES))
+
+	try:
+		delay = getattr(settings, "imin_copy_delay_ms", None)
+		delay = 800 if delay is None else int(delay)
+	except (TypeError, ValueError):
+		delay = 800
+	delay = max(0, min(delay, MAX_COPY_DELAY_MS))
+
 	return {
 		"driver": getattr(settings, "print_driver", None) or "browser",
 		"paper": getattr(settings, "imin_paper_width", None) or "58mm",
 		"custom_dots": getattr(settings, "imin_custom_dots", None) or 384,
 		"cut": bool(getattr(settings, "imin_cut_paper", None)),
+		"copies": copies,
+		"copy_delay_ms": delay,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

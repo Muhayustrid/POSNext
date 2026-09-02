@@ -158,6 +158,36 @@
 							:label="__('Cut paper after print (partial cut)')"
 						/>
 					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-copies">
+							{{ __("Copies per transaction") }}
+						</label>
+						<Select
+							id="direct-print-copies"
+							v-model="cfg.copies"
+							:options="copiesOptions"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("1 = one receipt. 2 = customer + crew.") }}
+						</p>
+					</div>
+
+					<div v-if="Number(cfg.copies) > 1">
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-copy-delay">
+							{{ __("Delay between copies (ms)") }}
+						</label>
+						<Input
+							id="direct-print-copy-delay"
+							v-model="copyDelayText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('800')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Tear-off pause so the first copy can be removed. Default 800.") }}
+						</p>
+					</div>
 				</div>
 
 				<div class="mt-4 flex items-center gap-2">
@@ -324,11 +354,22 @@ const paperOptions = computed(() => {
 	return [...base, { label: "custom", value: "custom" }]
 })
 
+const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
+	label: String(n),
+	value: n,
+}))
+
 const cfg = reactive({
 	host: "",
 	paper: "58mm",
 	cut: false,
+	copies: 1,
 })
+// Two copies printing (customer + outlet crew). Device-level delay
+// overrides the POS Settings value — same override pattern as `paper`/
+// `cut`, but specific to multi-copy jobs. Raw text so the field can be
+// empty (meaning 'use server default 800ms').
+const copyDelayText = ref("800")
 const customDotsText = ref("384")
 
 function readCfgIntoForm() {
@@ -337,8 +378,13 @@ function readCfgIntoForm() {
 	const p = stored.paper
 	cfg.paper = p === "58mm" || p === "80mm" || p === "custom" ? p : "58mm"
 	cfg.cut = Boolean(stored.cut)
+	const n = Number(stored.copies)
+	cfg.copies = Number.isFinite(n) && n >= 1 && n <= 5 ? Math.floor(n) : 1
 	const cd = stored.customDots
 	customDotsText.value = cd != null && cd !== "" ? String(cd) : "384"
+	const d = stored.copyDelayMs
+	copyDelayText.value =
+		d === undefined || d === "" || d === null ? "800" : String(d)
 }
 
 function reloadConfig() {
@@ -409,6 +455,11 @@ function onSaveConfig() {
 			paper,
 			customDots,
 			cut: Boolean(cfg.cut),
+			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
+			copyDelayMs:
+				copyDelayText.value === "" || copyDelayText.value == null
+					? 800
+					: Math.max(0, Math.min(Number(copyDelayText.value) || 0, 10000)),
 		})
 		// Do not call setPageFormat directly — imin_client applies it on next print.
 		showSuccess(__("Device config saved. It will apply on the next print."))

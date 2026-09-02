@@ -134,6 +134,52 @@ describe("createIminDriver", () => {
 		).rejects.toThrow(/not connected/i)
 	})
 
+	it("prints each copy with the same bitmap, delay only between copies", async () => {
+		const timeline = []
+		const sleepStart = Date.now()
+		printer.printSingleBitmap = vi.fn(async () => {
+			timeline.push({ e: "bitmap", t: Date.now() - sleepStart })
+			return 1
+		})
+		printer.printAndFeedPaper = vi.fn(() => timeline.push({ e: "feed" }))
+		const d = createIminDriver({
+			factory: () => printer,
+			loadConfig: () => ({ paper: "58mm", cut: true }),
+		})
+		const res = await d.printHTML("<div/>", {
+			render: async () => ({ dataURL: "x", width: 384 }),
+			config: { copies: 2, copyDelayMs: 250 },
+		})
+		expect(res.copies).toBe(2)
+		// The same bitmap was re-sent, not re-rendered: two bitmap calls,
+		// one upload URL.
+		expect(printer.printSingleBitmap).toHaveBeenCalledTimes(2)
+		expect(printer.printAndFeedPaper).toHaveBeenCalledTimes(2)
+		// Between-copy gap really elapsed (250 ms), and there is no gap
+		// after the final copy.
+		const bitmaps = timeline.filter((x) => x.e === "bitmap")
+		expect(bitmaps).toHaveLength(2)
+		const gap = bitmaps[1].t - bitmaps[0].t
+		// SETTLE_MS (200) + copyDelayMs (250) must both have elapsed.
+		expect(gap).toBeGreaterThanOrEqual(250)
+		expect(printer.partialCut).toHaveBeenCalledTimes(2)
+	})
+
+	it("single copy by default prints exactly one receipt", async () => {
+		await driver.printHTML("<div/>", {
+			render: async () => ({ dataURL: "x", width: 384 }),
+		})
+		expect(printer.printSingleBitmap).toHaveBeenCalledTimes(1)
+	})
+
+	it("clamps absurd copy counts to the operational maximum", async () => {
+		await driver.printHTML("<div/>", {
+			render: async () => ({ dataURL: "x", width: 384 }),
+			config: { copies: 99, copyDelayMs: 0 },
+		})
+		expect(printer.printSingleBitmap).toHaveBeenCalledTimes(5)
+	})
+
 	describe("server config fallback (Finding 2)", () => {
 		it("uses the server paper when the device has none", async () => {
 			const blank = createIminDriver({
@@ -150,7 +196,7 @@ describe("createIminDriver", () => {
 				paper: "80mm",
 				customDots: undefined,
 			})
-			expect(res).toEqual({ paper: "80mm", dots: 576 })
+			expect(res).toEqual({ paper: "80mm", dots: 576, copies: 1 })
 		})
 
 		it("device paper overrides the server paper", async () => {
@@ -161,7 +207,7 @@ describe("createIminDriver", () => {
 				config: { paper: "80mm", cut: true },
 			})
 			expect(printer.setPageFormat).toHaveBeenCalledWith(1) // device 58mm wins
-			expect(res).toEqual({ paper: "58mm", dots: 384 })
+			expect(res).toEqual({ paper: "58mm", dots: 384, copies: 1 })
 		})
 
 		it("device cut:false wins over server cut:true", async () => {
@@ -202,7 +248,7 @@ describe("createIminDriver", () => {
 				paper: "custom",
 				customDots: 512,
 			})
-			expect(res).toEqual({ paper: "custom", dots: 512 })
+			expect(res).toEqual({ paper: "custom", dots: 512, copies: 1 })
 		})
 	})
 })

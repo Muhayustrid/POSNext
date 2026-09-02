@@ -3,11 +3,11 @@
  "creation": "2025-10-15 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
-	"field_order": [
-   "pos_profile",
-   "enabled",
-   "invoice_type",
-   "section_break_localization",
+ "field_order": [
+  "pos_profile",
+  "enabled",
+  "invoice_type",
+  "section_break_localization",
   "allowed_locales",
   "section_break_wallet",
   "enable_loyalty_program",
@@ -61,6 +61,8 @@
   "imin_paper_width",
   "imin_custom_dots",
   "imin_cut_paper",
+  "imin_print_copies",
+  "imin_copy_delay_ms",
   "print_fallback_enabled",
   "section_break_delivery",
   "use_delivery_charges",
@@ -91,21 +93,21 @@
    "reqd": 1,
    "unique": 1
   },
-   {
-    "default": "1",
-    "description": "Enable custom POS settings for this profile",
-    "fieldname": "enabled",
-    "fieldtype": "Check",
-    "label": "Enabled"
-   },
-   {
-    "default": "Sales Invoice",
-    "description": "Compatibility field for ERPNext v16 POS code paths (e.g. POS Opening Entry cancellation reads get_single_value('POS Settings', 'invoice_type')). POS Next always creates Sales Invoices.",
-    "fieldname": "invoice_type",
-    "fieldtype": "Select",
-    "label": "Invoice Type Created via POS Screen",
-    "options": "Sales Invoice\nPOS Invoice"
-   },
+  {
+   "default": "1",
+   "description": "Enable custom POS settings for this profile",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "Sales Invoice",
+   "description": "Compatibility field for ERPNext v16 POS code paths (e.g. POS Opening Entry cancellation reads get_single_value('POS Settings', 'invoice_type')). POS Next always creates Sales Invoices.",
+   "fieldname": "invoice_type",
+   "fieldtype": "Select",
+   "label": "Invoice Type Created via POS Screen",
+   "options": "Sales Invoice\nPOS Invoice"
+  },
   {
    "fieldname": "section_break_localization",
    "fieldtype": "Section Break",
@@ -477,7 +479,23 @@
   },
   {
    "default": "1",
-   "description": "On failure, fall back down the chain (iMin \u2192 QZ \u2192 Browser)",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Copies printed per transaction (customer copy first, then crew/outlet copy)",
+   "fieldname": "imin_print_copies",
+   "fieldtype": "Int",
+   "label": "Print Copies"
+  },
+  {
+   "default": "800",
+   "depends_on": "eval:doc.print_driver==='imin' and (doc.imin_print_copies||1)>1",
+   "description": "Pause between copies so the cashier can tear the first copy off (ms); configurable per POS Profile and overridable per-device (default 800)",
+   "fieldname": "imin_copy_delay_ms",
+   "fieldtype": "Int",
+   "label": "Delay Between Copies (ms)"
+  },
+  {
+   "default": "1",
+   "description": "On failure, fall back down the chain (iMin → QZ → Browser)",
    "fieldname": "print_fallback_enabled",
    "fieldtype": "Check",
    "label": "Enable Print Fallback"
@@ -602,7 +620,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-02 13:07:56.990173",
+ "modified": "2026-09-02 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

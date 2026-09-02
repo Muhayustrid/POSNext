@@ -31,6 +31,12 @@ const DEFAULT_FEED_DOTS = 100
 // The bitmap command resolves once queued; give the head a moment to commit it
 // to the print buffer before feeding, or the feed can overtake the raster.
 const SETTLE_MS = 200
+// Multi-copy defaults (customer + crew copies). All overridable per POS
+// Profile (POS Settings) and per-device — never hardcoded at print time.
+const DEFAULT_COPIES = 1
+const DEFAULT_COPY_DELAY_MS = 800
+const MAX_COPIES = 5
+const MAX_COPY_DELAY_MS = 10000
 
 /** 58mm -> pageFormat 1; 80mm -> 0; custom keeps 58mm's value by dot count. */
 function pageFormatFor(paper, dots) {
@@ -169,28 +175,51 @@ export function createIminDriver(deps = {}) {
 			const paper = cfg.paper ?? serverCfg.paper ?? "58mm"
 			const customDots = cfg.customDots ?? serverCfg.customDots ?? undefined
 			const cut = cfg.cut ?? serverCfg.cut ?? false
+			// Multi-copy: server value -> device override. Clamped so a
+			// mis-typed number cannot make the cashier wait for ever.
+			const rawCopies = cfg.copies ?? serverCfg.copies ?? DEFAULT_COPIES
+			const copies = Math.max(1, Math.min(Number(rawCopies) || 1, MAX_COPIES))
+			const rawDelay =
+				cfg.copyDelayMs ?? serverCfg.copyDelayMs ?? DEFAULT_COPY_DELAY_MS
+			const copyDelayMs = Math.max(
+				0,
+				Math.min(Number(rawDelay) || 0, MAX_COPY_DELAY_MS),
+			)
 			const dots = dotsForPaper(paper, customDots)
 			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
 			const p = await ensurePrinter()
 			p.setPageFormat(pageFormatFor(paper, dots))
 
+			// Render once; every copy reuses the same bitmap so the content is
+			// pixel-identical across copies.
 			const bitmap = await render(html, { paper, customDots })
-			await p.printSingleBitmap(bitmap.dataURL, 1) // 1 = centre alignment
-
-			// Resolve above means "queued" — the raster may not be in the print
-			// buffer yet. Reference flows wait before advancing the paper.
-			await new Promise((r) => setTimeout(r, SETTLE_MS))
-
-			// The feed is what makes the receipt physically leave the printer.
-			// Omitting it is what caused the "first run prints nothing, second
-			// run prints the first one" behaviour seen on device.
 			const feedDots = cfg.feedDots ?? serverCfg.feedDots ?? DEFAULT_FEED_DOTS
-			p.printAndFeedPaper(feedDots)
-			if (cut) p.partialCut()
 
-			await waitIdle(p)
-			return { paper, dots }
+			for (let i = 0; i < copies; i++) {
+				await p.printSingleBitmap(bitmap.dataURL, 1) // 1 = centre alignment
+
+				// Resolve above means "queued" — the raster may not be in the print
+				// buffer yet. Reference flows wait before advancing the paper.
+				await new Promise((r) => setTimeout(r, SETTLE_MS))
+
+				// The feed is what makes the receipt physically leave the printer.
+				// Omitting it is what caused the "first run prints nothing, second
+				// run prints the first one" behaviour seen on device.
+				p.printAndFeedPaper(feedDots)
+				if (cut) p.partialCut()
+
+				await waitIdle(p)
+
+				// Tear-off pause between copies (customer copy -> crew copy),
+				// never after the final one: a trailing delay would stall the
+				// cashier for no reason.
+				if (i < copies - 1 && copyDelayMs > 0) {
+					await new Promise((r) => setTimeout(r, copyDelayMs))
+				}
+			}
+
+			return { paper, dots, copies }
 		},
 
 		describe() {
