@@ -56,6 +56,44 @@ def _ensure_item(item_code, item_name, is_stock_item):
 	).insert(ignore_permissions=True)
 
 
+def _ensure_profile():
+	if frappe.db.exists("POS Profile", PROFILE):
+		return
+
+	if not frappe.db.exists("Company", COMPANY):
+		try:
+			from pos_next.install import create_test_company
+
+			create_test_company(currency="USD", inventory_method="FIFO")
+		except Exception:
+			pass
+		if not frappe.db.exists("Company", COMPANY):
+			return
+
+	warehouse = frappe.db.get_value(
+		"Warehouse", {"company": COMPANY, "is_group": 0}, "name"
+	) or frappe.db.get_value("Warehouse", {"is_group": 0}, "name")
+
+	mode_of_payment = frappe.db.get_value("Mode of Payment", {"enabled": 1}, "name")
+
+	frappe.get_doc(
+		{
+			"doctype": "POS Profile",
+			"name": PROFILE,
+			"company": COMPANY,
+			"warehouse": warehouse,
+			"currency": frappe.db.get_value("Company", COMPANY, "default_currency"),
+			"write_off_account": frappe.db.get_value(
+				"Account", {"company": COMPANY, "root_type": "Expense", "is_group": 0}, "name"
+			),
+			"write_off_cost_center": frappe.db.get_value(
+				"Cost Center", {"company": COMPANY, "is_group": 0}, "name"
+			),
+			"payments": [{"mode_of_payment": mode_of_payment, "default": 1}] if mode_of_payment else [],
+		}
+	).insert(ignore_permissions=True)
+
+
 def _ensure_package():
 	for code, name in (
 		(LAPTOP, "PNXT Laptop"),
@@ -70,6 +108,11 @@ def _ensure_package():
 
 	if frappe.db.exists("POS Package", PACKAGE):
 		return
+
+	_ensure_profile()
+	vals = frappe.db.get_value("POS Profile", PROFILE, ["company", "warehouse"], as_dict=True)
+	profile_company = (vals or {}).get("company") or COMPANY
+	profile_warehouse = (vals or {}).get("warehouse")
 
 	frappe.get_doc(
 		{
@@ -110,7 +153,13 @@ def _ensure_package():
 					"price_adjustment": LISTRIK_ADJ,
 				},
 			],
-			"outlets": [{"pos_profile": PROFILE, "enabled": 1}],
+			"outlets": [
+				{
+					"company": profile_company,
+					"warehouse": profile_warehouse,
+					"enabled": 1,
+				}
+			],
 		}
 	).insert(ignore_permissions=True)
 

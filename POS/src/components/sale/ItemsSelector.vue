@@ -558,7 +558,7 @@
 							</p>
 							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
 								<span class="font-semibold text-blue-600">{{
-									formatCurrency(item.rate || item.price_list_rate || 0)
+									formatCurrency(getDisplayRate(item))
 								}}</span>
 								<span class="text-gray-400"
 									>/
@@ -836,7 +836,7 @@
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
 								<div class="text-xs sm:text-sm font-semibold text-blue-600">
-									{{ formatCurrency(item.rate || item.price_list_rate || 0) }}
+									{{ formatCurrency(getDisplayRate(item)) }}
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
@@ -1368,6 +1368,14 @@ const optimizedClickHandlers = new Map();
 
 function isPackageItem(itemCode) {
 	return packagesStore.isPackageItem(itemCode);
+}
+
+function getDisplayRate(item) {
+	if (isPackageItem(item.item_code)) {
+		const pkg = packagesStore.getPackageForItem(item.item_code);
+		if (pkg) return Number(pkg.base_price) || 0;
+	}
+	return item.rate || item.price_list_rate || 0;
 }
 
 function getOptimizedClickHandler(item) {

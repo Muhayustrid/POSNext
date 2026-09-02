@@ -3,10 +3,11 @@
  "creation": "2025-10-15 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
- "field_order": [
-  "pos_profile",
-  "enabled",
-  "section_break_localization",
+	"field_order": [
+   "pos_profile",
+   "enabled",
+   "invoice_type",
+   "section_break_localization",
   "allowed_locales",
   "section_break_wallet",
   "enable_loyalty_program",
@@ -85,13 +86,21 @@
    "reqd": 1,
    "unique": 1
   },
-  {
-   "default": "1",
-   "description": "Enable custom POS settings for this profile",
-   "fieldname": "enabled",
-   "fieldtype": "Check",
-   "label": "Enabled"
-  },
+   {
+    "default": "1",
+    "description": "Enable custom POS settings for this profile",
+    "fieldname": "enabled",
+    "fieldtype": "Check",
+    "label": "Enabled"
+   },
+   {
+    "default": "Sales Invoice",
+    "description": "Compatibility field for ERPNext v16 POS code paths (e.g. POS Opening Entry cancellation reads get_single_value('POS Settings', 'invoice_type')). POS Next always creates Sales Invoices.",
+    "fieldname": "invoice_type",
+    "fieldtype": "Select",
+    "label": "Invoice Type Created via POS Screen",
+    "options": "Sales Invoice\nPOS Invoice"
+   },
   {
    "fieldname": "section_break_localization",
    "fieldtype": "Section Break",
