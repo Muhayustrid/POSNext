@@ -7,6 +7,8 @@ import {
 	initTransportFromServer,
 	printHTML as transportPrint,
 } from "@/utils/print/transport"
+import { receiptStylesFor } from "@/utils/print/receipt_layout"
+export { receiptStylesFor }
 
 const log = logger.create("PrintInvoice")
 
@@ -119,48 +121,13 @@ export async function hydrateLocalOnlyInvoice(invoiceData) {
 	return invoiceData
 }
 
-const RECEIPT_STYLES = `
-	* { margin: 0; padding: 0; box-sizing: border-box; }
-	body {
-		font-family: 'Courier New', monospace;
-		padding: 10px; width: 80mm; margin: 0; max-width: 80mm;
-		font-weight: bold; color: black;
-	}
-	.receipt { width: 100%; }
-	.header { text-align: center; margin-bottom: 20px; border-bottom: 2px dashed #000; padding-bottom: 10px; }
-	.company-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-	.invoice-info { margin-bottom: 15px; font-size: 12px; }
-	.invoice-info div { display: flex; justify-content: space-between; margin-bottom: 3px; }
-	.partial-status { color: #000; font-weight: bold; margin-bottom: 5px; }
-	.items-table { width: 100%; margin-bottom: 15px; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 10px 0; }
-	.item-row { margin-bottom: 10px; font-size: 12px; }
-	.item-name { font-weight: bold; margin-bottom: 3px; }
-	.item-details { display: flex; justify-content: space-between; font-size: 11px; }
-	.item-discount { display: flex; justify-content: space-between; font-size: 10px; margin-top: 2px; }
-	.item-serials { font-size: 9px; margin-top: 3px; padding: 3px 5px; border: 1px dashed #000; border-radius: 2px; }
-	.item-serials-label { font-weight: bold; margin-bottom: 2px; }
-	.item-serials-list { word-break: break-all; }
-	.totals { margin-top: 15px; border-top: 1px dashed #000; padding-top: 10px; }
-	.total-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; }
-	.grand-total { font-size: 16px; font-weight: bold; border-top: 2px solid #000; padding-top: 10px; margin-top: 10px; }
-	.payments { margin-top: 15px; border-top: 1px dashed #000; padding-top: 10px; }
-	.payment-row { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 11px; }
-	.total-paid { font-weight: bold; border-top: 1px solid #000; padding-top: 5px; margin-top: 5px; }
-	.outstanding-row {
-		display: flex; justify-content: space-between; font-size: 13px; font-weight: bold;
-		border: 1px solid #000; padding: 8px; margin-top: 8px; border-radius: 4px;
-	}
-	.offline-badge {
-		text-align: center; font-size: 11px; font-weight: bold;
-		border: 1px dashed #000; padding: 4px; margin-bottom: 10px;
-	}
-	.footer { text-align: center; margin-top: 20px; padding-top: 10px; border-top: 2px dashed #000; font-size: 11px; }
-	@media print {
-		@page { size: 80mm auto; margin: 0; }
-		body { width: 80mm; padding: 5mm; margin: 0; }
-		.no-print { display: none; }
-	}
-`
+/**
+ * Dot-aware receipt stylesheet for the browser popup path
+ * (window.open + document.write, where <body> is real).
+ * The bitmap path ignores this — the frame width is `dots` px
+ * (receipt_renderer.composeReceiptFrame). Keep compat export.
+ */
+export const RECEIPT_STYLES = receiptStylesFor(576)
 
 /**
  * Inner receipt HTML (no shell). Used for local/offline invoices and the
@@ -335,7 +302,7 @@ export function buildReceiptHTML(invoiceData) {
 
 export function buildReceiptDocumentHTML(
 	invoiceData,
-	{ includeControls = false } = {},
+	{ includeControls = false, dots } = {},
 ) {
 	const controls = includeControls
 		? `
@@ -354,7 +321,7 @@ export function buildReceiptDocumentHTML(
 		<head>
 			<meta charset="UTF-8">
 			<title>${__("Invoice - {0}", [invoiceData.name])}</title>
-			<style>${RECEIPT_STYLES}</style>
+			<style>${receiptStylesFor(dots ?? 576)}</style>
 		</head>
 		<body>
 			${buildReceiptHTML(invoiceData)}

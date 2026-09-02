@@ -19,6 +19,8 @@ PRINT_CONFIG_FIELDS = (
 	"imin_print_copies",
 	"imin_copy_delay_ms",
 	"imin_feed_dots",
+	"imin_tail_dots",
+	"imin_copy_labels",
 	"print_fallback_enabled",
 )
 
@@ -27,6 +29,7 @@ PRINT_CONFIG_FIELDS = (
 MAX_COPIES = 5
 MAX_COPY_DELAY_MS = 10000
 MAX_FEED_DOTS = 500
+MAX_TAIL_DOTS = 200
 
 
 @frappe.whitelist()
@@ -84,10 +87,28 @@ def get_print_config(pos_profile):
 
 	try:
 		feed = getattr(settings, "imin_feed_dots", None)
-		feed = 100 if feed is None else int(feed)
+		feed = 160 if feed is None else int(feed)
 	except (TypeError, ValueError):
-		feed = 100
+		feed = 160
 	feed = max(8, min(feed, MAX_FEED_DOTS))
+
+	# Tail is white space INSIDE the bitmap. Together with feed it forms the
+	# clearance between the last printed line and the tear bar:
+	# head->cutter ~= tailDots + feedDots. The SDK clamps printAndFeedPaper to
+	# 0..255 dots, so some of that gap living in the raster keeps it safe even
+	# on builds where the feed ceiling matters.
+	# VERIFY ON DEVICE: 24 dots (3mm) is a starting value, not a measured one.
+	try:
+		tail = getattr(settings, "imin_tail_dots", None)
+		tail = 24 if tail is None else int(tail)
+	except (TypeError, ValueError):
+		tail = 24
+	tail = max(0, min(tail, MAX_TAIL_DOTS))
+
+	# Crew vs customer distinction: when copies>1 and this is truthy the second
+	# bitmap gets a CREW COPY banner so the outlet copy is unmistakable.
+	raw_label = getattr(settings, "imin_copy_labels", None)
+	copy_labels = True if raw_label is None else bool(raw_label)
 
 	return {
 		"driver": getattr(settings, "print_driver", None) or "browser",
@@ -97,6 +118,8 @@ def get_print_config(pos_profile):
 		"copies": copies,
 		"copy_delay_ms": delay,
 		"feed_dots": feed,
+		"tail_dots": tail,
+		"copy_labels": copy_labels,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

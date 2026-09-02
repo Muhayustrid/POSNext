@@ -198,15 +198,42 @@
 							v-model="feedDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('100')"
+							:placeholder="__('160')"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
-							__(
-								"Distance the paper moves after each copy, ~0.125 mm per dot. 100 = 12.5 mm. Raise this if the bottom of the receipt is cut off or the last line sits at the tear bar.",
-							)
-						}}
+								__(
+									"Distance the paper moves after each copy, 0.125 mm per dot. 160 = 20 mm. Together with the tail spacer this is the gap between the last printed line and the tear bar.",
+								)
+							}}
 						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-tail">
+							{{ __("Tail spacer (dots)") }}
+						</label>
+						<Input
+							id="direct-print-tail"
+							v-model="tailDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('24')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Blank space added inside the image itself, below the last line. Unlike the paper advance this cannot be clamped away by the printer service. 24 = 3 mm.",
+								)
+							}}
+						</p>
+					</div>
+
+					<div class="flex items-end pb-1">
+						<Checkbox
+							v-model="cfg.copyLabels"
+							:label="__('Label copies (CUSTOMER COPY / CREW COPY)')"
+						/>
 					</div>
 				</div>
 
@@ -324,6 +351,76 @@
 					{{ __("Showing the last 50 attempts.") }}
 				</p>
 			</div>
+
+			<!-- Print preview: the same bitmap path that reaches the printer, no device needed. -->
+			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
+				<h2 class="text-sm font-semibold text-gray-900">{{ __("Preview") }}</h2>
+				<p class="mt-1 text-xs text-gray-500">
+					{{
+						__(
+							"Renders the test receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer and copy labels. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
+						)
+					}}
+				</p>
+
+				<div class="mt-4 flex flex-wrap items-center gap-2">
+					<Button :loading="previewing" @click="runPreview(1)">
+						{{ __("Preview 1 copy") }}
+					</Button>
+					<Button :loading="previewing" @click="runPreview(2)">
+						{{ __("Preview 2 copies") }}
+					</Button>
+					<Button v-if="previewCopies.length" variant="ghost" @click="clearPreview">
+						{{ __("Clear") }}
+					</Button>
+				</div>
+
+				<div v-if="previewError" class="mt-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+					{{ previewError }}
+				</div>
+
+				<div v-else-if="previewing && !previewCopies.length" class="py-8 text-center text-sm text-gray-500">
+					{{ __("Rendering...") }}
+				</div>
+
+				<div v-else-if="previewCopies.length" class="mt-4 flex flex-wrap items-start gap-6">
+					<div v-for="row in previewCopies" :key="row.index" class="min-w-0">
+						<div class="mb-1 flex items-center gap-2">
+							<span class="text-xs font-medium text-gray-700">{{ row.label }}</span>
+							<Badge v-if="!row.visible" theme="gray">
+								{{ __("after {0} ms", [String(row.delayMs)]) }}
+							</Badge>
+						</div>
+						<div
+							class="overflow-x-auto rounded border border-gray-200 bg-neutral-100 p-2"
+							:aria-label="row.label"
+						>
+							<img
+								v-if="row.visible && row.bitmap"
+								:src="row.bitmap.dataURL"
+								:alt="row.label"
+								class="block bg-white"
+								:style="{ width: previewDots + 'px', maxWidth: 'none' }"
+							/>
+							<div
+								v-else
+								:style="{ width: previewDots + 'px' }"
+								class="flex h-24 items-center justify-center text-xs text-gray-400"
+							>
+								{{ __("waiting {0} ms", [String(row.delayMs)]) }}
+							</div>
+						</div>
+						<p v-if="row.bitmap" class="mt-1 text-xs text-gray-400">
+							{{
+								__("{0} x {1} dots", [
+									String(row.bitmap.width),
+									String(row.bitmap.height),
+								])
+							}}
+						</p>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </template>
@@ -336,6 +433,11 @@ import { useToast } from "@/composables/useToast"
 import { call } from "@/utils/apiWrapper"
 import { loadDeviceConfig, saveDeviceConfig } from "@/utils/print/imin_client"
 import { PAPER_PROFILES } from "@/utils/print/paper"
+import { buildReceiptPreviewSet } from "@/utils/print/receipt_preview"
+import {
+	DEFAULT_FEED_DOTS,
+	DEFAULT_TAIL_DOTS,
+} from "@/utils/print/receipt_layout"
 import { useBootstrapStore } from "@/stores/bootstrap"
 import {
 	ensureIminSdk,
@@ -384,13 +486,15 @@ const cfg = reactive({
 	paper: "58mm",
 	cut: false,
 	copies: 1,
+	copyLabels: true,
 })
 // Two copies printing (customer + outlet crew). Device-level delay
 // overrides the POS Settings value — same override pattern as `paper`/
 // `cut`, but specific to multi-copy jobs. Raw text so the field can be
 // empty (meaning 'use server default 800ms').
 const copyDelayText = ref("800")
-const feedDotsText = ref("100")
+const feedDotsText = ref(String(DEFAULT_FEED_DOTS))
+const tailDotsText = ref(String(DEFAULT_TAIL_DOTS))
 const customDotsText = ref("384")
 
 function readCfgIntoForm() {
@@ -399,6 +503,7 @@ function readCfgIntoForm() {
 	const p = stored.paper
 	cfg.paper = p === "58mm" || p === "80mm" || p === "custom" ? p : "58mm"
 	cfg.cut = Boolean(stored.cut)
+	cfg.copyLabels = stored.copyLabels == null ? true : Boolean(stored.copyLabels)
 	const n = Number(stored.copies)
 	cfg.copies = Number.isFinite(n) && n >= 1 && n <= 5 ? Math.floor(n) : 1
 	const cd = stored.customDots
@@ -408,7 +513,14 @@ function readCfgIntoForm() {
 		d === undefined || d === "" || d === null ? "800" : String(d)
 	const fd = stored.feedDots
 	feedDotsText.value =
-		fd === undefined || fd === "" || fd === null ? "100" : String(fd)
+		fd === undefined || fd === "" || fd === null
+			? String(DEFAULT_FEED_DOTS)
+			: String(fd)
+	const td = stored.tailDots
+	tailDotsText.value =
+		td === undefined || td === "" || td === null
+			? String(DEFAULT_TAIL_DOTS)
+			: String(td)
 }
 
 function reloadConfig() {
@@ -479,6 +591,7 @@ function onSaveConfig() {
 			paper,
 			customDots,
 			cut: Boolean(cfg.cut),
+			copyLabels: Boolean(cfg.copyLabels),
 			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
 			copyDelayMs:
 				copyDelayText.value === "" || copyDelayText.value == null
@@ -486,8 +599,12 @@ function onSaveConfig() {
 					: Math.max(0, Math.min(Number(copyDelayText.value) || 0, 10000)),
 			feedDots:
 				feedDotsText.value === "" || feedDotsText.value == null
-					? 100
+					? DEFAULT_FEED_DOTS
 					: Math.max(8, Math.min(Number(feedDotsText.value) || 0, 500)),
+			tailDots:
+				tailDotsText.value === "" || tailDotsText.value == null
+					? DEFAULT_TAIL_DOTS
+					: Math.max(0, Math.min(Number(tailDotsText.value) || 0, 200)),
 		})
 		// Do not call setPageFormat directly — imin_client applies it on next print.
 		showSuccess(__("Device config saved. It will apply on the next print."))
@@ -546,6 +663,101 @@ async function onTestPrint() {
 		await fetchLogs()
 	} finally {
 		printing.value = false
+	}
+}
+
+/**
+ * Read the effective print config the way the driver does: device
+ * localStorage on top of the transport's server config. Shared resolver, so
+ * the preview cannot drift from the print.
+ */
+
+const previewing = ref(false)
+const previewDots = ref(384)
+const previewCopies = ref([])
+const previewError = ref("")
+const previewTimers = []
+
+function effectivePrintConfig(copiesOverride) {
+	let server = {}
+	try {
+		const c = getTransport().getConfig() || {}
+		server = {
+			paper: c.paper,
+			customDots: c.custom_dots,
+			cut: c.cut,
+			copies: c.copies,
+			copyDelayMs: c.copy_delay_ms,
+			feedDots: c.feed_dots,
+			tailDots: c.tail_dots,
+			copyLabels: c.copy_labels,
+		}
+	} catch {
+		server = {}
+	}
+	const device = { ...(loadDeviceConfig() || {}) }
+	if (copiesOverride != null) device.copies = copiesOverride
+	return resolvePrintConfig(device, server)
+}
+
+function clearPreview() {
+	for (const t of previewTimers) window.clearTimeout(t)
+	previewTimers.length = 0
+	previewCopies.value = []
+	previewError.value = ""
+}
+
+/**
+ * Render the preview through the same path that actually prints
+ * (resolvePrintConfig -> withCopyLabel -> renderHTMLToBitmap), then reveal
+ * later copies only after the configured delay. The second sheet therefore
+ * appears exactly when it would leave the printer. Same invariant the driver
+ * itself relies on — the template only iterates the set it is given.
+ */
+async function runPreview(copiesOverride) {
+	clearPreview()
+	previewing.value = true
+	try {
+		const device = { ...(loadDeviceConfig() || {}) }
+		if (copiesOverride != null) device.copies = copiesOverride
+		let server = {}
+		try {
+			const c = getTransport().getConfig() || {}
+			server = {
+				paper: c.paper,
+				customDots: c.custom_dots,
+				cut: c.cut,
+				copies: c.copies,
+				copyDelayMs: c.copy_delay_ms,
+				feedDots: c.feed_dots,
+				tailDots: c.tail_dots,
+				copyLabels: c.copy_labels,
+			}
+		} catch {
+			server = {}
+		}
+		const html = buildReceiptDocumentHTML(buildTestInvoiceData(), {
+			includeControls: false,
+		})
+		const set = await buildReceiptPreviewSet(html, { device, server })
+		previewDots.value = set.dots
+		previewCopies.value = set.copies
+		// Later copies are hidden until their delay elapses, so the tear-off
+		// pause between physical sheets is visible even without a printer.
+		for (const row of set.copies) {
+			if (!row.visible)
+				previewTimers.push(
+					window.setTimeout(() => {
+						const n = previewCopies.value
+						const t = n.find((x) => x.index === row.index)
+						if (t) t.visible = true
+					}, row.delayMs),
+				)
+		}
+	} catch (e) {
+		previewError.value = e?.message || String(e)
+	} finally {
+		previewing.value = false
 	}
 }
 

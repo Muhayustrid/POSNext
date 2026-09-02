@@ -111,3 +111,34 @@ class TestPrintingAPI(FrappeTestCase):
 		)
 		rows = get_print_logs(reference_name="ACC-SINV-LIST")
 		self.assertTrue(any(r["reference_name"] == "ACC-SINV-LIST" for r in rows))
+	def test_tail_dots_defaults_sensibly(self):
+		cfg = get_print_config(self.profile)
+		self.assertIn("tail_dots", cfg)
+		self.assertGreater(cfg["tail_dots"], 0)
+		self.assertLessEqual(cfg["tail_dots"], 200)
+
+	def test_tail_dots_clamps_large_values(self):
+		if not self._has_feed_or_tail_column("imin_tail_dots"):
+			self.skipTest("imin_tail_dots column not migrated on this site")
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if not settings_name:
+			settings_name = (
+				frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.profile, "enabled": 1})
+				.insert(ignore_permissions=True)
+				.name
+			)
+		frappe.db.set_value("POS Settings", settings_name, "imin_tail_dots", 999)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["tail_dots"], 200)
+
+	def test_copy_labels_defaults_to_true(self):
+		cfg = get_print_config(self.profile)
+		self.assertIn("copy_labels", cfg)
+		self.assertTrue(cfg["copy_labels"])
+
+	def _has_feed_or_tail_column(self, fieldname):
+		meta = frappe.get_meta("POS Settings")
+		return any(df.fieldname == fieldname for df in meta.get("fields"))
+

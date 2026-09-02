@@ -1,6 +1,11 @@
 import html2canvas from "html2canvas"
 
 import { dotsForPaper } from "./paper"
+import {
+	DEFAULT_TAIL_DOTS,
+	receiptFrameStyle,
+	tailSpacerHTML,
+} from "./receipt_layout"
 
 const DEFAULT_THRESHOLD = 128
 
@@ -49,27 +54,48 @@ export function binarize(imageData, threshold = DEFAULT_THRESHOLD) {
 }
 
 /**
- * Render print HTML to a monochrome bitmap whose width is exactly the paper's
- * dot count. 1 CSS px == 1 printer dot, so html2canvas scale is forced to 1
- * (never left to the device pixel ratio — that is what skewed the old app).
+ * Build the off-screen frame that html2canvas rasterises.
  *
- * @param {string} html - full HTML document or fragment to print.
- * @param {object} opts
- * @param {string} opts.paper - "58mm" | "80mm" | "custom"
+ * Two things here are load-bearing and were previously broken:
+ *
+ *  1. Padding. `html` is usually a FULL document, and `frame.innerHTML = html`
+ *     runs the fragment parser: <!DOCTYPE>, <html>, <head> and <body> are all
+ *     dropped (the <style> text survives). So every `body { ... }` rule in the
+ *     receipt stylesheet matched nothing — including `padding: 10px`, which is
+ *     why bitmap content sat flush against the paper edge. The frame carries
+ *     the padding itself now (receiptFrameStyle).
+ *  2. Tail spacer. A white block under the receipt so the last printed line is
+ *     not the last raster row. This is a RENDER-side guard only; it does not
+ *     replace printAndFeedPaper(feedDots), which is what physically moves the
+ *     paper past the tear bar.
+ *
+ * Pure DOM composition (no html2canvas, no canvas) so it is unit-testable.
+ *
+ * @param {string} html
+ * @param {object} [opts]
+ * @param {string} [opts.paper] - "58mm" | "80mm" | "custom"
  * @param {number} [opts.customDots] - when paper is "custom"
- * @param {number} [opts.threshold] - binarize threshold (default 128)
- * @returns {Promise<{dataURL:string,width:number,height:number}>}
+ * @param {number} [opts.tailDots] - trailing white space in dots
+ * @returns {{host:HTMLElement, frame:HTMLElement, dots:number, tailDots:number}}
  */
-export async function renderHTMLToBitmap(html, opts) {
+export function composeReceiptFrame(html, opts = {}) {
 	const dots = dotsForPaper(opts.paper, opts.customDots)
-
+	const tail = opts.tailDots ?? DEFAULT_TAIL_DOTS
+	const tailHTML = tailSpacerHTML(tail)
 	const host = document.createElement("div")
 	host.style.cssText =
 		"position:fixed;left:-10000px;top:0;pointer-events:none;overflow:hidden;"
 	const frame = document.createElement("div")
-	frame.style.cssText = `width:${dots}px;background:#fff;color:#000;`
-	frame.innerHTML = html
+	frame.className = "pn-receipt-frame"
+	frame.style.cssText = receiptFrameStyle(dots)
+	frame.innerHTML = html + tailHTML
 	host.appendChild(frame)
+	return { host, frame, dots, tailDots: tailHTML ? Number(tail) || 0 : 0 }
+}
+
+export async function renderHTMLToBitmap(html, opts) {
+	const dots = dotsForPaper(opts.paper, opts.customDots)
+	const { host, frame } = composeReceiptFrame(html, opts)
 	document.body.appendChild(host)
 
 	try {

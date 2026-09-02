@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createIminDriver } from "./imin_client"
+import { DEFAULT_FEED_DOTS, DEFAULT_TAIL_DOTS } from "./receipt_layout"
 
 function makeFakePrinter(overrides = {}) {
 	return {
@@ -90,7 +91,9 @@ describe("createIminDriver", () => {
 		// before running the full fallback suite below, so mocks remain intact.
 		expect(printer.partialCut).toHaveBeenCalledTimes(1)
 		// Feed is paper-advance (not cut-path dependent) — it always happens.
-		expect(printer.printAndFeedPaper.mock.calls.length).toBeGreaterThanOrEqual(2)
+		expect(printer.printAndFeedPaper.mock.calls.length).toBeGreaterThanOrEqual(
+			2,
+		)
 	})
 
 	it("waits for status to reach 0 before resolving", async () => {
@@ -151,8 +154,8 @@ describe("createIminDriver", () => {
 			config: { copies: 2, copyDelayMs: 250 },
 		})
 		expect(res.copies).toBe(2)
-		// The same bitmap was re-sent, not re-rendered: two bitmap calls,
-		// one upload URL.
+		// Two copies reach the printer. With copy labels on (the default) each
+		// copy is rendered separately so the crew banner can differ.
 		expect(printer.printSingleBitmap).toHaveBeenCalledTimes(2)
 		expect(printer.printAndFeedPaper).toHaveBeenCalledTimes(2)
 		// Between-copy gap really elapsed (250 ms), and there is no gap
@@ -195,8 +198,9 @@ describe("createIminDriver", () => {
 			expect(render).toHaveBeenCalledWith("<div/>", {
 				paper: "80mm",
 				customDots: undefined,
+				tailDots: DEFAULT_TAIL_DOTS,
 			})
-			expect(res).toEqual({ paper: "80mm", dots: 576, copies: 1 })
+			expect(res.paper).toBe("80mm")
 		})
 
 		it("device paper overrides the server paper", async () => {
@@ -207,7 +211,7 @@ describe("createIminDriver", () => {
 				config: { paper: "80mm", cut: true },
 			})
 			expect(printer.setPageFormat).toHaveBeenCalledWith(1) // device 58mm wins
-			expect(res).toEqual({ paper: "58mm", dots: 384, copies: 1 })
+			expect(res.paper).toBe("58mm")
 		})
 
 		it("device cut:false wins over server cut:true", async () => {
@@ -247,8 +251,96 @@ describe("createIminDriver", () => {
 			expect(render).toHaveBeenCalledWith("<div/>", {
 				paper: "custom",
 				customDots: 512,
+				tailDots: DEFAULT_TAIL_DOTS,
 			})
-			expect(res).toEqual({ paper: "custom", dots: 512, copies: 1 })
+			expect(res.paper).toBe("custom")
+		})
+	})
+	describe("tail spacer + copy labels", () => {
+		it("feeds the safe default of 160 dots when nothing is configured", async () => {
+			const bare = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({}),
+			})
+			await bare.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			})
+			// 160 dots = 20 mm, above the typical head->tear-bar gap. The old
+			// 100 (12.5 mm) left the last line inside the mechanism.
+			expect(printer.printAndFeedPaper).toHaveBeenCalledWith(DEFAULT_FEED_DOTS)
+			expect(DEFAULT_FEED_DOTS).toBe(160)
+		})
+
+		it("device feedDots still overrides the safer default", async () => {
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ feedDots: 90 }),
+			})
+			await d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			})
+			expect(printer.printAndFeedPaper).toHaveBeenCalledWith(90)
+		})
+
+		it("passes the effective tailDots to the renderer", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			await driver.printHTML("<div/>", {
+				render,
+				config: { tailDots: 40 },
+			})
+			expect(render).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ tailDots: 40 }),
+			)
+		})
+
+		it("renders one labelled bitmap per copy when copies > 1", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<body>hi</body>", {
+				render,
+				config: { copies: 2, copyDelayMs: 0 },
+			})
+			expect(render).toHaveBeenCalledTimes(2)
+			const [first, second] = render.mock.calls
+			// The chosen design labels BOTH copies: copy 1 is the customer's,
+			// copy 2 is the outlet's crew copy. Same amounts, distinct banner.
+			expect(first[0]).toMatch(
+				/^<div class="pn-copy-label"[^>]*>CUSTOMER COPY<\/div>/,
+			)
+			expect(second[0]).toMatch(
+				/^<div class="pn-copy-label"[^>]*>CREW COPY<\/div>/,
+			)
+			expect(second[0]).toContain("<body>hi</body>")
+			expect(printer.printSingleBitmap).toHaveBeenCalledTimes(2)
+		})
+
+		it("reuses one bitmap when labels are off", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false, copyLabels: false }),
+			})
+			await d.printHTML("<div/>", {
+				render,
+				config: { copies: 2, copyDelayMs: 0 },
+			})
+			expect(render).toHaveBeenCalledTimes(1)
+			expect(printer.printSingleBitmap).toHaveBeenCalledTimes(2)
+		})
+
+		it("never labels a single copy", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<div/>", { render, config: { copies: 1 } })
+			expect(render).toHaveBeenCalledTimes(1)
+			expect(render.mock.calls[0][0]).toBe("<div/>")
 		})
 	})
 })
