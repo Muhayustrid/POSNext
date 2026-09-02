@@ -35,9 +35,16 @@ Open `/pos/direct-print` from the POSNext home shortcut.
 
 ## Part C — Deferred minors (fix if the device work exposes them)
 
-- Probe page: dead `wsReady` var; duplicated status-reply branch; `connectWS` leaks the previous
-  socket on repeat press; `pollStatus` reads `value` at the top level — if a reply looks empty,
-  read the raw `WS recv:` line above it (replies may be nested).
+- ~~Probe page `pollStatus` reads `value` at the top level~~ — **fixed in probe v2**: replies
+  are matched by `type` and the status code is read at `data.value` (the nested path the SDK
+  uses). A valid `{"type":2,"data":{"value":0}}` reply no longer logs "No status reply".
+- ~~Probe page upload 400~~ — **the 400 was a probe artifact, not the device.** v1 posted the
+  data URL as a string (`fd.append("file", dataUrl)` → a text form field, no `filename`); the
+  print service wants a multipart file part. The production driver was never affected:
+  `imin_client.js` calls `printSingleBitmap()`, which converts to a Blob internally
+  (`imin-printer.js:590`). Probe v2 posts variant A (SDK-canonical Blob) and an
+  "upload variants" button (A blob / B raw / C json / D the old string) confirms the accepted
+  format on any new unit.
 - `paper.js` `dotsForPaper("constructor")` returns via the prototype chain — fixed with
   `Object.hasOwn`, but keep in mind for other lookups.
 - `qz_client.getStatus` has no try/catch (the transport's fallback chain covers it).
@@ -45,3 +52,6 @@ Open `/pos/direct-print` from the POSNext home shortcut.
   session with no profile leaves the transport on defaults until reload.
 - Direct Print page: logs-error state replaces cached rows; paper pill shows the transport
   (server) value, not the just-saved device value.
+- ~~`POS Print Log` Fallback row dropped `error_message`~~ — **fixed**: the transport now
+  records why earlier drivers failed (and marks a skipped driver) on the Fallback row, so
+  "why did this not come out of the iMin" is answerable from the log. See `transport.js`.
