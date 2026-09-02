@@ -63,6 +63,7 @@
   "imin_cut_paper",
   "imin_print_copies",
   "imin_copy_delay_ms",
+  "imin_feed_dots",
   "print_fallback_enabled",
   "section_break_delivery",
   "use_delivery_charges",
@@ -492,6 +493,14 @@
    "fieldname": "imin_copy_delay_ms",
    "fieldtype": "Int",
    "label": "Delay Between Copies (ms)"
+  },
+  {
+   "default": "100",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Paper advance after each copy so the receipt clears the tear bar (dots = mm×8, e.g. 100≈12mm)",
+   "fieldname": "imin_feed_dots",
+   "fieldtype": "Int",
+   "label": "Advance Paper (dots)"
   },
   {
    "default": "1",

@@ -18,6 +18,7 @@ PRINT_CONFIG_FIELDS = (
 	"imin_cut_paper",
 	"imin_print_copies",
 	"imin_copy_delay_ms",
+	"imin_feed_dots",
 	"print_fallback_enabled",
 )
 
@@ -25,6 +26,7 @@ PRINT_CONFIG_FIELDS = (
 # wait for ever (copies) or block the lane (delay).
 MAX_COPIES = 5
 MAX_COPY_DELAY_MS = 10000
+MAX_FEED_DOTS = 500
 
 
 @frappe.whitelist()
@@ -80,6 +82,13 @@ def get_print_config(pos_profile):
 		delay = 800
 	delay = max(0, min(delay, MAX_COPY_DELAY_MS))
 
+	try:
+		feed = getattr(settings, "imin_feed_dots", None)
+		feed = 100 if feed is None else int(feed)
+	except (TypeError, ValueError):
+		feed = 100
+	feed = max(8, min(feed, MAX_FEED_DOTS))
+
 	return {
 		"driver": getattr(settings, "print_driver", None) or "browser",
 		"paper": getattr(settings, "imin_paper_width", None) or "58mm",
@@ -87,6 +96,7 @@ def get_print_config(pos_profile):
 		"cut": bool(getattr(settings, "imin_cut_paper", None)),
 		"copies": copies,
 		"copy_delay_ms": delay,
+		"feed_dots": feed,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

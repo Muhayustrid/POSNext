@@ -971,16 +971,16 @@
 </template>
 
 <script setup>
-import { Button, Dialog, FeatherIcon, Input } from "frappe-ui";
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { storeToRefs } from "pinia";
-import { useShift, shiftState } from "../composables/useShift";
-import { useFormatters } from "../composables/useFormatters";
-import { useToast } from "../composables/useToast";
-import { usePOSSettingsStore } from "../stores/posSettings";
-import { usePOSShiftStore } from "../stores/posShift";
-import { printEODReport } from "../utils/printEod";
-import TranslatedHTML from "./common/TranslatedHTML.vue";
+import { Button, Dialog, FeatherIcon, Input } from "frappe-ui"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { storeToRefs } from "pinia"
+import { useShift, shiftState } from "../composables/useShift"
+import { useFormatters } from "../composables/useFormatters"
+import { useToast } from "../composables/useToast"
+import { usePOSSettingsStore } from "../stores/posSettings"
+import { usePOSShiftStore } from "../stores/posShift"
+import { printEODReport } from "../utils/printEod"
+import TranslatedHTML from "./common/TranslatedHTML.vue"
 
 const props = defineProps({
 	modelValue: {
@@ -992,76 +992,77 @@ const props = defineProps({
 		required: true,
 		validator: (value) => value && value.length > 0,
 	},
-});
+})
 
-const emit = defineEmits(["update:modelValue", "shift-closed"]);
+const emit = defineEmits(["update:modelValue", "shift-closed"])
 
 const open = computed({
 	get: () => props.modelValue,
 	set: (value) => emit("update:modelValue", value),
-});
+})
 
-const { getClosingShiftData, submitClosingShift } = useShift();
-const { formatCurrency, formatQuantity, formatDateTime, formatTime } = useFormatters();
-const { showSuccess, showWarning } = useToast();
-const posSettingsStore = usePOSSettingsStore();
-const { hideExpectedAmount } = storeToRefs(posSettingsStore);
+const { getClosingShiftData, submitClosingShift } = useShift()
+const { formatCurrency, formatQuantity, formatDateTime, formatTime } =
+	useFormatters()
+const { showSuccess, showWarning } = useToast()
+const posSettingsStore = usePOSSettingsStore()
+const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 
-const shiftStore = usePOSShiftStore();
+const shiftStore = usePOSShiftStore()
 
-const closingData = ref(null);
-const closingDataResource = getClosingShiftData;
-const submitResource = submitClosingShift;
-const showInvoiceDetails = ref(false);
-const showSuccessReport = ref(false); // Track if shift is closed and showing report
-const errorMessage = ref(""); // User-friendly error message
-const eodPrintFailed = ref(null);
-const retryPrintLoading = ref(false);
-const showIdleWarning = ref(false);
-let _idleWarningTimer = null;
+const closingData = ref(null)
+const closingDataResource = getClosingShiftData
+const submitResource = submitClosingShift
+const showInvoiceDetails = ref(false)
+const showSuccessReport = ref(false) // Track if shift is closed and showing report
+const errorMessage = ref("") // User-friendly error message
+const eodPrintFailed = ref(null)
+const retryPrintLoading = ref(false)
+const showIdleWarning = ref(false)
+let _idleWarningTimer = null
 
 // Watch dialog open state
 watch(open, async (isOpen) => {
 	if (isOpen && props.openingShift) {
 		// Pause the shift duration counter in the header
-		shiftStore.shiftTimerPaused = true;
-		showIdleWarning.value = false;
+		shiftStore.shiftTimerPaused = true
+		showIdleWarning.value = false
 
 		// Warn user if dialog stays open for more than 1 minute
 		_idleWarningTimer = setTimeout(() => {
-			showIdleWarning.value = true;
-		}, 60_000);
+			showIdleWarning.value = true
+		}, 60_000)
 
 		// Refresh POS settings to get latest hideExpectedAmount value
-		await posSettingsStore.reloadSettings();
-		loadClosingData();
+		await posSettingsStore.reloadSettings()
+		loadClosingData()
 	} else {
 		// Resume the shift duration counter
-		shiftStore.shiftTimerPaused = false;
-		showIdleWarning.value = false;
+		shiftStore.shiftTimerPaused = false
+		showIdleWarning.value = false
 		if (_idleWarningTimer) {
-			clearTimeout(_idleWarningTimer);
-			_idleWarningTimer = null;
+			clearTimeout(_idleWarningTimer)
+			_idleWarningTimer = null
 		}
-		eodPrintFailed.value = null;
+		eodPrintFailed.value = null
 	}
-});
+})
 
 onBeforeUnmount(() => {
-	shiftStore.shiftTimerPaused = false;
+	shiftStore.shiftTimerPaused = false
 	if (_idleWarningTimer) {
-		clearTimeout(_idleWarningTimer);
-		_idleWarningTimer = null;
+		clearTimeout(_idleWarningTimer)
+		_idleWarningTimer = null
 	}
-});
+})
 
 async function loadClosingData() {
 	try {
-		errorMessage.value = ""; // Clear any previous errors
+		errorMessage.value = "" // Clear any previous errors
 
 		const data = await closingDataResource.submit({
 			opening_shift: props.openingShift,
-		});
+		})
 
 		// Make payment_reconciliation reactive
 		if (data.payment_reconciliation) {
@@ -1071,43 +1072,44 @@ async function loadClosingData() {
 					closing_amount: payment.closing_amount ?? 0,
 					difference: 0,
 					_touched: true,
-				})
-			);
+				}),
+			)
 
 			// Calculate initial differences
 			data.payment_reconciliation.forEach((payment) => {
-				calculateDifference(payment);
-			});
+				calculateDifference(payment)
+			})
 		}
 
-		closingData.value = data;
+		closingData.value = data
 
 		// Auto-expand invoice details if there are few invoices
 		if (invoiceCount.value > 0 && invoiceCount.value <= 10) {
-			showInvoiceDetails.value = true;
+			showInvoiceDetails.value = true
 		}
 	} catch (error) {
-		console.error("Error loading closing data:", error);
+		console.error("Error loading closing data:", error)
 		errorMessage.value =
-			"Unable to load shift data. Please check your connection and try again.";
+			"Unable to load shift data. Please check your connection and try again."
 	}
 }
 
 function calculateDifference(payment) {
-	const closing = Number.parseFloat(payment.closing_amount) || 0;
-	const expected = Number.parseFloat(payment.expected_amount) || 0;
-	payment.difference = closing - expected;
+	const closing = Number.parseFloat(payment.closing_amount) || 0
+	const expected = Number.parseFloat(payment.expected_amount) || 0
+	payment.difference = closing - expected
 }
 
 // New function to handle closing amount updates with proper reactivity
 function updateClosingAmount(payment, value) {
-	payment.closing_amount = value;
-	payment._touched = true;
-	calculateDifference(payment);
+	payment.closing_amount = value
+	payment._touched = true
+	calculateDifference(payment)
 }
 
 const canSubmit = computed(() => {
-	if (!closingData.value || !closingData.value.payment_reconciliation) return false;
+	if (!closingData.value || !closingData.value.payment_reconciliation)
+		return false
 
 	// Check if all closing amounts have been manually entered
 	return closingData.value.payment_reconciliation.every(
@@ -1115,209 +1117,219 @@ const canSubmit = computed(() => {
 			payment._touched &&
 			payment.closing_amount !== null &&
 			payment.closing_amount !== undefined &&
-			payment.closing_amount !== ""
-	);
-});
+			payment.closing_amount !== "",
+	)
+})
 
 async function submitClosing() {
-	if (!closingData.value) return;
+	if (!closingData.value) return
 
 	try {
-		errorMessage.value = ""; // Clear any previous errors
+		errorMessage.value = "" // Clear any previous errors
 
 		// Ensure all differences are calculated
 		if (closingData.value.payment_reconciliation) {
 			closingData.value.payment_reconciliation.forEach((payment) => {
-				calculateDifference(payment);
-			});
+				calculateDifference(payment)
+			})
 		}
 
 		// Submit to server
-		const result = await submitResource.submit({ closing_shift: closingData.value });
-		const closingShiftName = result?.name ?? submitResource.data?.name;
+		const result = await submitResource.submit({
+			closing_shift: closingData.value,
+		})
+		const closingShiftName = result?.name ?? submitResource.data?.name
 		if (closingShiftName) {
 			try {
-				await printEODReport(closingShiftName);
-				eodPrintFailed.value = null;
+				await printEODReport(closingShiftName, closingData.value?.pos_profile)
+				eodPrintFailed.value = null
 			} catch (err) {
-				console.warn("[eod] print failed", err);
-				showWarning(__("EOD report did not print. Use the Reprint button to retry."));
-				eodPrintFailed.value = { closingShiftName };
-				showSuccessReport.value = true;
-				return;
+				console.warn("[eod] print failed", err)
+				showWarning(
+					__("EOD report did not print. Use the Reprint button to retry."),
+				)
+				eodPrintFailed.value = { closingShiftName }
+				showSuccessReport.value = true
+				return
 			}
 		}
 
 		// If hideExpectedAmount is enabled, show success report before closing
 		if (hideExpectedAmount.value) {
-			showSuccessReport.value = true;
+			showSuccessReport.value = true
 			// Auto-expand invoice details in success report
 			if (invoiceCount.value > 0 && invoiceCount.value <= 10) {
-				showInvoiceDetails.value = true;
+				showInvoiceDetails.value = true
 			}
 		} else {
 			// Normal mode: close immediately
-			emit("shift-closed");
-			closeDialog();
+			emit("shift-closed")
+			closeDialog()
 		}
 	} catch (error) {
-		console.error("Error submitting closing shift:", error);
-		errorMessage.value = "Failed to close shift. Please verify all amounts and try again.";
+		console.error("Error submitting closing shift:", error)
+		errorMessage.value =
+			"Failed to close shift. Please verify all amounts and try again."
 	}
 }
 
 async function retryEodPrint() {
-	const closingShiftName = eodPrintFailed.value?.closingShiftName;
-	if (!closingShiftName) return;
+	const closingShiftName = eodPrintFailed.value?.closingShiftName
+	if (!closingShiftName) return
 
-	retryPrintLoading.value = true;
+	retryPrintLoading.value = true
 	try {
-		await printEODReport(closingShiftName);
-		eodPrintFailed.value = null;
-		showSuccess(__("EOD report printed successfully"));
-		closeDialog();
+		await printEODReport(closingShiftName, closingData.value?.pos_profile)
+		eodPrintFailed.value = null
+		showSuccess(__("EOD report printed successfully"))
+		closeDialog()
 	} catch (err) {
-		console.warn("[eod] retry print failed", err);
-		showWarning(__("EOD report did not print. Please check QZ Tray and retry."));
+		console.warn("[eod] retry print failed", err)
+		showWarning(__("EOD report did not print. Please check QZ Tray and retry."))
 	} finally {
-		retryPrintLoading.value = false;
+		retryPrintLoading.value = false
 	}
 }
 
 function closeDialog() {
 	// Emit shift-closed event if we're closing from success report
 	if (showSuccessReport.value) {
-		emit("shift-closed");
+		emit("shift-closed")
 	}
 
-	open.value = false;
-	closingData.value = null;
-	showInvoiceDetails.value = false;
-	showSuccessReport.value = false; // Reset report view
-	errorMessage.value = ""; // Clear error messages
-	eodPrintFailed.value = null;
+	open.value = false
+	closingData.value = null
+	showInvoiceDetails.value = false
+	showSuccessReport.value = false // Reset report view
+	errorMessage.value = "" // Clear error messages
+	eodPrintFailed.value = null
 }
 
 // UI State Computed Properties
-const shouldShowSummary = computed(() => !hideExpectedAmount.value || showSuccessReport.value);
+const shouldShowSummary = computed(
+	() => !hideExpectedAmount.value || showSuccessReport.value,
+)
 
-const isInEntryMode = computed(() => hideExpectedAmount.value && !showSuccessReport.value);
+const isInEntryMode = computed(
+	() => hideExpectedAmount.value && !showSuccessReport.value,
+)
 
 const reconciliationMessage = computed(() => {
 	if (isInEntryMode.value) {
-		return "Enter the actual counted amounts for each payment method";
+		return "Enter the actual counted amounts for each payment method"
 	}
 	if (showSuccessReport.value && hideExpectedAmount.value) {
-		return "Shift closed successfully - Review the final reconciliation below";
+		return "Shift closed successfully - Review the final reconciliation below"
 	}
-	return "Count your cash and enter actual amounts below";
-});
+	return "Count your cash and enter actual amounts below"
+})
 
 // Computed properties for real-time recalculation
 const invoiceCount = computed(() => {
-	if (!closingData.value) return 0;
-	const transactions = closingData.value.pos_transactions || [];
-	return transactions.length;
-});
+	if (!closingData.value) return 0
+	const transactions = closingData.value.pos_transactions || []
+	return transactions.length
+})
 
 // Check if there are any return invoices
 const hasReturns = computed(() => {
-	if (!closingData.value) return false;
-	return (closingData.value.returns_count || 0) > 0;
-});
+	if (!closingData.value) return false
+	return (closingData.value.returns_count || 0) > 0
+})
 
 // Count of sales invoices (non-returns)
 const salesInvoiceCount = computed(() => {
-	if (!closingData.value) return 0;
-	const transactions = closingData.value.pos_transactions || [];
-	return transactions.filter((t) => !t.is_return).length;
-});
+	if (!closingData.value) return 0
+	const transactions = closingData.value.pos_transactions || []
+	return transactions.filter((t) => !t.is_return).length
+})
 
 const totalTax = computed(() => {
-	if (!closingData.value || !closingData.value.taxes) return 0;
+	if (!closingData.value || !closingData.value.taxes) return 0
 	return closingData.value.taxes.reduce(
 		(sum, tax) => sum + Number.parseFloat(tax.amount || 0),
-		0
-	);
-});
+		0,
+	)
+})
 
 const grossSales = computed(() => {
-	if (!closingData.value) return 0;
-	return closingData.value.sales_total ?? closingData.value.grand_total ?? 0;
-});
+	if (!closingData.value) return 0
+	return closingData.value.sales_total ?? closingData.value.grand_total ?? 0
+})
 const getTotalExpected = computed(() => {
-	if (!closingData.value || !closingData.value.payment_reconciliation) return 0;
+	if (!closingData.value || !closingData.value.payment_reconciliation) return 0
 	return closingData.value.payment_reconciliation.reduce(
 		(sum, payment) => sum + Number.parseFloat(payment.expected_amount || 0),
-		0
-	);
-});
+		0,
+	)
+})
 
 const getTotalActual = computed(() => {
-	if (!closingData.value || !closingData.value.payment_reconciliation) return 0;
+	if (!closingData.value || !closingData.value.payment_reconciliation) return 0
 	return closingData.value.payment_reconciliation.reduce(
 		(sum, payment) => sum + Number.parseFloat(payment.closing_amount || 0),
-		0
-	);
-});
+		0,
+	)
+})
 
 const getTotalDifference = computed(() => {
-	return getTotalActual.value - getTotalExpected.value;
-});
+	return getTotalActual.value - getTotalExpected.value
+})
 
 function getSalesForPayment(payment) {
 	return (
 		Number.parseFloat(payment.expected_amount || 0) -
 		Number.parseFloat(payment.opening_amount || 0)
-	);
+	)
 }
 
 function getShiftDuration() {
-	if (!closingData.value || !closingData.value.period_start_date) return __("N/A");
+	if (!closingData.value || !closingData.value.period_start_date)
+		return __("N/A")
 
 	// Use the same timezone-safe approach as the header timer
-	const { _initialElapsedMs, _receivedAt } = shiftState.value;
-	const diff = _initialElapsedMs + (Date.now() - (_receivedAt || Date.now()));
-	if (diff < 0) return __("N/A");
+	const { _initialElapsedMs, _receivedAt } = shiftState.value
+	const diff = _initialElapsedMs + (Date.now() - (_receivedAt || Date.now()))
+	if (diff < 0) return __("N/A")
 
-	const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-	const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-	const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+	const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+	const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+	const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
 
 	if (days > 0) {
-		const dayLabel = days === 1 ? __("Day") : __("Days");
-		return __("{0} {1} {2}h {3}m", [days, dayLabel, hours, minutes]);
+		const dayLabel = days === 1 ? __("Day") : __("Days")
+		return __("{0} {1} {2}h {3}m", [days, dayLabel, hours, minutes])
 	}
 	if (hours > 0) {
-		return __("{0}h {1}m", [hours, minutes]);
+		return __("{0}h {1}m", [hours, minutes])
 	}
-	return __("{0}m", [minutes]);
+	return __("{0}m", [minutes])
 }
 
 function getPaymentIcon(method) {
-	const methodLower = method.toLowerCase();
+	const methodLower = method.toLowerCase()
 
 	if (methodLower.includes("cash")) {
-		return { icon: "💵", color: "bg-green-500" };
+		return { icon: "💵", color: "bg-green-500" }
 	} else if (
 		methodLower.includes("card") ||
 		methodLower.includes("credit") ||
 		methodLower.includes("debit")
 	) {
-		return { icon: "💳", color: "bg-blue-500" };
+		return { icon: "💳", color: "bg-blue-500" }
 	} else if (
 		methodLower.includes("mobile") ||
 		methodLower.includes("wallet") ||
 		methodLower.includes("upi") ||
 		methodLower.includes("phone")
 	) {
-		return { icon: "📱", color: "bg-purple-500" };
+		return { icon: "📱", color: "bg-purple-500" }
 	} else if (methodLower.includes("bank") || methodLower.includes("transfer")) {
-		return { icon: "🏦", color: "bg-indigo-500" };
+		return { icon: "🏦", color: "bg-indigo-500" }
 	} else if (methodLower.includes("cheque") || methodLower.includes("check")) {
-		return { icon: "📝", color: "bg-yellow-500" };
+		return { icon: "📝", color: "bg-yellow-500" }
 	} else {
-		return { icon: "💰", color: "bg-gray-500" };
+		return { icon: "💰", color: "bg-gray-500" }
 	}
 }
 </script>

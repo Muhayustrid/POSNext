@@ -188,6 +188,26 @@
 							{{ __("Tear-off pause so the first copy can be removed. Default 800.") }}
 						</p>
 					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-feed">
+							{{ __("Paper advance per copy (dots)") }}
+						</label>
+						<Input
+							id="direct-print-feed"
+							v-model="feedDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('100')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+							__(
+								"Distance the paper moves after each copy, ~0.125 mm per dot. 100 = 12.5 mm. Raise this if the bottom of the receipt is cut off or the last line sits at the tear bar.",
+							)
+						}}
+						</p>
+					</div>
 				</div>
 
 				<div class="mt-4 flex items-center gap-2">
@@ -370,6 +390,7 @@ const cfg = reactive({
 // `cut`, but specific to multi-copy jobs. Raw text so the field can be
 // empty (meaning 'use server default 800ms').
 const copyDelayText = ref("800")
+const feedDotsText = ref("100")
 const customDotsText = ref("384")
 
 function readCfgIntoForm() {
@@ -385,6 +406,9 @@ function readCfgIntoForm() {
 	const d = stored.copyDelayMs
 	copyDelayText.value =
 		d === undefined || d === "" || d === null ? "800" : String(d)
+	const fd = stored.feedDots
+	feedDotsText.value =
+		fd === undefined || fd === "" || fd === null ? "100" : String(fd)
 }
 
 function reloadConfig() {
@@ -460,6 +484,10 @@ function onSaveConfig() {
 				copyDelayText.value === "" || copyDelayText.value == null
 					? 800
 					: Math.max(0, Math.min(Number(copyDelayText.value) || 0, 10000)),
+			feedDots:
+				feedDotsText.value === "" || feedDotsText.value == null
+					? 100
+					: Math.max(8, Math.min(Number(feedDotsText.value) || 0, 500)),
 		})
 		// Do not call setPageFormat directly — imin_client applies it on next print.
 		showSuccess(__("Device config saved. It will apply on the next print."))
