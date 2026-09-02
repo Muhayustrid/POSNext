@@ -81,10 +81,41 @@ export function createIminDriver(deps = {}) {
 		return p
 	}
 
+	// The SDK's getPrinterStatus() only resolves when a type===2 reply
+	// arrives; there is no internal timeout. If the service drops the query
+	// under load (seen on-device: a reply arrives ~2 s later or not at all
+	// during repeated Test Prints), `await p.getPrinterStatus()` would hang
+	// forever and freeze the cashier. The per-call race below keeps the
+	// status gate bounded by the driver's own statusTimeoutMs.
+	function callStatus(p) {
+		return new Promise((resolve) => {
+			let settled = false
+			const timer = setTimeout(() => {
+				if (settled) return
+				settled = true
+				resolve({ value: -1, timedOut: true })
+			}, statusPollMs * 4)
+			p.getPrinterStatus().then(
+				(s) => {
+					if (settled) return
+					settled = true
+					clearTimeout(timer)
+					resolve(s)
+				},
+				() => {
+					if (settled) return
+					settled = true
+					clearTimeout(timer)
+					resolve({ value: -1, timedOut: true })
+				},
+			)
+		})
+	}
+
 	async function waitIdle(p) {
 		const deadline = Date.now() + statusTimeoutMs
 		for (;;) {
-			const status = await p.getPrinterStatus()
+			const status = await callStatus(p)
 			const code = Number(status?.value)
 			if (code === 0) return
 			if (Date.now() > deadline) {
@@ -110,8 +141,11 @@ export function createIminDriver(deps = {}) {
 		async getStatus() {
 			try {
 				const p = await ensurePrinter()
-				const status = await p.getPrinterStatus()
-				return { ok: Number(status?.value) === 0, code: Number(status?.value) }
+				const status = await callStatus(p)
+				const code = Number(status?.value)
+				const out = { ok: code === 0, code }
+				if (status?.timedOut) out.message = "no status reply (device busy?)"
+				return out
 			} catch (err) {
 				return { ok: false, code: -1, message: err.message }
 			}
