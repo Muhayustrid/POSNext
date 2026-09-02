@@ -28,49 +28,91 @@ This design brings iMin printing into `pos_next` itself, fixes the two output bu
 their root, and routes **every** existing print path (checkout receipt, offline receipt,
 invoice reprint, and the end-of-day report at shift closing) through one transport.
 
-## Hardware specification (authoritative)
+## Specification layers
 
-All dimensions come from the iMin printer documentation, cross-checked against
-`imin-printer.js` v1.4.0 in `/Users/rotiropi/iMinJSPrinterSDK`. Generic thermal-printer
-assumptions must not be used anywhere in this feature.
+Two things are commonly conflated and must be kept separate in this design:
+**hardware geometry**, which is fixed by the printer and confirmed by official iMin
+documentation, and **SDK/API behaviour**, which belongs to a specific client library and
+local print service and is *not* guaranteed across versions. All layout math uses the
+first; the driver implementation must be validated against the second on the actual
+target device before any code is assumed correct.
+
+### Hardware paper/dot geometry (official, stable)
 
 | Property | 58mm paper | 80mm paper |
 | --- | --- | --- |
 | Physical paper width | 58 mm | 80 mm |
 | Effective printing width | 48 mm | 72 mm |
 | Effective dots | **384** | **576** |
-| `setPageFormat(style)` | `1` | `0` |
 
 - Resolution is **205 DPI = 8 dots/mm** (384 dots ÷ 48 mm).
 - The full paper width is never the print area. The content budget is dots, snapped to a
   multiple of 8.
-- `setTextWidth` and `setLeftMargin` are clamped to 576 in the SDK, confirming 576 as the
-  hardware maximum.
 - Paper chute depth: 40 mm on M2 / D1 / D1 Pro, 80 mm on D1w / D4 / S1. Informational only —
   it bounds roll diameter, not print width.
+- Monospace text budget (Font A, if text APIs are ever used): 32 chars/line at 58 mm,
+  48 at 80 mm.
 
-### SDK behaviours that constrain the design
+These numbers hold regardless of which SDK the device exposes; they are properties of the
+print head and paper path.
 
-Verified by reading the SDK source, not assumed:
+### JS SDK / print-service API (versioned — validate on target)
 
-- **`printSingleBitmap(dataURL, alignmentMode?)`** does an HTTP `POST` of the image to
-  `http://<host>:8081/upload`, then sends WebSocket command type `26` (no alignment) or
-  `27` (with alignment). It is not a pure WebSocket call — the HTTP upload must reach the
-  same host.
+Everything below describes **`imin-printer.js` v1.4.0 (2022, MIT, author "archiesong")**,
+the library bundled in every demo under `/Users/rotiropi/iMinJSPrinterSDK` and vendored by
+the old `pos_direct_print` app. iMin ships newer surfaces — an `imin-printer-v2` npm package
+and "iMinPrinterSDK 2.0" developer documentation exist — and V2 behaviour must not be
+assumed identical to V1.x. Treat this table as **provisional until the Phase 0 probe passes**
+against the actual POSNext device:
+
+- v1.4.0 transport: `ws://<host>:8081/websocket` (heartbeat ping ~3 s, auto-reconnect ~4 s,
+  both built into the SDK) plus an HTTP `POST http://<host>:8081/upload` used by
+  `printSingleBitmap(dataURL, alignmentMode?)`, which then sends WS command type `26`
+  (no alignment) or `27` (with alignment).
 - **Resolve means "queued", not "printed".** The promise resolves as soon as the upload
   succeeds and the command is written to the socket. The SDK ships its own bug report about
   this (`imin-customer-odoo.js`): a customer appended three `printAndLineFeed()` calls after
   awaiting `printSingleBitmap`, and those feeds executed *after* the cut, so every following
-  receipt began with blank lines. **Never append feeds after a bitmap.** Use
-  `getPrinterStatus()` returning `0` as the completion gate before starting the next job.
-- **v1.4.0 does not auto-cut** (older SDK versions did). Cutting is explicit: `partialCut()`
+  receipt began with blank lines. **Never append feeds after a bitmap** (under v1.4.0).
+  Use `getPrinterStatus()` returning `0` as the completion gate before starting the next job.
+- v1.4.0 does **not** auto-cut (older SDK versions did). Cutting is explicit: `partialCut()`
   → command type `5`.
 - `setAlignment(a)`: `0` left, `1` centre, `2` right (type `6`).
-- `printAndFeedPaper(n)` is clamped to `0..255`.
-- Transport is `ws://<host>:8081/websocket` with a ~3 s heartbeat ping and ~4 s
-  auto-reconnect, both built into the SDK.
+- `setPageFormat(style)` (type 25): `1` = 58 mm, `0` = 80 mm — the *meaning* is API-level and
+  must be probe-verified; the underlying paper geometry above is not in doubt.
+- `printAndFeedPaper(n)` clamped `0..255`; `setTextWidth`/`setLeftMargin` clamped to 576
+  (which independently corroborates the 576-dot figure for 80 mm).
 - `getPrinterStatus()` values: `0` normal, `1` not powered on, `3` head open, `7` no paper
   feed, `8` paper running out, `-1` not connected, `99` other error.
+
+**Evidence available now:** `pos_direct_print` bundles the same v1.4.0 and the user has
+printed successfully on iMin devices running Android <11 and >11 — so those units do expose
+a v1-compatible :8081 service. That is encouraging, not sufficient: the POSNext target unit
+may be a different model/firmware exposing v2 semantics.
+
+## Phase 0 — device probe (gate before `imin_client.js`)
+
+Nothing that hard-codes v1.4.0 semantics may be implemented until this probe has been run
+against the actual target device and recorded here. The probe is a throwaway page (a few
+lines over raw WebSocket + fetch, or the bundled v1.4.0 itself) that answers:
+
+1. Does `ws://127.0.0.1:8081/websocket` connect and speak the v1 ping/`request` protocol?
+   If not, does a v2 endpoint (or different port) answer instead?
+2. Does `POST /upload` + command `26/27` exist and print the bitmap? At what widths?
+3. Does `setPageFormat(1)` vs `(0)` visibly change the output width on the installed roll?
+4. Does a successful bitmap print auto-cut on this device, or is `partialCut()` needed?
+5. What do `getPrinterStatus()` codes look like for: idle, head open, no paper?
+6. Version handshake: any service-reported version string, plus the device model and Android
+   API level (`navigator.userAgent` inside the POSNext WebView).
+
+The probe script ships as part of the Direct Print page ("Diagnostics" tab) so field
+technicians can re-run it on any new unit; its findings are recorded in
+`docs/superpowers/specs/2026-09-02-imin-device-probe.md`. Depending on the result, the
+pinned vendored SDK file is chosen (v1.4.0 or the v2 package) and any divergent behaviours
+above are corrected in the spec before driver code is written.
+
+The architecture below is deliberately probe-proof: every v1-specific detail lives behind
+the single `imin_client.js` wrapper.
 
 ## Approach
 
