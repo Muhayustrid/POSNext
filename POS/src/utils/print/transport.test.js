@@ -115,6 +115,38 @@ it("passes the server transport config to the driver and logs the effective pape
 	expect(log.attempts.at(-1).paper_width).toBe("80mm")
 })
 
+it("records why earlier drivers failed when a fallback succeeds", async () => {
+	const imin = failDriver("imin", "upload rejected")
+	const qz = failDriver("qz", "no qz tray")
+	const browser = okDriver("browser")
+	const t = createTransport({
+		drivers: { imin, qz, browser },
+		config: { driver: "imin", fallback_enabled: true },
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	const row = log.attempts.at(-1)
+	expect(row.status).toBe("Fallback")
+	expect(row.driver).toBe("browser")
+	expect(row.error_message).toContain("imin: upload rejected")
+	expect(row.error_message).toContain("qz: no qz tray")
+})
+
+it("records why earlier drivers failed when a driver was skipped", async () => {
+	const imin = okDriver("imin")
+	imin.isAvailable.mockResolvedValue(false)
+	const browser = okDriver("browser")
+	const t = createTransport({
+		drivers: { imin, qz: okDriver("qz"), browser },
+		config: { driver: "imin", fallback_enabled: true },
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	const row = log.attempts.at(-1)
+	expect(row.status).toBe("Fallback")
+	expect(row.error_message).toContain("skipped imin")
+})
+
 it("falls back to transport paper when the driver does not report the effective value", async () => {
 	const imin = okDriver("imin") // mockResolvedValue(true)
 	const t = createTransport({

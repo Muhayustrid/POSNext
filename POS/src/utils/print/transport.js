@@ -55,7 +55,10 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 			let ok = true
 			let effectivePaper = current.paper
 			try {
-				if (!(await driver.isAvailable())) continue
+				if (!(await driver.isAvailable())) {
+					errors.push(`skipped ${id} (unavailable)`)
+					continue
+				}
 				const result = await driver.printHTML(html, {
 					...opts,
 					config: {
@@ -76,6 +79,11 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 					...opts.logContext,
 					driver: id,
 					status: idx === 0 ? "Success" : "Fallback",
+					// Keep the reason the earlier drivers failed on the row.
+					// This log exists to answer "why didn't it come out of the
+					// iMin" — dropping error_message on the fallback path hides
+					// exactly that, which is the case operators ask about most.
+					error_message: errors.length ? errors.join(" | ") : undefined,
 					paper_width: effectivePaper,
 					duration_ms: Date.now() - started,
 				})
