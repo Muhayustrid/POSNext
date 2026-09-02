@@ -29,6 +29,10 @@
 					{{ statusError }}
 				</div>
 
+				<div v-if="configError" class="rounded bg-amber-50 px-3 py-2 text-sm text-amber-700">
+					{{ configError }}
+				</div>
+
 				<dl v-else-if="currentDriver" class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
 					<div>
 						<dt class="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -178,7 +182,7 @@
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Builds a small test receipt with buildReceiptHTML and sends it through the transport. On a non-iMin machine a connection error is expected and will appear in the recent attempts below.",
+							"Builds a small test receipt and sends it through the transport exactly as a real print does. On a non-iMin machine a connection error is expected and will appear in the recent attempts below.",
 						)
 					}}
 				</p>
@@ -282,16 +286,23 @@ import { useToast } from "@/composables/useToast"
 import { call } from "@/utils/apiWrapper"
 import { loadDeviceConfig, saveDeviceConfig } from "@/utils/print/imin_client"
 import { PAPER_PROFILES } from "@/utils/print/paper"
-import { getTransport } from "@/utils/print/transport"
-import { buildReceiptHTML } from "@/utils/printInvoice"
+import { useBootstrapStore } from "@/stores/bootstrap"
+import {
+	getTransport,
+	initTransportFromServer,
+	printHTML as transportPrint,
+} from "@/utils/print/transport"
+import { buildReceiptDocumentHTML } from "@/utils/printInvoice"
 
 const { showSuccess, showError, showInfo } = useToast()
+const bootstrap = useBootstrapStore()
 
 const currentDriver = ref(null)
 const statusOk = ref(false)
 const statusCode = ref(-1)
 const statusMessage = ref("")
 const statusError = ref("")
+const configError = ref("")
 const statusLoading = ref(true)
 
 const transportPaperLabel = ref("-")
@@ -438,9 +449,10 @@ function buildTestInvoiceData() {
 async function onTestPrint() {
 	printing.value = true
 	try {
-		const html = buildReceiptHTML(buildTestInvoiceData())
-		const t = getTransport()
-		await t.printHTML(html, {
+		const html = buildReceiptDocumentHTML(buildTestInvoiceData(), {
+			includeControls: false,
+		})
+		await transportPrint(html, {
 			logContext: {
 				reference_doctype: "Sales Invoice",
 				reference_name: "TEST",
@@ -506,6 +518,22 @@ watch(
 
 onMounted(async () => {
 	readCfgIntoForm()
+	// Load the server print config before anything reads transport state.
+	// Test Print calls the module-level transportPrint, which relies on the
+	// singleton config populated here; without it the chain is empty and no
+	// driver can be reached. The store call is idempotent — awaiting it closes
+	// the race with the non-blocking preload started in main.js.
+	try {
+		await bootstrap.loadInitialData()
+		await initTransportFromServer(
+			bootstrap.getPreloadedPOSProfile()?.name || null,
+		)
+		configError.value = ""
+	} catch (e) {
+		configError.value = __("Could not load print config from the server: {0}", [
+			e?.message || String(e),
+		])
+	}
 	transportSnapshot()
 	await pollStatus()
 	timer = window.setInterval(pollStatus, 3000)

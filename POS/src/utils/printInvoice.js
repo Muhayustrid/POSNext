@@ -333,7 +333,7 @@ export function buildReceiptHTML(invoiceData) {
 			</div>`
 }
 
-function buildReceiptDocumentHTML(
+export function buildReceiptDocumentHTML(
 	invoiceData,
 	{ includeControls = false } = {},
 ) {
