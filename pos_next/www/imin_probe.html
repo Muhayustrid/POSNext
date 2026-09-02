@@ -4,7 +4,7 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<meta name="robots" content="noindex, nofollow">
-	<title>iMin Direct Print — Device Probe v2</title>
+	<title>iMin Direct Print — Device Probe v3</title>
 	<style>
 		body { font-family: system-ui, -apple-system, sans-serif; margin: 16px; background: #ffffff; color: #111111; }
 		h1 { font-size: 18px; margin: 0 0 12px; }
@@ -20,10 +20,11 @@
 		.hint { font-size: 12px; color: #555; margin: 6px 0; }
 		details { margin: 6px 0; font-size: 12px; }
 		summary { cursor: pointer; font-weight: 600; }
+		code { background: #eee; padding: 1px 4px; border-radius: 3px; }
 	</style>
 </head>
 <body>
-	<h1>iMin Direct Print — Device Probe v2</h1>
+	<h1>iMin Direct Print — Device Probe v3</h1>
 	<section class="info">
 		<div><strong>Device user agent:</strong> <span id="ua"></span></div>
 		<div><strong>Page origin:</strong> <span id="origin"></span></div>
@@ -31,24 +32,30 @@
 	</section>
 	<section>
 		<button class="primary" id="run-all">Run full probe</button>
+		<button id="init">initPrinter (type 1, SPI)</button>
 		<button id="print-centered">Print centered (type 27, value 1)</button>
 		<button id="pf58">setPageFormat 58mm</button>
 		<button id="pf80">setPageFormat 80mm</button>
-		<button id="status">getPrinterStatus (type 2)</button>
+		<button id="status">getPrinterStatus (type 2, SPI)</button>
 		<button id="clear">Clear log</button>
 	</section>
 	<section>
-		<h2>Upload diagnosis (which format does this print service accept?)</h2>
+		<h2>Upload diagnosis</h2>
 		<button id="upload-variants" class="warn">Try upload variants A/B/C/D</button>
 		<button id="ping">Ping (type 0)</button>
 		<p class="hint">
-			Each variant POSTs the same 384×120 PNG to <code>/upload</code> using a different encoding and
-			logs the HTTP status + response body. A 400 usually means the wrong encoding or a missing
-			<code>multipart; filename=</code>.
+			Each variant is isolated: a crash or a server that never answers can no longer
+			block the others (8 s per-variant timeout). Summary line at the end.
+		</p>
+		<p class="hint">
+			Status values: 0 normal · 1 not powered · 3 head open · 7 no paper feed ·
+			8 paper running out · 99 other error · <strong>-1 not connected to the printer
+			device</strong> (per SDK getPrinterStatusText). v2 polled with text:"" and skipped
+			initPrinter — v3 matches the SDK exactly (init type 1 + status type 2, both text:"SPI").
 		</p>
 	</section>
 	<details>
-		summary>How to check logcat on the device</summary>
+		<summary>How to check logcat on the device</summary>
 		<pre style="min-height: 0;">adb -s &lt;device-serial&gt; logcat -v time | grep -iE "imin|8081|printer|printservice"
 adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|print'"</pre>
 	</details>
@@ -60,6 +67,7 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 
 	var WS_URL = "ws://127.0.0.1:8081/websocket";
 	var UPLOAD_URL = "http://127.0.0.1:8081/upload";
+	var VARIANT_TIMEOUT_MS = 8000;
 	var IMG_W = 384;
 	var IMG_H = 120;
 
@@ -68,8 +76,7 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 	document.getElementById("origin").textContent = window.location.origin;
 
 	var ws = null;
-	var wsReady = false;
-	var pendingReply = null;   // { matchType, resolve, timer }
+	var pendingReply = null;
 
 	function log(msg) {
 		var t = new Date().toISOString().substring(11, 23);
@@ -78,28 +85,24 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 	}
 
 	// ------------------------------------------------------------------
-	// WS plumbing.
-	//
-	// Two fixes over v1 of this page:
-	//   1. Replies are matched by `type`, so a status reply (type 2) is
-	//      never mistaken for a setPageFormat echo or a heartbeat.
-	//   2. Status code is read at `parsed.data.value`, not `parsed.value`.
-	//      (v1 read the wrong path and logged "No status reply within 3 s"
-	//      on a valid reply. That was a bug in the probe, not the service.)
+	// WS plumbing
 	// ------------------------------------------------------------------
-	function sendCmd(type, value, note) {
+	function sendCmd(type, value, note, text) {
 		if (!ws || ws.readyState !== WebSocket.OPEN) {
 			log("WS not open — cannot send command type " + type);
 			return false;
 		}
-		// SDK sendParameter signature: { data: { text, value, labelData }, type }
-		// Empty text and labelData match the SDK's own bitmap commands.
+		// SDK sendParameter(text, type, value) shape:
+		//   { data: { text, value, labelData }, type }
+		// Commands the SDK sends with a printer type (initPrinter,
+		// getPrinterStatus) carry text="SPI" — v2 sent text:"" there, which
+		// is a plausible cause of the constant value:-1 status replies.
 		var payload = JSON.stringify({
-			data: { text: "", value: value == null ? -1 : value, labelData: {} },
+			data: { text: text || "", value: value == null ? -1 : value, labelData: {} },
 			type: type,
 		});
 		ws.send(payload);
-		log("WS sent type=" + type + " value=" + value + (note ? " (" + note + ")" : ""));
+		log("WS sent type=" + type + " value=" + value + (text ? " text=" + JSON.stringify(text) : "") + (note ? " (" + note + ")" : ""));
 		return true;
 	}
 
@@ -129,7 +132,6 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 
 	function connectWS() {
 		return new Promise(function (resolve) {
-			wsReady = false;
 			log("Connecting WebSocket " + WS_URL + " ...");
 			var sock;
 			try { sock = new WebSocket(WS_URL); }
@@ -142,7 +144,7 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 			}, 5000);
 			function done(ok) { if (settled) return; settled = true; clearTimeout(timeout); resolve(ok); }
 			sock.onopen = function () {
-				ws = sock; wsReady = true;
+				ws = sock;
 				log("WS open — CONNECTED");
 				done(true);
 			};
@@ -150,7 +152,7 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 				log("WS error event (connection refused or closed before open)");
 				done(false);
 			};
-			sock.onclose = function (ev) { wsReady = false; log("WS closed code=" + ev.code + " reason=" + (ev.reason || "-")); done(false); };
+			sock.onclose = function (ev) { ws = null; log("WS closed code=" + ev.code + " reason=" + (ev.reason || "-")); done(false); };
 			sock.onmessage = function (ev) {
 				var raw = ev.data;
 				var parsed = null;
@@ -170,7 +172,7 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 	}
 
 	// ------------------------------------------------------------------
-	// Bitmap + upload variants
+	// Bitmap + uploads
 	// ------------------------------------------------------------------
 	function renderTestCanvas() {
 		var canvas = document.createElement("canvas");
@@ -182,7 +184,7 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 		ctx.fillStyle = "#000000";
 		ctx.textBaseline = "top";
 		ctx.font = "bold 16px monospace";
-		ctx.fillText("iMin probe v2", 8, 8);
+		ctx.fillText("iMin probe v3", 8, 8);
 		ctx.font = "12px monospace";
 		ctx.fillText("384 x 120 dots @ 205 DPI", 8, 32);
 		ctx.fillText("Line: 1234567890", 8, 52);
@@ -190,25 +192,6 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 		ctx.fillText("384 dots", 8, 76);
 		ctx.fillRect(8, 112, IMG_W - 16, 4);
 		return canvas;
-	}
-
-	function dataURLToUint8Array(dataUrl) {
-		var comma = dataUrl.indexOf(",");
-		var head = dataUrl.substring(0, comma);
-		var body = dataUrl.substring(comma + 1);
-		var mimeMatch = head.match(/^data:([^;]+)/);
-		var mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
-		if (head.indexOf(";base64") >= 0) {
-			var bin = atob(body);
-			var arr = new Uint8Array(bin.length);
-			for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-			return { bytes: arr, mime: mime };
-		}
-		// URL-encoded data URL
-		var decoded = decodeURIComponent(body);
-		var arr2 = new Uint8Array(decoded.length);
-		for (var j = 0; j < decoded.length; j++) arr2[j] = decoded.charCodeAt(j);
-		return { bytes: arr2, mime: mime };
 	}
 
 	function summarizeResponse(resp, textBody) {
@@ -224,43 +207,61 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 		};
 	}
 
+	function errSummary(err) {
+		return { status: 0, statusText: "fetch-error", contentType: "-", server: "-", bodyHead: String(err), bodyLen: 0 };
+	}
+
+	function timeoutSummary(label) {
+		return {
+			status: 0, statusText: "TIMEOUT", contentType: "-", server: "-",
+			bodyHead: label + ": no HTTP response within " + VARIANT_TIMEOUT_MS + " ms — the print service accepted the bytes but never answered (or answered on a channel the browser ignores). Client moved on.",
+			bodyLen: 0, timedOut: true,
+		};
+	}
+
 	function logResp(label, s) {
+		if (!s) { log("[" + label + "] no result"); return; }
 		log("[" + label + "] HTTP " + s.status + " " + s.statusText +
 			" · ct=" + s.contentType + " · server=" + s.server +
 			" · body=" + s.bodyLen + "B :: " + s.bodyHead);
 	}
 
-	// Variant A: SDK-canonical. multipart/form-data with a Blob under field
-	// "file" carrying a filename. This is what imin_client.js does via
-	// printSingleBitmap(). If A succeeds and B/C/D fail, the transport is
-	// confirmed as multipart-with-filename and no code changes are needed.
+	// Variant A: SDK-canonical — multipart/form-data, Blob file part named
+	// "file" with a filename. printSingleBitmap() does exactly this.
 	function upload_A_blob(canvas) {
 		return new Promise(function (resolve) {
 			canvas.toBlob(function (blob) {
+				if (!blob) { resolve(errSummary(new Error("canvas.toBlob(): snapshot produced a null blob"))); return; }
+
 				var fd = new FormData();
 				fd.append("file", blob, "receipt.png");
 				log("[A] multipart/form-data · field=file · filename=receipt.png · type=" + blob.type + " · size=" + blob.size);
 				fetch(UPLOAD_URL, { method: "POST", body: fd })
-					.then(function (resp) {
-						return resp.text().then(function (body) { resolve(summarizeResponse(resp, body)); });
-					})
-					.catch(function (err) { resolve({ status: 0, statusText: "fetch-error", contentType: "-", server: "-", bodyHead: String(err), bodyLen: 0 }); });
+					.then(function (resp) { resp.text().then(function (b) { resolve(summarizeResponse(resp, b)); }); })
+					.catch(function (err) { resolve(errSummary(err)); });
 			}, "image/png");
 		});
 	}
 
-	// Variant B: raw PNG body. Content-Type image/png. No multipart wrapper.
-	// Some print services accept this; it also proves whether the 400 came
-	// from the multipart parser specifically.
+	// Variant B: raw PNG body, Content-Type: image/png.
+	// v2 bug this fixes: canvas.toBlob() is callback-based and returns
+	// undefined; v2 chained .then() onto that undefined, throwing a
+	// TypeError that killed the whole variant chain (B looked like a hang,
+	// C and D never ran). Now B returns a real Promise.
 	function upload_B_raw(canvas) {
-		return canvas.toBlob(function (blob) {
-			log("[B] raw binary · Content-Type=image/png · size=" + blob.size);
-			return fetch(UPLOAD_URL, { method: "POST", headers: { "Content-Type": "image/png" }, body: blob })
-				.then(function (resp) { return resp.text().then(function (b) { return summarizeResponse(resp, b); }); });
-		}).then(function (r) { return r; }, function (e) { return { status: 0, statusText: "err", bodyHead: String(e), bodyLen: 0, contentType: "-", server: "-" }; });
+		return new Promise(function (resolve) {
+			canvas.toBlob(function (blob) {
+				if (!blob) { resolve(errSummary(new Error("canvas.toBlob(): snapshot produced a null blob"))); return; }
+
+				log("[B] raw binary · Content-Type=image/png · size=" + blob.size);
+				fetch(UPLOAD_URL, { method: "POST", headers: { "Content-Type": "image/png" }, body: blob })
+					.then(function (resp) { resp.text().then(function (b) { resolve(summarizeResponse(resp, b)); }); })
+					.catch(function (err) { resolve(errSummary(err)); });
+			}, "image/png");
+		});
 	}
 
-	// Variant C: JSON { file: "<base64>" }. Matches other print services (CUPS-like).
+	// Variant C: JSON { file: "<base64>" }.
 	function upload_C_json(canvas) {
 		var dataUrl = canvas.toDataURL("image/png");
 		var b64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
@@ -270,10 +271,12 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ file: b64, filename: "receipt.png", type: "image/png" }),
 		}).then(function (resp) { return resp.text().then(function (b) { return summarizeResponse(resp, b); }); })
-			.catch(function (err) { return { status: 0, statusText: "err", bodyHead: String(err), bodyLen: 0, contentType: "-", server: "-" }; });
+			.catch(errSummary);
 	}
 
-	// Variant D: what the broken v1 probe did. Kept for A/B comparison.
+	// Variant D: v1 probe behaviour — FormData field "file" holding the data
+	// URL as a text string (no filename). Known to be rejected; kept for the
+	// A-vs-D contrast.
 	function upload_D_dataurl_string(canvas) {
 		var dataUrl = canvas.toDataURL("image/png");
 		var fd = new FormData();
@@ -281,25 +284,84 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 		log("[D] multipart/form-data · field=file · value=string data URL (" + dataUrl.length + " chars) — the v1 behaviour");
 		return fetch(UPLOAD_URL, { method: "POST", body: fd })
 			.then(function (resp) { return resp.text().then(function (b) { return summarizeResponse(resp, b); }); })
-			.catch(function (err) { return { status: 0, statusText: "err", bodyHead: String(err), bodyLen: 0, contentType: "-", server: "-" }; });
+			.catch(errSummary);
+	}
+
+	// One variant = own try/catch + own timeout. Nothing a variant does —
+	// sync throw, rejected promise, or a server that never answers — can
+	// stop the next variant.
+	function runVariant(label, fn) {
+		var started = Date.now();
+		var p;
+		try {
+			p = Promise.resolve(fn());
+		} catch (e) {
+			log("[" + label + "] CRASHED before request: " + e);
+			return Promise.resolve({ status: 0, statusText: "CRASH", contentType: "-", server: "-", bodyHead: String(e), bodyLen: 0 });
+		}
+		var result = new Promise(function (resolve) {
+			var settled = false;
+			var timer = setTimeout(function () {
+				if (settled) return; settled = true;
+				resolve(timeoutSummary(label));
+			}, VARIANT_TIMEOUT_MS);
+			p.then(function (s) {
+				if (settled) return; settled = true; clearTimeout(timer);
+				resolve(s);
+			}, function (e) {
+				if (settled) return; settled = true; clearTimeout(timer);
+				resolve(errSummary(e));
+			});
+		});
+		return result.then(function (s) {
+			s.elapsedMs = Date.now() - started;
+			logResp(label, s);
+			return s;
+		});
 	}
 
 	function tryAllVariants() {
 		var canvas = renderTestCanvas();
-		log("=== Upload variants A/B/C/D ===");
-		return Promise.resolve()
-			.then(function () { return upload_A_blob(canvas); }).then(function (s) { logResp("A · blob", s); })
-			.then(function () { return upload_B_raw(canvas); }).then(function (s) { logResp("B · raw", s); })
-			.then(function () { return upload_C_json(canvas); }).then(function (s) { logResp("C · json", s); })
-			.then(function () { return upload_D_dataurl_string(canvas); }).then(function (s) { logResp("D · string", s); })
+		log("=== Upload variants A/B/C/D (each isolated, " + VARIANT_TIMEOUT_MS + " ms timeout) ===");
+		var results = {};
+		return runVariant("A · blob", function () { return upload_A_blob(canvas); }).then(function (s) { results.A = s; })
+			.then(function () { return runVariant("B · raw", function () { return upload_B_raw(canvas); }); }).then(function (s) { results.B = s; })
+			.then(function () { return runVariant("C · json", function () { return upload_C_json(canvas); }); }).then(function (s) { results.C = s; })
+			.then(function () { return runVariant("D · string", function () { return upload_D_dataurl_string(canvas); }); }).then(function (s) { results.D = s; })
 			.then(function () {
-				log("Done. If A=2xx and B/C/D=4xx, print service requires SDK-canonical multipart-with-Blob (which imin_client.js already does). Record in probe spec.");
+				log("--- Variant summary ---");
+				[["A", "blob"], ["B", "raw"], ["C", "json"], ["D", "string"]].forEach(function (pair) {
+					var s = results[pair[0]];
+					var verdict = "not run";
+					if (s) {
+						if (s.timedOut) verdict = "TIMEOUT (no response in " + VARIANT_TIMEOUT_MS + " ms)";
+						else if (s.status === 0) verdict = "ERROR: " + s.statusText;
+						else verdict = "HTTP " + s.status + " in " + s.elapsedMs + " ms";
+					}
+					log("  " + pair[0] + " · " + pair[1] + ": " + verdict);
+				});
+				if (results.A && results.A.status >= 200 && results.A.status < 300) {
+					log("A (SDK-canonical multipart Blob) ACCEPTED — imin_client.js/printSingleBitmap uses exactly this. B/C/D are diagnostics only.");
+				}
 			});
 	}
 
 	// ------------------------------------------------------------------
-	// Status parsing — this is where v1 got it wrong.
+	// Status: SDK-faithful query (text "SPI") + interpretation
 	// ------------------------------------------------------------------
+	function statusMeaning(v) {
+		switch (Number(v)) {
+			case 0: return "normal / job complete";
+			case 1: return "printer NOT POWERED ON";
+			case 3: return "print head OPEN";
+			case 7: return "NO PAPER FEED";
+			case 8: return "paper RUNNING OUT";
+			case 99: return "other error";
+			case -1: return "NOT CONNECTED / unknown — the service session has no printer device bound (open the iMin print-service app on the device, or check USB/SPI binding); it can also mean the query shape is wrong — v3 sends the SDK's exact initPrinter + text:'SPI' query, so a persistent -1 here is a device-side condition";
+			default: return "unmapped value (" + v + ")";
+		}
+	}
+
 	function extractStatusValue(parsed) {
 		if (!parsed || typeof parsed !== "object") return undefined;
 		if (parsed.data && typeof parsed.data === "object" && typeof parsed.data.value !== "undefined") {
@@ -309,21 +371,25 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 		return undefined;
 	}
 
-	function pollStatus(maxMs) {
+	function pollStatus(maxMs, stopOnFirst) {
 		var started = Date.now();
+		var attempts = 0;
 		function attempt() {
 			if (Date.now() - started > (maxMs || 10000)) {
-				log("Status polling timed out — last seen type=2 reply had value: (see WS recv log above).");
+				log("Status polling window ended after " + attempts + " queries. Check the last WS recv value above.");
 				return Promise.resolve();
 			}
-			sendCmd(2, -1, "getPrinterStatus poll");
+			attempts++;
+			sendCmd(2, -1, "getPrinterStatus #" + attempts, "SPI");
 			return waitForReply(2, 2500, "status").then(function (data) {
 				if (data) {
 					var v = extractStatusValue(data);
-					log("Printer status value: " + v);
+					log("Status #" + attempts + " value=" + v + " — " + statusMeaning(v));
 					if (v === 0) { log("Status 0 — printer normal / job complete."); return; }
+					if (stopOnFirst) return;
 				} else {
-					log("No type=2 reply within 2500 ms — is the WebSocket receiving anything?");
+					log("Status #" + attempts + ": no type=2 reply within 2500 ms.");
+					if (stopOnFirst) return;
 				}
 				return new Promise(function (r) { setTimeout(function () { r(attempt()); }, 700); });
 			});
@@ -331,59 +397,57 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 		return attempt();
 	}
 
+	function initPrinter() {
+		// SDK initPrinter("SPI") === sendParameter("SPI", 1) — attach the
+		// printer device to this service session. v2 never sent this; the
+		// production driver (imin_client.js) does.
+		return sendCmd(1, -1, "initPrinter SPI", "SPI") ? waitForReply(1, 2000, "init echo") : Promise.resolve(null);
+	}
+
 	// ------------------------------------------------------------------
-	// Full flow.
+	// Flows
 	// ------------------------------------------------------------------
 	function printFlow(alignmentType, alignmentValue, label) {
 		log("=== " + label + " ===");
 		connectWS().then(function (connected) {
 			if (!connected) { log("ABORT: WebSocket did not connect — is the iMin print service running?"); return; }
-			var canvas = renderTestCanvas();
-			log("Test bitmap rendered (" + IMG_W + "x" + IMG_H + ").");
-			return upload_A_blob(canvas).then(function (s) {
-				logResp("A", s);
-				if (s.status < 200 || s.status >= 300) {
-					log("ABORT: variant A upload failed — press 'Try upload variants' to see which format does work.");
-					return;
-				}
-				sendCmd(alignmentType, alignmentValue, "print bitmap " + label);
-				return pollStatus();
+			return initPrinter().then(function () {
+				var canvas = renderTestCanvas();
+				return runVariant("A · upload", function () { return upload_A_blob(canvas); }).then(function (s) {
+					if (!s || s.status < 200 || s.status >= 300) {
+						log("ABORT: variant A upload failed — press 'Try upload variants' for the full matrix.");
+						return;
+					}
+					sendCmd(25, 1, "setPageFormat 58mm before print");
+					sendCmd(alignmentType, alignmentValue, "print bitmap " + label);
+					return pollStatus(15000);
+				});
 			});
 		}).catch(function (err) { log("Probe error: " + err); });
 	}
 
 	function runFullProbe() {
-		log("=== Full probe v2 (WS connect → ping → upload[A] → print type 26 → status poll) ===");
+		log("=== Full probe v3: WS → ping → initPrinter(1,SPI) → setPageFormat(25,1) → upload[A] → print(26) → status(2,SPI) ===");
 		log("userAgent: " + navigator.userAgent);
 		log("origin: " + window.location.origin);
 		connectWS().then(function (connected) {
 			if (!connected) { log("STEP 1 FAILED: WebSocket did not connect. Check whether the iMin print service is running, or whether a different port/endpoint answers."); return; }
 			log("STEP 1 OK: WebSocket connected.");
-			// ping: SDK uses { data: { text: "ping" }, type: 0 } with no value
-			var pingPayload = JSON.stringify({ data: { text: "ping", value: -1, labelData: {} }, type: 0 });
-			ws.send(pingPayload);
-			log("Sent v1 ping (type=0 text='ping')");
-			// Ping replies come as heartbeats, which the WS handler filters out
-			// — so we settle on any non-heartbeat frame or timeout.
-			return new Promise(function (resolve) {
-				var settled = false;
-				function finish(v) { if (settled) return; settled = true; pendingReply = null; resolve(v); }
-				pendingReply = { type: null, handle: function (p) { finish(p); } };
-				setTimeout(function () { finish("timeout"); }, 3000);
-			}).then(function (reply) {
-				if (reply === "timeout") log("STEP 2: no non-heartbeat reply within 3 s — heartbeat-only traffic is normal for the iMin service, so this is informational.");
-				else log("STEP 2: got a non-heartbeat reply early: " + JSON.stringify(reply));
+			ws.send(JSON.stringify({ data: { text: "ping", value: -1, labelData: {} }, type: 0 }));
+			log("STEP 2: v1 ping sent (heartbeat-only traffic back is normal).");
+			return initPrinter().then(function () {
+				log("STEP 3: initPrinter (type 1, text 'SPI') sent.");
+				sendCmd(25, 1, "setPageFormat 58mm");
 				var canvas = renderTestCanvas();
-				return upload_A_blob(canvas).then(function (s) {
-					logResp("A · upload", s);
-					if (s.status < 200 || s.status >= 300) {
-						log("STEP 3 FAILED: variant A upload rejected. Press 'Try upload variants A/B/C/D' to see which encoding this print service accepts.");
+				return runVariant("STEP 4 · upload A", function () { return upload_A_blob(canvas); }).then(function (s) {
+					if (!s || s.status < 200 || s.status >= 300) {
+						log("STEP 4 FAILED: upload rejected/timed out. Press 'Try upload variants A/B/C/D'.");
 						return;
 					}
-					log("STEP 3 OK: variant A accepted.");
+					log("STEP 4 OK: upload accepted — response body echoes the saved file path.");
 					sendCmd(26, -1, "print bitmap, no alignment");
-					log("STEP 4: print command sent (type 26, value -1).");
-					return pollStatus();
+					log("STEP 5: print command (type 26) sent. LOOK AT THE PRINTER — does paper come out?");
+					return pollStatus(20000);
 				});
 			});
 		}).then(function () {
@@ -397,9 +461,16 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 	// Wire up
 	// ------------------------------------------------------------------
 	document.getElementById("run-all").addEventListener("click", runFullProbe);
+	document.getElementById("init").addEventListener("click", function () {
+		if (!ws || ws.readyState !== WebSocket.OPEN) {
+			connectWS().then(function (ok) { if (ok) initPrinter().then(function () { pollStatus(3000, true); }); });
+			return;
+		}
+		initPrinter().then(function () { pollStatus(3000, true); });
+	});
 	document.getElementById("upload-variants").addEventListener("click", function () { tryAllVariants(); });
 	document.getElementById("ping").addEventListener("click", function () {
-		if (!ws || ws.readyState !== WebSocket.OPEN) { log("Press Print or Status first to open a WebSocket."); return; }
+		if (!ws || ws.readyState !== WebSocket.OPEN) { log("Open a WebSocket first (Print or Status buttons do)."); return; }
 		ws.send(JSON.stringify({ data: { text: "ping", value: -1, labelData: {} }, type: 0 }));
 		log("Ping sent.");
 	});
@@ -408,16 +479,16 @@ adb -s &lt;device-serial&gt; shell "dumpsys activity services | grep -iE 'imin|p
 	document.getElementById("pf80").addEventListener("click", function () { sendCmd(25, 0, "setPageFormat 80mm"); });
 	document.getElementById("status").addEventListener("click", function () {
 		if (!ws || ws.readyState !== WebSocket.OPEN) {
-			connectWS().then(function (ok) { if (ok) pollStatus(4000); });
+			connectWS().then(function (ok) { if (ok) initPrinter().then(function () { pollStatus(5000, true); }); });
 			return;
 		}
-		pollStatus(4000);
+		pollStatus(5000, true);
 	});
 	document.getElementById("clear").addEventListener("click", function () { logEl.textContent = ""; });
 
 	log("Probe page loaded. userAgent: " + navigator.userAgent);
 	log("Page origin: " + window.location.origin);
-	log("Press 'Run full probe' or 'Try upload variants A/B/C/D' to begin.");
+	log("Press 'Run full probe' — it now includes initPrinter and SPI-text status queries.");
 })();
 	</script>
 </body>
