@@ -65,8 +65,8 @@
   "imin_copy_delay_ms",
   "imin_feed_dots",
   "imin_tail_dots",
-  "imin_copy_labels",
   "imin_font_scale",
+  "imin_crew_font_scale",
   "print_fallback_enabled",
   "section_break_delivery",
   "use_delivery_charges",
@@ -514,20 +514,20 @@
    "label": "Tail Spacer (dots)"
   },
   {
-   "default": "1",
-   "depends_on": "eval:doc.print_driver==='imin' && (doc.imin_print_copies||1) > 1",
-   "description": "When printing 2+ copies, the second copy gets a CREW COPY banner so the outlet copy is unmistakable. First copy is CUSTOMER COPY.",
-   "fieldname": "imin_copy_labels",
-   "fieldtype": "Check",
-   "label": "Label Copies (Customer / Crew)"
-  },
-  {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
    "description": "Font scale for bitmap printing (percent). Receipt CSS is authored at 96 DPI and translated to the 205 DPI head; 100 = as authored. Raise if text still prints small. VERIFY ON DEVICE.",
    "fieldname": "imin_font_scale",
    "fieldtype": "Int",
    "label": "Font Scale (%)"
+  },
+  {
+   "default": "130",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Font scale for the crew copy only (percent) — the short order slip the outlet keeps. Starts bigger than Font Scale because it is read across the counter and carries no prices. 60–250.",
+   "fieldname": "imin_crew_font_scale",
+   "fieldtype": "Int",
+   "label": "Crew Copy Font Scale (%)"
   },
   {
    "default": "1",

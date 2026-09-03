@@ -20,8 +20,8 @@ PRINT_CONFIG_FIELDS = (
 	"imin_copy_delay_ms",
 	"imin_feed_dots",
 	"imin_tail_dots",
-	"imin_copy_labels",
 	"imin_font_scale",
+	"imin_crew_font_scale",
 	"print_fallback_enabled",
 )
 
@@ -117,10 +117,9 @@ def get_print_config(pos_profile):
 		tail = 24
 	tail = max(0, min(tail, MAX_TAIL_DOTS))
 
-	# Crew vs customer distinction: when copies>1 and this is truthy the second
-	# bitmap gets a CREW COPY banner so the outlet copy is unmistakable.
-	raw_label = getattr(settings, "imin_copy_labels", None)
-	copy_labels = True if raw_label is None else bool(raw_label)
+	# Crew vs customer distinction lives in the slip itself now (its own short
+	# order list), so there is no copy-label switch to serve: neither copy
+	# carries a banner on the paper.
 
 	# Font scale on top of the fixed 205/96 DPI translation. 100 = as authored
 	# at 96 DPI (already ~2.1x bigger than what printed before the translation
@@ -132,6 +131,16 @@ def get_print_config(pos_profile):
 		font_scale = 100
 	font_scale = max(60, min(font_scale, 250))
 
+	# The crew slip has its own scale and starts bigger than the receipt: it is
+	# read across a counter, not handed to the customer, and it carries no
+	# prices to crowd the line. Same clamp band as the receipt scale.
+	try:
+		crew_font_scale = getattr(settings, "imin_crew_font_scale", None)
+		crew_font_scale = 130 if crew_font_scale is None else int(crew_font_scale)
+	except (TypeError, ValueError):
+		crew_font_scale = 130
+	crew_font_scale = max(60, min(crew_font_scale, 250))
+
 	return {
 		"pos_profile": resolved_profile,
 		"driver": getattr(settings, "print_driver", None) or "browser",
@@ -142,8 +151,8 @@ def get_print_config(pos_profile):
 		"copy_delay_ms": delay,
 		"feed_dots": feed,
 		"tail_dots": tail,
-		"copy_labels": copy_labels,
 		"font_scale": font_scale,
+		"crew_font_scale": crew_font_scale,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

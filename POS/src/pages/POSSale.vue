@@ -2201,6 +2201,9 @@ async function handlePaymentCompleted(paymentData) {
 				is_offline: true,
 				pos_profile: cartStore.posProfile,
 				posting_date: new Date().toISOString().slice(0, 10),
+				// Local clock at creation, "HH:MM:SS" — the crew slip and the server
+				// template both print it next to posting_date.
+				posting_time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
 				company: shiftStore.profileCompany || undefined,
 				customer_name: customerLabel,
 				buyer_name: (cartStore.buyerName || "").trim(),

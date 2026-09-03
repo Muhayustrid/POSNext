@@ -183,10 +183,43 @@ class TestPrintingAPI(FrappeTestCase):
 		# (Int columns here are NOT NULL, so reset to the default, not None.)
 		frappe.db.set_value("POS Settings", settings_name, "imin_font_scale", 100)
 
-	def test_copy_labels_defaults_to_true(self):
+	def test_copy_labels_is_no_longer_served(self):
+		# The banners came off the paper, so the endpoint must not advertise a
+		# knob that would do nothing: the transport has nothing left to switch.
 		cfg = get_print_config(self.profile)
-		self.assertIn("copy_labels", cfg)
-		self.assertTrue(cfg["copy_labels"])
+		self.assertNotIn("copy_labels", cfg)
+
+	def test_crew_font_scale_defaults_to_130(self):
+		cfg = get_print_config(self.profile)
+		self.assertIn("crew_font_scale", cfg)
+		self.assertEqual(cfg["crew_font_scale"], 130)
+
+	def test_crew_font_scale_clamps_absurd_values(self):
+		if not self._has_column("imin_crew_font_scale"):
+			self.skipTest("imin_crew_font_scale column not migrated on this site")
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if not settings_name:
+			settings_name = (
+				frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.profile, "enabled": 1})
+				.insert(ignore_permissions=True)
+				.name
+			)
+		frappe.db.set_value("POS Settings", settings_name, "imin_crew_font_scale", 999)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["crew_font_scale"], 250)
+		frappe.db.set_value("POS Settings", settings_name, "imin_crew_font_scale", 40)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["crew_font_scale"], 60)
+		# Undo so later tests (and the defaults test) see the clean state.
+		# (Int columns here are NOT NULL, so reset to the default, not None.)
+		frappe.db.set_value("POS Settings", settings_name, "imin_crew_font_scale", 130)
+
+	def test_crew_font_scale_survives_garbage(self):
+		cfg = get_print_config(self.profile)
+		# A NULL column answers the default rather than leaking None to the FE.
+		self.assertIsInstance(cfg["crew_font_scale"], int)
 
 	def _has_column(self, fieldname):
 		meta = frappe.get_meta("POS Settings")

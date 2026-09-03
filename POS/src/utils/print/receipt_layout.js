@@ -182,32 +182,6 @@ export function buildPreviewPlan(copies, copyDelayMs) {
 	return { copies: n, copyDelayMs: d }
 }
 
-/**
- * Copy labels: the customer copy and the crew copy are otherwise identical
- * bitmaps, so nobody can tell them apart at the counter. Only used when more
- * than one copy is requested — a single receipt needs no label.
- */
-export const COPY_LABELS = { 0: "CUSTOMER COPY", 1: "CREW COPY" }
-
-export function copyLabelFor(index, copies) {
-	if (!copies || copies < 2) return ""
-	return COPY_LABELS[index] || `COPY ${index + 1}`
-}
-
-/**
- * Insert a copy label into print HTML as the first printed line.
- *
- * This is prepended as a sibling rather than injected into the markup, so it
- * works for every HTML the transport can be handed: the locally built receipt,
- * a Frappe print format, or the EOD report. The banner uses inline styles
- * because nothing in the receipt stylesheet knows about it.
- */
-export function withCopyLabel(html, label) {
-	if (!label) return html
-	const banner = `<div class="pn-copy-label" style="text-align:center;font-weight:bold;font-size:14px;letter-spacing:1px;padding:4px 0 8px;">${label}</div>`
-	return `${banner}${html}`
-}
-
 const MAX_COPIES = 5
 const MAX_COPY_DELAY_MS = 10000
 const DEFAULT_COPIES = 1
@@ -228,6 +202,12 @@ function clampInt(v, lo, hi, dflt) {
  * Precedence per value: device key if present (including false / "58mm")
  * wins; only an ABSENT device key falls through to the server value; then the
  * module default. `??` (not `||`) keeps that distinction.
+ *
+ * There is no copy-label knob here any more: nothing is printed above a copy.
+ * The banners read like a second receipt the customer never asked for, so both
+ * the CUSTOMER COPY and the CREW COPY label went. Copies are identical
+ * bitmaps; the Direct Print preview captions its rows instead, which costs no
+ * paper.
  */
 export function resolvePrintConfig(device = {}, server = {}) {
 	const paper = device.paper ?? server.paper ?? "58mm"
@@ -257,19 +237,17 @@ export function resolvePrintConfig(device = {}, server = {}) {
 		MAX_TAIL_DOTS,
 		DEFAULT_TAIL_DOTS,
 	)
-	const rawLabels = device.copyLabels ?? server.copyLabels
-	const copyLabels = rawLabels == null ? true : Boolean(rawLabels)
 	// Percent (100 = as authored). Extra headroom on top of the fixed 205/96
 	// translation, for tills where the operator wants chunkier text still.
 	const fontScale = clampFontScale(device.fontScale ?? server.fontScale)
+	// The crew slip has its own knob: it is read across a counter, so it
+	// defaults chunkier than the receipt itself.
+	const crewFontScale = clampFontScale(
+		device.crewFontScale ?? server.crewFontScale,
+		DEFAULT_CREW_FONT_SCALE,
+	)
 
 	const dots = dotsForPaper(paper, customDots)
-	// Labels only change the bitmap when there is more than one copy; a single
-	// receipt is the customer's and needs no banner.
-	const useLabels = copyLabels && copies > 1
-	const labels = useLabels
-		? Array.from({ length: copies }, (_, i) => copyLabelFor(i, copies))
-		: []
 
 	return {
 		paper,
@@ -279,11 +257,9 @@ export function resolvePrintConfig(device = {}, server = {}) {
 		copyDelayMs,
 		feedDots,
 		tailDots,
-		copyLabels,
 		fontScale,
+		crewFontScale,
 		dots,
-		useLabels,
-		labels,
 	}
 }
 
@@ -319,6 +295,9 @@ const SCALABLE_UNITS = new Set(["px", "pt"])
 const LENGTH_RE = /(-?\d*\.?\d+)(px|pt|mm|cm|in)\b/g
 
 export const DEFAULT_FONT_SCALE = 100
+/** The crew slip starts chunkier: it is read across a counter, not handed to
+ * the customer, and it carries no prices to crowd the line. */
+export const DEFAULT_CREW_FONT_SCALE = 130
 const MIN_FONT_SCALE = 60
 const MAX_FONT_SCALE = 250
 
@@ -341,10 +320,10 @@ export function parseNumericField(label, raw, { min, max, dflt }) {
 	return Math.max(min, Math.min(Math.floor(n) === n ? n : Math.round(n), max))
 }
 
-export function clampFontScale(v) {
-	if (v == null || v === "") return DEFAULT_FONT_SCALE
+export function clampFontScale(v, dflt = DEFAULT_FONT_SCALE) {
+	if (v == null || v === "") return dflt
 	const n = Number(v)
-	if (!Number.isFinite(n)) return DEFAULT_FONT_SCALE
+	if (!Number.isFinite(n)) return dflt
 	return Math.max(MIN_FONT_SCALE, Math.min(Math.round(n), MAX_FONT_SCALE))
 }
 
@@ -468,8 +447,6 @@ export function scopeReceiptCSS(css, scope, fontScale = 1) {
  */
 export function receiptBaseCSS(scope, fontScale = 1) {
 	const base = Math.round(22 * fontScale)
-	const label = Math.round(30 * fontScale)
 	return `${scope}{font-family:'Courier New',Courier,monospace;font-weight:bold;color:#000;background:#fff;font-size:${base}px;line-height:1.35;padding:16px;}
-${scope} .pn-copy-label{font-size:${label}px;font-weight:bold;text-align:center;letter-spacing:2px;padding:0 0 10px;}
 ${scope} .pn-receipt-tail{background:#fff;}`
 }

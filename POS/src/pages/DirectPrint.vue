@@ -254,11 +254,24 @@
 						</p>
 					</div>
 
-					<div class="flex items-end pb-1">
-						<Checkbox
-							v-model="cfg.copyLabels"
-							:label="__('Label copies (CUSTOMER COPY / CREW COPY)')"
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-crew-font-scale">
+							{{ __("Crew copy font scale (%)") }}
+						</label>
+						<Input
+							id="direct-print-crew-font-scale"
+							v-model="crewFontScaleText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('130')"
 						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Same knob, but only for the crew copy — the short order slip the outlet keeps. It starts bigger than the receipt because it is read across the counter. 60–250.",
+								)
+							}}
+						</p>
 					</div>
 				</div>
 
@@ -273,7 +286,7 @@
 					<p>
 						{{
 							__(
-								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Labels {7}",
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}%",
 								[
 									String(effectiveCfg.paper),
 									String(effectiveCfg.dots),
@@ -282,7 +295,7 @@
 									String(effectiveCfg.feedDots),
 									String(effectiveCfg.tailDots),
 									String(effectiveCfg.fontScale),
-									effectiveCfg.useLabels ? __("On") : __("Off"),
+									String(effectiveCfg.crewFontScale),
 								],
 							)
 						}}
@@ -318,7 +331,7 @@
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Builds a small test receipt and sends it through the transport exactly as a real print does. On a non-iMin machine a connection error is expected and will appear in the recent attempts below.",
+							"Prints a sample receipt through the transport exactly as a real print does — the last invoice of this profile through the server receipt template when one is available, the built-in test receipt otherwise. On a non-iMin machine a connection error is expected and will appear in the recent attempts below.",
 						)
 					}}
 				</p>
@@ -330,6 +343,12 @@
 					>
 						{{ __("Test Print") }}
 					</Button>
+					<p
+						v-if="sampleNote"
+						class="mt-2 text-xs text-gray-400"
+					>
+						{{ sampleNote }}
+					</p>
 				</div>
 			</div>
 
@@ -417,7 +436,7 @@
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Renders the test receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer and copy labels. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
+							"Renders the sample receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer — copy 2 is the crew slip, at its own font scale, when the profile prints two. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
 						)
 					}}
 				</p>
@@ -490,6 +509,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 
 import { useToast } from "@/composables/useToast"
 import { call } from "@/utils/apiWrapper"
+import { buildCrewSlipHTML } from "@/utils/print/crew_slip"
 import { loadDeviceConfig, saveDeviceConfig } from "@/utils/print/imin_client"
 import { PAPER_PROFILES } from "@/utils/print/paper"
 import { buildReceiptPreviewSet } from "@/utils/print/receipt_preview"
@@ -499,6 +519,7 @@ import {
 	parseNumericField,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
+import { fetchSampleReceiptBundle } from "@/utils/print/sample_receipt"
 import { useBootstrapStore } from "@/stores/bootstrap"
 import {
 	ensureIminSdk,
@@ -506,7 +527,10 @@ import {
 	initTransportFromServer,
 	printHTML as transportPrint,
 } from "@/utils/print/transport"
-import { buildReceiptDocumentHTML } from "@/utils/printInvoice"
+import {
+	buildReceiptDocumentHTML,
+	effectiveReceiptDots,
+} from "@/utils/printInvoice"
 
 const { showSuccess, showError, showInfo } = useToast()
 
@@ -565,7 +589,6 @@ const cfg = reactive({
 	paper: "58mm",
 	cut: false,
 	copies: 1,
-	copyLabels: true,
 })
 // Two copies printing (customer + outlet crew). Device-level delay
 // overrides the POS Settings value — same override pattern as `paper`/
@@ -575,6 +598,7 @@ const copyDelayText = ref("800")
 const feedDotsText = ref(String(DEFAULT_FEED_DOTS))
 const tailDotsText = ref(String(DEFAULT_TAIL_DOTS))
 const fontScaleText = ref("100")
+const crewFontScaleText = ref("130")
 const customDotsText = ref("384")
 
 function readCfgIntoForm() {
@@ -583,7 +607,6 @@ function readCfgIntoForm() {
 	const p = stored.paper
 	cfg.paper = p === "58mm" || p === "80mm" || p === "custom" ? p : "58mm"
 	cfg.cut = Boolean(stored.cut)
-	cfg.copyLabels = stored.copyLabels == null ? true : Boolean(stored.copyLabels)
 	const n = Number(stored.copies)
 	cfg.copies = Number.isFinite(n) && n >= 1 && n <= 5 ? Math.floor(n) : 1
 	const cd = stored.customDots
@@ -604,6 +627,9 @@ function readCfgIntoForm() {
 	const fs = stored.fontScale
 	fontScaleText.value =
 		fs === undefined || fs === "" || fs === null ? "100" : String(fs)
+	const cfs = stored.crewFontScale
+	crewFontScaleText.value =
+		cfs === undefined || cfs === "" || cfs === null ? "130" : String(cfs)
 }
 
 function reloadConfig() {
@@ -697,17 +723,26 @@ function onSaveConfig() {
 			max: 250,
 			dflt: 100,
 		})
+		const crewFontScale = parseNumericField(
+			"Crew copy font scale",
+			crewFontScaleText.value,
+			{
+				min: 60,
+				max: 250,
+				dflt: 130,
+			},
+		)
 		saveDeviceConfig({
 			host: host || undefined,
 			paper,
 			customDots,
 			cut: Boolean(cfg.cut),
-			copyLabels: Boolean(cfg.copyLabels),
 			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
 			copyDelayMs,
 			feedDots,
 			tailDots,
 			fontScale,
+			crewFontScale,
 		})
 		// Do not call setPageFormat directly — imin_client applies it on next print.
 		showSuccess(__("Device config saved. It will apply on the next print."))
@@ -722,9 +757,14 @@ function onSaveConfig() {
 
 function buildTestInvoiceData() {
 	const now = new Date()
+	// Real invoices carry date and time as separate fields; the crew slip's
+	// timestamp row prints them as-is, so keep the test doc shaped the same
+	// instead of stuffing a full ISO timestamp into posting_date.
+	const iso = now.toISOString()
 	return {
 		name: "TEST",
-		posting_date: now.toISOString(),
+		posting_date: iso.slice(0, 10),
+		posting_time: iso.slice(11, 19),
 		company: __("POS Next"),
 		header: __("TEST PRINT"),
 		customer: __("Walk-in Customer"),
@@ -747,13 +787,69 @@ function buildTestInvoiceData() {
 	}
 }
 
+/**
+ * The sample the page prints: the last invoice of the active profile through
+ * the real "POS Next Receipt" server template, or the local test receipt when
+ * that is out of reach (fresh site, offline till, no profile in scope).
+ *
+ * The bundle is fetched at most once per page mount and shared by Test Print
+ * and the preview — three server calls to look at one receipt is enough.
+ */
+const sampleBundle = ref(null)
+// One-line note under the Test Print button: which sample was used and why.
+// Null until the first fetch, so the page never claims something it has not
+// checked yet.
+const sampleInfo = ref(null)
+
+const sampleNote = computed(() => {
+	if (!sampleInfo.value) return ""
+	return sampleInfo.value.source === "server"
+		? __("Sample: last invoice {0} through the server receipt template.", [
+				sampleInfo.value.name,
+			])
+		: __("Sample: built-in test receipt (no server invoice available).")
+})
+
+async function getSampleBundle({ refresh = false } = {}) {
+	if (sampleBundle.value && !refresh) return sampleBundle.value
+	const bundle = await fetchSampleReceiptBundle(
+		bootstrap.getPreloadedPOSProfile()?.name || null,
+		buildTestInvoiceData(),
+	)
+	sampleBundle.value = bundle
+	sampleInfo.value = {
+		source: bundle.source,
+		name: bundle.invoiceDoc?.name || "",
+	}
+	return bundle
+}
+
+/** Receipt document for the sample: server template, else the local one. */
+function sampleReceiptHTML(bundle) {
+	return (
+		bundle.serverHTML ||
+		buildReceiptDocumentHTML(bundle.invoiceDoc, {
+			includeControls: false,
+			dots: effectiveReceiptDots(),
+		})
+	)
+}
+
+/** Crew slip for the sample — copy 2 whenever the profile prints two. */
+function sampleCrewHTML(bundle) {
+	return buildCrewSlipHTML(bundle.invoiceDoc, {
+		dots: effectiveReceiptDots(),
+	})
+}
+
 async function onTestPrint() {
 	printing.value = true
 	try {
-		const html = buildReceiptDocumentHTML(buildTestInvoiceData(), {
-			includeControls: false,
-		})
-		await transportPrint(html, {
+		const bundle = await getSampleBundle()
+		await transportPrint(sampleReceiptHTML(bundle), {
+			crewHTML: sampleCrewHTML(bundle),
+			// Still "TEST": the log row must stay recognisable as a test print
+			// and must not look like a real sale of that invoice.
 			logContext: {
 				reference_doctype: "Sales Invoice",
 				reference_name: "TEST",
@@ -794,8 +890,8 @@ function serverConfigFromTransport() {
 			copyDelayMs: c.copy_delay_ms,
 			feedDots: c.feed_dots,
 			tailDots: c.tail_dots,
-			copyLabels: c.copy_labels,
 			fontScale: c.font_scale,
+			crewFontScale: c.crew_font_scale,
 		}
 	} catch {
 		return {}
@@ -833,10 +929,10 @@ function clearPreview() {
 
 /**
  * Render the preview through the same path that actually prints
- * (resolvePrintConfig -> withCopyLabel -> renderHTMLToBitmap), then reveal
- * later copies only after the configured delay. The second sheet therefore
- * appears exactly when it would leave the printer. Same invariant the driver
- * itself relies on — the template only iterates the set it is given.
+ * (resolvePrintConfig -> renderHTMLToBitmap, crew slip at its own font scale),
+ * then reveal later copies only after the configured delay. The second sheet
+ * therefore appears exactly when it would leave the printer. Same invariant
+ * the driver itself relies on — the template only iterates the set it is given.
  */
 async function runPreview(copiesOverride) {
 	clearPreview()
@@ -845,10 +941,13 @@ async function runPreview(copiesOverride) {
 		const device = { ...(loadDeviceConfig() || {}) }
 		if (copiesOverride != null) device.copies = copiesOverride
 		const server = serverConfigFromTransport()
-		const html = buildReceiptDocumentHTML(buildTestInvoiceData(), {
-			includeControls: false,
+		const bundle = await getSampleBundle()
+		const set = await buildReceiptPreviewSet(sampleReceiptHTML(bundle), {
+			device,
+			server,
+			// Copy 2 is the compact crew slip, exactly as the driver prints it.
+			crewHTML: sampleCrewHTML(bundle),
 		})
-		const set = await buildReceiptPreviewSet(html, { device, server })
 		previewDots.value = set.dots
 		previewCopies.value = set.copies
 		// Later copies are hidden until their delay elapses, so the tear-off
@@ -947,6 +1046,11 @@ onMounted(async () => {
 	await pollStatus()
 	timer = window.setInterval(pollStatus, 3000)
 	await fetchLogs()
+	// Fetch the sample bundle in the background so the note under Test Print is
+	// already truthful before the first click. Never awaited: a slow print-format
+	// fetch must not delay the status poll or the log table. fetchSampleReceiptBundle
+	// resolves to a fallback bundle instead of rejecting, so there is no error path.
+	getSampleBundle()
 })
 
 onUnmounted(() => {

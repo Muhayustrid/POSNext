@@ -162,3 +162,49 @@ describe("composeReceiptFrame vs server print formats", () => {
 		expect(frame.style.maxWidth).toBe("576px")
 	})
 })
+
+describe("composeReceiptFrame vs the real POS Next Receipt format", () => {
+	// Verbatim excerpt of pos_next/pos_next/print_format/pos_next_receipt —
+	// px typography inside an 80mm body. This is the shape the Direct Print
+	// sample feeds the bitmap path now that it renders the real server
+	// template, so the font-scale knob has to land on THIS css.
+	const posNextReceiptHTML = `<!DOCTYPE html><html><head><style>
+		@page { size: 80mm auto; margin: 0mm; }
+		body {
+			font-family: 'DejaVu Sans', 'Arial', sans-serif;
+			width: 80mm;
+			max-width: 80mm;
+			margin: 0 auto;
+			padding: 10px;
+			font-size: 11px;
+			line-height: 1.4;
+		}
+		.item-name { font-weight: bold; margin-bottom: 3px; font-size: 11px; }
+		@media print { body { width: 80mm; max-width: 80mm; padding: 5mm; } }
+	</style></head><body><div class="item-name">Kopi Susu</div></body></html>`
+
+	it("scales the format's px typography by the font-scale knob", () => {
+		const { scopedCss } = composeReceiptFrame(posNextReceiptHTML, {
+			paper: "58mm",
+			fontScale: 60,
+		})
+		// 11px authored at 96 DPI -> 11 x (205/96) x 0.6 dots.
+		const expected = Math.round(11 * DPI_SCALE * 0.6 * 100) / 100
+		expect(scopedCss).toContain(`font-size: ${expected}px`)
+	})
+
+	it("keeps the 80mm body width physical — mm never follows the font knob", () => {
+		for (const fontScale of [60, 100, 250]) {
+			const { scopedCss } = composeReceiptFrame(posNextReceiptHTML, {
+				paper: "80mm",
+				fontScale,
+			})
+			// 80mm x 8 dots/mm, identical at every scale ...
+			expect(scopedCss).toContain("width: 640px")
+			expect(scopedCss).toContain("max-width: 640px")
+			// ... otherwise the paper width would follow the text size.
+			expect(scopedCss).not.toContain("1280px")
+			expect(scopedCss).not.toContain("1600px")
+		}
+	})
+})

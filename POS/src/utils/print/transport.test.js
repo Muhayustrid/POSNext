@@ -115,6 +115,38 @@ it("passes the server transport config to the driver and logs the effective pape
 	expect(log.attempts.at(-1).paper_width).toBe("80mm")
 })
 
+it("maps the server print knobs the driver resolves (no copy labels)", async () => {
+	const imin = {
+		id: "imin",
+		isAvailable: vi.fn().mockResolvedValue(true),
+		getStatus: vi.fn().mockResolvedValue({ ok: true, code: 0 }),
+		printHTML: vi.fn().mockResolvedValue({ paper: "58mm", dots: 384 }),
+		describe: () => ({ id: "imin" }),
+	}
+	const t = createTransport({
+		drivers: { imin, qz: okDriver("qz"), browser: okDriver("browser") },
+		config: {
+			driver: "imin",
+			copies: 2,
+			copy_delay_ms: 900,
+			tail_dots: 40,
+			// Obsolete server knob: must not reach the driver as a config key.
+			copy_labels: true,
+			font_scale: 110,
+			crew_font_scale: 145,
+		},
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	const config = imin.printHTML.mock.calls[0][1].config
+	expect(config.crewFontScale).toBe(145)
+	expect(config.fontScale).toBe(110)
+	expect(config.copies).toBe(2)
+	expect(config.copyDelayMs).toBe(900)
+	expect(config.tailDots).toBe(40)
+	expect("copyLabels" in config).toBe(false)
+})
+
 it("records why earlier drivers failed when a fallback succeeds", async () => {
 	const imin = failDriver("imin", "upload rejected")
 	const qz = failDriver("qz", "no qz tray")

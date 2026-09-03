@@ -22,11 +22,9 @@ import { logger } from "@/utils/logger"
 
 import { renderHTMLToBitmap } from "./receipt_renderer"
 import {
-	copyLabelFor,
 	loadDeviceConfig,
 	resolvePrintConfig,
 	saveDeviceConfig,
-	withCopyLabel,
 } from "./receipt_layout"
 
 export { loadDeviceConfig, saveDeviceConfig }
@@ -171,6 +169,10 @@ export function createIminDriver(deps = {}) {
 		 * @param {string} html
 		 * @param {object} [opts]
 		 * @param {(html, o) => Promise<{dataURL:string}>} [opts.render] - injected for tests
+		 * @param {string} [opts.crewHTML] - complete document to print INSTEAD OF
+		 *   the second copy (the compact crew slip). Rendered with the resolved
+		 *   crewFontScale and printed exactly as handed over — nothing is
+		 *   prepended to it, and nothing is printed above any copy.
 		 * @param {object} [opts.config] - server (transport) config used as the
 		 *   fallback below each device value. An explicit device value
 		 *   (including false / "58mm") always wins; only an ABSENT device key
@@ -191,8 +193,7 @@ export function createIminDriver(deps = {}) {
 				tailDots,
 				feedDots,
 				fontScale,
-				useLabels,
-				labels,
+				crewFontScale,
 			} = r
 			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
@@ -200,20 +201,23 @@ export function createIminDriver(deps = {}) {
 			p.setPageFormat(pageFormatFor(paper, dots))
 
 			const renderOpts = { paper, customDots, tailDots, fontScale }
-			let bitmap = null
-			let bitmaps = null
-			if (useLabels) {
-				bitmaps = await Promise.all(
-					Array.from({ length: copies }, (_, idx) =>
-						render(withCopyLabel(html, labels[idx]), renderOpts),
-					),
-				)
-			} else {
-				bitmap = await render(html, renderOpts)
-			}
+			// A crew slip only exists for a multi-copy job: with one copy there is
+			// no second sheet to replace. When it applies, copy 2 (index 1) prints
+			// the slip at its own font scale and every other copy prints the
+			// receipt exactly as built — no banner above either sheet, so the paper
+			// looks like one receipt and one order list.
+			const crewApplies = Boolean(opts.crewHTML) && copies > 1
+			// Every non-crew copy is the same html with the same options, so one
+			// bitmap serves them all; only the slip is a second render.
+			const [bitmap, crewBitmap] = await Promise.all([
+				render(html, renderOpts),
+				crewApplies
+					? render(opts.crewHTML, { ...renderOpts, fontScale: crewFontScale })
+					: null,
+			])
 
 			for (let i = 0; i < copies; i++) {
-				const bmp = useLabels ? bitmaps[i] : bitmap
+				const bmp = crewApplies && i === 1 ? crewBitmap : bitmap
 				const tQueued = Date.now()
 				await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
 

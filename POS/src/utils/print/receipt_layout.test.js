@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
 	clampFontScale,
-	copyLabelFor,
 	loadDeviceConfig,
 	parseNumericField,
 	saveDeviceConfig,
+	DEFAULT_CREW_FONT_SCALE,
 	DEFAULT_FEED_DOTS,
 	DEFAULT_FONT_SCALE,
 	DEFAULT_TAIL_DOTS,
@@ -20,7 +20,6 @@ import {
 	scopeReceiptCSS,
 	splitStyleBlocks,
 	tailSpacerHTML,
-	withCopyLabel,
 } from "./receipt_layout"
 import { dotsForPaper } from "./paper"
 
@@ -53,34 +52,6 @@ describe("tailSpacerHTML", () => {
 	})
 })
 
-describe("copyLabelFor", () => {
-	it("returns empty for a single copy (no label needed)", () => {
-		expect(copyLabelFor(0, 1)).toBe("")
-		expect(copyLabelFor(1, 1)).toBe("")
-	})
-
-	it("labels customer vs crew for the common 2-copy case", () => {
-		expect(copyLabelFor(0, 2)).toBe("CUSTOMER COPY")
-		expect(copyLabelFor(1, 2)).toBe("CREW COPY")
-	})
-
-	it("keeps going for copy 3, 4, ...", () => {
-		expect(copyLabelFor(2, 3)).toBe("COPY 3")
-	})
-})
-
-describe("withCopyLabel", () => {
-	it("prepends a banner when labelled", () => {
-		expect(withCopyLabel("<div>body</div>", "CREW COPY")).toMatch(
-			/^<div class="pn-copy-label"[^>]*>CREW COPY<\/div><div>body<\/div>/,
-		)
-	})
-
-	it("is identity when the label is empty", () => {
-		expect(withCopyLabel("<div>x</div>", "")).toBe("<div>x</div>")
-	})
-})
-
 describe("resolvePrintConfig", () => {
 	it("device keys win over server keys", () => {
 		const r = resolvePrintConfig({ paper: "58mm" }, { paper: "80mm" })
@@ -105,21 +76,13 @@ describe("resolvePrintConfig", () => {
 		expect(resolvePrintConfig({}, {}).tailDots).toBe(DEFAULT_TAIL_DOTS)
 	})
 
-	it("does not label a single copy", () => {
-		const r = resolvePrintConfig({ copies: 1 }, {})
-		expect(r.useLabels).toBe(false)
-		expect(r.labels).toEqual([])
-	})
-
-	it("labels both copies by default when copies>1", () => {
-		const r = resolvePrintConfig({ copies: 2 }, {})
-		expect(r.useLabels).toBe(true)
-		expect(r.labels).toEqual(["CUSTOMER COPY", "CREW COPY"])
-	})
-
-	it("honours a device copyLabels:false even when copies>1", () => {
-		const r = resolvePrintConfig({ copies: 2, copyLabels: false }, {})
-		expect(r.useLabels).toBe(false)
+	it("no longer resolves copy labels — nothing is printed above the receipt", () => {
+		// The banners came off the paper: the machinery must be gone from the
+		// resolver too, so no caller can quietly put a label back.
+		const r = resolvePrintConfig({ copies: 2, copyLabels: true }, {})
+		expect("useLabels" in r).toBe(false)
+		expect("labels" in r).toBe(false)
+		expect("copyLabels" in r).toBe(false)
 	})
 
 	it("maps through dotsForPaper for custom widths", () => {
@@ -217,16 +180,6 @@ describe("scopeReceiptCSS", () => {
 	})
 })
 
-describe("clampFontScale", () => {
-	it("defaults to 100 and clamps to 60..250", () => {
-		expect(clampFontScale(null)).toBe(100)
-		expect(clampFontScale("")).toBe(100)
-		expect(clampFontScale(40)).toBe(60)
-		expect(clampFontScale(999)).toBe(250)
-		expect(clampFontScale("130")).toBe(130)
-	})
-})
-
 describe("receiptBaseCSS", () => {
 	it("sets an explicit monospace baseline in dots, scaled by the knob", () => {
 		const css = receiptBaseCSS(".pn", 1)
@@ -234,6 +187,10 @@ describe("receiptBaseCSS", () => {
 		expect(css).toMatch(/font-size:\d+px/)
 		const bigger = receiptBaseCSS(".pn", 2)
 		expect(bigger).not.toBe(css)
+	})
+
+	it("no longer styles a copy banner — the print path has none", () => {
+		expect(receiptBaseCSS(".pn", 1)).not.toContain("pn-copy-label")
 	})
 })
 
@@ -248,6 +205,60 @@ describe("resolvePrintConfig fontScale", () => {
 
 	it("clamps absurd values", () => {
 		expect(resolvePrintConfig({ fontScale: 9999 }, {}).fontScale).toBe(250)
+	})
+})
+
+describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
+	it("defaults to 130 — the slip is read across a counter, so it starts bigger", () => {
+		expect(DEFAULT_CREW_FONT_SCALE).toBe(130)
+		expect(resolvePrintConfig({}, {}).crewFontScale).toBe(130)
+	})
+
+	it("device wins over server, server over the default", () => {
+		expect(
+			resolvePrintConfig({ crewFontScale: 150 }, { crewFontScale: 90 })
+				.crewFontScale,
+		).toBe(150)
+		expect(resolvePrintConfig({}, { crewFontScale: 90 }).crewFontScale).toBe(90)
+	})
+
+	it("is independent of the main font scale", () => {
+		const r = resolvePrintConfig({ fontScale: 200 }, {})
+		expect(r.fontScale).toBe(200)
+		expect(r.crewFontScale).toBe(130)
+	})
+
+	it("clamps to the same 60..250 band as the main knob", () => {
+		expect(resolvePrintConfig({ crewFontScale: 10 }, {}).crewFontScale).toBe(60)
+		expect(resolvePrintConfig({ crewFontScale: 9999 }, {}).crewFontScale).toBe(
+			250,
+		)
+	})
+
+	it("falls back to the crew default on garbage instead of 100", () => {
+		expect(
+			resolvePrintConfig({ crewFontScale: "garbage" }, {}).crewFontScale,
+		).toBe(130)
+		expect(
+			resolvePrintConfig({}, { crewFontScale: "garbage" }).crewFontScale,
+		).toBe(130)
+	})
+})
+
+describe("clampFontScale", () => {
+	it("defaults to 100 and clamps to 60..250", () => {
+		expect(clampFontScale(null)).toBe(100)
+		expect(clampFontScale("")).toBe(100)
+		expect(clampFontScale(40)).toBe(60)
+		expect(clampFontScale(999)).toBe(250)
+		expect(clampFontScale("130")).toBe(130)
+	})
+
+	it("takes a custom default (the crew knob defaults to 130)", () => {
+		expect(clampFontScale(null, DEFAULT_CREW_FONT_SCALE)).toBe(130)
+		expect(clampFontScale("", DEFAULT_CREW_FONT_SCALE)).toBe(130)
+		expect(clampFontScale("nope", DEFAULT_CREW_FONT_SCALE)).toBe(130)
+		expect(clampFontScale(20, DEFAULT_CREW_FONT_SCALE)).toBe(60)
 	})
 })
 

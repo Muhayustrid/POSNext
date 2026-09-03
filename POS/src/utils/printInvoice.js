@@ -8,6 +8,7 @@ import {
 	initTransportFromServer,
 	printHTML as transportPrint,
 } from "@/utils/print/transport"
+import { buildCrewSlipHTML } from "@/utils/print/crew_slip"
 import {
 	loadDeviceConfig,
 	receiptStylesFor,
@@ -514,18 +515,14 @@ async function ensureTransportInitialized(posProfile = null) {
 }
 
 /**
- * Fetch server-rendered print HTML for any doctype and route it through the
- * print transport. `posProfile` is optional — callers without one in scope
- * (e.g. EOD) pass nothing and the log context records a null profile.
+ * Fetch server-rendered print HTML and wrap it into the full document the
+ * transport expects. One response-shape handler for every caller
+ * (silentPrintDoc, the invoice path, the Direct Print sample), so a change in
+ * how Frappe returns the payload cannot desync them.
+ *
+ * @returns {Promise<string>} full HTML document
  */
-export async function silentPrintDoc(
-	doctype,
-	name,
-	printFormat,
-	posProfile = null,
-) {
-	await ensureTransportInitialized(posProfile)
-
+export async function fetchServerPrintHTML(doctype, name, printFormat) {
 	const result = await call("frappe.www.printview.get_html_and_style", {
 		doc: doctype,
 		name,
@@ -537,11 +534,30 @@ export async function silentPrintDoc(
 	const style = result?.style || result?.message?.style || ""
 	if (!html) throw new Error("Failed to get print HTML from server")
 
-	const fullHTML = `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><style>${style}</style></head>
 <body>${html}</body>
 </html>`
+}
+
+/**
+ * Fetch server-rendered print HTML for any doctype and route it through the
+ * print transport. `posProfile` is optional — callers without one in scope
+ * (e.g. EOD) pass nothing and the log context records a null profile.
+ *
+ * Deliberately generic: no crew slip here. Only the invoice call sites attach
+ * one, so an EOD report can never print a second, order-only sheet.
+ */
+export async function silentPrintDoc(
+	doctype,
+	name,
+	printFormat,
+	posProfile = null,
+) {
+	await ensureTransportInitialized(posProfile)
+
+	const fullHTML = await fetchServerPrintHTML(doctype, name, printFormat)
 
 	await transportPrint(fullHTML, {
 		logContext: {
@@ -561,6 +577,11 @@ export async function silentPrintDoc(
  * is NOT included — print formats that rely on Bootstrap layout classes may
  * render differently. Paper size and margins are controlled by the
  * transport's config loaded from POS Settings.
+ *
+ * When the profile prints more than one copy, copy 2 is the compact crew slip.
+ * The invoice doc it is built from is fetched in PARALLEL with the HTML and a
+ * failure there is not the print's problem: the customer copy must still come
+ * out exactly as it always did.
  */
 export async function silentPrintInvoice(
 	invoiceName,
@@ -578,7 +599,31 @@ export async function silentPrintInvoice(
 	}
 	const format = printFormat || DEFAULT_PRINT_FORMAT
 
-	await silentPrintDoc("Sales Invoice", invoiceName, format, posProfile)
+	await ensureTransportInitialized(posProfile)
+
+	const [htmlResult, docResult] = await Promise.allSettled([
+		fetchServerPrintHTML("Sales Invoice", invoiceName, format),
+		call("pos_next.api.invoices.get_invoice", { invoice_name: invoiceName }),
+	])
+	if (htmlResult.status === "rejected") throw htmlResult.reason
+	if (docResult.status === "rejected") {
+		log.warn(
+			"Crew slip skipped (invoice doc fetch failed):",
+			docResult.reason?.message || docResult.reason,
+		)
+	}
+	const invoiceDoc = docResult.status === "fulfilled" ? docResult.value : null
+
+	await transportPrint(htmlResult.value, {
+		crewHTML: invoiceDoc
+			? buildCrewSlipHTML(invoiceDoc, { dots: effectiveReceiptDots() })
+			: null,
+		logContext: {
+			reference_doctype: "Sales Invoice",
+			reference_name: invoiceName,
+			pos_profile: posProfile,
+		},
+	})
 	log.info(`Silent print sent for ${invoiceName}`)
 	return true
 }
@@ -591,11 +636,15 @@ export async function silentPrintInvoice(
 export async function silentPrintInvoiceFromDoc(invoiceData) {
 	await ensureTransportInitialized(invoiceData?.pos_profile || null)
 
+	const dots = effectiveReceiptDots()
 	const fullHTML = buildReceiptDocumentHTML(invoiceData, {
 		includeControls: false,
-		dots: effectiveReceiptDots(),
+		dots,
 	})
 	await transportPrint(fullHTML, {
+		// Copy 2, when the profile prints one: the compact crew slip built from
+		// the doc we already hold. The driver drops it for single copies.
+		crewHTML: buildCrewSlipHTML(invoiceData, { dots }),
 		logContext: {
 			reference_doctype: "Sales Invoice",
 			reference_name: invoiceData?.name,

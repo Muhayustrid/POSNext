@@ -3,27 +3,30 @@
  *
  * The point of a preview is that it *is* the print. So this mirrors the iMin
  * driver's render block exactly — same `resolvePrintConfig`, same
- * `withCopyLabel(html, labels[i])`, same `renderHTMLToBitmap`, same
- * tailDots/paper/customDots. There is no second renderer and no second label
- * path; if the two ever disagree, the preview lies. Keeping the copy loop here
- * (rather than in the Vue page) is what makes "preview = print" structural.
+ * `renderHTMLToBitmap`, same tailDots/paper/customDots, and the same two
+ * bitmaps: one for every plain copy, the crew slip (at its own font scale) for
+ * copy 2. There is no second renderer; if the two ever disagree, the preview
+ * lies. Keeping the copy loop here (rather than in the Vue page) is what makes
+ * "preview = print" structural.
  *
  * Nothing here touches the printer, so it works on a laptop with no iMin
  * attached. What it cannot show is the physical part: where the tear bar
  * actually falls relative to the last line. That still needs the device.
  */
 import { renderHTMLToBitmap } from "./receipt_renderer"
-import { resolvePrintConfig, withCopyLabel } from "./receipt_layout"
+import { resolvePrintConfig } from "./receipt_layout"
 
 /**
  * Render the full copy set exactly as the driver would.
  *
- * @param {string} html - receipt document HTML (no copy label yet).
+ * @param {string} html - receipt document HTML.
  * @param {object} [opts]
  * @param {object} [opts.device] - per-device localStorage config.
  * @param {object} [opts.server] - transport/POS Settings config.
  * @param {number} [opts.copies] - override the configured copy count
  *   (the preview buttons pass 1 or 2 explicitly).
+ * @param {string} [opts.crewHTML] - the crew slip that replaces copy 2, same
+ *   contract as the driver's opts.crewHTML.
  * @param {(html, o) => Promise<{dataURL,width,height}>} [opts.render]
  *   injected for tests; defaults to the real bitmap renderer.
  * @returns {Promise<{dots:number, paper:string, tailDots:number,
@@ -37,29 +40,27 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 	const r = resolvePrintConfig(device, opts.server || {})
 	const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
-	// Same branch the driver takes: labelled per-copy bitmaps, or one shared.
-	// The preview still has to SHOW `r.copies` sheets when labels are off — the
-	// printer will physically eject that many — so a shared bitmap is reused
-	// per index rather than collapsing the list to one row.
+	// Same render the driver makes for every plain copy. Nothing is printed
+	// above a copy any more, so the sheets are identical and one bitmap is
+	// reused; the preview still shows `r.copies` rows because that is what
+	// physically leaves the printer.
 	const renderOpts = {
 		paper: r.paper,
 		customDots: r.customDots,
 		tailDots: r.tailDots,
 		fontScale: r.fontScale,
 	}
-	let bitmaps
-	if (r.useLabels) {
-		bitmaps = await Promise.all(
-			Array.from({ length: r.copies }, (_, idx) =>
-				render(withCopyLabel(html, r.labels[idx]), renderOpts),
-			),
-		)
-	} else {
-		// One render, reused for every sheet — matches the driver, which sends
-		// the same bitmap for each copy when labels are off.
-		const shared = await render(html, renderOpts)
-		bitmaps = Array.from({ length: r.copies }, () => shared)
-	}
+	// Mirrors imin_client: a crew slip only replaces copy 2 of a multi-copy job.
+	const crewApplies = Boolean(opts.crewHTML) && r.copies > 1
+	const [shared, crewBitmap] = await Promise.all([
+		render(html, renderOpts),
+		crewApplies
+			? render(opts.crewHTML, { ...renderOpts, fontScale: r.crewFontScale })
+			: null,
+	])
+	const bitmaps = Array.from({ length: r.copies }, (_, idx) =>
+		crewApplies && idx === 1 ? crewBitmap : shared,
+	)
 
 	return {
 		dots: r.dots,
@@ -69,7 +70,9 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 		copyDelayMs: r.copyDelayMs,
 		copies: bitmaps.map((bitmap, index) => ({
 			index,
-			label: r.useLabels ? r.labels[index] : `Copy ${index + 1}`,
+			// Screen-only caption so the operator knows which sheet is which —
+			// the paper itself carries no banner.
+			label: crewApplies && index === 1 ? "CREW COPY" : `Copy ${index + 1}`,
 			// Copy 1 shows now; later copies are revealed after their delay by
 			// the caller, so the tear-off pause between copies is visible.
 			visible: index === 0,
@@ -91,7 +94,7 @@ export function buildCopyTimeline(copies, copyDelayMs) {
 	const r = resolvePrintConfig({ copies, copyDelayMs }, {})
 	return Array.from({ length: r.copies }, (_, i) => ({
 		index: i,
-		label: r.useLabels ? r.labels[i] : `Copy ${i + 1}`,
+		label: `Copy ${i + 1}`,
 		delayMs: i * r.copyDelayMs,
 	}))
 }
