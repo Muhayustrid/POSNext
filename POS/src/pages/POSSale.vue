@@ -967,6 +967,7 @@
 						<Button
 							variant="solid"
 							theme="blue"
+							:disabled="activePrintCount > 0"
 							@click="
 								() => {
 									handlePrintInvoice({ name: uiStore.lastInvoiceName });
@@ -1049,8 +1050,8 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
-let _initializedKey = null;
-let _posInitPromise = null;
+let _initializedKey = null
+let _posInitPromise = null
 </script>
 
 <script setup>
@@ -2228,28 +2229,19 @@ async function handlePaymentCompleted(paymentData) {
 				draftsStore.deleteDraft(draftIdToDelete);
 			}
 
-			if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
-				try {
-					await handlePrintInvoice({ name: offlineReceiptName });
-					showSuccess(
-						__(
-							"Invoice {0} saved offline and sent to printer — will sync when online",
-							[offlineReceiptName]
-						)
-					);
-				} catch (error) {
+			uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+			showSuccess(__("Invoice saved offline. Will sync when online"));
+
+			if (shiftStore.autoPrintEnabled) {
+				handlePrintInvoice({ name: offlineReceiptName }).catch((error) => {
 					log.error("Offline auto-print error:", error);
-					uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
 					showWarning(
 						__(
 							"Invoice {0} saved offline but print failed — open Print from the success dialog",
 							[offlineReceiptName]
 						)
 					);
-				}
-			} else {
-				uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
-				showSuccess(__("Invoice saved offline. Will sync when online"));
+				});
 			}
 		} else {
 			// Get item codes from cart before clearing
@@ -2307,17 +2299,14 @@ async function handlePaymentCompleted(paymentData) {
 					log.debug("Background invoice cache refresh failed:", err)
 				);
 
-				if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
-					try {
-						await handlePrintInvoice({ name: invoiceName });
-						showSuccess(__("Invoice {0} created and sent to printer", [invoiceName]));
-					} catch (error) {
+				uiStore.showSuccess(invoiceName, invoiceTotal, paidAmount);
+				showSuccess(__("Invoice {0} created successfully", [invoiceName]));
+
+				if (shiftStore.autoPrintEnabled) {
+					handlePrintInvoice({ name: invoiceName }).catch((error) => {
 						log.error("Auto-print error:", error);
 						showWarning(__("Invoice {0} created but print failed", [invoiceName]));
-					}
-				} else {
-					uiStore.showSuccess(invoiceName, invoiceTotal, paidAmount);
-					showSuccess(__("Invoice {0} created successfully", [invoiceName]));
+					});
 				}
 			}
 		}
@@ -3033,7 +3022,34 @@ function handleViewInvoice(invoice) {
 }
 
 // Centralized print handler - uses printInvoice.js utilities
-async function handlePrintInvoice(invoiceData) {
+//
+// The success dialog is interactive while the fire-and-forget auto-print is
+// still walking the printer, and neither transport serializes a second job,
+// so a re-trigger for the same invoice must reuse the running job instead of
+// interleaving feed/cut on one device.
+const printJobsInFlight = new Map();
+const activePrintCount = ref(0);
+
+function handlePrintInvoice(invoiceData) {
+	const name = (invoiceData || {}).name || null;
+	const running = name ? printJobsInFlight.get(name) : null;
+	if (running) {
+		return running;
+	}
+	activePrintCount.value += 1;
+	const job = runPrintInvoice(invoiceData).finally(() => {
+		activePrintCount.value -= 1;
+		if (name && printJobsInFlight.get(name) === job) {
+			printJobsInFlight.delete(name);
+		}
+	});
+	if (name) {
+		printJobsInFlight.set(name, job);
+	}
+	return job;
+}
+
+async function runPrintInvoice(invoiceData) {
 	try {
 		invoiceData = await hydrateLocalOnlyInvoice(invoiceData || {});
 		const offlineSnapshot = uiStore.lastOfflinePrintDoc;

@@ -46,10 +46,14 @@ function pageFormatFor(paper, dots) {
 
 // Conservative thermal throughput used ONLY to reserve wall-clock time for
 // the copy that is still printing when getPrinterStatus() already reports 0.
-// 8 dots/mm at a slow ~100 mm/s -> ~800 dots/s. Deliberately on the slow
-// side: underestimating the speed just adds idle wait before the next copy,
-// overestimating it would re-introduce the swallowed tear-off pause.
-const PRINT_DOTS_PER_SECOND = 800
+// 8 dots/mm at a slow ~50 mm/s -> ~400 dots/s. Device evidence (2026-09-03:
+// ~13 s for a 2-copy, 1-item receipt once upload and status overheads are
+// counted) puts real throughput well below the 800 dots/s this used, so the
+// estimate has to be even more conservative for the reservation to survive a
+// slow queue. Deliberately on the slow side: underestimating the speed just
+// adds idle wait before the next copy, overestimating it would re-introduce
+// the swallowed tear-off pause.
+const PRINT_DOTS_PER_SECOND = 400
 
 /**
  * Estimated wall-clock time the head needs for a bitmap of `heightDots`.
@@ -228,16 +232,19 @@ export function createIminDriver(deps = {}) {
 				// printing, so waitIdle passes instantly and a bare copyDelayMs is
 				// consumed by the copy still coming out: the pause visibly existed
 				// with fontScale 60 (short bitmap) and vanished at fontScale 100
-				// (tall bitmap). Reserve the bitmap's estimated print time first,
-				// so the next sheet starts no earlier than "printed + delay".
-				// The configured delay stays the minimum tear-off window.
+				// (tall bitmap). Invariant: the gap between two copies is always
+				// at least copyDelayMs, ON TOP of whatever the pipeline actually
+				// took — the reservation only extends the pause (when status went
+				// idle early) and shrinks to zero when the pipeline overran the
+				// estimate, so slow uploads plus waitIdle polling overshoot can
+				// no longer swallow the configured tear-off window.
 				if (i < copies - 1) {
 					const elapsed = Date.now() - tQueued
-					const minCycleMs = SETTLE_MS + bitmapPrintMs(bmp.height) + copyDelayMs
-					const remaining = minCycleMs - elapsed
-					if (remaining > 0) {
-						await new Promise((r) => setTimeout(r, remaining))
-					}
+					const reserveMs = Math.max(
+						0,
+						SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
+					)
+					await new Promise((r) => setTimeout(r, reserveMs + copyDelayMs))
 				}
 			}
 

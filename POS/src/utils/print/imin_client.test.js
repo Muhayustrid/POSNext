@@ -3,6 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createIminDriver } from "./imin_client"
 import { DEFAULT_FEED_DOTS, DEFAULT_TAIL_DOTS } from "./receipt_layout"
 
+// Clock slack for the wall-clock gap assertions. The mock stamps its time a
+// few microseconds AFTER the driver captured tQueued, so the ms clock can
+// tick across that boundary and shave 1 ms off the measured gap.
+const CLOCK_SLACK_MS = 2
+
+// These cases sleep real wall-clock time (no fake timers), which is measured
+// against vitest's 5 s default per-test timeout.
+const SLOW_TEST_TIMEOUT_MS = 15000
+
 function makeFakePrinter(overrides = {}) {
 	return {
 		connect: vi.fn().mockResolvedValue(true),
@@ -308,35 +317,11 @@ describe("createIminDriver", () => {
 			)
 		})
 
-		it("reserves the copy's print time even when the status gate returns instantly", async () => {
-			// Device behaviour: getPrinterStatus() reports 0 while the head is
-			// still printing, so waitIdle is a no-op. The pause must survive it.
-			const stamps = []
-			const t0 = Date.now()
-			printer.printSingleBitmap = vi.fn(async () => {
-				stamps.push(Date.now() - t0)
-				return 1
-			})
-			printer.printAndFeedPaper = vi.fn()
-			printer.getPrinterStatus = async () => ({ value: 0 })
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({ paper: "58mm", cut: false }),
-			})
-			// 800 dots at the conservative 800 dots/s -> ~1000 ms reserved.
-			await d.printHTML("<div/>", {
-				render: async () => ({ dataURL: "x", width: 384, height: 800 }),
-				config: { copies: 3, copyDelayMs: 300 },
-			})
-			expect(stamps).toHaveLength(3)
-			for (let i = 1; i < stamps.length; i++) {
-				// settle 200 + reserved print ~1000 + delay 300, from queue time.
-				expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(1400)
-			}
-		})
-
-		it("a taller bitmap widens the inter-copy pause (reproduces fontScale report)", async () => {
-			const runCopies = async (height) => {
+		it(
+			"reserves the copy's print time even when the status gate returns instantly",
+			async () => {
+				// Device behaviour: getPrinterStatus() reports 0 while the head is
+				// still printing, so waitIdle is a no-op. The pause must survive it.
 				const stamps = []
 				const t0 = Date.now()
 				printer.printSingleBitmap = vi.fn(async () => {
@@ -349,15 +334,102 @@ describe("createIminDriver", () => {
 					factory: () => printer,
 					loadConfig: () => ({ paper: "58mm", cut: false }),
 				})
+				// 800 dots at the conservative 400 dots/s -> ~2000 ms reserved.
+				// Two copies only: a single gap already costs the full ~2.5 s window
+				// of real sleep, hence the explicit timeout above.
+				const SETTLE_MS = 200
+				const ESTIMATE_MS = 2000
+				const COPY_DELAY_MS = 300
 				await d.printHTML("<div/>", {
-					render: async () => ({ dataURL: "x", width: 384, height }),
-					config: { copies: 2, copyDelayMs: 300 },
+					render: async () => ({ dataURL: "x", width: 384, height: 800 }),
+					config: { copies: 2, copyDelayMs: COPY_DELAY_MS },
 				})
-				return stamps[1] - stamps[0]
+				expect(stamps).toHaveLength(2)
+				for (let i = 1; i < stamps.length; i++) {
+					// settle 200 + reserved print ~2000 + delay 300, from queue time.
+					// CLOCK_SLACK_MS because the mock stamps a tick after tQueued.
+					expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(
+						SETTLE_MS + ESTIMATE_MS + COPY_DELAY_MS - CLOCK_SLACK_MS,
+					)
+				}
+			},
+			SLOW_TEST_TIMEOUT_MS,
+		)
+
+		it(
+			"a taller bitmap widens the inter-copy pause (reproduces fontScale report)",
+			async () => {
+				const runCopies = async (height) => {
+					const stamps = []
+					const t0 = Date.now()
+					printer.printSingleBitmap = vi.fn(async () => {
+						stamps.push(Date.now() - t0)
+						return 1
+					})
+					printer.printAndFeedPaper = vi.fn()
+					printer.getPrinterStatus = async () => ({ value: 0 })
+					const d = createIminDriver({
+						factory: () => printer,
+						loadConfig: () => ({ paper: "58mm", cut: false }),
+					})
+					await d.printHTML("<div/>", {
+						render: async () => ({ dataURL: "x", width: 384, height }),
+						config: { copies: 2, copyDelayMs: 300 },
+					})
+					return stamps[1] - stamps[0]
+				}
+				const shortBitmap = await runCopies(200) // ~0.5 s print
+				const tallBitmap = await runCopies(800) // ~2 s print
+				expect(tallBitmap).toBeGreaterThan(shortBitmap + 800)
+			},
+			SLOW_TEST_TIMEOUT_MS,
+		)
+
+		it("keeps the tear-off pause when the pipeline overruns the estimate", async () => {
+			// Device evidence (2026-09-03): a slow bitmap upload plus the waitIdle
+			// polling overshoot can take LONGER than settle + estimate + delay, so
+			// the old `remaining = cycle - elapsed` reservation went negative and
+			// the pause silently vanished — copies printed back-to-back. The
+			// configured delay must be ADDED on top of whatever the pipeline took,
+			// never carved out of it.
+			const SETTLE_MS = 200
+			const QUEUE_MS = 700
+			const STATUS_MS = 400
+			const COPY_DELAY_MS = 400
+			// 100 dots at 400 dots/s -> ~250 ms estimate, far under the real cycle.
+			const stamps = []
+			const t0 = Date.now()
+			printer.printSingleBitmap = vi.fn(async () => {
+				stamps.push(Date.now() - t0)
+				await new Promise((r) => setTimeout(r, QUEUE_MS))
+				return 1
+			})
+			printer.getPrinterStatus = vi.fn(async () => {
+				await new Promise((r) => setTimeout(r, STATUS_MS))
+				return { value: 0 }
+			})
+			printer.printAndFeedPaper = vi.fn()
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384, height: 100 }),
+				config: { copies: 2, copyDelayMs: COPY_DELAY_MS },
+			})
+			expect(stamps).toHaveLength(2)
+			// Lower bound on the real cycle: queue + settle + status round trip.
+			const cycleMs = QUEUE_MS + SETTLE_MS + STATUS_MS
+			// The delay survives the overrun, so it is >= the delay alone ...
+			for (let i = 1; i < stamps.length; i++) {
+				expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(COPY_DELAY_MS)
+				// ... and it is never swallowed by the pipeline: the gap must
+				// exceed the cycle itself by at least the configured delay.
+				// CLOCK_SLACK_MS because the mock stamps a tick after tQueued.
+				expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(
+					cycleMs + COPY_DELAY_MS - CLOCK_SLACK_MS,
+				)
 			}
-			const shortBitmap = await runCopies(400) // ~0.5 s print
-			const tallBitmap = await runCopies(1600) // ~2 s print
-			expect(tallBitmap).toBeGreaterThan(shortBitmap + 800)
 		})
 
 		it("delays between EVERY pair of copies, not only the first gap", async () => {
