@@ -17,6 +17,7 @@ vi.mock("@/utils/offline/workerClient", () => ({
 	offlineWorker: { markOfflineInvoicePrinted: vi.fn().mockResolvedValue(undefined) },
 }))
 vi.mock("@/utils/print/transport", () => ({
+	getTransport: vi.fn(() => ({ getConfig: () => ({ paper: "58mm" }) })),
 	initTransportFromServer: vi.fn().mockResolvedValue({ driver: "browser" }),
 	printHTML: vi.fn().mockResolvedValue(undefined),
 }))
@@ -32,6 +33,7 @@ globalThis.__ = (message, replacements = []) => {
 import { call } from "@/utils/apiWrapper"
 import {
 	buildReceiptDocumentHTML,
+	effectiveReceiptDots,
 	RECEIPT_STYLES,
 	receiptStylesFor,
 	silentPrintInvoiceFromDoc,
@@ -136,5 +138,29 @@ describe("printWithSilentFallback (silent first, browser second)", () => {
 		const res = await p(doc)
 		expect(res.success).toBe(true)
 		expect(res.method).toBe("browser")
+	})
+})
+
+describe("effectiveReceiptDots (paper follows the device/server config)", () => {
+	it("reads the transport config (58mm -> 384 dots)", () => {
+		// The transport mock above exposes getConfig with paper 58mm.
+		expect(effectiveReceiptDots()).toBe(384)
+	})
+
+	it("falls back to 576 when the transport is unreachable", async () => {
+		const transport = await import("@/utils/print/transport")
+		transport.getTransport.mockImplementationOnce(() => {
+			throw new Error("no singleton")
+		})
+		expect(effectiveReceiptDots()).toBe(576)
+	})
+})
+
+describe("silentPrintInvoiceFromDoc embeds the effective paper width", () => {
+	it("styles the document for the configured paper, not the 576 default", async () => {
+		await silentPrintInvoiceFromDoc(doc)
+		const html = transport.printHTML.mock.calls[0][0]
+		// 384 dots -> 48mm in the embedded @page/body width.
+		expect(html).toContain("48mm")
 	})
 })

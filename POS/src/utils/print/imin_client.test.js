@@ -199,6 +199,7 @@ describe("createIminDriver", () => {
 				paper: "80mm",
 				customDots: undefined,
 				tailDots: DEFAULT_TAIL_DOTS,
+				fontScale: 100,
 			})
 			expect(res.paper).toBe("80mm")
 		})
@@ -252,6 +253,7 @@ describe("createIminDriver", () => {
 				paper: "custom",
 				customDots: 512,
 				tailDots: DEFAULT_TAIL_DOTS,
+				fontScale: 100,
 			})
 			expect(res.paper).toBe("custom")
 		})
@@ -282,6 +284,18 @@ describe("createIminDriver", () => {
 			expect(printer.printAndFeedPaper).toHaveBeenCalledWith(90)
 		})
 
+		it("passes the effective fontScale to the renderer", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			await driver.printHTML("<div/>", {
+				render,
+				config: { fontScale: 170 },
+			})
+			expect(render).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ fontScale: 170 }),
+			)
+		})
+
 		it("passes the effective tailDots to the renderer", async () => {
 			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
 			await driver.printHTML("<div/>", {
@@ -292,6 +306,83 @@ describe("createIminDriver", () => {
 				expect.any(String),
 				expect.objectContaining({ tailDots: 40 }),
 			)
+		})
+
+		it("reserves the copy's print time even when the status gate returns instantly", async () => {
+			// Device behaviour: getPrinterStatus() reports 0 while the head is
+			// still printing, so waitIdle is a no-op. The pause must survive it.
+			const stamps = []
+			const t0 = Date.now()
+			printer.printSingleBitmap = vi.fn(async () => {
+				stamps.push(Date.now() - t0)
+				return 1
+			})
+			printer.printAndFeedPaper = vi.fn()
+			printer.getPrinterStatus = async () => ({ value: 0 })
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			// 800 dots at the conservative 800 dots/s -> ~1000 ms reserved.
+			await d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384, height: 800 }),
+				config: { copies: 3, copyDelayMs: 300 },
+			})
+			expect(stamps).toHaveLength(3)
+			for (let i = 1; i < stamps.length; i++) {
+				// settle 200 + reserved print ~1000 + delay 300, from queue time.
+				expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(1400)
+			}
+		})
+
+		it("a taller bitmap widens the inter-copy pause (reproduces fontScale report)", async () => {
+			const runCopies = async (height) => {
+				const stamps = []
+				const t0 = Date.now()
+				printer.printSingleBitmap = vi.fn(async () => {
+					stamps.push(Date.now() - t0)
+					return 1
+				})
+				printer.printAndFeedPaper = vi.fn()
+				printer.getPrinterStatus = async () => ({ value: 0 })
+				const d = createIminDriver({
+					factory: () => printer,
+					loadConfig: () => ({ paper: "58mm", cut: false }),
+				})
+				await d.printHTML("<div/>", {
+					render: async () => ({ dataURL: "x", width: 384, height }),
+					config: { copies: 2, copyDelayMs: 300 },
+				})
+				return stamps[1] - stamps[0]
+			}
+			const shortBitmap = await runCopies(400) // ~0.5 s print
+			const tallBitmap = await runCopies(1600) // ~2 s print
+			expect(tallBitmap).toBeGreaterThan(shortBitmap + 800)
+		})
+
+		it("delays between EVERY pair of copies, not only the first gap", async () => {
+			const timeline = []
+			const t0 = Date.now()
+			printer.printSingleBitmap = vi.fn(async () => {
+				timeline.push({ e: "bitmap", t: Date.now() - t0 })
+				return 1
+			})
+			printer.printAndFeedPaper = vi.fn(() => timeline.push({ e: "feed" }))
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			const res = await d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+				config: { copies: 3, copyDelayMs: 250 },
+			})
+			expect(res.copies).toBe(3)
+			const bitmaps = timeline.filter((x) => x.e === "bitmap")
+			expect(bitmaps).toHaveLength(3)
+			// Two inter-copy gaps must each cover the 250 ms tear-off pause
+			// (plus the 200 ms settle). A 0 ms delay would collapse these.
+			const gaps = [bitmaps[1].t - bitmaps[0].t, bitmaps[2].t - bitmaps[1].t]
+			for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(250)
 		})
 
 		it("renders one labelled bitmap per copy when copies > 1", async () => {

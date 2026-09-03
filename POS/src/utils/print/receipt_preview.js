@@ -45,6 +45,7 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 		paper: r.paper,
 		customDots: r.customDots,
 		tailDots: r.tailDots,
+		fontScale: r.fontScale,
 	}
 	let bitmaps
 	if (r.useLabels) {

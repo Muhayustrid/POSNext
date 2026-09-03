@@ -56,6 +56,20 @@ describe("buildReceiptPreviewSet (preview = print, structural)", () => {
 		expect(render.mock.calls[1][0]).toContain("CREW COPY")
 	})
 
+	it("lifts the effective fontScale through, like the real render block", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.fontScale)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		await buildReceiptPreviewSet("<div/>", {
+			device: {},
+			server: { paper: "58mm", fontScale: 140 },
+			render,
+		})
+		expect(seen[0]).toBe(140)
+	})
+
 	it("lifts the effective tailDots through, like the real render block", async () => {
 		const seen = []
 		const render = vi.fn(async (_html, o) => {

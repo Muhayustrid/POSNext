@@ -4,6 +4,11 @@
 			<div class="mb-4 flex items-center justify-between gap-3">
 				<h1 class="text-lg font-semibold text-gray-900 sm:text-xl">
 					{{ __("Direct Print") }}
+					<span
+						v-if="buildLabel"
+						class="ml-2 align-middle text-[10px] font-normal text-gray-400"
+						:title="__('Build executed by this page — if it is old, the service worker served a stale bundle')"
+					>build {{ buildLabel }}</span>
 				</h1>
 				<div class="flex items-center gap-2">
 					<Badge v-if="currentDriver" :theme="statusOk ? 'green' : 'orange'">
@@ -229,12 +234,66 @@
 						</p>
 					</div>
 
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-font-scale">
+							{{ __("Font scale (%)") }}
+						</label>
+						<Input
+							id="direct-print-font-scale"
+							v-model="fontScaleText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('100')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Receipt text is authored at 96 DPI and translated to the 205 DPI print head, so it already prints at the size you see in a browser preview. Raise this only if it still reads small. 60–250.",
+								)
+							}}
+						</p>
+					</div>
+
 					<div class="flex items-end pb-1">
 						<Checkbox
 							v-model="cfg.copyLabels"
 							:label="__('Label copies (CUSTOMER COPY / CREW COPY)')"
 						/>
 					</div>
+				</div>
+
+				<!-- What the NEXT print will actually use (device over server) -->
+				<div
+					v-if="effectiveCfg"
+					class="mt-4 rounded bg-gray-50 px-3 py-2 text-xs text-gray-600"
+				>
+					<p class="mb-1 font-medium text-gray-700">
+						{{ __("Effective config for the next print") }}
+					</p>
+					<p>
+						{{
+							__(
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Labels {7}",
+								[
+									String(effectiveCfg.paper),
+									String(effectiveCfg.dots),
+									String(effectiveCfg.copies),
+									String(effectiveCfg.copyDelayMs),
+									String(effectiveCfg.feedDots),
+									String(effectiveCfg.tailDots),
+									String(effectiveCfg.fontScale),
+									effectiveCfg.useLabels ? __("On") : __("Off"),
+								],
+							)
+						}}
+					</p>
+					<p class="mt-1 text-gray-400">
+						{{
+							__(
+								"Delay 0 means copies print back-to-back with no tear-off pause. Values here are what Test Print uses.",
+							)
+						}}
+					</p>
 				</div>
 
 				<div class="mt-4 flex items-center gap-2">
@@ -437,6 +496,8 @@ import { buildReceiptPreviewSet } from "@/utils/print/receipt_preview"
 import {
 	DEFAULT_FEED_DOTS,
 	DEFAULT_TAIL_DOTS,
+	parseNumericField,
+	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
 import { useBootstrapStore } from "@/stores/bootstrap"
 import {
@@ -448,6 +509,24 @@ import {
 import { buildReceiptDocumentHTML } from "@/utils/printInvoice"
 
 const { showSuccess, showError, showInfo } = useToast()
+
+// Compile-time constant injected by vite (define.__BUILD_VERSION__). It lives
+// in the executing bundle, so it dates the CODE actually running — a stale
+// service worker shows an old time (or nothing, pre-marker) even when the
+// server already serves the new build.
+let buildLabel = ""
+try {
+	const v =
+		typeof __BUILD_VERSION__ !== "undefined"
+			? Number(__BUILD_VERSION__)
+			: Number.NaN
+	buildLabel =
+		Number.isFinite(v) && v > 0
+			? new Date(v).toLocaleString()
+			: String(__BUILD_VERSION__ ?? "")
+} catch {
+	buildLabel = ""
+}
 const bootstrap = useBootstrapStore()
 
 const currentDriver = ref(null)
@@ -495,6 +574,7 @@ const cfg = reactive({
 const copyDelayText = ref("800")
 const feedDotsText = ref(String(DEFAULT_FEED_DOTS))
 const tailDotsText = ref(String(DEFAULT_TAIL_DOTS))
+const fontScaleText = ref("100")
 const customDotsText = ref("384")
 
 function readCfgIntoForm() {
@@ -521,10 +601,14 @@ function readCfgIntoForm() {
 		td === undefined || td === "" || td === null
 			? String(DEFAULT_TAIL_DOTS)
 			: String(td)
+	const fs = stored.fontScale
+	fontScaleText.value =
+		fs === undefined || fs === "" || fs === null ? "100" : String(fs)
 }
 
 function reloadConfig() {
 	readCfgIntoForm()
+	refreshEffectiveConfig()
 	showInfo(__("Device config reloaded from this browser."))
 }
 
@@ -586,6 +670,33 @@ function onSaveConfig() {
 		) {
 			throw new Error(__("Custom dots is required when paper is custom."))
 		}
+		// Parse BEFORE writing anything: a non-numeric delay used to silently
+		// save as 0, which disabled the tear-off pause entirely (device report:
+		// "sometimes the delay happens, sometimes it doesn't").
+		const copyDelayMs = parseNumericField(
+			"Delay between copies",
+			copyDelayText.value,
+			{
+				min: 0,
+				max: 10000,
+				dflt: 800,
+			},
+		)
+		const feedDots = parseNumericField("Paper advance", feedDotsText.value, {
+			min: 8,
+			max: 500,
+			dflt: DEFAULT_FEED_DOTS,
+		})
+		const tailDots = parseNumericField("Tail spacer", tailDotsText.value, {
+			min: 0,
+			max: 200,
+			dflt: DEFAULT_TAIL_DOTS,
+		})
+		const fontScale = parseNumericField("Font scale", fontScaleText.value, {
+			min: 60,
+			max: 250,
+			dflt: 100,
+		})
 		saveDeviceConfig({
 			host: host || undefined,
 			paper,
@@ -593,22 +704,15 @@ function onSaveConfig() {
 			cut: Boolean(cfg.cut),
 			copyLabels: Boolean(cfg.copyLabels),
 			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
-			copyDelayMs:
-				copyDelayText.value === "" || copyDelayText.value == null
-					? 800
-					: Math.max(0, Math.min(Number(copyDelayText.value) || 0, 10000)),
-			feedDots:
-				feedDotsText.value === "" || feedDotsText.value == null
-					? DEFAULT_FEED_DOTS
-					: Math.max(8, Math.min(Number(feedDotsText.value) || 0, 500)),
-			tailDots:
-				tailDotsText.value === "" || tailDotsText.value == null
-					? DEFAULT_TAIL_DOTS
-					: Math.max(0, Math.min(Number(tailDotsText.value) || 0, 200)),
+			copyDelayMs,
+			feedDots,
+			tailDots,
+			fontScale,
 		})
 		// Do not call setPageFormat directly — imin_client applies it on next print.
 		showSuccess(__("Device config saved. It will apply on the next print."))
 		transportSnapshot()
+		refreshEffectiveConfig()
 	} catch (e) {
 		showError(e?.message || String(e))
 	} finally {
@@ -658,6 +762,7 @@ async function onTestPrint() {
 		showSuccess(__("Test print sent."))
 		await fetchLogs()
 		await pollStatus()
+		refreshEffectiveConfig()
 	} catch (e) {
 		showError(e?.message || String(e))
 		await fetchLogs()
@@ -678,11 +783,10 @@ const previewCopies = ref([])
 const previewError = ref("")
 const previewTimers = []
 
-function effectivePrintConfig(copiesOverride) {
-	let server = {}
+function serverConfigFromTransport() {
 	try {
 		const c = getTransport().getConfig() || {}
-		server = {
+		return {
 			paper: c.paper,
 			customDots: c.custom_dots,
 			cut: c.cut,
@@ -691,13 +795,33 @@ function effectivePrintConfig(copiesOverride) {
 			feedDots: c.feed_dots,
 			tailDots: c.tail_dots,
 			copyLabels: c.copy_labels,
+			fontScale: c.font_scale,
 		}
 	} catch {
-		server = {}
+		return {}
 	}
+}
+
+/**
+ * Resolve exactly what the NEXT print will use (device localStorage on top of
+ * the transport's server config, same resolver the driver calls). Exposed on
+ * the page so "sometimes the delay applies, sometimes it doesn't" is visible
+ * as a concrete value instead of a guess.
+ */
+function effectivePrintConfig(copiesOverride) {
 	const device = { ...(loadDeviceConfig() || {}) }
 	if (copiesOverride != null) device.copies = copiesOverride
-	return resolvePrintConfig(device, server)
+	return resolvePrintConfig(device, serverConfigFromTransport())
+}
+
+const effectiveCfg = ref(null)
+
+function refreshEffectiveConfig() {
+	try {
+		effectiveCfg.value = effectivePrintConfig()
+	} catch {
+		effectiveCfg.value = null
+	}
 }
 
 function clearPreview() {
@@ -720,22 +844,7 @@ async function runPreview(copiesOverride) {
 	try {
 		const device = { ...(loadDeviceConfig() || {}) }
 		if (copiesOverride != null) device.copies = copiesOverride
-		let server = {}
-		try {
-			const c = getTransport().getConfig() || {}
-			server = {
-				paper: c.paper,
-				customDots: c.custom_dots,
-				cut: c.cut,
-				copies: c.copies,
-				copyDelayMs: c.copy_delay_ms,
-				feedDots: c.feed_dots,
-				tailDots: c.tail_dots,
-				copyLabels: c.copy_labels,
-			}
-		} catch {
-			server = {}
-		}
+		const server = serverConfigFromTransport()
 		const html = buildReceiptDocumentHTML(buildTestInvoiceData(), {
 			includeControls: false,
 		})
@@ -834,6 +943,7 @@ onMounted(async () => {
 		])
 	}
 	transportSnapshot()
+	refreshEffectiveConfig()
 	await pollStatus()
 	timer = window.setInterval(pollStatus, 3000)
 	await fetchLogs()

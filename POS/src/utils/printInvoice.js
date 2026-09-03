@@ -4,10 +4,15 @@ import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import {
+	getTransport,
 	initTransportFromServer,
 	printHTML as transportPrint,
 } from "@/utils/print/transport"
-import { receiptStylesFor } from "@/utils/print/receipt_layout"
+import {
+	loadDeviceConfig,
+	receiptStylesFor,
+	resolvePrintConfig,
+} from "@/utils/print/receipt_layout"
 export { receiptStylesFor }
 
 const log = logger.create("PrintInvoice")
@@ -128,6 +133,26 @@ export async function hydrateLocalOnlyInvoice(invoiceData) {
  * (receipt_renderer.composeReceiptFrame). Keep compat export.
  */
 export const RECEIPT_STYLES = receiptStylesFor(576)
+
+/**
+ * Paper width (dots) the CURRENT print config resolves to: device overrides
+ * on top of the transport's server config. Receipts embed this so the
+ * stylesheet's @page/body width matches the paper actually loaded — without
+ * it every local receipt claimed the 576-dot default even on a 58mm till.
+ * Falls back to the 576 default when the transport is unreachable (offline
+ * first print); the bitmap lane re-resolves independently anyway.
+ */
+export function effectiveReceiptDots() {
+	try {
+		const c = getTransport().getConfig() || {}
+		return resolvePrintConfig(loadDeviceConfig(), {
+			paper: c.paper,
+			customDots: c.custom_dots,
+		}).dots
+	} catch {
+		return 576
+	}
+}
 
 /**
  * Inner receipt HTML (no shell). Used for local/offline invoices and the
@@ -568,6 +593,7 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
 
 	const fullHTML = buildReceiptDocumentHTML(invoiceData, {
 		includeControls: false,
+		dots: effectiveReceiptDots(),
 	})
 	await transportPrint(fullHTML, {
 		logContext: {
@@ -651,6 +677,7 @@ export function printInvoiceCustom(invoiceData) {
 
 	const printContent = buildReceiptDocumentHTML(invoiceData, {
 		includeControls: true,
+		dots: effectiveReceiptDots(),
 	})
 
 	printWindow.document.write(printContent)

@@ -22,9 +22,32 @@ class TestPrintingAPI(FrappeTestCase):
 		self.assertIn(cfg["driver"], ("imin", "qz", "browser"))
 		self.assertIn(cfg["paper"], ("58mm", "80mm", "custom"))
 
-	def test_get_print_config_requires_profile(self):
-		with self.assertRaises(frappe.ValidationError):
-			get_print_config(None)
+	def test_get_print_config_without_profile_falls_back_to_first_enabled_row(self):
+		# The Direct Print page has no shift/invoice context, so it calls with
+		# None. The endpoint must answer with usable config instead of throwing:
+		# fall back to the first enabled POS Settings row on the site.
+		cfg = get_print_config(None)
+		for key in ("driver", "paper", "custom_dots", "cut", "fallback_enabled"):
+			self.assertIn(key, cfg)
+		first_enabled = frappe.db.get_value(
+			"POS Settings", {"enabled": 1}, "pos_profile",
+			order_by="modified desc",
+		)
+		self.assertEqual(cfg.get("pos_profile"), first_enabled)
+
+	def test_get_print_config_without_profile_survives_empty_site(self):
+		# No enabled row at all -> pure transport defaults, still no throw.
+		enabled_rows = frappe.get_all(
+			"POS Settings", filters={"enabled": 1}, pluck="name"
+		)
+		frappe.db.set_value("POS Settings", {"enabled": 1}, "enabled", 0)
+		try:
+			cfg = get_print_config(None)
+			self.assertIsNone(cfg.get("pos_profile"))
+			self.assertEqual(cfg["driver"], "browser")
+		finally:
+			for name in enabled_rows:
+				frappe.db.set_value("POS Settings", name, "enabled", 1)
 
 	def _has_fallback_column(self):
 		# The Task 7 print fields may not be migrated on every site; the API
@@ -118,7 +141,7 @@ class TestPrintingAPI(FrappeTestCase):
 		self.assertLessEqual(cfg["tail_dots"], 200)
 
 	def test_tail_dots_clamps_large_values(self):
-		if not self._has_feed_or_tail_column("imin_tail_dots"):
+		if not self._has_column("imin_tail_dots"):
 			self.skipTest("imin_tail_dots column not migrated on this site")
 		settings_name = frappe.db.get_value(
 			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
@@ -132,13 +155,40 @@ class TestPrintingAPI(FrappeTestCase):
 		frappe.db.set_value("POS Settings", settings_name, "imin_tail_dots", 999)
 		cfg = get_print_config(self.profile)
 		self.assertEqual(cfg["tail_dots"], 200)
+		# Undo so later tests (and the defaults test) see the clean state.
+		# (Int columns here are NOT NULL, so reset to the default, not None.)
+		frappe.db.set_value("POS Settings", settings_name, "imin_tail_dots", 24)
+
+	def test_font_scale_defaults_to_100(self):
+		cfg = get_print_config(self.profile)
+		self.assertIn("font_scale", cfg)
+		self.assertEqual(cfg["font_scale"], 100)
+
+	def test_font_scale_clamps_absurd_values(self):
+		if not self._has_column("imin_font_scale"):
+			self.skipTest("imin_font_scale column not migrated on this site")
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if not settings_name:
+			settings_name = (
+				frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.profile, "enabled": 1})
+				.insert(ignore_permissions=True)
+				.name
+			)
+		frappe.db.set_value("POS Settings", settings_name, "imin_font_scale", 999)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["font_scale"], 250)
+		# Undo so later tests (and the defaults test) see the clean state.
+		# (Int columns here are NOT NULL, so reset to the default, not None.)
+		frappe.db.set_value("POS Settings", settings_name, "imin_font_scale", 100)
 
 	def test_copy_labels_defaults_to_true(self):
 		cfg = get_print_config(self.profile)
 		self.assertIn("copy_labels", cfg)
 		self.assertTrue(cfg["copy_labels"])
 
-	def _has_feed_or_tail_column(self, fieldname):
+	def _has_column(self, fieldname):
 		meta = frappe.get_meta("POS Settings")
 		return any(df.fieldname == fieldname for df in meta.get("fields"))
 

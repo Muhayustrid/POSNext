@@ -21,6 +21,7 @@ PRINT_CONFIG_FIELDS = (
 	"imin_feed_dots",
 	"imin_tail_dots",
 	"imin_copy_labels",
+	"imin_font_scale",
 	"print_fallback_enabled",
 )
 
@@ -34,9 +35,20 @@ MAX_TAIL_DOTS = 200
 
 @frappe.whitelist()
 def get_print_config(pos_profile):
-	"""Resolve the print configuration for a POS Profile."""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	"""Resolve the print configuration for a POS Profile.
+
+	A null/empty pos_profile is a supported caller state, not an error: the
+	Direct Print diagnostic page has no shift or invoice in context (no open
+	shift -> bootstrap returns pos_profile: None). Fall back to the first
+	enabled POS Settings row on the site, then to pure transport defaults.
+	The response reports which profile was actually used via `pos_profile`,
+	so callers (and logs) can see when the fallback fired.
+	"""
+	resolved_profile = pos_profile
+	if not resolved_profile:
+		resolved_profile = frappe.db.get_value(
+			"POS Settings", {"enabled": 1}, "pos_profile", order_by="modified desc"
+		)
 
 	# POS Settings print fields are introduced in Task 7. Until that migration
 	# has landed, querying by those column names would raise
@@ -52,10 +64,10 @@ def get_print_config(pos_profile):
 	else:
 		fields = []
 
-	if fields:
+	if fields and resolved_profile:
 		settings = frappe.db.get_value(
 			"POS Settings",
-			{"pos_profile": pos_profile, "enabled": 1},
+			{"pos_profile": resolved_profile, "enabled": 1},
 			list(fields),
 			as_dict=True,
 		)
@@ -110,7 +122,18 @@ def get_print_config(pos_profile):
 	raw_label = getattr(settings, "imin_copy_labels", None)
 	copy_labels = True if raw_label is None else bool(raw_label)
 
+	# Font scale on top of the fixed 205/96 DPI translation. 100 = as authored
+	# at 96 DPI (already ~2.1x bigger than what printed before the translation
+	# existed); raise for chunkier text. Percent, clamped to a sane band.
+	try:
+		font_scale = getattr(settings, "imin_font_scale", None)
+		font_scale = 100 if font_scale is None else int(font_scale)
+	except (TypeError, ValueError):
+		font_scale = 100
+	font_scale = max(60, min(font_scale, 250))
+
 	return {
+		"pos_profile": resolved_profile,
 		"driver": getattr(settings, "print_driver", None) or "browser",
 		"paper": getattr(settings, "imin_paper_width", None) or "58mm",
 		"custom_dots": getattr(settings, "imin_custom_dots", None) or 384,
@@ -120,6 +143,7 @@ def get_print_config(pos_profile):
 		"feed_dots": feed,
 		"tail_dots": tail,
 		"copy_labels": copy_labels,
+		"font_scale": font_scale,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

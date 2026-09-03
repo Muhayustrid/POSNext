@@ -2,10 +2,17 @@ import html2canvas from "html2canvas"
 
 import { dotsForPaper } from "./paper"
 import {
+	DEFAULT_FONT_SCALE,
 	DEFAULT_TAIL_DOTS,
+	receiptBaseCSS,
 	receiptFrameStyle,
+	scaleCssLengths,
+	scopeReceiptCSS,
+	splitStyleBlocks,
 	tailSpacerHTML,
 } from "./receipt_layout"
+
+const FRAME_SCOPE = ".pn-receipt-frame"
 
 const DEFAULT_THRESHOLD = 128
 
@@ -56,41 +63,76 @@ export function binarize(imageData, threshold = DEFAULT_THRESHOLD) {
 /**
  * Build the off-screen frame that html2canvas rasterises.
  *
- * Two things here are load-bearing and were previously broken:
+ * Three things here are load-bearing and were broken before this patch:
  *
- *  1. Padding. `html` is usually a FULL document, and `frame.innerHTML = html`
- *     runs the fragment parser: <!DOCTYPE>, <html>, <head> and <body> are all
- *     dropped (the <style> text survives). So every `body { ... }` rule in the
- *     receipt stylesheet matched nothing — including `padding: 10px`, which is
- *     why bitmap content sat flush against the paper edge. The frame carries
- *     the padding itself now (receiptFrameStyle).
- *  2. Tail spacer. A white block under the receipt so the last printed line is
- *     not the last raster row. This is a RENDER-side guard only; it does not
- *     replace printAndFeedPaper(feedDots), which is what physically moves the
- *     paper past the tear bar.
+ *  1. Leaking `<style>`s. `html` is often a FULL document (<!DOCTYPE> +
+ *     <html><head><style>...). Assigning it via `frame.innerHTML = html` makes
+ *     the browser extract those <style> blocks, drop <!DOCTYPE>/<html>/<head>
+ *     /<body> *but keep the style elements as children of the frame* — so a
+ *     receipt `<style>` that says `body{...}` was live global CSS while the
+ *     print ran. Extracting + scoping those blocks to `.pn-receipt-frame` is
+ *     what actually fixes it.
+ *  2. DPI translation. Those blocks are authored at 96 DPI px. The frame is
+ *     rasterised at 1 px = 1 printer dot at 205 DPI. So every receipt printed
+ *     half its intended size. Lengths are rewritten to dots and then squeezed
+ *     together with the scoping pass.
+ *  3. Tail spacer: a white block under the receipt so the last printed line is
+ *     not the raster's last row — purely a render-side guard, not a substitute
+ *     for printAndFeedPaper(feedDots).
  *
- * Pure DOM composition (no html2canvas, no canvas) so it is unit-testable.
+ * Pure DOM composition apart from the html2canvas render call in the caller,
+ * so it is unit-testable.
  *
  * @param {string} html
  * @param {object} [opts]
  * @param {string} [opts.paper] - "58mm" | "80mm" | "custom"
  * @param {number} [opts.customDots] - when paper is "custom"
  * @param {number} [opts.tailDots] - trailing white space in dots
- * @returns {{host:HTMLElement, frame:HTMLElement, dots:number, tailDots:number}}
+ * @param {number} [opts.fontScale] - 100 = as-authored; 180 = +80%.
+ *   Stored per-device and overridable from the /pos/direct-print page.
+ * @returns {{host:HTMLElement, frame:HTMLElement, dots:number, tailDots:number, scopedCss:string}}
  */
 export function composeReceiptFrame(html, opts = {}) {
 	const dots = dotsForPaper(opts.paper, opts.customDots)
+	const fontScale = (opts.fontScale ?? DEFAULT_FONT_SCALE) / 100
 	const tail = opts.tailDots ?? DEFAULT_TAIL_DOTS
 	const tailHTML = tailSpacerHTML(tail)
+
+	// Styles in print HTML were written for 96 DPI preview, not for a 205 DPI
+	// head. Scoping prevents them from touching the POS page, and the length
+	// rewrite makes `11px` mean the same physical size it had at 96 DPI.
+	const { css, html: stripped } = splitStyleBlocks(html)
+	const base = receiptBaseCSS(FRAME_SCOPE, fontScale)
+	const scoped = css
+		? `${base}\n${scopeReceiptCSS(css, FRAME_SCOPE, fontScale)}`
+		: base
+
 	const host = document.createElement("div")
 	host.style.cssText =
 		"position:fixed;left:-10000px;top:0;pointer-events:none;overflow:hidden;"
 	const frame = document.createElement("div")
 	frame.className = "pn-receipt-frame"
 	frame.style.cssText = receiptFrameStyle(dots)
-	frame.innerHTML = html + tailHTML
+	frame.innerHTML = `<style>${scoped}</style>${stripped}${tailHTML}`
 	host.appendChild(frame)
-	return { host, frame, dots, tailDots: tailHTML ? Number(tail) || 0 : 0 }
+
+	// Attributes like `style="font-size: 11px"` that survived the split were
+	// never in a stylesheet, so the rewrite above missed them. Walk once:
+	for (const el of frame.querySelectorAll("[style]")) {
+		// The synthetic tail / any element marked as already-in-dots keeps its
+		// value; otherwise the report's footer would be double-scaled together
+		// with the spacer height.
+		if (el.matches("[data-pn-dots]")) continue
+		el.style.cssText = scaleCssLengths(el.style.cssText, fontScale)
+	}
+
+	return {
+		host,
+		frame,
+		dots,
+		tailDots: tailHTML ? Number(tail) || 0 : 0,
+		scopedCss: scoped,
+	}
 }
 
 export async function renderHTMLToBitmap(html, opts) {

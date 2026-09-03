@@ -44,6 +44,23 @@ function pageFormatFor(paper, dots) {
 	return dots <= 384 ? 1 : 0
 }
 
+// Conservative thermal throughput used ONLY to reserve wall-clock time for
+// the copy that is still printing when getPrinterStatus() already reports 0.
+// 8 dots/mm at a slow ~100 mm/s -> ~800 dots/s. Deliberately on the slow
+// side: underestimating the speed just adds idle wait before the next copy,
+// overestimating it would re-introduce the swallowed tear-off pause.
+const PRINT_DOTS_PER_SECOND = 800
+
+/**
+ * Estimated wall-clock time the head needs for a bitmap of `heightDots`.
+ * Fake/test bitmaps may carry no height -> 0 (no reservation).
+ */
+function bitmapPrintMs(heightDots) {
+	const h = Number(heightDots)
+	if (!Number.isFinite(h) || h <= 0) return 0
+	return Math.round((h / PRINT_DOTS_PER_SECOND) * 1000)
+}
+
 /**
  * @param {object} [deps] - injectable for tests.
  * @param {() => object} [deps.factory] - returns the SDK printer instance.
@@ -165,6 +182,7 @@ export function createIminDriver(deps = {}) {
 				dots,
 				tailDots,
 				feedDots,
+				fontScale,
 				useLabels,
 				labels,
 			} = r
@@ -173,24 +191,22 @@ export function createIminDriver(deps = {}) {
 			const p = await ensurePrinter()
 			p.setPageFormat(pageFormatFor(paper, dots))
 
+			const renderOpts = { paper, customDots, tailDots, fontScale }
 			let bitmap = null
 			let bitmaps = null
 			if (useLabels) {
 				bitmaps = await Promise.all(
 					Array.from({ length: copies }, (_, idx) =>
-						render(withCopyLabel(html, labels[idx]), {
-							paper,
-							customDots,
-							tailDots,
-						}),
+						render(withCopyLabel(html, labels[idx]), renderOpts),
 					),
 				)
 			} else {
-				bitmap = await render(html, { paper, customDots, tailDots })
+				bitmap = await render(html, renderOpts)
 			}
 
 			for (let i = 0; i < copies; i++) {
 				const bmp = useLabels ? bitmaps[i] : bitmap
+				const tQueued = Date.now()
 				await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
 
 				// Resolve above means "queued" — the raster may not be in the print
@@ -205,11 +221,23 @@ export function createIminDriver(deps = {}) {
 
 				await waitIdle(p)
 
-				// Tear-off pause between copies (customer copy -> crew copy),
-				// never after the final one: a trailing delay would stall the
-				// cashier for no reason.
-				if (i < copies - 1 && copyDelayMs > 0) {
-					await new Promise((r) => setTimeout(r, copyDelayMs))
+				// Tear-off pause before the next copy; never after the final one.
+				//
+				// Measured from QUEUE time, not from here. On device (2026-09-03)
+				// getPrinterStatus() already reports 0 while the head is still
+				// printing, so waitIdle passes instantly and a bare copyDelayMs is
+				// consumed by the copy still coming out: the pause visibly existed
+				// with fontScale 60 (short bitmap) and vanished at fontScale 100
+				// (tall bitmap). Reserve the bitmap's estimated print time first,
+				// so the next sheet starts no earlier than "printed + delay".
+				// The configured delay stays the minimum tear-off window.
+				if (i < copies - 1) {
+					const elapsed = Date.now() - tQueued
+					const minCycleMs = SETTLE_MS + bitmapPrintMs(bmp.height) + copyDelayMs
+					const remaining = minCycleMs - elapsed
+					if (remaining > 0) {
+						await new Promise((r) => setTimeout(r, remaining))
+					}
 				}
 			}
 

@@ -70,6 +70,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						feedDots: current.feed_dots,
 						tailDots: current.tail_dots,
 						copyLabels: current.copy_labels,
+						fontScale: current.font_scale,
 					},
 				})
 				if (result && typeof result.paper === "string") {
@@ -190,6 +191,7 @@ export async function initTransportFromServer(posProfile) {
 		feed_dots: cfg.feed_dots,
 		tail_dots: cfg.tail_dots,
 		copy_labels: cfg.copy_labels,
+		font_scale: cfg.font_scale,
 		fallback_enabled: cfg.fallback_enabled,
 	})
 	return cfg
