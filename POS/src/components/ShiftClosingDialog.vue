@@ -1004,7 +1004,7 @@ const open = computed({
 const { getClosingShiftData, submitClosingShift } = useShift()
 const { formatCurrency, formatQuantity, formatDateTime, formatTime } =
 	useFormatters()
-const { showSuccess, showWarning } = useToast()
+const { showInfo, showSuccess, showWarning } = useToast()
 const posSettingsStore = usePOSSettingsStore()
 const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 
@@ -1141,8 +1141,18 @@ async function submitClosing() {
 		const closingShiftName = result?.name ?? submitResource.data?.name
 		if (closingShiftName) {
 			try {
-				await printEODReport(closingShiftName, closingData.value?.pos_profile)
+				const result = await printEODReport(
+					closingShiftName,
+					closingData.value?.pos_profile,
+				)
 				eodPrintFailed.value = null
+				if (result?.method === "printview") {
+					showInfo(
+						__(
+							"Direct print was not detected. The EOD report was opened in a print preview window instead.",
+						),
+					)
+				}
 			} catch (err) {
 				console.warn("[eod] print failed", err)
 				showWarning(
@@ -1179,13 +1189,20 @@ async function retryEodPrint() {
 
 	retryPrintLoading.value = true
 	try {
-		await printEODReport(closingShiftName, closingData.value?.pos_profile)
+		const result = await printEODReport(
+			closingShiftName,
+			closingData.value?.pos_profile,
+		)
 		eodPrintFailed.value = null
-		showSuccess(__("EOD report printed successfully"))
+		if (result?.method === "printview") {
+			showInfo(__("The EOD report was opened in a print preview window."))
+		} else {
+			showSuccess(__("EOD report printed successfully"))
+		}
 		closeDialog()
 	} catch (err) {
 		console.warn("[eod] retry print failed", err)
-		showWarning(__("EOD report did not print. Please check QZ Tray and retry."))
+		showWarning(__("EOD report did not print. Retry, or check the printer."))
 	} finally {
 		retryPrintLoading.value = false
 	}
