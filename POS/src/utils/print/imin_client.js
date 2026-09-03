@@ -18,6 +18,8 @@
  * partialCut(), and the code confirms no cut inside printSingleBitmap. The
  * prohibition was correct only for SDK builds that really do auto-cut.
  */
+import { logger } from "@/utils/logger"
+
 import { renderHTMLToBitmap } from "./receipt_renderer"
 import {
 	copyLabelFor,
@@ -28,6 +30,7 @@ import {
 } from "./receipt_layout"
 
 export { loadDeviceConfig, saveDeviceConfig }
+const log = logger.create("IminClient")
 const STATUS_POLL_MS = 500
 const STATUS_TIMEOUT_MS = 15000
 // The bitmap command resolves once queued; give the head a moment to commit it
@@ -44,16 +47,17 @@ function pageFormatFor(paper, dots) {
 	return dots <= 384 ? 1 : 0
 }
 
-// Conservative thermal throughput used ONLY to reserve wall-clock time for
-// the copy that is still printing when getPrinterStatus() already reports 0.
-// 8 dots/mm at a slow ~50 mm/s -> ~400 dots/s. Device evidence (2026-09-03:
-// ~13 s for a 2-copy, 1-item receipt once upload and status overheads are
-// counted) puts real throughput well below the 800 dots/s this used, so the
-// estimate has to be even more conservative for the reservation to survive a
-// slow queue. Deliberately on the slow side: underestimating the speed just
-// adds idle wait before the next copy, overestimating it would re-introduce
-// the swallowed tear-off pause.
-const PRINT_DOTS_PER_SECOND = 400
+// Thermal throughput used ONLY to reserve wall-clock time for the copy that is
+// still printing when getPrinterStatus() already reports 0. The SDK exposes no
+// print-completion signal (status is fault-only: 0 = normal, no busy state,
+// every command is fire-and-forget into the device queue), so this rate is the
+// only anchor for "the previous copy has physically finished". On-device
+// measurements (POS Print Log 2026-09-03: ~13 s for a 2-copy, 1-item receipt
+// at fontScale 100) put real throughput at ~200-250 dots/s, so the estimate
+// must sit AT OR BELOW the slowest real device: over-estimating sends copy N+1
+// while copy N is still coming out and swallows the tear-off pause, while
+// under-estimating merely adds idle time before the next copy.
+export const PRINT_DOTS_PER_SECOND = 200
 
 /**
  * Estimated wall-clock time the head needs for a bitmap of `heightDots`.
@@ -238,13 +242,25 @@ export function createIminDriver(deps = {}) {
 				// idle early) and shrinks to zero when the pipeline overran the
 				// estimate, so slow uploads plus waitIdle polling overshoot can
 				// no longer swallow the configured tear-off window.
-				if (i < copies - 1) {
-					const elapsed = Date.now() - tQueued
-					const reserveMs = Math.max(
-						0,
-						SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
-					)
-					await new Promise((r) => setTimeout(r, reserveMs + copyDelayMs))
+				const elapsed = Date.now() - tQueued
+				const reserveMs = Math.max(
+					0,
+					SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
+				)
+				const isLastCopy = i === copies - 1
+				const pauseMs = isLastCopy ? 0 : reserveMs + copyDelayMs
+				// The reservation is invisible to POS Print Log (it only sees the
+				// whole print), so say per copy how the wall clock was spent — this
+				// is what makes a swallowed pause on site diagnosable after the fact.
+				log.info("copy printed", {
+					copy: i + 1,
+					heightDots: bmp.height,
+					elapsedMs: elapsed,
+					reserveMs,
+					pauseMs,
+				})
+				if (!isLastCopy) {
+					await new Promise((r) => setTimeout(r, pauseMs))
 				}
 			}
 

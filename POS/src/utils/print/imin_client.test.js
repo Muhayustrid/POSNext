@@ -1,6 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { createIminDriver } from "./imin_client"
+// Shared so the assertions can read what the driver logged, whichever logger
+// instance createIminDriver() ended up holding.
+const logInfo = vi.hoisted(() => vi.fn())
+
+vi.mock("@/utils/logger", () => ({
+	logger: {
+		create: () => ({
+			debug: vi.fn(),
+			info: logInfo,
+			warn: vi.fn(),
+			error: vi.fn(),
+		}),
+	},
+}))
+
+import { createIminDriver, PRINT_DOTS_PER_SECOND } from "./imin_client"
 import { DEFAULT_FEED_DOTS, DEFAULT_TAIL_DOTS } from "./receipt_layout"
 
 // Clock slack for the wall-clock gap assertions. The mock stamps its time a
@@ -30,6 +45,7 @@ let driver
 
 beforeEach(() => {
 	printer = makeFakePrinter()
+	logInfo.mockClear()
 	driver = createIminDriver({
 		factory: () => printer,
 		loadConfig: () => ({ host: "127.0.0.1", paper: "58mm", cut: true }),
@@ -334,27 +350,93 @@ describe("createIminDriver", () => {
 					factory: () => printer,
 					loadConfig: () => ({ paper: "58mm", cut: false }),
 				})
-				// 800 dots at the conservative 400 dots/s -> ~2000 ms reserved.
-				// Two copies only: a single gap already costs the full ~2.5 s window
-				// of real sleep, hence the explicit timeout above.
+				// 800 dots at the measured ~200 dots/s -> ~4000 ms reserved. The
+				// rate is read off the driver, so this test fails the moment the
+				// reservation quietly reverts to an optimistic throughput: that is
+				// exactly what swallowed the pause on device. Two copies only — a
+				// single gap already costs the full window of real sleep, hence the
+				// explicit timeout above.
 				const SETTLE_MS = 200
-				const ESTIMATE_MS = 2000
+				const HEIGHT_DOTS = 800
+				const ESTIMATE_MS = Math.round(
+					(HEIGHT_DOTS / PRINT_DOTS_PER_SECOND) * 1000,
+				)
 				const COPY_DELAY_MS = 300
 				await d.printHTML("<div/>", {
-					render: async () => ({ dataURL: "x", width: 384, height: 800 }),
+					render: async () => ({
+						dataURL: "x",
+						width: 384,
+						height: HEIGHT_DOTS,
+					}),
 					config: { copies: 2, copyDelayMs: COPY_DELAY_MS },
 				})
 				expect(stamps).toHaveLength(2)
 				for (let i = 1; i < stamps.length; i++) {
-					// settle 200 + reserved print ~2000 + delay 300, from queue time.
-					// CLOCK_SLACK_MS because the mock stamps a tick after tQueued.
+					// settle 200 + reserved print + delay 300, measured from queue
+					// time. CLOCK_SLACK_MS because the mock stamps a tick after
+					// tQueued, so the measured gap can sit 1 ms under the exact sum.
+					const expectedMs = SETTLE_MS + ESTIMATE_MS + COPY_DELAY_MS
 					expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(
-						SETTLE_MS + ESTIMATE_MS + COPY_DELAY_MS - CLOCK_SLACK_MS,
+						expectedMs - CLOCK_SLACK_MS,
+					)
+					// ... and it must not overshoot either: the driver sleeps exactly
+					// reserve + delay, so a much larger gap would mean it is
+					// double-counting the print time. Generous, jitter-only ceiling.
+					expect(stamps[i] - stamps[i - 1]).toBeLessThanOrEqual(
+						expectedMs + 1000,
 					)
 				}
 			},
 			SLOW_TEST_TIMEOUT_MS,
 		)
+
+		it("logs one line per copy with the reservation numbers", async () => {
+			// The pause cannot be observed remotely (POS Print Log only sees the
+			// whole print), so the driver has to say per copy how the wall clock
+			// was spent — otherwise a swallowed pause on site is undiagnosable.
+			const SETTLE_MS = 200
+			const HEIGHT_DOTS = 200
+			const ESTIMATE_MS = Math.round(
+				(HEIGHT_DOTS / PRINT_DOTS_PER_SECOND) * 1000,
+			)
+			const COPY_DELAY_MS = 250
+			printer.printAndFeedPaper = vi.fn()
+			printer.getPrinterStatus = async () => ({ value: 0 })
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<div/>", {
+				render: async () => ({
+					dataURL: "x",
+					width: 384,
+					height: HEIGHT_DOTS,
+				}),
+				config: { copies: 2, copyDelayMs: COPY_DELAY_MS },
+			})
+			expect(logInfo).toHaveBeenCalledTimes(2)
+
+			const copies = logInfo.mock.calls.map((call) => call[1])
+			for (const [idx, copy] of copies.entries()) {
+				// 1-based copy index and the bitmap height the estimate came from.
+				expect(copy).toMatchObject({
+					copy: idx + 1,
+					heightDots: HEIGHT_DOTS,
+				})
+				// The reservation is what is left of settle + estimated print time
+				// after the pipeline already ran, so reserve + elapsed reconstructs
+				// the full estimate exactly — and pins it to the exported rate.
+				expect(copy.reserveMs + copy.elapsedMs).toBe(SETTLE_MS + ESTIMATE_MS)
+				if (idx < copies.length - 1) {
+					// The logged pause is the one actually slept out.
+					expect(copy.pauseMs).toBe(copy.reserveMs + COPY_DELAY_MS)
+				}
+			}
+			// The final copy has no successor, so nothing is slept regardless of
+			// what the reservation computed.
+			expect(copies[1].pauseMs).toBe(0)
+			expect(copies[0].pauseMs).toBeGreaterThan(0)
+		})
 
 		it(
 			"a taller bitmap widens the inter-copy pause (reproduces fontScale report)",
@@ -378,8 +460,8 @@ describe("createIminDriver", () => {
 					})
 					return stamps[1] - stamps[0]
 				}
-				const shortBitmap = await runCopies(200) // ~0.5 s print
-				const tallBitmap = await runCopies(800) // ~2 s print
+				const shortBitmap = await runCopies(200) // ~1 s print at 200 dots/s
+				const tallBitmap = await runCopies(800) // ~4 s print
 				expect(tallBitmap).toBeGreaterThan(shortBitmap + 800)
 			},
 			SLOW_TEST_TIMEOUT_MS,
@@ -396,7 +478,7 @@ describe("createIminDriver", () => {
 			const QUEUE_MS = 700
 			const STATUS_MS = 400
 			const COPY_DELAY_MS = 400
-			// 100 dots at 400 dots/s -> ~250 ms estimate, far under the real cycle.
+			// 100 dots at 200 dots/s -> ~500 ms estimate, far under the real cycle.
 			const stamps = []
 			const t0 = Date.now()
 			printer.printSingleBitmap = vi.fn(async () => {
