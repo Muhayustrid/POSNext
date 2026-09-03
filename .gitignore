@@ -61,6 +61,10 @@ dev-dist/
 .vite/
 *.png
 !docs/screenshots/*.png
+# PWA install icons (Chrome needs PNG bitmaps; rendered from icon.svg/icon-maskable.svg)
+# and install-dialog screenshots (manifest form_factor wide/narrow)
+!POS/public/icon-*.png
+!POS/public/pwa-screenshot-*.png
 !docs/screenshots/*.gif
 .playwright-mcp/*
 TODO.md

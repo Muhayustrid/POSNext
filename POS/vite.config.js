@@ -78,32 +78,53 @@ export default defineConfig({
 				theme_color: "#4F46E5",
 				background_color: "#ffffff",
 				display: "standalone",
-				scope: "/assets/pos_next/pos/",
+				// Manifest scope must contain start_url or Chrome rejects installability.
+				// Canonical app URL is /pos (www/pos.html); the previous scope was the
+				// build-output path (/assets/pos_next/pos/), which Chrome rejects for install.
+				// Service worker scope is separate and unchanged (/assets/pos_next/pos/).
+				scope: "/pos",
 				start_url: "/pos",
 				icons: [
 					{
-						src: "/assets/pos_next/pos/icon.svg",
+						src: "/assets/pos_next/pos/icon-192.png",
 						sizes: "192x192",
-						type: "image/svg+xml",
+						type: "image/png",
 						purpose: "any",
 					},
 					{
-						src: "/assets/pos_next/pos/icon.svg",
+						src: "/assets/pos_next/pos/icon-512.png",
 						sizes: "512x512",
-						type: "image/svg+xml",
+						type: "image/png",
 						purpose: "any",
 					},
 					{
-						src: "/assets/pos_next/pos/icon-maskable.svg",
+						src: "/assets/pos_next/pos/icon-maskable-192.png",
 						sizes: "192x192",
-						type: "image/svg+xml",
+						type: "image/png",
 						purpose: "maskable",
 					},
 					{
-						src: "/assets/pos_next/pos/icon-maskable.svg",
+						src: "/assets/pos_next/pos/icon-maskable-512.png",
 						sizes: "512x512",
-						type: "image/svg+xml",
+						type: "image/png",
 						purpose: "maskable",
+					},
+				],
+				// Chrome's "Richer PWA Install UI" needs at least one wide and one
+				// non-wide screenshot; captured from the live login page at the exact
+				// viewport sizes declared here.
+				screenshots: [
+					{
+						src: "/assets/pos_next/pos/pwa-screenshot-wide.png",
+						sizes: "1280x800",
+						type: "image/png",
+						form_factor: "wide",
+					},
+					{
+						src: "/assets/pos_next/pos/pwa-screenshot-narrow.png",
+						sizes: "390x844",
+						type: "image/png",
+						form_factor: "narrow",
 					},
 				],
 			},
