@@ -1,8 +1,9 @@
 """Price Group — outlet-scoped selling prices, ported from the `selling_additional` app.
 
 A Price Group owns one generated Price List (`PG-<name>`), the unscoped Item Price rows
-on that list, and every POS Profile matching its outlets. All writes are targeted
-(`frappe.db.set_value`) rather than document saves: saving a Price List runs
+on that list, and every POS Profile of its outlet companies (an outlet is a company;
+all of its profiles — one per register — share the outlet's price list). All writes are
+targeted (`frappe.db.set_value`) rather than document saves: saving a Price List runs
 `PriceList.on_update`, which rewrites every Item Price on the list and can claim the
 global `Selling Settings.selling_price_list` default.
 """
@@ -106,22 +107,25 @@ class PriceGroup(Document):
 		if self.name and frappe.db.exists("Price Group", self.name):
 			frappe.db.get_value("Price Group", self.name, "modified", for_update=True)
 
-		# 2. Resolve desired profile names and per-outlet mapping deterministically
+		# 2. Resolve desired profile names and per-outlet mapping deterministically.
+		# An outlet claims EVERY POS Profile of its company: an outlet is a company,
+		# and one outlet routinely runs several profiles (one per register). The row's
+		# warehouse identifies the outlet; it does not filter which profiles are claimed.
 		desired_set: set[str] = set()
-		outlet_profiles_dict: dict[tuple[str, str], str | None] = {}
+		outlet_profiles_dict: dict[tuple[str, str], tuple[str, ...]] = {}
 		for row in self.outlets:
 			key = (row.company, row.warehouse)
 			if key not in outlet_profiles_dict:
-				matching = frappe.get_all(
-					"POS Profile",
-					filters={"company": row.company, "warehouse": row.warehouse},
-					pluck="name",
-					order_by="name asc",
+				matching = tuple(
+					frappe.get_all(
+						"POS Profile",
+						filters={"company": row.company},
+						pluck="name",
+						order_by="name asc",
+					)
 				)
-				chosen = matching[0] if matching else None
-				outlet_profiles_dict[key] = chosen
-				if chosen:
-					desired_set.add(chosen)
+				outlet_profiles_dict[key] = matching
+				desired_set.update(matching)
 
 		desired = sorted(desired_set)
 		currently_owned = self._currently_owned_profiles()
@@ -389,15 +393,15 @@ class PriceGroup(Document):
 		pl_name = state.price_list_name
 		desired_set = set(state.desired_profiles) if self.enabled else set()
 
-		# Update outlet child table statuses & pos_profile links from the state snapshot
+		# Update outlet child table statuses & linked-profile listing from the state snapshot
 		for row in self.outlets:
-			profile_name = state.outlet_profiles.get((row.company, row.warehouse))
-			if not profile_name:
+			profiles = state.outlet_profiles.get((row.company, row.warehouse), ())
+			if not profiles:
 				row.status = "No POS Profile"
 				row.pos_profile = None
 			else:
 				row.status = "Linked"
-				row.pos_profile = profile_name
+				row.pos_profile = ", ".join(profiles)
 
 			if row.name:
 				frappe.db.set_value(
