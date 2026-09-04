@@ -22,6 +22,37 @@ const FRAME_SCOPE = ".pn-receipt-frame"
 const DEFAULT_THRESHOLD = 128
 
 /**
+ * Slack added on top of the measured frame height when sizing the capture.
+ *
+ * html2canvas paints the CLONE of the frame, and on a device the clone can
+ * reflow a line or two taller than the host measured it (font fallback
+ * metrics differ between the page and the cloned document). When the clone is
+ * taller than the canvas, the last painted line is sliced mid-glyph — the
+ * "-- Akhir Laporan --" cut on the Closing report preview. The slack is blank
+ * paper at the bitmap's foot: ~5 mm, invisible under the tear.
+ */
+export const CAPTURE_SLACK_DOTS = 40
+
+/**
+ * html2canvas options for one receipt capture.
+ *
+ * windowHeight is set EXPLICITLY from the frame: without it html2canvas uses
+ * the real window's height, and on a phone webview that is shorter than a
+ * tall report — the cloned document then rendered against a too-small
+ * viewport and the bitmap lost its bottom.
+ */
+export function html2canvasOptions(frame, dots) {
+	const captureH = Math.ceil(frame.scrollHeight) + CAPTURE_SLACK_DOTS
+	return {
+		scale: 1,
+		backgroundColor: "#ffffff",
+		windowWidth: dots,
+		windowHeight: captureH,
+		height: captureH,
+	}
+}
+
+/**
  * Decide how to bring a source canvas of `sourceWidth` px to exactly
  * `targetDots` px. Padding/trimming is centred so the receipt stays on the
  * paper's optical centre line.
@@ -179,11 +210,7 @@ export async function renderHTMLToBitmap(html, opts) {
 	document.body.appendChild(host)
 
 	try {
-		const canvas = await html2canvas(frame, {
-			scale: 1,
-			backgroundColor: "#ffffff",
-			windowWidth: dots,
-		})
+		const canvas = await html2canvas(frame, html2canvasOptions(frame, dots))
 
 		const plan = normalizeWidthPlan(canvas.width, dots)
 		const out = document.createElement("canvas")

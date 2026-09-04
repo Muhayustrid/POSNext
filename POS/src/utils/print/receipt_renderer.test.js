@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest"
 import {
 	binarize,
 	composeReceiptFrame,
+	html2canvasOptions,
 	normalizeWidthPlan,
+	CAPTURE_SLACK_DOTS,
 } from "./receipt_renderer"
 import { DPI_SCALE } from "./receipt_layout"
 
@@ -344,5 +346,34 @@ describe("composeReceiptFrame vs the real POS Next Receipt format", () => {
 			expect(scopedCss).not.toContain("1280px")
 			expect(scopedCss).not.toContain("1600px")
 		}
+	})
+})
+
+describe("html2canvasOptions (deterministic capture window)", () => {
+	it("derives the capture window from the frame content plus slack, never from the real window", () => {
+		const frame = document.createElement("div")
+		Object.defineProperty(frame, "scrollHeight", {
+			value: 1546,
+			configurable: true,
+		})
+		const opts = html2canvasOptions(frame, 384)
+		expect(opts).toEqual({
+			scale: 1,
+			backgroundColor: "#ffffff",
+			windowWidth: 384,
+			windowHeight: 1546 + CAPTURE_SLACK_DOTS,
+			height: 1546 + CAPTURE_SLACK_DOTS,
+		})
+	})
+
+	it("leaves room above the measured height so a taller-cloning device cannot clip the last line", () => {
+		const frame = document.createElement("div")
+		Object.defineProperty(frame, "scrollHeight", {
+			value: 857,
+			configurable: true,
+		})
+		const opts = html2canvasOptions(frame, 384)
+		expect(opts.height).toBeGreaterThan(857)
+		expect(opts.windowHeight).toBe(opts.height)
 	})
 })
