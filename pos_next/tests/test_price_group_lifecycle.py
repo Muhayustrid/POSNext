@@ -328,8 +328,9 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 	def test_invalid_item_uom_fails_before_mutation(self):
 		"""Missing UOM conversion detail raises validation error while Price List/Profile remain unchanged."""
 		item = helpers.make_test_item("life8", self.uom)
-		wh = helpers.make_test_warehouse("life8", self.company)
-		pos = helpers.make_test_pos_profile("life8", self.company, wh)
+		company = helpers.make_test_company("life8")
+		wh = helpers.make_test_warehouse("life8", company)
+		pos = helpers.make_test_pos_profile("life8", company, wh)
 
 		pl_name = f"{helpers.MANAGED_PRICE_LIST_PREFIX}PG-Life-8"
 
@@ -350,7 +351,7 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 			helpers.make_price_group(
 				"PG-Life-8",
 				items=[{"item_code": item, "rate": 10000}],
-				outlets=[{"company": self.company, "warehouse": wh}],
+				outlets=[{"company": company, "warehouse": wh}],
 			)
 
 		self.assertFalse(
@@ -415,17 +416,78 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 			msg=f"Price Group {pg.name} should be successfully deleted after stock UOM change",
 		)
 
+	def test_company_outlet_claims_all_profiles(self):
+		"""An outlet claims EVERY POS Profile of its company, not just the first match."""
+		company = helpers.make_test_company("life27")
+		wh = helpers.make_test_warehouse("life27", company)
+		pos1 = helpers.make_test_pos_profile("life27-1", company, wh)
+		pos2 = helpers.make_test_pos_profile("life27-2", company, wh)
+		# A profile on a different warehouse of the same company must also be claimed
+		wh2 = helpers.make_test_warehouse("life27b", company)
+		pos3 = helpers.make_test_pos_profile("life27-3", company, wh2)
+
+		for pos in (pos1, pos2, pos3):
+			frappe.db.set_value("POS Profile", pos, "selling_price_list", "Standard Selling")
+
+		pg = helpers.make_price_group(
+			"PG-Life-27",
+			items=[{"item_code": helpers.make_test_item("life27", self.uom), "rate": 10000}],
+			outlets=[{"company": company, "warehouse": wh}],
+		)
+		pl_name = f"{helpers.MANAGED_PRICE_LIST_PREFIX}{pg.price_group_name}"
+
+		for pos in (pos1, pos2, pos3):
+			self.assertEqual(
+				frappe.db.get_value("POS Profile", pos, "selling_price_list"),
+				pl_name,
+				msg=f"POS Profile {pos} should be assigned managed list {pl_name}",
+			)
+			self.assertEqual(
+				frappe.db.get_value("POS Profile", pos, helpers.PROFILE_OWNER_FIELD),
+				pg.name,
+				msg=f"POS Profile {pos} owner marker should equal {pg.name}",
+			)
+			self.assertEqual(
+				frappe.db.get_value("POS Profile", pos, helpers.PROFILE_PREVIOUS_PRICE_LIST_FIELD),
+				"Standard Selling",
+				msg=f"POS Profile {pos} previous price list should be preserved",
+			)
+
+		# The outlet row records the linked profiles and a Linked status
+		outlet_row = frappe.db.get_value(
+			"Price Group Outlet", {"parent": pg.name}, ["name", "status", "pos_profile"], as_dict=True
+		)
+		self.assertEqual(outlet_row.status, "Linked", msg="Outlet status should be 'Linked'")
+		self.assertIn(pos1, outlet_row.pos_profile, msg="Outlet row should list linked profile pos1")
+		self.assertIn(pos2, outlet_row.pos_profile, msg="Outlet row should list linked profile pos2")
+		self.assertIn(pos3, outlet_row.pos_profile, msg="Outlet row should list linked profile pos3")
+
+		# Removing the outlet restores EVERY claimed profile
+		pg.outlets = []
+		pg.save()
+		for pos in (pos1, pos2, pos3):
+			self.assertEqual(
+				frappe.db.get_value("POS Profile", pos, "selling_price_list"),
+				"Standard Selling",
+				msg=f"POS Profile {pos} price list was not restored after outlet removal",
+			)
+			self.assertFalse(
+				frappe.db.get_value("POS Profile", pos, helpers.PROFILE_OWNER_FIELD),
+				msg=f"POS Profile {pos} owner marker was not cleared after outlet removal",
+			)
+
 	def test_outlet_claim_marks_profile_and_saves_previous(self):
 		"""Claiming an outlet marks the POS Profile with owner and saves its previous price list."""
-		wh = helpers.make_test_warehouse("life10", self.company)
-		pos = helpers.make_test_pos_profile("life10", self.company, wh)
+		company = helpers.make_test_company("life10")
+		wh = helpers.make_test_warehouse("life10", company)
+		pos = helpers.make_test_pos_profile("life10", company, wh)
 
 		frappe.db.set_value("POS Profile", pos, "selling_price_list", "Standard Selling")
 
 		pg = helpers.make_price_group(
 			"PG-Life-10",
 			items=[{"item_code": helpers.make_test_item("life10", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 		pl_name = f"{helpers.MANAGED_PRICE_LIST_PREFIX}{pg.price_group_name}"
 
@@ -448,14 +510,15 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 
 	def test_reclaim_does_not_overwrite_stored_previous(self):
 		"""Re-saving a Price Group retains original stored previous price list on claimed profile and keeps owner marker."""
-		wh = helpers.make_test_warehouse("life11", self.company)
-		pos = helpers.make_test_pos_profile("life11", self.company, wh)
+		company = helpers.make_test_company("life11")
+		wh = helpers.make_test_warehouse("life11", company)
+		pos = helpers.make_test_pos_profile("life11", company, wh)
 		frappe.db.set_value("POS Profile", pos, "selling_price_list", "Standard Selling")
 
 		pg = helpers.make_price_group(
 			"PG-Life-11",
 			items=[{"item_code": helpers.make_test_item("life11", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		pg.save()
@@ -471,14 +534,15 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 
 	def test_outlet_removal_restores_owned_profile(self):
 		"""Removing an outlet from Price Group restores POS Profile's previous price list and clears marker."""
-		wh = helpers.make_test_warehouse("life12", self.company)
-		pos = helpers.make_test_pos_profile("life12", self.company, wh)
+		company = helpers.make_test_company("life12")
+		wh = helpers.make_test_warehouse("life12", company)
+		pos = helpers.make_test_pos_profile("life12", company, wh)
 		frappe.db.set_value("POS Profile", pos, "selling_price_list", "Standard Selling")
 
 		pg = helpers.make_price_group(
 			"PG-Life-12",
 			items=[{"item_code": helpers.make_test_item("life12", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		pg.outlets = []
@@ -501,13 +565,14 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 
 	def test_cross_group_claim_is_rejected(self):
 		"""Group B cannot claim an outlet whose POS Profile is already owned by Group A."""
-		wh = helpers.make_test_warehouse("life13", self.company)
-		helpers.make_test_pos_profile("life13", self.company, wh)
+		company = helpers.make_test_company("life13")
+		wh = helpers.make_test_warehouse("life13", company)
+		helpers.make_test_pos_profile("life13", company, wh)
 
 		helpers.make_price_group(
 			"PG-Life-13A",
 			items=[{"item_code": helpers.make_test_item("life13A", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		with self.assertRaises(
@@ -516,17 +581,18 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 			helpers.make_price_group(
 				"PG-Life-13B",
 				items=[{"item_code": helpers.make_test_item("life13B", self.uom), "rate": 20000}],
-				outlets=[{"company": self.company, "warehouse": wh}],
+				outlets=[{"company": company, "warehouse": wh}],
 			)
 
 	def test_no_pos_profile_sets_outlet_status_without_throwing(self):
 		"""When no POS Profile matches company/warehouse, outlet status is 'No POS Profile' in DB without raising."""
-		wh = helpers.make_test_warehouse("life14", self.company)
+		company = helpers.make_test_company("life14")
+		wh = helpers.make_test_warehouse("life14", company)
 
 		pg = helpers.make_price_group(
 			"PG-Life-14",
 			items=[{"item_code": helpers.make_test_item("life14", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		self.assertEqual(len(pg.outlets), 1, msg="Expected 1 outlet row on Price Group")
@@ -607,14 +673,15 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 
 	def test_disable_restores_profiles_and_clears_markers(self):
 		"""Disabling Price Group restores linked POS Profile previous list and clears owner markers."""
-		wh = helpers.make_test_warehouse("life19", self.company)
-		pos = helpers.make_test_pos_profile("life19", self.company, wh)
+		company = helpers.make_test_company("life19")
+		wh = helpers.make_test_warehouse("life19", company)
+		pos = helpers.make_test_pos_profile("life19", company, wh)
 		frappe.db.set_value("POS Profile", pos, "selling_price_list", "Standard Selling")
 
 		pg = helpers.make_price_group(
 			"PG-Life-19",
 			items=[{"item_code": helpers.make_test_item("life19", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		pg.enabled = 0
@@ -700,15 +767,16 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 
 	def test_delete_restores_profiles_and_keeps_price_list(self):
 		"""Deleting Price Group restores profiles, keeps Price List (disabled), deletes marked rows, preserves unmanaged."""
-		wh = helpers.make_test_warehouse("life22", self.company)
-		pos = helpers.make_test_pos_profile("life22", self.company, wh)
+		company = helpers.make_test_company("life22")
+		wh = helpers.make_test_warehouse("life22", company)
+		pos = helpers.make_test_pos_profile("life22", company, wh)
 		frappe.db.set_value("POS Profile", pos, "selling_price_list", "Standard Selling")
 
 		item = helpers.make_test_item("life22", self.uom)
 		pg = helpers.make_price_group(
 			"PG-Life-22",
 			items=[{"item_code": item, "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 		pl_name = f"{helpers.MANAGED_PRICE_LIST_PREFIX}{pg.price_group_name}"
 
@@ -826,13 +894,14 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 	def test_delete_fails_before_mutation_when_price_list_owned_by_other_group(self):
 		"""Delete blocks, mutating nothing, when the managed Price List belongs to another group."""
 		item = helpers.make_test_item("life25", self.uom)
-		wh = helpers.make_test_warehouse("life25", self.company)
-		pos = helpers.make_test_pos_profile("life25", self.company, wh)
+		company = helpers.make_test_company("life25")
+		wh = helpers.make_test_warehouse("life25", company)
+		pos = helpers.make_test_pos_profile("life25", company, wh)
 
 		pg = helpers.make_price_group(
 			"PG-Life-25",
 			items=[{"item_code": item, "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 		pl_name = f"{helpers.MANAGED_PRICE_LIST_PREFIX}{pg.price_group_name}"
 
@@ -894,19 +963,20 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 
 	def test_delete_succeeds_when_foreign_owned_profile_is_only_desired(self):
 		"""Deleting a group must not be blocked by a profile another group owns and this one merely desires."""
-		wh = helpers.make_test_warehouse("life26", self.company)
+		company = helpers.make_test_company("life26")
+		wh = helpers.make_test_warehouse("life26", company)
 
 		# Create Group B before any matching POS Profile exists, so creation-time desired-profile
 		# validation (which still runs on save) has nothing to collide with.
 		pg_b = helpers.make_price_group(
 			"PG-Life-26B",
 			items=[{"item_code": helpers.make_test_item("life26", self.uom), "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		# A POS Profile now appears for the same outlet, already owned by another group.
 		# Group B never claimed it via save, so it is only ever DESIRED, never OWNED, by B.
-		pos = helpers.make_test_pos_profile("life26", self.company, wh)
+		pos = helpers.make_test_pos_profile("life26", company, wh)
 		frappe.db.set_value("POS Profile", pos, helpers.PROFILE_OWNER_FIELD, "PG-A")
 		frappe.db.set_value("POS Profile", pos, "selling_price_list", "PG-PG-A")
 

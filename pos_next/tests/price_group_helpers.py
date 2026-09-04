@@ -29,6 +29,35 @@ def get_default_company() -> str:
 	return doc.name
 
 
+def make_test_company(suffix: str) -> str:
+	"""Create a dedicated Company with no POS Profiles, for outlet-claiming tests.
+
+	Price Group outlets claim every POS Profile of their company, so tests that
+	assert on claiming must run against a company whose only profiles are the
+	ones the test itself creates — the shared default company may carry site
+	profiles owned by earlier tests (IntegrationTestCase rolls back per class,
+	not per test).
+	"""
+	company_name = f"_Test PG Co {suffix}"
+	if frappe.db.exists("Company", company_name):
+		return company_name
+	# Company.validate_abbr derives the abbreviation from word initials, so
+	# distinct suffixes (life10, life11) would collide on the same abbr; derive
+	# a unique one from the suffix instead.
+	abbr = "PG" + "".join(c for c in suffix.upper() if c.isalnum())
+	doc = frappe.get_doc(
+		{
+			"doctype": "Company",
+			"company_name": company_name,
+			"abbr": abbr,
+			"default_currency": "IDR",
+			"country": "Indonesia",
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
 def get_second_company() -> str:
 	"""Resolve or create a distinct second company."""
 	primary = get_default_company()
