@@ -1,14 +1,14 @@
 """Ownership constants and field definitions for the Price Group feature.
 
 Ported from the `selling_additional` app. A Price Group owns exactly one generated
-Price List (`PG-<name>`), the unscoped Item Price rows on that list, and the POS
-Profiles matching its outlets. Ownership is recorded in Custom Fields so a row can
+Price List (`PG-<name>`), the unscoped Item Price rows on that list, and every POS
+Profile of its outlet companies. Ownership is recorded in Custom Fields so a row can
 always be traced back to the group that created it — and restored when the group is
 disabled or deleted.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 
 OWNER_FIELD = "custom_pos_next_price_group"
 PRICE_LIST_OWNER_FIELD = OWNER_FIELD
@@ -45,12 +45,13 @@ def managed_item_price_filters(price_group: str, price_list: str) -> dict:
 
 @dataclass(frozen=True)
 class ManagedState:
-	price_list_name: str
-	desired_profiles: tuple[str, ...]
-	currently_owned_profiles: tuple[str, ...]
-	all_profiles: tuple[str, ...]
-	managed_item_prices: tuple[str, ...]
-	outlet_profiles: MappingProxyType
+    price_list_name: str
+    desired_profiles: tuple[str, ...]
+    currently_owned_profiles: tuple[str, ...]
+    all_profiles: tuple[str, ...]
+    managed_item_prices: tuple[str, ...]
+    outlet_profiles: Mapping[tuple[str, str], tuple[str, ...]]
+    """Every POS Profile name per outlet (company, warehouse) key, name-sorted."""
 
 
 def managed_price_list_name(price_group_name: str) -> str:

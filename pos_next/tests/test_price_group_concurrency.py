@@ -18,10 +18,14 @@ class TestPriceGroupConcurrency(IntegrationTestCase):
 		"""Assert full lock sequence: Price Group, current+desired profiles, Price List, managed Item Prices."""
 		item1 = helpers.make_test_item("conc1-1", self.uom)
 		item2 = helpers.make_test_item("conc1-2", self.uom)
-		wh1 = helpers.make_test_warehouse("conc1-1", self.company)
-		wh2 = helpers.make_test_warehouse("conc1-2", self.company)
-		pos1 = helpers.make_test_pos_profile("conc1-1", self.company, wh1)
-		pos2 = helpers.make_test_pos_profile("conc1-2", self.company, wh2)
+		# Outlets claim every profile of their company, so the ownership transfer
+		# below needs each profile in its OWN company.
+		company_a = helpers.make_test_company("conc1a")
+		company_b = helpers.make_test_company("conc1b")
+		wh1 = helpers.make_test_warehouse("conc1-1", company_a)
+		wh2 = helpers.make_test_warehouse("conc1-2", company_b)
+		pos1 = helpers.make_test_pos_profile("conc1-1", company_a, wh1)
+		pos2 = helpers.make_test_pos_profile("conc1-2", company_b, wh2)
 
 		pg = helpers.make_price_group(
 			"PG-Conc-1",
@@ -29,7 +33,7 @@ class TestPriceGroupConcurrency(IntegrationTestCase):
 				{"item_code": item1, "rate": 10000},
 				{"item_code": item2, "rate": 20000},
 			],
-			outlets=[{"company": self.company, "warehouse": wh1}],
+			outlets=[{"company": company_a, "warehouse": wh1}],
 		)
 		pl_name = f"{helpers.MANAGED_PRICE_LIST_PREFIX}{pg.price_group_name}"
 		managed_ip_names = frappe.get_all(
@@ -43,7 +47,7 @@ class TestPriceGroupConcurrency(IntegrationTestCase):
 		)
 
 		# Transfer ownership from current pos1 to desired pos2.
-		pg.set("outlets", [{"company": self.company, "warehouse": wh2}])
+		pg.set("outlets", [{"company": company_b, "warehouse": wh2}])
 		lock_log = []
 		orig_get_value = frappe.db.get_value
 
@@ -74,13 +78,14 @@ class TestPriceGroupConcurrency(IntegrationTestCase):
 	def test_ownership_checked_after_all_locks(self):
 		"""Assert each ownership read follows a lock on the exact same (doctype, name) row."""
 		item = helpers.make_test_item("conc2", self.uom)
-		wh = helpers.make_test_warehouse("conc2", self.company)
-		helpers.make_test_pos_profile("conc2", self.company, wh)
+		company = helpers.make_test_company("conc2")
+		wh = helpers.make_test_warehouse("conc2", company)
+		helpers.make_test_pos_profile("conc2", company, wh)
 
 		pg = helpers.make_price_group(
 			"PG-Conc-2",
 			items=[{"item_code": item, "rate": 10000}],
-			outlets=[{"company": self.company, "warehouse": wh}],
+			outlets=[{"company": company, "warehouse": wh}],
 		)
 
 		events = []
