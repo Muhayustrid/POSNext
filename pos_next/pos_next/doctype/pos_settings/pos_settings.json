@@ -69,6 +69,13 @@
   "imin_crew_font_scale",
   "imin_line_spacing",
   "imin_side_margin",
+  "imin_eod_print_copies",
+  "imin_eod_copy_delay_ms",
+  "imin_eod_feed_dots",
+  "imin_eod_tail_dots",
+  "imin_eod_font_scale",
+  "imin_eod_line_spacing",
+  "imin_eod_side_margin",
   "print_fallback_enabled",
   "section_break_delivery",
   "use_delivery_charges",
@@ -546,6 +553,62 @@
    "fieldname": "imin_side_margin",
    "fieldtype": "Int",
    "label": "Side Margin (dots)"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Copies printed for the Closing/EOD receipt — a separate print lane from the per-transaction copies. 1 = the report goes to the manager only. 1–5.",
+   "fieldname": "imin_eod_print_copies",
+   "fieldtype": "Int",
+   "label": "EOD Print Copies"
+  },
+  {
+   "default": "800",
+   "depends_on": "eval:doc.print_driver==='imin' and (doc.imin_eod_print_copies||1)>1",
+   "description": "Pause between EOD copies so the cashier can tear the first one off (ms); overridable per-device. 0–10000.",
+   "fieldname": "imin_eod_copy_delay_ms",
+   "fieldtype": "Int",
+   "label": "EOD Delay Between Copies (ms)"
+  },
+  {
+   "default": "160",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Paper advance after the EOD receipt so it clears the tear bar (dots = mm×8, e.g. 160≈20mm). 8–500.",
+   "fieldname": "imin_eod_feed_dots",
+   "fieldtype": "Int",
+   "label": "EOD Advance Paper (dots)"
+  },
+  {
+   "default": "24",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "White space appended inside the EOD bitmap so the last line clears the tear bar (dots = mm×8). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
+   "fieldname": "imin_eod_tail_dots",
+   "fieldtype": "Int",
+   "label": "EOD Tail Spacer (dots)"
+  },
+  {
+   "default": "100",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Font scale for the EOD receipt (percent), same 96 DPI authoring as the sales receipt; 100 = as authored. The EOD list is longer, so lower values fit more lines per page. 60–250.",
+   "fieldname": "imin_eod_font_scale",
+   "fieldtype": "Int",
+   "label": "EOD Font Scale (%)"
+  },
+  {
+   "default": "100",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Vertical density of the printed EOD receipt (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50–150.",
+   "fieldname": "imin_eod_line_spacing",
+   "fieldtype": "Int",
+   "label": "EOD Line Spacing (%)"
+  },
+  {
+   "default": "16",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Left and right print margin for the EOD receipt in dots (dots = mm×8, e.g. 16≈2mm). 0 is edge-to-edge. 0–64. VERIFY ON DEVICE.",
+   "fieldname": "imin_eod_side_margin",
+   "fieldtype": "Int",
+   "label": "EOD Side Margin (dots)"
   },
   {
    "default": "1",

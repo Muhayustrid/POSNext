@@ -73,6 +73,15 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						crewFontScale: current.crew_font_scale,
 						lineSpacing: current.line_spacing,
 						sideMarginDots: current.side_margin,
+						// Closing/EOD lane: the driver resolves these against the eod*
+						// device keys instead of the receipt ones.
+						eodCopies: current.eod_copies,
+						eodCopyDelayMs: current.eod_copy_delay_ms,
+						eodFeedDots: current.eod_feed_dots,
+						eodTailDots: current.eod_tail_dots,
+						eodFontScale: current.eod_font_scale,
+						eodLineSpacing: current.eod_line_spacing,
+						eodSideMarginDots: current.eod_side_margin,
 					},
 				})
 				if (result && typeof result.paper === "string") {
@@ -196,6 +205,15 @@ export async function initTransportFromServer(posProfile) {
 		crew_font_scale: cfg.crew_font_scale,
 		line_spacing: cfg.line_spacing,
 		side_margin: cfg.side_margin,
+		// Stored verbatim (snake_case, exactly as the API returns); printHTML
+		// maps them camelCase per print.
+		eod_copies: cfg.eod_copies,
+		eod_copy_delay_ms: cfg.eod_copy_delay_ms,
+		eod_feed_dots: cfg.eod_feed_dots,
+		eod_tail_dots: cfg.eod_tail_dots,
+		eod_font_scale: cfg.eod_font_scale,
+		eod_line_spacing: cfg.eod_line_spacing,
+		eod_side_margin: cfg.eod_side_margin,
 		fallback_enabled: cfg.fallback_enabled,
 	})
 	return cfg

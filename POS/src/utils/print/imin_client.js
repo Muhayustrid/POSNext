@@ -182,7 +182,9 @@ export function createIminDriver(deps = {}) {
 		 * @returns {Promise<{paper:string, dots:number}>}
 		 */
 		async printHTML(html, opts = {}) {
-			const r = resolvePrintConfig(loadConfig(), opts.config || {})
+			const r = resolvePrintConfig(loadConfig(), opts.config || {}, {
+				kind: opts.kind,
+			})
 			const {
 				paper,
 				customDots,

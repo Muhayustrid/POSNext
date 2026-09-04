@@ -207,6 +207,56 @@ describe("buildReceiptPreviewSet (crew slip as copy 2)", () => {
 	})
 })
 
+describe("buildReceiptPreviewSet (eod lane)", () => {
+	it("resolves the eod knobs through the same resolver the driver uses", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.fontScale)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		const set = await buildReceiptPreviewSet("<div/>", {
+			device: { eodCopies: 2, eodFontScale: 120 },
+			kind: "eod",
+			render,
+		})
+		expect(set.copies).toHaveLength(2)
+		expect(seen).toEqual([120])
+	})
+
+	it("never renders crewHTML for an eod preview — there is no crew copy", async () => {
+		const render = vi.fn(async (html) => ({
+			dataURL: "data:,",
+			width: 384,
+			height: 100,
+			html,
+		}))
+		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
+			copies: 2,
+			crewHTML: '<div class="crew">crew</div>',
+			kind: "eod",
+			render,
+		})
+		expect(render).toHaveBeenCalledTimes(1)
+		expect(render.mock.calls[0][0]).toBe("<body>receipt</body>")
+		expect(set.copies.map((c) => c.label)).toEqual(["Copy 1", "Copy 2"])
+	})
+
+	it("applies the explicit copies override to the eod copy count", async () => {
+		const render = vi.fn(async () => ({
+			dataURL: "data:,",
+			width: 384,
+			height: 100,
+		}))
+		const set = await buildReceiptPreviewSet("<div/>", {
+			device: { eodCopies: 2 },
+			copies: 1,
+			kind: "eod",
+			render,
+		})
+		expect(set.copies).toHaveLength(1)
+	})
+})
+
 describe("buildCopyTimeline", () => {
 	it("reveals copy 1 immediately and copy 2 after the configured delay", () => {
 		const tl = buildCopyTimeline(2, 800)

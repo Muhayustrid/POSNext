@@ -546,20 +546,24 @@ export async function fetchServerPrintHTML(doctype, name, printFormat) {
  * print transport. `posProfile` is optional — callers without one in scope
  * (e.g. EOD) pass nothing and the log context records a null profile.
  *
- * Deliberately generic: no crew slip here. Only the invoice call sites attach
- * one, so an EOD report can never print a second, order-only sheet.
+ * `kind` selects the print lane ("receipt" by default; "eod" for the
+ * Closing/EOD report), which the iMin driver resolves into its own layout
+ * knobs. Deliberately generic: no crew slip here. Only the invoice call sites
+ * attach one, so an EOD report can never print a second, order-only sheet.
  */
 export async function silentPrintDoc(
 	doctype,
 	name,
 	printFormat,
 	posProfile = null,
+	kind = "receipt",
 ) {
 	await ensureTransportInitialized(posProfile)
 
 	const fullHTML = await fetchServerPrintHTML(doctype, name, printFormat)
 
 	await transportPrint(fullHTML, {
+		kind,
 		logContext: {
 			reference_doctype: doctype,
 			reference_name: name,

@@ -9,6 +9,7 @@ import {
 	parseNumericField,
 	saveDeviceConfig,
 	DEFAULT_CREW_FONT_SCALE,
+	DEFAULT_EOD_COPIES,
 	DEFAULT_FEED_DOTS,
 	DEFAULT_FONT_SCALE,
 	DEFAULT_LINE_SPACING,
@@ -376,6 +377,125 @@ describe("resolvePrintConfig sideMarginDots (left/right print margin)", () => {
 		expect(
 			resolvePrintConfig({}, { sideMarginDots: null }).sideMarginDots,
 		).toBe(16)
+	})
+})
+
+describe('resolvePrintConfig kind: "eod" (Closing/EOD lane)', () => {
+	const device = {
+		eodCopies: 2,
+		eodCopyDelayMs: 900,
+		eodFeedDots: 200,
+		eodTailDots: 40,
+		eodFontScale: 120,
+		eodLineSpacing: 90,
+		eodSideMarginDots: 32,
+	}
+	const server = {
+		eodCopies: 3,
+		eodCopyDelayMs: 1000,
+		eodFeedDots: 210,
+		eodTailDots: 50,
+		eodFontScale: 130,
+		eodLineSpacing: 110,
+		eodSideMarginDots: 40,
+	}
+
+	it("reads the eod* device keys over server, server over the defaults", () => {
+		expect(resolvePrintConfig(device, server, { kind: "eod" })).toMatchObject({
+			copies: 2,
+			copyDelayMs: 900,
+			feedDots: 200,
+			tailDots: 40,
+			fontScale: 120,
+			lineSpacing: 90,
+			sideMarginDots: 32,
+		})
+		expect(resolvePrintConfig({}, server, { kind: "eod" })).toMatchObject({
+			copies: 3,
+			copyDelayMs: 1000,
+			feedDots: 210,
+			tailDots: 50,
+			fontScale: 130,
+			lineSpacing: 110,
+			sideMarginDots: 40,
+		})
+	})
+
+	it("falls back to the eod defaults when nothing is set", () => {
+		expect(DEFAULT_EOD_COPIES).toBe(1)
+		expect(resolvePrintConfig({}, {}, { kind: "eod" })).toMatchObject({
+			copies: 1,
+			copyDelayMs: 800,
+			feedDots: 160,
+			tailDots: 24,
+			fontScale: 100,
+			lineSpacing: 100,
+			sideMarginDots: 16,
+		})
+	})
+
+	it("clamps to the same bands as the receipt knobs", () => {
+		const r = (d) => resolvePrintConfig(d, {}, { kind: "eod" })
+		expect(r({ eodCopies: 99 }).copies).toBe(5)
+		expect(r({ eodCopyDelayMs: 99999 }).copyDelayMs).toBe(10000)
+		expect(r({ eodFeedDots: 9999 }).feedDots).toBe(500)
+		expect(r({ eodTailDots: 999 }).tailDots).toBe(200)
+		expect(r({ eodFontScale: 10 }).fontScale).toBe(60)
+		expect(r({ eodLineSpacing: 10 }).lineSpacing).toBe(50)
+		expect(r({ eodSideMarginDots: 999 }).sideMarginDots).toBe(64)
+	})
+
+	it("ignores the receipt knobs, and the receipt lane ignores eod*", () => {
+		const eod = resolvePrintConfig(
+			{ copies: 2, fontScale: 150, tailDots: 99, sideMarginDots: 64 },
+			{},
+			{ kind: "eod" },
+		)
+		expect(eod.copies).toBe(1)
+		expect(eod.fontScale).toBe(100)
+		expect(eod.tailDots).toBe(24)
+		expect(eod.sideMarginDots).toBe(16)
+		// No opts (or kind "receipt") must not pick the eod overrides up.
+		expect(
+			resolvePrintConfig({ eodCopies: 3, eodFontScale: 200 }, {}).copies,
+		).toBe(1)
+		expect(resolvePrintConfig({ eodFontScale: 200 }, {}).fontScale).toBe(100)
+	})
+
+	it("keeps paper/customDots/cut global — they describe the paper, not the job", () => {
+		const r = resolvePrintConfig(
+			{},
+			{ paper: "custom", customDots: 512, cut: true },
+			{ kind: "eod" },
+		)
+		expect(r.paper).toBe("custom")
+		expect(r.customDots).toBe(512)
+		expect(r.cut).toBe(true)
+		expect(r.dots).toBe(512)
+	})
+
+	it("mirrors the eod fontScale into crewFontScale so the return shape holds", () => {
+		expect(
+			resolvePrintConfig({ eodFontScale: 120 }, {}, { kind: "eod" })
+				.crewFontScale,
+		).toBe(120)
+		expect(
+			resolvePrintConfig({ eodFontScale: 999 }, {}, { kind: "eod" })
+				.crewFontScale,
+		).toBe(250)
+	})
+
+	it('a call without opts resolves exactly like kind "receipt"', () => {
+		const d = { paper: "58mm", copies: 2, copyDelayMs: 900, fontScale: 110 }
+		const s = {
+			tailDots: 32,
+			lineSpacing: 80,
+			sideMarginDots: 24,
+			feedDots: 200,
+		}
+		expect(resolvePrintConfig(d, s)).toEqual(
+			resolvePrintConfig(d, s, { kind: "receipt" }),
+		)
 	})
 })
 

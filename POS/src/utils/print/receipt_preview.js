@@ -27,6 +27,9 @@ import { resolvePrintConfig } from "./receipt_layout"
  *   (the preview buttons pass 1 or 2 explicitly).
  * @param {string} [opts.crewHTML] - the crew slip that replaces copy 2, same
  *   contract as the driver's opts.crewHTML.
+ * @param {string} [opts.kind] - print lane ("receipt" or "eod"), forwarded to
+ *   the resolver so an EOD preview shows the eod knobs. An EOD print has no
+ *   crew slip, so crewHTML is ignored entirely for that lane.
  * @param {(html, o) => Promise<{dataURL,width,height}>} [opts.render]
  *   injected for tests; defaults to the real bitmap renderer.
  * @returns {Promise<{dots:number, paper:string, tailDots:number,
@@ -35,9 +38,12 @@ import { resolvePrintConfig } from "./receipt_layout"
  *     delayMs:number,bitmap:{dataURL,width,height}}>}>}
  */
 export async function buildReceiptPreviewSet(html, opts = {}) {
+	const eod = opts.kind === "eod"
 	const device = { ...(opts.device || {}) }
-	if (opts.copies != null) device.copies = opts.copies
-	const r = resolvePrintConfig(device, opts.server || {})
+	// The override lands on the key the lane actually reads, or it would be
+	// silently dropped by the resolver's eod branch.
+	if (opts.copies != null) device[eod ? "eodCopies" : "copies"] = opts.copies
+	const r = resolvePrintConfig(device, opts.server || {}, { kind: opts.kind })
 	const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
 	// Same render the driver makes for every plain copy. Nothing is printed
@@ -52,8 +58,9 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 		lineSpacing: r.lineSpacing,
 		sideMarginDots: r.sideMarginDots,
 	}
-	// Mirrors imin_client: a crew slip only replaces copy 2 of a multi-copy job.
-	const crewApplies = Boolean(opts.crewHTML) && r.copies > 1
+	// Mirrors imin_client: a crew slip only replaces copy 2 of a multi-copy
+	// job, and never exists on the EOD lane.
+	const crewApplies = Boolean(opts.crewHTML) && !eod && r.copies > 1
 	const [shared, crewBitmap] = await Promise.all([
 		render(html, renderOpts),
 		crewApplies

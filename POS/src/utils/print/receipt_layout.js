@@ -186,6 +186,11 @@ const MAX_COPIES = 5
 const MAX_COPY_DELAY_MS = 10000
 const DEFAULT_COPIES = 1
 const DEFAULT_COPY_DELAY_MS = 800
+/**
+ * The Closing/EOD lane defaults to a single report: unlike a sale there is no
+ * customer copy to hand over, so one sheet is the norm.
+ */
+export const DEFAULT_EOD_COPIES = 1
 
 /**
  * Clamp an integer-ish setting into [lo, hi], falling back to `dflt` for
@@ -208,53 +213,65 @@ export function clampInt(v, lo, hi, dflt) {
  * wins; only an ABSENT device key falls through to the server value; then the
  * module default. `??` (not `||`) keeps that distinction.
  *
+ * `opts.kind` splits the knob set per print lane: "eod" (the default is
+ * "receipt") reads `eod<Name>` keys on both the device and the server object,
+ * so tuning one lane can never retune the other. paper/customDots/cut stay
+ * global — they describe the paper, not which job is on it.
+ *
  * There is no copy-label knob here any more: nothing is printed above a copy.
  * The banners read like a second receipt the customer never asked for, so both
  * the CUSTOMER COPY and the CREW COPY label went. Copies are identical
  * bitmaps; the Direct Print preview captions its rows instead, which costs no
  * paper.
  */
-export function resolvePrintConfig(device = {}, server = {}) {
+export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 	const paper = device.paper ?? server.paper ?? "58mm"
 	const customDots = device.customDots ?? server.customDots ?? undefined
 	const cut = device.cut ?? server.cut ?? false
+
+	const eod = opts.kind === "eod"
+	// One knob's per-kind key: "eod" upper-cases the first letter onto the eod
+	// prefix, so `copyDelayMs` becomes `eodCopyDelayMs` on device AND server.
+	const pick = (name) => {
+		const key = eod ? `eod${name[0].toUpperCase()}${name.slice(1)}` : name
+		return device[key] ?? server[key]
+	}
+
 	const copies = clampInt(
-		device.copies ?? server.copies ?? DEFAULT_COPIES,
+		pick("copies"),
 		1,
 		MAX_COPIES,
-		DEFAULT_COPIES,
+		eod ? DEFAULT_EOD_COPIES : DEFAULT_COPIES,
 	)
 	const copyDelayMs = clampInt(
-		device.copyDelayMs ?? server.copyDelayMs ?? DEFAULT_COPY_DELAY_MS,
+		pick("copyDelayMs"),
 		0,
 		MAX_COPY_DELAY_MS,
 		DEFAULT_COPY_DELAY_MS,
 	)
-	const feedDots = clampInt(
-		device.feedDots ?? server.feedDots ?? DEFAULT_FEED_DOTS,
-		8,
-		500,
-		DEFAULT_FEED_DOTS,
-	)
+	const feedDots = clampInt(pick("feedDots"), 8, 500, DEFAULT_FEED_DOTS)
 	const tailDots = clampInt(
-		device.tailDots ?? server.tailDots ?? DEFAULT_TAIL_DOTS,
+		pick("tailDots"),
 		0,
 		MAX_TAIL_DOTS,
 		DEFAULT_TAIL_DOTS,
 	)
 	// Percent (100 = as authored). Extra headroom on top of the fixed 205/96
 	// translation, for tills where the operator wants chunkier text still.
-	const fontScale = clampFontScale(device.fontScale ?? server.fontScale)
+	const fontScale = clampFontScale(pick("fontScale"))
 	// The crew slip has its own knob: it is read across a counter, so it
-	// defaults chunkier than the receipt itself.
-	const crewFontScale = clampFontScale(
-		device.crewFontScale ?? server.crewFontScale,
-		DEFAULT_CREW_FONT_SCALE,
-	)
+	// defaults chunkier than the receipt itself. An EOD print has no crew
+	// slip, so the field mirrors the eod fontScale to keep the shape stable.
+	const crewFontScale = eod
+		? fontScale
+		: clampFontScale(
+				device.crewFontScale ?? server.crewFontScale,
+				DEFAULT_CREW_FONT_SCALE,
+			)
 	// One vertical-density knob for everything direct printed — the receipt AND
 	// the crew slip tighten together, so the two copies stay comparable.
 	const lineSpacing = clampInt(
-		device.lineSpacing ?? server.lineSpacing ?? DEFAULT_LINE_SPACING,
+		pick("lineSpacing"),
 		MIN_LINE_SPACING,
 		MAX_LINE_SPACING,
 		DEFAULT_LINE_SPACING,
@@ -266,7 +283,7 @@ export function resolvePrintConfig(device = {}, server = {}) {
 	// deliberately narrower than that 40 — it is what the renderer pins the
 	// sides to, overriding the template.
 	const sideMarginDots = clampInt(
-		device.sideMarginDots ?? server.sideMarginDots ?? DEFAULT_SIDE_MARGIN_DOTS,
+		pick("sideMarginDots"),
 		0,
 		MAX_SIDE_MARGIN_DOTS,
 		DEFAULT_SIDE_MARGIN_DOTS,

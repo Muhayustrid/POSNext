@@ -99,10 +99,10 @@
 				</p>
 			</div>
 
-			<!-- Device config card -->
+			<!-- Device card: the physical, global half — shared by both lanes. -->
 			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
 				<h2 class="text-sm font-semibold text-gray-900">
-					{{ __("Device config") }}
+					{{ __("Device") }}
 				</h2>
 				<p class="mt-1 text-xs text-gray-500">
 					{{
@@ -163,7 +163,36 @@
 							:label="__('Cut paper after print (partial cut)')"
 						/>
 					</div>
+				</div>
 
+				<div class="mt-4 flex items-center gap-2">
+					<Button
+						variant="solid"
+						:loading="savingDevice"
+						@click="onSaveDeviceConfig"
+					>
+						{{ __("Save") }}
+					</Button>
+					<Button variant="ghost" @click="resetDeviceConfig">
+						{{ __("Reset") }}
+					</Button>
+				</div>
+			</div>
+
+			<!-- Sales receipt lane: its own knobs, save, test print and preview. -->
+			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
+				<h2 class="text-sm font-semibold text-gray-900">
+					{{ __("Struk Penjualan") }}
+				</h2>
+				<p class="mt-1 text-xs text-gray-500">
+					{{
+						__(
+							"Layout of the sales receipt and its crew copy. Stored on this device too; an empty field uses the server value.",
+						)
+					}}
+				</p>
+
+				<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-copies">
 							{{ __("Copies per transaction") }}
@@ -315,7 +344,7 @@
 					</div>
 				</div>
 
-				<!-- What the NEXT print will actually use (device over server) -->
+				<!-- What the NEXT receipt print will actually use (device over server) -->
 				<div
 					v-if="effectiveCfg"
 					class="mt-4 rounded bg-gray-50 px-3 py-2 text-xs text-gray-600"
@@ -354,43 +383,381 @@
 				<div class="mt-4 flex items-center gap-2">
 					<Button
 						variant="solid"
-						:loading="saving"
-						@click="onSaveConfig"
+						:loading="savingReceipt"
+						@click="onSaveReceiptConfig"
 					>
 						{{ __("Save") }}
 					</Button>
-					<Button variant="ghost" @click="reloadConfig">
+					<Button variant="ghost" @click="resetReceiptConfig">
 						{{ __("Reset") }}
 					</Button>
 				</div>
+
+				<!-- Test print -->
+				<div class="mt-5 border-t border-gray-100 pt-4">
+					<h3 class="text-sm font-medium text-gray-900">
+						{{ __("Test print") }}
+					</h3>
+					<p class="mt-1 text-xs text-gray-500">
+						{{
+							__(
+								"Prints a sample receipt through the transport exactly as a real print does — the last invoice of this profile through the server receipt template when one is available, the built-in test receipt otherwise. On a non-iMin machine a connection error is expected and will appear in the recent attempts below.",
+							)
+						}}
+					</p>
+					<div class="mt-4">
+						<Button
+							variant="solid"
+							:loading="printing"
+							@click="onTestPrint"
+						>
+							{{ __("Test Print") }}
+						</Button>
+						<p
+							v-if="sampleNote"
+							class="mt-2 text-xs text-gray-400"
+						>
+							{{ sampleNote }}
+						</p>
+					</div>
+				</div>
+
+				<!-- Print preview: the same bitmap path that reaches the printer, no device needed. -->
+				<div class="mt-5 border-t border-gray-100 pt-4">
+					<h3 class="text-sm font-medium text-gray-900">{{ __("Preview") }}</h3>
+					<p class="mt-1 text-xs text-gray-500">
+						{{
+							__(
+								"Renders the sample receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer — copy 2 is the crew slip, at its own font scale, when the profile prints two. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
+							)
+						}}
+					</p>
+
+					<div class="mt-4 flex flex-wrap items-center gap-2">
+						<Button :loading="previewing" @click="runPreview(1)">
+							{{ __("Preview 1 copy") }}
+						</Button>
+						<Button :loading="previewing" @click="runPreview(2)">
+							{{ __("Preview 2 copies") }}
+						</Button>
+						<Button v-if="previewCopies.length" variant="ghost" @click="clearPreview">
+							{{ __("Clear") }}
+						</Button>
+					</div>
+
+					<div v-if="previewError" class="mt-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+						{{ previewError }}
+					</div>
+
+					<div v-else-if="previewing && !previewCopies.length" class="py-8 text-center text-sm text-gray-500">
+						{{ __("Rendering...") }}
+					</div>
+
+					<div v-else-if="previewCopies.length" class="mt-4 flex flex-wrap items-start gap-6">
+						<div v-for="row in previewCopies" :key="row.index" class="min-w-0">
+							<div class="mb-1 flex items-center gap-2">
+								<span class="text-xs font-medium text-gray-700">{{ row.label }}</span>
+								<Badge v-if="!row.visible" theme="gray">
+									{{ __("after {0} ms", [String(row.delayMs)]) }}
+								</Badge>
+							</div>
+							<div
+								class="overflow-x-auto rounded border border-gray-200 bg-neutral-100 p-2"
+								:aria-label="row.label"
+							>
+								<img
+									v-if="row.visible && row.bitmap"
+									:src="row.bitmap.dataURL"
+									:alt="row.label"
+									class="block bg-white"
+									:style="{ width: previewDots + 'px', maxWidth: 'none' }"
+								/>
+								<div
+									v-else
+									:style="{ width: previewDots + 'px' }"
+									class="flex h-24 items-center justify-center text-xs text-gray-400"
+								>
+									{{ __("waiting {0} ms", [String(row.delayMs)]) }}
+								</div>
+							</div>
+							<p v-if="row.bitmap" class="mt-1 text-xs text-gray-400">
+								{{
+									__("{0} x {1} dots", [
+										String(row.bitmap.width),
+										String(row.bitmap.height),
+									])
+								}}
+							</p>
+						</div>
+					</div>
+				</div>
 			</div>
 
-			<!-- Test print -->
+			<!-- Closing / EOD lane: same knobs, resolved with kind: "eod". -->
 			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
 				<h2 class="text-sm font-semibold text-gray-900">
-					{{ __("Test print") }}
+					{{ __("Closing / EOD") }}
 				</h2>
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Prints a sample receipt through the transport exactly as a real print does — the last invoice of this profile through the server receipt template when one is available, the built-in test receipt otherwise. On a non-iMin machine a connection error is expected and will appear in the recent attempts below.",
+							"Layout of the closing (end of day) report print. Same device storage; an empty field uses the server value.",
 						)
 					}}
 				</p>
-				<div class="mt-4">
+
+				<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-copies">
+							{{ __("EOD copies per print") }}
+						</label>
+						<Select
+							id="direct-print-eod-copies"
+							v-model="cfg.eodCopies"
+							:options="copiesOptions"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("The closing report has no crew slip, so every copy is identical.") }}
+						</p>
+					</div>
+
+					<div v-if="Number(cfg.eodCopies) > 1">
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-copy-delay">
+							{{ __("EOD delay between copies (ms)") }}
+						</label>
+						<Input
+							id="direct-print-eod-copy-delay"
+							v-model="eodCopyDelayText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('800')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Tear-off pause between closing copies. Default 800.") }}
+						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-feed">
+							{{ __("EOD paper advance per copy (dots)") }}
+						</label>
+						<Input
+							id="direct-print-eod-feed"
+							v-model="eodFeedDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('160')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Distance the paper moves after the copy, 0.125 mm per dot. 160 = 20 mm.") }}
+						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-tail">
+							{{ __("EOD tail spacer (dots)") }}
+						</label>
+						<Input
+							id="direct-print-eod-tail"
+							v-model="eodTailDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('24')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Blank space inside the image below the last line. 24 = 3 mm.") }}
+						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-font-scale">
+							{{ __("EOD font scale (%)") }}
+						</label>
+						<Input
+							id="direct-print-eod-font-scale"
+							v-model="eodFontScaleText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('100')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Separate from the receipt knob: the closing report is read at the desk, not handed over. 60–250.") }}
+						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-line-spacing">
+							{{ __("EOD line spacing (%)") }}
+						</label>
+						<Input
+							id="direct-print-eod-line-spacing"
+							v-model="eodLineSpacingText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('100')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Vertical density of the closing report. 100 = as authored. 50–150.") }}
+						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-side-margin">
+							{{ __("EOD side margin (dots)") }}
+						</label>
+						<Input
+							id="direct-print-eod-side-margin"
+							v-model="eodSideMarginDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('16')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Blank space on the left and right of every line, in dots. 0–64.") }}
+						</p>
+					</div>
+				</div>
+
+				<!-- What the NEXT closing print will actually use -->
+				<div
+					v-if="effectiveEodCfg"
+					class="mt-4 rounded bg-gray-50 px-3 py-2 text-xs text-gray-600"
+				>
+					<p class="mb-1 font-medium text-gray-700">
+						{{ __("Effective config for the next closing print") }}
+					</p>
+					<p>
+						{{
+							__(
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Line spacing {7}% · Side margin {8} dots",
+								[
+									String(effectiveEodCfg.paper),
+									String(effectiveEodCfg.dots),
+									String(effectiveEodCfg.copies),
+									String(effectiveEodCfg.copyDelayMs),
+									String(effectiveEodCfg.feedDots),
+									String(effectiveEodCfg.tailDots),
+									String(effectiveEodCfg.fontScale),
+									String(effectiveEodCfg.lineSpacing),
+									String(effectiveEodCfg.sideMarginDots),
+								],
+							)
+						}}
+					</p>
+				</div>
+
+				<div class="mt-4 flex items-center gap-2">
 					<Button
 						variant="solid"
-						:loading="printing"
-						@click="onTestPrint"
+						:loading="savingEod"
+						@click="onSaveEodConfig"
 					>
-						{{ __("Test Print") }}
+						{{ __("Save") }}
 					</Button>
-					<p
-						v-if="sampleNote"
-						class="mt-2 text-xs text-gray-400"
-					>
-						{{ sampleNote }}
+					<Button variant="ghost" @click="resetEodConfig">
+						{{ __("Reset") }}
+					</Button>
+				</div>
+
+				<!-- Test print -->
+				<div class="mt-5 border-t border-gray-100 pt-4">
+					<h3 class="text-sm font-medium text-gray-900">
+						{{ __("Test print closing") }}
+					</h3>
+					<p class="mt-1 text-xs text-gray-500">
+						{{
+							__(
+								"Prints the latest closing shift of this profile through the server EOD template, through the transport exactly as a real closing print does.",
+							)
+						}}
 					</p>
+					<div class="mt-4">
+						<Button
+							variant="solid"
+							:loading="printingClosing"
+							:disabled="closingUnavailable"
+							@click="onTestPrintClosing"
+						>
+							{{ __("Test Print Closing") }}
+						</Button>
+						<p
+							v-if="closingNote"
+							class="mt-2 text-xs text-gray-400"
+						>
+							{{ closingNote }}
+						</p>
+					</div>
+				</div>
+
+				<!-- Preview -->
+				<div class="mt-5 border-t border-gray-100 pt-4">
+					<h3 class="text-sm font-medium text-gray-900">{{ __("Preview closing") }}</h3>
+					<p class="mt-1 text-xs text-gray-500">
+						{{
+							__(
+								"Renders the closing report through the same bitmap path a real print uses, with the EOD knobs above. Nothing reaches the printer.",
+							)
+						}}
+					</p>
+
+					<div class="mt-4 flex flex-wrap items-center gap-2">
+						<Button
+							:loading="eodPreviewing"
+							:disabled="closingUnavailable"
+							@click="runEodPreview"
+						>
+							{{ __("Preview Closing") }}
+						</Button>
+						<Button v-if="eodPreviewCopies.length" variant="ghost" @click="clearEodPreview">
+							{{ __("Clear") }}
+						</Button>
+					</div>
+
+					<div v-if="eodPreviewError" class="mt-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+						{{ eodPreviewError }}
+					</div>
+
+					<div v-else-if="eodPreviewing && !eodPreviewCopies.length" class="py-8 text-center text-sm text-gray-500">
+						{{ __("Rendering...") }}
+					</div>
+
+					<div v-else-if="eodPreviewCopies.length" class="mt-4 flex flex-wrap items-start gap-6">
+						<div v-for="row in eodPreviewCopies" :key="row.index" class="min-w-0">
+							<div class="mb-1 flex items-center gap-2">
+								<span class="text-xs font-medium text-gray-700">{{ row.label }}</span>
+								<Badge v-if="!row.visible" theme="gray">
+									{{ __("after {0} ms", [String(row.delayMs)]) }}
+								</Badge>
+							</div>
+							<div
+								class="overflow-x-auto rounded border border-gray-200 bg-neutral-100 p-2"
+								:aria-label="row.label"
+							>
+								<img
+									v-if="row.visible && row.bitmap"
+									:src="row.bitmap.dataURL"
+									:alt="row.label"
+									class="block bg-white"
+									:style="{ width: eodPreviewDots + 'px', maxWidth: 'none' }"
+								/>
+								<div
+									v-else
+									:style="{ width: eodPreviewDots + 'px' }"
+									class="flex h-24 items-center justify-center text-xs text-gray-400"
+								>
+									{{ __("waiting {0} ms", [String(row.delayMs)]) }}
+								</div>
+							</div>
+							<p v-if="row.bitmap" class="mt-1 text-xs text-gray-400">
+								{{
+									__("{0} x {1} dots", [
+										String(row.bitmap.width),
+										String(row.bitmap.height),
+									])
+								}}
+							</p>
+						</div>
+					</div>
 				</div>
 			</div>
 
@@ -471,76 +838,6 @@
 					{{ __("Showing the last 50 attempts.") }}
 				</p>
 			</div>
-
-			<!-- Print preview: the same bitmap path that reaches the printer, no device needed. -->
-			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
-				<h2 class="text-sm font-semibold text-gray-900">{{ __("Preview") }}</h2>
-				<p class="mt-1 text-xs text-gray-500">
-					{{
-						__(
-							"Renders the sample receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer — copy 2 is the crew slip, at its own font scale, when the profile prints two. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
-						)
-					}}
-				</p>
-
-				<div class="mt-4 flex flex-wrap items-center gap-2">
-					<Button :loading="previewing" @click="runPreview(1)">
-						{{ __("Preview 1 copy") }}
-					</Button>
-					<Button :loading="previewing" @click="runPreview(2)">
-						{{ __("Preview 2 copies") }}
-					</Button>
-					<Button v-if="previewCopies.length" variant="ghost" @click="clearPreview">
-						{{ __("Clear") }}
-					</Button>
-				</div>
-
-				<div v-if="previewError" class="mt-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
-					{{ previewError }}
-				</div>
-
-				<div v-else-if="previewing && !previewCopies.length" class="py-8 text-center text-sm text-gray-500">
-					{{ __("Rendering...") }}
-				</div>
-
-				<div v-else-if="previewCopies.length" class="mt-4 flex flex-wrap items-start gap-6">
-					<div v-for="row in previewCopies" :key="row.index" class="min-w-0">
-						<div class="mb-1 flex items-center gap-2">
-							<span class="text-xs font-medium text-gray-700">{{ row.label }}</span>
-							<Badge v-if="!row.visible" theme="gray">
-								{{ __("after {0} ms", [String(row.delayMs)]) }}
-							</Badge>
-						</div>
-						<div
-							class="overflow-x-auto rounded border border-gray-200 bg-neutral-100 p-2"
-							:aria-label="row.label"
-						>
-							<img
-								v-if="row.visible && row.bitmap"
-								:src="row.bitmap.dataURL"
-								:alt="row.label"
-								class="block bg-white"
-								:style="{ width: previewDots + 'px', maxWidth: 'none' }"
-							/>
-							<div
-								v-else
-								:style="{ width: previewDots + 'px' }"
-								class="flex h-24 items-center justify-center text-xs text-gray-400"
-							>
-								{{ __("waiting {0} ms", [String(row.delayMs)]) }}
-							</div>
-						</div>
-						<p v-if="row.bitmap" class="mt-1 text-xs text-gray-400">
-							{{
-								__("{0} x {1} dots", [
-									String(row.bitmap.width),
-									String(row.bitmap.height),
-								])
-							}}
-						</p>
-					</div>
-				</div>
-			</div>
 		</div>
 	</div>
 </template>
@@ -561,6 +858,7 @@ import {
 	parseNumericField,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
+import { fetchSampleClosingBundle } from "@/utils/print/sample_closing"
 import { fetchSampleReceiptBundle } from "@/utils/print/sample_receipt"
 import { useBootstrapStore } from "@/stores/bootstrap"
 import {
@@ -606,8 +904,11 @@ const statusLoading = ref(true)
 const transportPaperLabel = ref("-")
 const fallbackEnabled = ref(true)
 
-const saving = ref(false)
+const savingDevice = ref(false)
+const savingReceipt = ref(false)
+const savingEod = ref(false)
 const printing = ref(false)
+const printingClosing = ref(false)
 
 const logs = ref([])
 const logsLoading = ref(false)
@@ -626,11 +927,14 @@ const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
 	value: n,
 }))
 
+// Physical/global half of the device config, plus the copy counts of both
+// lanes (Select-driven, so no text parsing).
 const cfg = reactive({
 	host: "",
 	paper: "58mm",
 	cut: false,
 	copies: 1,
+	eodCopies: 1,
 })
 // Two copies printing (customer + outlet crew). Device-level delay
 // overrides the POS Settings value — same override pattern as `paper`/
@@ -645,16 +949,27 @@ const lineSpacingText = ref("100")
 const sideMarginDotsText = ref("16")
 const customDotsText = ref("384")
 
-function readCfgIntoForm() {
-	const stored = loadDeviceConfig() || {}
+// Closing / EOD lane knobs. Same text-field convention: empty means "use the
+// server value", and the save writes the resolved number.
+const eodCopyDelayText = ref("800")
+const eodFeedDotsText = ref(String(DEFAULT_FEED_DOTS))
+const eodTailDotsText = ref(String(DEFAULT_TAIL_DOTS))
+const eodFontScaleText = ref("100")
+const eodLineSpacingText = ref("100")
+const eodSideMarginDotsText = ref("16")
+
+function readDeviceIntoForm(stored) {
 	cfg.host = typeof stored.host === "string" ? stored.host : ""
 	const p = stored.paper
 	cfg.paper = p === "58mm" || p === "80mm" || p === "custom" ? p : "58mm"
 	cfg.cut = Boolean(stored.cut)
-	const n = Number(stored.copies)
-	cfg.copies = Number.isFinite(n) && n >= 1 && n <= 5 ? Math.floor(n) : 1
 	const cd = stored.customDots
 	customDotsText.value = cd != null && cd !== "" ? String(cd) : "384"
+}
+
+function readReceiptIntoForm(stored) {
+	const n = Number(stored.copies)
+	cfg.copies = Number.isFinite(n) && n >= 1 && n <= 5 ? Math.floor(n) : 1
 	const d = stored.copyDelayMs
 	copyDelayText.value =
 		d === undefined || d === "" || d === null ? "800" : String(d)
@@ -682,8 +997,54 @@ function readCfgIntoForm() {
 		sm === undefined || sm === "" || sm === null ? "16" : String(sm)
 }
 
-function reloadConfig() {
-	readCfgIntoForm()
+function readEodIntoForm(stored) {
+	const n = Number(stored.eodCopies)
+	cfg.eodCopies = Number.isFinite(n) && n >= 1 && n <= 5 ? Math.floor(n) : 1
+	const d = stored.eodCopyDelayMs
+	eodCopyDelayText.value =
+		d === undefined || d === "" || d === null ? "800" : String(d)
+	const fd = stored.eodFeedDots
+	eodFeedDotsText.value =
+		fd === undefined || fd === "" || fd === null
+			? String(DEFAULT_FEED_DOTS)
+			: String(fd)
+	const td = stored.eodTailDots
+	eodTailDotsText.value =
+		td === undefined || td === "" || td === null
+			? String(DEFAULT_TAIL_DOTS)
+			: String(td)
+	const fs = stored.eodFontScale
+	eodFontScaleText.value =
+		fs === undefined || fs === "" || fs === null ? "100" : String(fs)
+	const ls = stored.eodLineSpacing
+	eodLineSpacingText.value =
+		ls === undefined || ls === "" || ls === null ? "100" : String(ls)
+	const sm = stored.eodSideMarginDots
+	eodSideMarginDotsText.value =
+		sm === undefined || sm === "" || sm === null ? "16" : String(sm)
+}
+
+function readCfgIntoForm() {
+	const stored = loadDeviceConfig() || {}
+	readDeviceIntoForm(stored)
+	readReceiptIntoForm(stored)
+	readEodIntoForm(stored)
+}
+
+function resetDeviceConfig() {
+	readDeviceIntoForm(loadDeviceConfig() || {})
+	refreshEffectiveConfig()
+	showInfo(__("Device config reloaded from this browser."))
+}
+
+function resetReceiptConfig() {
+	readReceiptIntoForm(loadDeviceConfig() || {})
+	refreshEffectiveConfig()
+	showInfo(__("Device config reloaded from this browser."))
+}
+
+function resetEodConfig() {
+	readEodIntoForm(loadDeviceConfig() || {})
 	refreshEffectiveConfig()
 	showInfo(__("Device config reloaded from this browser."))
 }
@@ -728,8 +1089,8 @@ async function pollStatus() {
 
 let timer = null
 
-function onSaveConfig() {
-	saving.value = true
+function onSaveDeviceConfig() {
+	savingDevice.value = true
 	try {
 		const host = (cfg.host || "").trim()
 		const paper = cfg.paper
@@ -746,6 +1107,26 @@ function onSaveConfig() {
 		) {
 			throw new Error(__("Custom dots is required when paper is custom."))
 		}
+		saveDeviceConfig({
+			host: host || undefined,
+			paper,
+			customDots,
+			cut: Boolean(cfg.cut),
+		})
+		// Do not call setPageFormat directly — imin_client applies it on next print.
+		showSuccess(__("Device config saved. It will apply on the next print."))
+		transportSnapshot()
+		refreshEffectiveConfig()
+	} catch (e) {
+		showError(e?.message || String(e))
+	} finally {
+		savingDevice.value = false
+	}
+}
+
+function onSaveReceiptConfig() {
+	savingReceipt.value = true
+	try {
 		// Parse BEFORE writing anything: a non-numeric delay used to silently
 		// save as 0, which disabled the tear-off pause entirely (device report:
 		// "sometimes the delay happens, sometimes it doesn't").
@@ -801,10 +1182,6 @@ function onSaveConfig() {
 			},
 		)
 		saveDeviceConfig({
-			host: host || undefined,
-			paper,
-			customDots,
-			cut: Boolean(cfg.cut),
 			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
 			copyDelayMs,
 			feedDots,
@@ -814,14 +1191,89 @@ function onSaveConfig() {
 			lineSpacing,
 			sideMarginDots,
 		})
-		// Do not call setPageFormat directly — imin_client applies it on next print.
-		showSuccess(__("Device config saved. It will apply on the next print."))
-		transportSnapshot()
+		showSuccess(__("Receipt layout saved. It will apply on the next print."))
 		refreshEffectiveConfig()
 	} catch (e) {
 		showError(e?.message || String(e))
 	} finally {
-		saving.value = false
+		savingReceipt.value = false
+	}
+}
+
+function onSaveEodConfig() {
+	savingEod.value = true
+	try {
+		// Same ranges as the resolver's own clamps, so a saved value never
+		// differs from the value the print actually used.
+		const eodCopyDelayMs = parseNumericField(
+			"EOD delay between copies",
+			eodCopyDelayText.value,
+			{
+				min: 0,
+				max: 10000,
+				dflt: 800,
+			},
+		)
+		const eodFeedDots = parseNumericField(
+			"EOD paper advance",
+			eodFeedDotsText.value,
+			{
+				min: 8,
+				max: 500,
+				dflt: DEFAULT_FEED_DOTS,
+			},
+		)
+		const eodTailDots = parseNumericField(
+			"EOD tail spacer",
+			eodTailDotsText.value,
+			{
+				min: 0,
+				max: 200,
+				dflt: DEFAULT_TAIL_DOTS,
+			},
+		)
+		const eodFontScale = parseNumericField(
+			"EOD font scale",
+			eodFontScaleText.value,
+			{
+				min: 60,
+				max: 250,
+				dflt: 100,
+			},
+		)
+		const eodLineSpacing = parseNumericField(
+			"EOD line spacing",
+			eodLineSpacingText.value,
+			{
+				min: 50,
+				max: 150,
+				dflt: 100,
+			},
+		)
+		const eodSideMarginDots = parseNumericField(
+			"EOD side margin",
+			eodSideMarginDotsText.value,
+			{
+				min: 0,
+				max: 64,
+				dflt: 16,
+			},
+		)
+		saveDeviceConfig({
+			eodCopies: Math.max(1, Math.min(Number(cfg.eodCopies) || 1, 5)),
+			eodCopyDelayMs,
+			eodFeedDots,
+			eodTailDots,
+			eodFontScale,
+			eodLineSpacing,
+			eodSideMarginDots,
+		})
+		showSuccess(__("Closing layout saved. It will apply on the next print."))
+		refreshEffectiveConfig()
+	} catch (e) {
+		showError(e?.message || String(e))
+	} finally {
+		savingEod.value = false
 	}
 }
 
@@ -894,6 +1346,32 @@ async function getSampleBundle({ refresh = false } = {}) {
 	return bundle
 }
 
+/**
+ * The closing sample: the latest POS Closing Shift through the server EOD
+ * template. Unlike the receipt lane there is no local fallback — with no
+ * closing shift there is nothing meaningful to print, so the bundle resolves
+ * source "none" and both closing buttons stay disabled. The module caches its
+ * own hit; the page only mirrors the result for the note and the buttons.
+ */
+const closingInfo = ref(null)
+
+const closingUnavailable = computed(() => closingInfo.value?.source === "none")
+
+const closingNote = computed(() => {
+	if (!closingInfo.value) return ""
+	return closingInfo.value.source === "server"
+		? __("Sample: closing shift {0} through the server EOD template.", [
+				closingInfo.value.name,
+			])
+		: __("No closing shift available yet — nothing to print or preview.")
+})
+
+async function getClosingBundle({ refresh = false } = {}) {
+	const bundle = await fetchSampleClosingBundle({ refresh })
+	closingInfo.value = { source: bundle.source, name: bundle.name || "" }
+	return bundle
+}
+
 /** Receipt document for the sample: server template, else the local one. */
 function sampleReceiptHTML(bundle) {
 	return (
@@ -941,6 +1419,35 @@ async function onTestPrint() {
 	}
 }
 
+async function onTestPrintClosing() {
+	printingClosing.value = true
+	try {
+		// Same rule as the receipt lane: refresh, so the operator never prints
+		// a closing report the server has already superseded.
+		const bundle = await getClosingBundle({ refresh: true })
+		if (bundle.source !== "server") {
+			showInfo(__("No closing shift available to print yet."))
+			return
+		}
+		await transportPrint(bundle.serverHTML, {
+			// Separate lane from the sales receipt: the EOD knobs apply here.
+			kind: "eod",
+			logContext: {
+				reference_doctype: "POS Closing Shift",
+				reference_name: bundle.name,
+			},
+		})
+		showSuccess(__("Test print sent."))
+		await fetchLogs()
+		await pollStatus()
+	} catch (e) {
+		showError(e?.message || String(e))
+		await fetchLogs()
+	} finally {
+		printingClosing.value = false
+	}
+}
+
 /**
  * Read the effective print config the way the driver does: device
  * localStorage on top of the transport's server config. Shared resolver, so
@@ -952,6 +1459,14 @@ const previewDots = ref(384)
 const previewCopies = ref([])
 const previewError = ref("")
 const previewTimers = []
+
+// Closing preview: same delay-reveal mechanic, its own state so an EOD
+// preview can never overwrite what the receipt preview is showing.
+const eodPreviewing = ref(false)
+const eodPreviewDots = ref(384)
+const eodPreviewCopies = ref([])
+const eodPreviewError = ref("")
+const eodPreviewTimers = []
 
 function serverConfigFromTransport() {
 	try {
@@ -968,6 +1483,13 @@ function serverConfigFromTransport() {
 			crewFontScale: c.crew_font_scale,
 			lineSpacing: c.line_spacing,
 			sideMarginDots: c.side_margin,
+			eodCopies: c.eod_copies,
+			eodCopyDelayMs: c.eod_copy_delay_ms,
+			eodFeedDots: c.eod_feed_dots,
+			eodTailDots: c.eod_tail_dots,
+			eodFontScale: c.eod_font_scale,
+			eodLineSpacing: c.eod_line_spacing,
+			eodSideMarginDots: c.eod_side_margin,
 		}
 	} catch {
 		return {}
@@ -986,7 +1508,17 @@ function effectivePrintConfig(copiesOverride) {
 	return resolvePrintConfig(device, serverConfigFromTransport())
 }
 
+/** Same, for the closing lane: the EOD knobs resolve instead. */
+function effectiveEodPrintConfig() {
+	return resolvePrintConfig(
+		{ ...(loadDeviceConfig() || {}) },
+		serverConfigFromTransport(),
+		{ kind: "eod" },
+	)
+}
+
 const effectiveCfg = ref(null)
+const effectiveEodCfg = ref(null)
 
 function refreshEffectiveConfig() {
 	try {
@@ -994,13 +1526,46 @@ function refreshEffectiveConfig() {
 	} catch {
 		effectiveCfg.value = null
 	}
+	try {
+		effectiveEodCfg.value = effectiveEodPrintConfig()
+	} catch {
+		effectiveEodCfg.value = null
+	}
+}
+
+function clearTimers(timers) {
+	for (const t of timers) window.clearTimeout(t)
+	timers.length = 0
 }
 
 function clearPreview() {
-	for (const t of previewTimers) window.clearTimeout(t)
-	previewTimers.length = 0
+	clearTimers(previewTimers)
 	previewCopies.value = []
 	previewError.value = ""
+}
+
+function clearEodPreview() {
+	clearTimers(eodPreviewTimers)
+	eodPreviewCopies.value = []
+	eodPreviewError.value = ""
+}
+
+/**
+ * Reveal later copies only after their delay, so the tear-off pause between
+ * physical sheets is visible even without a printer. Shared by both lanes;
+ * the rows are the ones the preview ref holds, so flipping `visible` here is
+ * what the template reacts to.
+ */
+function scheduleCopiesReveal(copiesRef, timers, rows) {
+	for (const row of rows) {
+		if (row.visible) continue
+		timers.push(
+			window.setTimeout(() => {
+				const t = copiesRef.value.find((x) => x.index === row.index)
+				if (t) t.visible = true
+			}, row.delayMs),
+		)
+	}
 }
 
 /**
@@ -1026,22 +1591,46 @@ async function runPreview(copiesOverride) {
 		})
 		previewDots.value = set.dots
 		previewCopies.value = set.copies
-		// Later copies are hidden until their delay elapses, so the tear-off
-		// pause between physical sheets is visible even without a printer.
-		for (const row of set.copies) {
-			if (!row.visible)
-				previewTimers.push(
-					window.setTimeout(() => {
-						const n = previewCopies.value
-						const t = n.find((x) => x.index === row.index)
-						if (t) t.visible = true
-					}, row.delayMs),
-				)
-		}
+		scheduleCopiesReveal(previewCopies, previewTimers, set.copies)
 	} catch (e) {
 		previewError.value = e?.message || String(e)
 	} finally {
 		previewing.value = false
+	}
+}
+
+/**
+ * Closing preview: the same builder with kind "eod", so the EOD knobs (device
+ * overrides on top of the server config) shape the bitmap exactly as the next
+ * real closing print will. No crewHTML — the closing report has no crew slip.
+ * The bundle is not refreshed here: the cache is good enough for a look, and
+ * Test Print Closing is the path that pays for a fresh fetch.
+ */
+async function runEodPreview() {
+	clearEodPreview()
+	eodPreviewing.value = true
+	try {
+		const device = { ...(loadDeviceConfig() || {}) }
+		const server = serverConfigFromTransport()
+		const bundle = await getClosingBundle()
+		if (bundle.source !== "server") {
+			// Clicked before the background fetch landed on a till with no
+			// closing shift yet — the note under the button already says why.
+			showInfo(__("No closing shift available to preview yet."))
+			return
+		}
+		const set = await buildReceiptPreviewSet(bundle.serverHTML, {
+			device,
+			server,
+			kind: "eod",
+		})
+		eodPreviewDots.value = set.dots
+		eodPreviewCopies.value = set.copies
+		scheduleCopiesReveal(eodPreviewCopies, eodPreviewTimers, set.copies)
+	} catch (e) {
+		eodPreviewError.value = e?.message || String(e)
+	} finally {
+		eodPreviewing.value = false
 	}
 }
 
@@ -1122,11 +1711,13 @@ onMounted(async () => {
 	await pollStatus()
 	timer = window.setInterval(pollStatus, 3000)
 	await fetchLogs()
-	// Fetch the sample bundle in the background so the note under Test Print is
-	// already truthful before the first click. Never awaited: a slow print-format
-	// fetch must not delay the status poll or the log table. fetchSampleReceiptBundle
-	// resolves to a fallback bundle instead of rejecting, so there is no error path.
+	// Fetch the sample bundles in the background so the notes under the test
+	// print buttons are already truthful before the first click. Never awaited:
+	// a slow print-format fetch must not delay the status poll or the log
+	// table. Both fetchers resolve to a bundle instead of rejecting, so there
+	// is no error path.
 	getSampleBundle()
+	getClosingBundle()
 })
 
 onUnmounted(() => {

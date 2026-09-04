@@ -1,10 +1,37 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from pos_next.api.printing import get_print_config, get_print_logs, log_print_attempt
+from pos_next.api.printing import (
+	PRINT_CONFIG_FIELDS,
+	get_latest_closing_shift,
+	get_print_config,
+	get_print_logs,
+	log_print_attempt,
+)
+
+
+@contextmanager
+def _settings_row(**values):
+	"""A POS Settings row as get_print_config would see it after migrate.
+
+	Faked instead of written to the DB so knob bands are exercised even on a
+	site where the columns are not migrated yet (the API then filters them out
+	of the query and answers the getattr default, which is a different path).
+	"""
+	row = SimpleNamespace(**{field: None for field in PRINT_CONFIG_FIELDS})
+	row.__dict__.update(values)
+	meta = SimpleNamespace(get=lambda _k: [SimpleNamespace(fieldname=f) for f in PRINT_CONFIG_FIELDS])
+	with patch("pos_next.api.printing.frappe.get_meta", return_value=meta), patch(
+		"pos_next.api.printing.frappe.db.get_value", return_value=row
+	):
+		yield
 
 
 class TestPrintingAPI(FrappeTestCase):
@@ -189,10 +216,10 @@ class TestPrintingAPI(FrappeTestCase):
 		cfg = get_print_config(self.profile)
 		self.assertNotIn("copy_labels", cfg)
 
-	def test_crew_font_scale_defaults_to_130(self):
+	def test_crew_font_scale_defaults_to_100(self):
 		cfg = get_print_config(self.profile)
 		self.assertIn("crew_font_scale", cfg)
-		self.assertEqual(cfg["crew_font_scale"], 130)
+		self.assertEqual(cfg["crew_font_scale"], 100)
 
 	def test_crew_font_scale_clamps_absurd_values(self):
 		if not self._has_column("imin_crew_font_scale"):
@@ -214,7 +241,7 @@ class TestPrintingAPI(FrappeTestCase):
 		self.assertEqual(cfg["crew_font_scale"], 60)
 		# Undo so later tests (and the defaults test) see the clean state.
 		# (Int columns here are NOT NULL, so reset to the default, not None.)
-		frappe.db.set_value("POS Settings", settings_name, "imin_crew_font_scale", 130)
+		frappe.db.set_value("POS Settings", settings_name, "imin_crew_font_scale", 100)
 
 	def test_crew_font_scale_survives_garbage(self):
 		cfg = get_print_config(self.profile)
@@ -284,6 +311,72 @@ class TestPrintingAPI(FrappeTestCase):
 		cfg = get_print_config(self.profile)
 		# A NULL column answers the default rather than leaking None to the FE.
 		self.assertIsInstance(cfg["side_margin"], int)
+
+	def test_eod_defaults_when_unset(self):
+		# No EOD knob is set on this site yet, so the transport must answer the
+		# defaults instead of leaking None to the FE.
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["eod_copies"], 1)
+		self.assertEqual(cfg["eod_copy_delay_ms"], 800)
+		self.assertEqual(cfg["eod_feed_dots"], 160)
+		self.assertEqual(cfg["eod_tail_dots"], 24)
+		self.assertEqual(cfg["eod_font_scale"], 100)
+		self.assertEqual(cfg["eod_line_spacing"], 100)
+		self.assertEqual(cfg["eod_side_margin"], 16)
+
+	def test_eod_values_clamp_to_sane_bands(self):
+		with _settings_row(
+			imin_eod_print_copies=99,
+			imin_eod_copy_delay_ms=99999,
+			imin_eod_feed_dots=9999,
+			imin_eod_tail_dots=9999,
+			imin_eod_font_scale=999,
+			imin_eod_line_spacing=999,
+			imin_eod_side_margin=999,
+		):
+			cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["eod_copies"], 5)
+		self.assertEqual(cfg["eod_copy_delay_ms"], 10000)
+		self.assertEqual(cfg["eod_feed_dots"], 500)
+		self.assertEqual(cfg["eod_tail_dots"], 200)
+		self.assertEqual(cfg["eod_font_scale"], 250)
+		self.assertEqual(cfg["eod_line_spacing"], 150)
+		self.assertEqual(cfg["eod_side_margin"], 64)
+
+		with _settings_row(
+			imin_eod_print_copies=0,
+			imin_eod_copy_delay_ms=-1,
+			imin_eod_feed_dots=1,
+			imin_eod_tail_dots=-5,
+			imin_eod_font_scale=1,
+			imin_eod_line_spacing=1,
+			imin_eod_side_margin=-9,
+		):
+			cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["eod_copies"], 1)
+		self.assertEqual(cfg["eod_copy_delay_ms"], 0)
+		self.assertEqual(cfg["eod_feed_dots"], 8)
+		self.assertEqual(cfg["eod_tail_dots"], 0)
+		self.assertEqual(cfg["eod_font_scale"], 60)
+		self.assertEqual(cfg["eod_line_spacing"], 50)
+		self.assertEqual(cfg["eod_side_margin"], 0)
+
+	def test_get_latest_closing_shift_returns_latest_submitted(self):
+		expected = frappe.get_all(
+			"POS Closing Shift",
+			filters={"docstatus": 1},
+			order_by="creation desc",
+			limit_page_length=1,
+			pluck="name",
+		)
+		name = get_latest_closing_shift()
+		self.assertEqual(name, expected[0] if expected else None)
+		if name is not None:
+			self.assertEqual(frappe.db.get_value("POS Closing Shift", name, "docstatus"), 1)
+
+	def test_get_latest_closing_shift_returns_none_when_empty(self):
+		with patch("pos_next.api.printing.frappe.get_all", return_value=[]):
+			self.assertIsNone(get_latest_closing_shift())
 
 	def _has_column(self, fieldname):
 		meta = frappe.get_meta("POS Settings")

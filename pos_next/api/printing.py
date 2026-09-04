@@ -24,6 +24,13 @@ PRINT_CONFIG_FIELDS = (
 	"imin_crew_font_scale",
 	"imin_line_spacing",
 	"imin_side_margin",
+	"imin_eod_print_copies",
+	"imin_eod_copy_delay_ms",
+	"imin_eod_feed_dots",
+	"imin_eod_tail_dots",
+	"imin_eod_font_scale",
+	"imin_eod_line_spacing",
+	"imin_eod_side_margin",
 	"print_fallback_enabled",
 )
 
@@ -171,6 +178,59 @@ def get_print_config(pos_profile):
 		side_margin = 16
 	side_margin = max(0, min(side_margin, MAX_SIDE_MARGIN_DOTS))
 
+	# The Closing/EOD lane is a separate print job, so it gets its own knobs at
+	# the same defaults and clamp bands as the sales receipt. Device overrides
+	# (eodCopies/eodCopyDelayMs/...) land in POS Settings as imin_eod_*.
+	try:
+		eod_copies = int(getattr(settings, "imin_eod_print_copies", None) or 1)
+	except (TypeError, ValueError):
+		eod_copies = 1
+	eod_copies = max(1, min(eod_copies, MAX_COPIES))
+
+	try:
+		eod_delay = getattr(settings, "imin_eod_copy_delay_ms", None)
+		eod_delay = 800 if eod_delay is None else int(eod_delay)
+	except (TypeError, ValueError):
+		eod_delay = 800
+	eod_delay = max(0, min(eod_delay, MAX_COPY_DELAY_MS))
+
+	try:
+		eod_feed = getattr(settings, "imin_eod_feed_dots", None)
+		eod_feed = 160 if eod_feed is None else int(eod_feed)
+	except (TypeError, ValueError):
+		eod_feed = 160
+	eod_feed = max(8, min(eod_feed, MAX_FEED_DOTS))
+
+	# Same split as the sales receipt: tail is white space INSIDE the bitmap,
+	# feed is the advance after it, head->cutter ~= tail + feed.
+	try:
+		eod_tail = getattr(settings, "imin_eod_tail_dots", None)
+		eod_tail = 24 if eod_tail is None else int(eod_tail)
+	except (TypeError, ValueError):
+		eod_tail = 24
+	eod_tail = max(0, min(eod_tail, MAX_TAIL_DOTS))
+
+	try:
+		eod_font_scale = getattr(settings, "imin_eod_font_scale", None)
+		eod_font_scale = 100 if eod_font_scale is None else int(eod_font_scale)
+	except (TypeError, ValueError):
+		eod_font_scale = 100
+	eod_font_scale = max(60, min(eod_font_scale, 250))
+
+	try:
+		eod_line_spacing = getattr(settings, "imin_eod_line_spacing", None)
+		eod_line_spacing = 100 if eod_line_spacing is None else int(eod_line_spacing)
+	except (TypeError, ValueError):
+		eod_line_spacing = 100
+	eod_line_spacing = max(MIN_LINE_SPACING, min(eod_line_spacing, MAX_LINE_SPACING))
+
+	try:
+		eod_side_margin = getattr(settings, "imin_eod_side_margin", None)
+		eod_side_margin = 16 if eod_side_margin is None else int(eod_side_margin)
+	except (TypeError, ValueError):
+		eod_side_margin = 16
+	eod_side_margin = max(0, min(eod_side_margin, MAX_SIDE_MARGIN_DOTS))
+
 	return {
 		"pos_profile": resolved_profile,
 		"driver": getattr(settings, "print_driver", None) or "browser",
@@ -185,8 +245,28 @@ def get_print_config(pos_profile):
 		"crew_font_scale": crew_font_scale,
 		"line_spacing": line_spacing,
 		"side_margin": side_margin,
+		"eod_copies": eod_copies,
+		"eod_copy_delay_ms": eod_delay,
+		"eod_feed_dots": eod_feed,
+		"eod_tail_dots": eod_tail,
+		"eod_font_scale": eod_font_scale,
+		"eod_line_spacing": eod_line_spacing,
+		"eod_side_margin": eod_side_margin,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
+
+
+@frappe.whitelist()
+def get_latest_closing_shift():
+	"""Name of the most recent submitted POS Closing Shift, or None."""
+	names = frappe.get_all(
+		"POS Closing Shift",
+		filters={"docstatus": 1},
+		order_by="creation desc",
+		limit_page_length=1,
+		pluck="name",
+	)
+	return names[0] if names else None
 
 
 @frappe.whitelist()

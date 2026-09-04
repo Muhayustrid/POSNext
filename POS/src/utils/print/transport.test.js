@@ -170,6 +170,57 @@ it("maps side_margin even when the server omits it (absent, not 0)", async () =>
 	expect(config.sideMarginDots).toBeUndefined()
 })
 
+it("maps the eod server knobs camelCase for the Closing/EOD lane", async () => {
+	const imin = {
+		id: "imin",
+		isAvailable: vi.fn().mockResolvedValue(true),
+		getStatus: vi.fn().mockResolvedValue({ ok: true, code: 0 }),
+		printHTML: vi.fn().mockResolvedValue({ paper: "58mm", dots: 384 }),
+		describe: () => ({ id: "imin" }),
+	}
+	const t = createTransport({
+		drivers: { imin, qz: okDriver("qz"), browser: okDriver("browser") },
+		config: {
+			driver: "imin",
+			eod_copies: 2,
+			eod_copy_delay_ms: 900,
+			eod_feed_dots: 200,
+			eod_tail_dots: 40,
+			eod_font_scale: 120,
+			eod_line_spacing: 90,
+			eod_side_margin: 32,
+		},
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	expect(imin.printHTML.mock.calls[0][1].config).toMatchObject({
+		eodCopies: 2,
+		eodCopyDelayMs: 900,
+		eodFeedDots: 200,
+		eodTailDots: 40,
+		eodFontScale: 120,
+		eodLineSpacing: 90,
+		eodSideMarginDots: 32,
+	})
+})
+
+it("initTransportFromServer keeps the eod_* fields under the names the API returns", async () => {
+	const { call } = await import("@/utils/apiWrapper")
+	const { initTransportFromServer, getTransport } = await import("./transport")
+	call.mockResolvedValueOnce({
+		driver: "imin",
+		eod_copies: 2,
+		eod_side_margin: 32,
+	})
+	await initTransportFromServer("POS Profile juri1")
+	const cfg = getTransport().getConfig()
+	// Stored verbatim (snake_case): the transport maps them per print, so a
+	// missing key must stay absent and fall through to the resolver's default.
+	expect(cfg.eod_copies).toBe(2)
+	expect(cfg.eod_side_margin).toBe(32)
+	expect(cfg.eod_copy_delay_ms).toBeUndefined()
+})
+
 it("records why earlier drivers failed when a fallback succeeds", async () => {
 	const imin = failDriver("imin", "upload rejected")
 	const qz = failDriver("qz", "no qz tray")
