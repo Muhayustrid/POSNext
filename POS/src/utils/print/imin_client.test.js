@@ -747,7 +747,7 @@ describe("createIminDriver", () => {
 			expect(crewOpts.sideMarginDots).toBe(8)
 		})
 
-		it("defaults the crew slip to the 130 crew knob, not the receipt scale", async () => {
+		it("defaults the crew slip to the 100 crew knob — same size as the receipt", async () => {
 			const render = renderFor()
 			const d = createIminDriver({
 				factory: () => printer,
@@ -760,11 +760,11 @@ describe("createIminDriver", () => {
 			})
 			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
 			expect(firstOpts.fontScale).toBe(100)
-			expect(crewOpts.fontScale).toBe(130)
+			expect(crewOpts.fontScale).toBe(100)
 		})
 
 		it("falls back to the receipt scale for the slip only when the crew knob is unset on both ends", async () => {
-			// resolvePrintConfig always answers crewFontScale (default 130), so the
+			// resolvePrintConfig always answers crewFontScale (default 100), so the
 			// slip never inherits the receipt scale silently. Pinned here so a
 			// future refactor of the resolver cannot change that by accident.
 			const render = renderFor()

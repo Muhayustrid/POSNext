@@ -1622,7 +1622,12 @@ def get_invoice(invoice_name):
 	# Get invoice document
 	invoice = frappe.get_doc("Sales Invoice", invoice_name)
 
-	return invoice.as_dict()
+	invoice_dict = invoice.as_dict()
+	# The receipts print the cashier's display name; owner is the login email.
+	invoice_dict["cashier_name"] = (
+		frappe.db.get_value("User", invoice.owner, "full_name") or invoice.owner
+	)
+	return invoice_dict
 
 
 @frappe.whitelist()

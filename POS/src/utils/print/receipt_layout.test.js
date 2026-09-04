@@ -217,9 +217,9 @@ describe("resolvePrintConfig fontScale", () => {
 })
 
 describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
-	it("defaults to 130 — the slip is read across a counter, so it starts bigger", () => {
-		expect(DEFAULT_CREW_FONT_SCALE).toBe(130)
-		expect(resolvePrintConfig({}, {}).crewFontScale).toBe(130)
+	it("defaults to 100 — the slip mirrors the customer receipt's size by default", () => {
+		expect(DEFAULT_CREW_FONT_SCALE).toBe(100)
+		expect(resolvePrintConfig({}, {}).crewFontScale).toBe(100)
 	})
 
 	it("device wins over server, server over the default", () => {
@@ -233,7 +233,7 @@ describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
 	it("is independent of the main font scale", () => {
 		const r = resolvePrintConfig({ fontScale: 200 }, {})
 		expect(r.fontScale).toBe(200)
-		expect(r.crewFontScale).toBe(130)
+		expect(r.crewFontScale).toBe(100)
 	})
 
 	it("clamps to the same 60..250 band as the main knob", () => {
@@ -243,13 +243,13 @@ describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
 		)
 	})
 
-	it("falls back to the crew default on garbage instead of 100", () => {
+	it("falls back to the crew default on garbage instead of 60", () => {
 		expect(
 			resolvePrintConfig({ crewFontScale: "garbage" }, {}).crewFontScale,
-		).toBe(130)
+		).toBe(100)
 		expect(
 			resolvePrintConfig({}, { crewFontScale: "garbage" }).crewFontScale,
-		).toBe(130)
+		).toBe(100)
 	})
 })
 
@@ -262,10 +262,10 @@ describe("clampFontScale", () => {
 		expect(clampFontScale("130")).toBe(130)
 	})
 
-	it("takes a custom default (the crew knob defaults to 130)", () => {
-		expect(clampFontScale(null, DEFAULT_CREW_FONT_SCALE)).toBe(130)
-		expect(clampFontScale("", DEFAULT_CREW_FONT_SCALE)).toBe(130)
-		expect(clampFontScale("nope", DEFAULT_CREW_FONT_SCALE)).toBe(130)
+	it("takes a custom default (the crew knob defaults to 100)", () => {
+		expect(clampFontScale(null, DEFAULT_CREW_FONT_SCALE)).toBe(100)
+		expect(clampFontScale("", DEFAULT_CREW_FONT_SCALE)).toBe(100)
+		expect(clampFontScale("nope", DEFAULT_CREW_FONT_SCALE)).toBe(100)
 		expect(clampFontScale(20, DEFAULT_CREW_FONT_SCALE)).toBe(60)
 	})
 })

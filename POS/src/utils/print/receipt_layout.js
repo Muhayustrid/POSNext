@@ -324,7 +324,7 @@ const LENGTH_RE = /(-?\d*\.?\d+)(px|pt|mm|cm|in)\b/g
 export const DEFAULT_FONT_SCALE = 100
 /** The crew slip starts chunkier: it is read across a counter, not handed to
  * the customer, and it carries no prices to crowd the line. */
-export const DEFAULT_CREW_FONT_SCALE = 130
+export const DEFAULT_CREW_FONT_SCALE = 100
 const MIN_FONT_SCALE = 60
 const MAX_FONT_SCALE = 250
 

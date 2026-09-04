@@ -141,9 +141,9 @@ def get_print_config(pos_profile):
 	# prices to crowd the line. Same clamp band as the receipt scale.
 	try:
 		crew_font_scale = getattr(settings, "imin_crew_font_scale", None)
-		crew_font_scale = 130 if crew_font_scale is None else int(crew_font_scale)
+		crew_font_scale = 100 if crew_font_scale is None else int(crew_font_scale)
 	except (TypeError, ValueError):
-		crew_font_scale = 130
+		crew_font_scale = 100
 	crew_font_scale = max(60, min(crew_font_scale, 250))
 
 	# Vertical density of the printed output, as a percent of the values the

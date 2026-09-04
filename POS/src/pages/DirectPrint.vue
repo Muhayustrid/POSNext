@@ -263,7 +263,7 @@
 							v-model="crewFontScaleText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('130')"
+							:placeholder="__('100')"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -640,7 +640,7 @@ const copyDelayText = ref("800")
 const feedDotsText = ref(String(DEFAULT_FEED_DOTS))
 const tailDotsText = ref(String(DEFAULT_TAIL_DOTS))
 const fontScaleText = ref("100")
-const crewFontScaleText = ref("130")
+const crewFontScaleText = ref("100")
 const lineSpacingText = ref("100")
 const sideMarginDotsText = ref("16")
 const customDotsText = ref("384")
@@ -673,7 +673,7 @@ function readCfgIntoForm() {
 		fs === undefined || fs === "" || fs === null ? "100" : String(fs)
 	const cfs = stored.crewFontScale
 	crewFontScaleText.value =
-		cfs === undefined || cfs === "" || cfs === null ? "130" : String(cfs)
+		cfs === undefined || cfs === "" || cfs === null ? "100" : String(cfs)
 	const ls = stored.lineSpacing
 	lineSpacingText.value =
 		ls === undefined || ls === "" || ls === null ? "100" : String(ls)
@@ -779,7 +779,7 @@ function onSaveConfig() {
 			{
 				min: 60,
 				max: 250,
-				dflt: 130,
+				dflt: 100,
 			},
 		)
 		const lineSpacing = parseNumericField(
@@ -915,7 +915,11 @@ function sampleCrewHTML(bundle) {
 async function onTestPrint() {
 	printing.value = true
 	try {
-		const bundle = await getSampleBundle()
+		// Always re-fetch the sample: the server print format changes out
+		// from under a mounted page (fixture syncs), and a cached bundle had
+		// the operator test-printing a stale template while the fixes were
+		// already live on the server.
+		const bundle = await getSampleBundle({ refresh: true })
 		await transportPrint(sampleReceiptHTML(bundle), {
 			crewHTML: sampleCrewHTML(bundle),
 			// Still "TEST": the log row must stay recognisable as a test print
