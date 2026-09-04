@@ -2,6 +2,7 @@ import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
+import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
@@ -19,6 +20,8 @@ const submitMutex = new CoalescingMutex({
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore();
+	// HQ confirmation code for restricted discounts (validated per rule server-side)
+	const restrictionStore = useDiscountRestrictionStore();
 
 	// State
 	const invoiceItems = ref([]);
@@ -1019,6 +1022,7 @@ export function useInvoice() {
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
+			discount_confirmation_code: restrictionStore.code || "",
 			is_pos: 1,
 			update_stock: 1,
 		};
@@ -1082,6 +1086,7 @@ export function useInvoice() {
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
+					discount_confirmation_code: restrictionStore.code || "",
 					is_pos: 1,
 					update_stock: 1, // Critical: ensures stock is updated
 				};
@@ -1245,6 +1250,8 @@ export function useInvoice() {
 		additionalDiscount.value = 0;
 		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
+		// One-time HQ code is consumed with the invoice it was submitted on
+		restrictionStore.clearCode();
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;

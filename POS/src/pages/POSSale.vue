@@ -1108,6 +1108,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
+import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { useStockStore } from "@/stores/stock";
 // Pinia Stores
@@ -1134,8 +1135,23 @@ const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
 const bootstrapStore = useBootstrapStore();
+const restrictionStore = useDiscountRestrictionStore();
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
+
+// Discount restriction status follows the shift's company (UX hints only — the
+// server enforces every rule again on draft save and submit)
+watch(
+	() => shiftStore.profileCompany,
+	(company) => {
+		if (company) {
+			restrictionStore.fetchStatus(company);
+		} else {
+			restrictionStore.reset();
+		}
+	},
+	{ immediate: true }
+);
 
 // Real-time stock updates
 const { onStockUpdate } = useRealtimeStock();
@@ -2153,6 +2169,7 @@ async function handlePaymentCompleted(paymentData) {
 				company: shiftStore.profileCompany,
 				customer: customerValue || shiftStore.profileCustomer,
 				buyer_name: (cartStore.buyerName || "").trim(),
+				discount_confirmation_code: restrictionStore.code || "",
 				items: preparedItems,
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
 				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
@@ -2204,6 +2221,8 @@ async function handlePaymentCompleted(paymentData) {
 				// Local clock at creation, "HH:MM:SS" — the crew slip and the server
 				// template both print it next to posting_date.
 				posting_time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+				// Display name of the signed-in user — the receipts' Cashier row.
+				cashier: window.frappe?.boot?.user?.full_name || "",
 				company: shiftStore.profileCompany || undefined,
 				customer_name: customerLabel,
 				buyer_name: (cartStore.buyerName || "").trim(),
@@ -2296,6 +2315,10 @@ async function handlePaymentCompleted(paymentData) {
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
+
+				// The submitted invoice consumed restriction quota — refresh hints.
+				// clearCode happened in resetInvoice; quota may have hit its limit.
+				restrictionStore.fetchStatus(shiftStore.profileCompany);
 
 				// Refresh invoice history cache in background (non-blocking)
 				loadInvoiceHistoryData().catch((err) =>

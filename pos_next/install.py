@@ -40,6 +40,28 @@ CUSTOM_FIELDS = {
 			"translatable": 0,
 			"description": "Optional walk-in buyer label shown on POS receipts without creating a Customer.",
 		},
+		{
+			"fieldname": "pos_discount_restriction",
+			"label": "POS Discount Restriction",
+			"fieldtype": "Link",
+			"options": "POS Discount Restriction",
+			"insert_after": "buyer_name",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"description": "Discount restriction rule that governed this invoice's discounts.",
+		},
+		{
+			"fieldname": "discount_confirmation_code",
+			"label": "Discount Confirmation Code",
+			"fieldtype": "Data",
+			"insert_after": "pos_discount_restriction",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "One-time HQ confirmation code entered for restricted discounts.",
+		},
 	],
 	"Sales Invoice Item": [
 		{

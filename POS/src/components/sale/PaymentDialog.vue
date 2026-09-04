@@ -791,6 +791,20 @@
 									</button>
 								</div>
 							</div>
+								<!-- HQ confirmation code for restricted discounts -->
+								<div v-if="restrictionCodeRequired" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
+									<label class="block text-xs font-medium text-orange-700 mb-1 text-start">
+										{{ __("Confirmation Code (HQ)") }}
+									</label>
+									<input
+										v-model="confirmationCode"
+										type="text"
+										:placeholder="__('Enter the code from head office')"
+										maxlength="8"
+										class="w-full h-9 border border-orange-300 rounded-lg px-3 text-sm uppercase tracking-widest bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+									/>
+								</div>
+							
 							<!-- Subtotal -->
 							<div class="flex items-center justify-between text-sm">
 								<span class="text-gray-600 text-start">{{ __("Subtotal") }}</span>
@@ -2065,6 +2079,7 @@ import { logger } from "@/utils/logger";
 import { Dialog, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
+import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
 import { useLongPress } from "@/composables/useLongPress";
 import { usePaymentNumpad } from "@/composables/usePaymentNumpad";
 import { useResponsivePayment } from "@/composables/useResponsivePayment";
@@ -2072,6 +2087,7 @@ import { useQuickAmounts } from "@/composables/useQuickAmounts";
 
 const log = logger.create("PaymentDialog");
 const settingsStore = usePOSSettingsStore();
+const restrictionStore = useDiscountRestrictionStore();
 const { showWarning, showInfo } = useToast();
 
 const props = defineProps({
@@ -2280,6 +2296,14 @@ function numpadAddPayment() {
 const localAdditionalDiscount = ref(0);
 // Initialize discount type from settings (default to percentage if enabled, otherwise amount)
 const additionalDiscountType = ref(settingsStore.usePercentageDiscount ? "percentage" : "amount");
+
+// HQ confirmation code for restricted discounts
+const confirmationCode = ref("");
+// A code is needed when the active rule covers the cart: an additional discount
+// hits everything, and restricted item discounts do too. Server re-validates.
+const restrictionCodeRequired = computed(() =>
+	restrictionStore.needsCodeForCart(props.additionalDiscount, props.items || [])
+);
 
 const paymentMethodsResource = createResource({
 	url: "pos_next.api.pos_profile.get_payment_methods",
@@ -3433,7 +3457,7 @@ function clearAll() {
 	customAmount.value = "";
 }
 
-function completePayment() {
+async function completePayment() {
 	log.debug("[PaymentDialog] Complete payment called:", {
 		canComplete: canComplete.value,
 		totalPaid: totalPaid.value,
@@ -3451,6 +3475,25 @@ function completePayment() {
 	if (!canComplete.value) {
 		log.warn("[PaymentDialog] Cannot complete - validation failed");
 		return;
+	}
+
+	// Restricted discount: require (and validate) the HQ confirmation code before
+	// submitting. The server re-checks the code on save and submit.
+	if (restrictionCodeRequired.value && !restrictionStore.hasCode) {
+		restrictionStore.setCode(confirmationCode.value);
+		if (!restrictionStore.hasCode) {
+			showWarning(__("Confirmation code from head office is required for this discount"));
+			return;
+		}
+		const result = await restrictionStore.validateCode({
+			items: props.items || [],
+			additionalDiscount: props.additionalDiscount || 0,
+		});
+		if (!result?.valid) {
+			restrictionStore.clearCode();
+			showWarning(result?.message || __("Invalid confirmation code"));
+			return;
+		}
 	}
 
 	// "Pay on Receivable Account": the chosen account holds the unpaid balance (the invoice's
@@ -3593,6 +3636,8 @@ watch(
 		if (isOpen) {
 			// Only sync when dialog opens, not continuously
 			localAdditionalDiscount.value = props.additionalDiscount || 0;
+			// Fresh HQ confirmation code entry per checkout session
+			confirmationCode.value = "";
 		}
 	}
 );

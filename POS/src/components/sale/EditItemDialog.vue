@@ -398,6 +398,20 @@
 												</div>
 											</div>
 
+												<!-- HQ confirmation code for restricted discounts -->
+												<div v-if="restrictionCodeRequired" class="border-t border-gray-200 pt-4">
+													<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
+														{{ __("Confirmation Code (HQ)") }}
+													</label>
+													<input
+														v-model="confirmationCode"
+														type="text"
+														:placeholder="__('Enter the code from head office')"
+														maxlength="8"
+														class="w-full h-9 border border-gray-300 rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+													/>
+												</div>
+											
 											<!-- Totals -->
 											<div
 												class="bg-gray-50 rounded-lg p-4 flex flex-col gap-2"
@@ -474,6 +488,7 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast";
+import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { getItemStock } from "@/utils/stockValidator";
@@ -489,6 +504,7 @@ import SelectInput from "@/components/common/SelectInput.vue";
 const { showSuccess, showError, showWarning } = useToast();
 const settingsStore = usePOSSettingsStore();
 const serialStore = useSerialNumberStore();
+const restrictionStore = useDiscountRestrictionStore();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -524,6 +540,7 @@ const localSerials = ref([]); // List of serial numbers for this item
 const removedSerials = ref([]); // Track serials removed during this edit session
 const originalSerials = ref([]); // Original serials when dialog opened
 const originalPriceListRate = ref(0); // Original price_list_rate when dialog opened (for rate edit validation)
+const confirmationCode = ref(""); // HQ confirmation code for restricted discounts
 
 const getItemDetailsResource = createResource({
 	url: "pos_next.api.items.get_item_details",
@@ -593,6 +610,19 @@ const discountTypeOptions = computed(() => [
 	{ value: "amount", label: __("Amount") },
 ]);
 
+// HQ confirmation code needed: an active restriction rule covers this item and
+// this edit applies a discount (percentage/amount or a manual rate reduction).
+const restrictionCodeRequired = computed(() => {
+	if (!restrictionStore.applicable || restrictionStore.hasCode) return false;
+	const hasRateDiscount =
+		canEditRate.value &&
+		Number(originalPriceListRate.value) > 0 &&
+		Number(localRate.value) > 0 &&
+		Number(localRate.value) < Number(originalPriceListRate.value);
+	const applied = calculatedDiscount.value > 0 || hasRateDiscount;
+	return Boolean(applied && restrictionStore.needsCodeForItem(localItem.value?.item_code));
+});
+
 // Initialize local state when item changes
 watch(
 	() => props.item,
@@ -632,6 +662,9 @@ watch(
 				discountType.value = "percentage";
 				discountValue.value = 0;
 			}
+
+			// Fresh HQ confirmation code entry per edit session
+			confirmationCode.value = "";
 
 			// Reset stock check state
 			hasStock.value = true;
@@ -881,7 +914,7 @@ function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
 }
 
-function updateItem() {
+async function updateItem() {
 	// Check if rate was manually edited
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value;
 
@@ -913,6 +946,35 @@ function updateItem() {
 				return;
 			}
 		}
+	}
+
+	// Restricted discount: require (and validate) the HQ confirmation code before
+	// applying. The server re-checks this on save and submit.
+	if (restrictionCodeRequired.value) {
+		restrictionStore.setCode(confirmationCode.value);
+		if (!restrictionStore.hasCode) {
+			showError(__("Confirmation code from head office is required for this discount"));
+			return;
+		}
+		const result = await restrictionStore.validateCode({
+			items: [
+				{
+					item_code: localItem.value?.item_code,
+					discount_percentage: discountType.value === "percentage" ? discountValue.value : 0,
+					discount_amount: discountType.value === "amount" ? discountValue.value : 0,
+					rate: localRate.value,
+					price_list_rate: originalPriceListRate.value,
+					is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
+				},
+			],
+			additionalDiscount: 0,
+		});
+		if (!result?.valid) {
+			restrictionStore.clearCode();
+			showError(result?.message || __("Invalid confirmation code"));
+			return;
+		}
+		showSuccess(__("Confirmation code accepted"));
 	}
 
 	const updatedItem = {
