@@ -71,6 +71,8 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						tailDots: current.tail_dots,
 						fontScale: current.font_scale,
 						crewFontScale: current.crew_font_scale,
+						lineSpacing: current.line_spacing,
+						sideMarginDots: current.side_margin,
 					},
 				})
 				if (result && typeof result.paper === "string") {
@@ -192,6 +194,8 @@ export async function initTransportFromServer(posProfile) {
 		tail_dots: cfg.tail_dots,
 		font_scale: cfg.font_scale,
 		crew_font_scale: cfg.crew_font_scale,
+		line_spacing: cfg.line_spacing,
+		side_margin: cfg.side_margin,
 		fallback_enabled: cfg.fallback_enabled,
 	})
 	return cfg

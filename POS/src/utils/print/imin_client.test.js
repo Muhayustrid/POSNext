@@ -224,6 +224,8 @@ describe("createIminDriver", () => {
 				customDots: undefined,
 				tailDots: DEFAULT_TAIL_DOTS,
 				fontScale: 100,
+				lineSpacing: 100,
+				sideMarginDots: 16,
 			})
 			expect(res.paper).toBe("80mm")
 		})
@@ -278,6 +280,8 @@ describe("createIminDriver", () => {
 				customDots: 512,
 				tailDots: DEFAULT_TAIL_DOTS,
 				fontScale: 100,
+				lineSpacing: 100,
+				sideMarginDots: 16,
 			})
 			expect(res.paper).toBe("custom")
 		})
@@ -317,6 +321,30 @@ describe("createIminDriver", () => {
 			expect(render).toHaveBeenCalledWith(
 				expect.any(String),
 				expect.objectContaining({ fontScale: 170 }),
+			)
+		})
+
+		it("passes the effective lineSpacing to the renderer", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			await driver.printHTML("<div/>", {
+				render,
+				config: { lineSpacing: 80 },
+			})
+			expect(render).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ lineSpacing: 80 }),
+			)
+		})
+
+		it("passes the effective sideMarginDots to the renderer", async () => {
+			const render = vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
+			await driver.printHTML("<div/>", {
+				render,
+				config: { sideMarginDots: 8 },
+			})
+			expect(render).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ sideMarginDots: 8 }),
 			)
 		})
 
@@ -681,6 +709,42 @@ describe("createIminDriver", () => {
 			expect(crewOpts).toEqual(
 				expect.objectContaining({ fontScale: 90, tailDots: 30 }),
 			)
+		})
+
+		it("carries the one line-spacing knob onto both copies", async () => {
+			// There is a single vertical-density setting for everything direct
+			// printed: the receipt and the slip tighten/loosen together.
+			const render = renderFor()
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<body>receipt</body>", {
+				render,
+				crewHTML,
+				config: { copies: 2, copyDelayMs: 0, lineSpacing: 70 },
+			})
+			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
+			expect(firstOpts.lineSpacing).toBe(70)
+			expect(crewOpts.lineSpacing).toBe(70)
+		})
+
+		it("carries the side margin onto both copies via the shared spread", async () => {
+			// The margin is a property of the paper, not of which slip is on it,
+			// so the crew copy must inherit it through the same renderOpts.
+			const render = renderFor()
+			const d = createIminDriver({
+				factory: () => printer,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<body>receipt</body>", {
+				render,
+				crewHTML,
+				config: { copies: 2, copyDelayMs: 0, sideMarginDots: 8 },
+			})
+			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
+			expect(firstOpts.sideMarginDots).toBe(8)
+			expect(crewOpts.sideMarginDots).toBe(8)
 		})
 
 		it("defaults the crew slip to the 130 crew knob, not the receipt scale", async () => {

@@ -123,6 +123,144 @@ describe("composeReceiptFrame (DPI translation + scoping)", () => {
 		expect(frame.style.width).toBe("576px")
 		expect(dots).toBe(576)
 	})
+
+	describe("lineSpacing knob (vertical density)", () => {
+		it("rewrites unitless line-height declarations in the scoped css", () => {
+			const { scopedCss } = composeReceiptFrame(doc("body{line-height:1.4}"), {
+				paper: "58mm",
+				lineSpacing: 80,
+			})
+			expect(scopedCss).toContain("line-height:1.12")
+		})
+
+		it("scales px line-height values, then the DPI translation", () => {
+			const { scopedCss } = composeReceiptFrame(doc("body{line-height:20px}"), {
+				paper: "58mm",
+				lineSpacing: 80,
+			})
+			expect(scopedCss).toContain(
+				`line-height:${Math.round(16 * DPI_SCALE * 100) / 100}px`,
+			)
+		})
+
+		it("tightens the frame's own baseline line-height as well", () => {
+			const { scopedCss } = composeReceiptFrame("<div/>", {
+				paper: "58mm",
+				lineSpacing: 80,
+			})
+			expect(scopedCss).toContain("line-height:1.08")
+		})
+
+		it("leaves line-height untouched when the knob is absent (default 100)", () => {
+			const { scopedCss } = composeReceiptFrame(doc("body{line-height:1.4}"), {
+				paper: "58mm",
+			})
+			expect(scopedCss).toContain("line-height:1.4")
+			expect(scopedCss).toContain("line-height:1.35")
+		})
+
+		it("also reaches inline style attributes, like the font knob does", () => {
+			// The real "POS Next Receipt" format sets line-height: 1.5 inline on
+			// its invoice-info block, so a knob that only rewrote stylesheets
+			// would tighten everything EXCEPT the densest part of the receipt.
+			const { frame } = composeReceiptFrame(
+				'<div style="line-height: 1.5">info</div>',
+				{ paper: "58mm", lineSpacing: 80 },
+			)
+			const el = frame.querySelector("div:not(.pn-receipt-tail)")
+			expect(el.style.lineHeight).toBe("1.2")
+		})
+	})
+
+	describe("sideMarginDots knob (left/right print margin)", () => {
+		// The real "POS Next Receipt" format pads its body at 96 DPI and again
+		// inside `@media print` — both unwrap onto the frame and steal width.
+		const padded = (css) =>
+			`<!DOCTYPE html><html><head><style>${css}</style></head><body><div class="receipt">R</div></body></html>`
+
+		it("appends a LAST frame rule pinning left/right to the knob in dots", () => {
+			const { scopedCss } = composeReceiptFrame(padded("body{padding:5mm}"), {
+				paper: "58mm",
+				sideMarginDots: 8,
+			})
+			// The authored 5mm survives as 5 x 8 = 40 dots — the knob does not
+			// rewrite the template, it wins the cascade after it.
+			expect(scopedCss).toContain("padding:40px")
+			const rule = ".pn-receipt-frame{padding-left:8px;padding-right:8px;}"
+			expect(scopedCss).toContain(rule)
+			// Same specificity, so being appended last is the whole mechanism.
+			expect(scopedCss.indexOf(rule)).toBe(scopedCss.lastIndexOf(rule))
+			expect(scopedCss.trimEnd().endsWith(rule)).toBe(true)
+		})
+
+		it("beats a template @media print body padding too", () => {
+			const { scopedCss } = composeReceiptFrame(
+				padded("body{padding:5mm}@media print{body{padding:5mm}}"),
+				{ paper: "58mm", sideMarginDots: 0 },
+			)
+			expect(
+				scopedCss
+					.trimEnd()
+					.endsWith(".pn-receipt-frame{padding-left:0px;padding-right:0px;}"),
+			).toBe(true)
+		})
+
+		it("defaults to 16 dots (2 mm) when the knob is absent", () => {
+			const { scopedCss } = composeReceiptFrame(padded("body{padding:5mm}"), {
+				paper: "58mm",
+			})
+			expect(
+				scopedCss
+					.trimEnd()
+					.endsWith(".pn-receipt-frame{padding-left:16px;padding-right:16px;}"),
+			).toBe(true)
+		})
+
+		it("only touches left/right — top/bottom stay as authored", () => {
+			const { scopedCss } = composeReceiptFrame(
+				padded("body{padding-top:5mm;padding-bottom:5mm}"),
+				{ paper: "58mm", sideMarginDots: 8 },
+			)
+			expect(scopedCss).toContain("padding-top:40px")
+			expect(scopedCss).toContain("padding-bottom:40px")
+			// The override declares the two side paddings and nothing else, so it
+			// cannot clobber a vertical value the format asked for.
+			const rule = scopedCss.match(
+				/\.pn-receipt-frame\{[^}]*padding-left[^}]*\}/,
+			)
+			expect(rule).toBeTruthy()
+			expect(rule[0]).not.toContain("padding-top")
+			expect(rule[0]).not.toContain("padding-bottom")
+		})
+
+		it("is physical dots — NOT scaled by the fontScale knob", () => {
+			const { scopedCss } = composeReceiptFrame(padded("body{padding:5mm}"), {
+				paper: "58mm",
+				fontScale: 200,
+				sideMarginDots: 16,
+			})
+			expect(
+				scopedCss
+					.trimEnd()
+					.endsWith(".pn-receipt-frame{padding-left:16px;padding-right:16px;}"),
+			).toBe(true)
+		})
+
+		it("applies with no stylesheet at all (the frame base padding loses)", () => {
+			const { scopedCss } = composeReceiptFrame("<div/>", {
+				paper: "58mm",
+				sideMarginDots: 8,
+			})
+			// receiptBaseCSS still ships `padding:16px` as its own baseline; the
+			// appended rule narrows just the sides on top of it.
+			expect(scopedCss).toContain("padding:16px")
+			expect(
+				scopedCss
+					.trimEnd()
+					.endsWith(".pn-receipt-frame{padding-left:8px;padding-right:8px;}"),
+			).toBe(true)
+		})
+	})
 })
 
 describe("composeReceiptFrame vs server print formats", () => {

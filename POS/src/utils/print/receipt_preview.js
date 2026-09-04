@@ -49,6 +49,8 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 		customDots: r.customDots,
 		tailDots: r.tailDots,
 		fontScale: r.fontScale,
+		lineSpacing: r.lineSpacing,
+		sideMarginDots: r.sideMarginDots,
 	}
 	// Mirrors imin_client: a crew slip only replaces copy 2 of a multi-copy job.
 	const crewApplies = Boolean(opts.crewHTML) && r.copies > 1

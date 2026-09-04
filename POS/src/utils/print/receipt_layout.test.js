@@ -11,6 +11,8 @@ import {
 	DEFAULT_CREW_FONT_SCALE,
 	DEFAULT_FEED_DOTS,
 	DEFAULT_FONT_SCALE,
+	DEFAULT_LINE_SPACING,
+	DEFAULT_SIDE_MARGIN_DOTS,
 	DEFAULT_TAIL_DOTS,
 	DPI_SCALE,
 	receiptBaseCSS,
@@ -189,6 +191,12 @@ describe("receiptBaseCSS", () => {
 		expect(bigger).not.toBe(css)
 	})
 
+	it("scales its baseline line-height by the line-spacing factor", () => {
+		expect(receiptBaseCSS(".pn", 1)).toContain("line-height:1.35")
+		expect(receiptBaseCSS(".pn", 1, 0.8)).toContain("line-height:1.08")
+		expect(receiptBaseCSS(".pn", 2, 1.2)).toContain("line-height:1.62")
+	})
+
 	it("no longer styles a copy banner — the print path has none", () => {
 		expect(receiptBaseCSS(".pn", 1)).not.toContain("pn-copy-label")
 	})
@@ -259,6 +267,115 @@ describe("clampFontScale", () => {
 		expect(clampFontScale("", DEFAULT_CREW_FONT_SCALE)).toBe(130)
 		expect(clampFontScale("nope", DEFAULT_CREW_FONT_SCALE)).toBe(130)
 		expect(clampFontScale(20, DEFAULT_CREW_FONT_SCALE)).toBe(60)
+	})
+})
+
+describe("resolvePrintConfig lineSpacing (vertical density knob)", () => {
+	it("defaults to 100 — the receipt prints exactly as authored", () => {
+		expect(DEFAULT_LINE_SPACING).toBe(100)
+		expect(resolvePrintConfig({}, {}).lineSpacing).toBe(100)
+	})
+
+	it("device wins over server, server over the default", () => {
+		expect(
+			resolvePrintConfig({ lineSpacing: 80 }, { lineSpacing: 120 }).lineSpacing,
+		).toBe(80)
+		expect(resolvePrintConfig({}, { lineSpacing: 120 }).lineSpacing).toBe(120)
+	})
+
+	it("clamps to the 50..150 percent band", () => {
+		expect(resolvePrintConfig({ lineSpacing: 10 }, {}).lineSpacing).toBe(50)
+		expect(resolvePrintConfig({ lineSpacing: 999 }, {}).lineSpacing).toBe(150)
+		expect(resolvePrintConfig({}, { lineSpacing: 400 }).lineSpacing).toBe(150)
+	})
+
+	it("falls back to the default on garbage or an empty value", () => {
+		expect(resolvePrintConfig({ lineSpacing: "garbage" }, {}).lineSpacing).toBe(
+			100,
+		)
+		expect(resolvePrintConfig({ lineSpacing: "" }, {}).lineSpacing).toBe(100)
+		expect(resolvePrintConfig({}, { lineSpacing: null }).lineSpacing).toBe(100)
+	})
+})
+
+describe("scopeReceiptCSS line-height (the lineSpacing knob)", () => {
+	it("scales unitless declarations (1.4 at 80% -> 1.12)", () => {
+		const out = scopeReceiptCSS("body{line-height:1.4}", ".pn", 1, 0.8)
+		expect(out).toContain("line-height:1.12")
+	})
+
+	it("scales px values BEFORE the DPI translation, like any other length", () => {
+		const out = scopeReceiptCSS("body{line-height:20px}", ".pn", 1, 0.8)
+		expect(out).toContain(
+			`line-height:${Math.round(16 * DPI_SCALE * 100) / 100}px`,
+		)
+	})
+
+	it("scales %, em and rem declarations too", () => {
+		expect(scopeReceiptCSS("body{line-height:120%}", ".pn", 1, 0.5)).toContain(
+			"line-height:60%",
+		)
+		expect(scopeReceiptCSS("body{line-height:1.2em}", ".pn", 1, 1.5)).toContain(
+			"line-height:1.8em",
+		)
+		expect(scopeReceiptCSS("body{line-height:2rem}", ".pn", 1, 0.75)).toContain(
+			"line-height:1.5rem",
+		)
+	})
+
+	it("only touches line-height, and only when the knob moves", () => {
+		expect(scopeReceiptCSS("body{line-height:1.4}", ".pn", 1)).toContain(
+			"line-height:1.4",
+		)
+		expect(
+			scopeReceiptCSS("body{line-height:normal}", ".pn", 1, 0.8),
+		).toContain("line-height:normal")
+		expect(scopeReceiptCSS("body{margin:4px}", ".pn", 1, 0.8)).toContain(
+			`margin:${Math.round(4 * DPI_SCALE * 100) / 100}px`,
+		)
+	})
+})
+
+describe("resolvePrintConfig sideMarginDots (left/right print margin)", () => {
+	it("defaults to 16 dots (2 mm) — narrower than the ~40 the templates ship", () => {
+		expect(DEFAULT_SIDE_MARGIN_DOTS).toBe(16)
+		expect(resolvePrintConfig({}, {}).sideMarginDots).toBe(16)
+	})
+
+	it("device wins over server, server over the default", () => {
+		expect(
+			resolvePrintConfig({ sideMarginDots: 8 }, { sideMarginDots: 32 })
+				.sideMarginDots,
+		).toBe(8)
+		expect(resolvePrintConfig({}, { sideMarginDots: 32 }).sideMarginDots).toBe(
+			32,
+		)
+	})
+
+	it("clamps to the 0..64 dot band", () => {
+		expect(resolvePrintConfig({ sideMarginDots: 999 }, {}).sideMarginDots).toBe(
+			64,
+		)
+		expect(resolvePrintConfig({}, { sideMarginDots: 400 }).sideMarginDots).toBe(
+			64,
+		)
+	})
+
+	it("honours an explicit 0 — the operator wants the full paper width", () => {
+		expect(resolvePrintConfig({ sideMarginDots: 0 }, {}).sideMarginDots).toBe(0)
+		expect(resolvePrintConfig({}, { sideMarginDots: 0 }).sideMarginDots).toBe(0)
+	})
+
+	it("falls back to the default on garbage or an empty value", () => {
+		expect(
+			resolvePrintConfig({ sideMarginDots: "garbage" }, {}).sideMarginDots,
+		).toBe(16)
+		expect(resolvePrintConfig({ sideMarginDots: "" }, {}).sideMarginDots).toBe(
+			16,
+		)
+		expect(
+			resolvePrintConfig({}, { sideMarginDots: null }).sideMarginDots,
+		).toBe(16)
 	})
 })
 

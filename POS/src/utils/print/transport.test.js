@@ -134,6 +134,8 @@ it("maps the server print knobs the driver resolves (no copy labels)", async () 
 			copy_labels: true,
 			font_scale: 110,
 			crew_font_scale: 145,
+			line_spacing: 80,
+			side_margin: 24,
 		},
 		logSink: log,
 	})
@@ -144,7 +146,28 @@ it("maps the server print knobs the driver resolves (no copy labels)", async () 
 	expect(config.copies).toBe(2)
 	expect(config.copyDelayMs).toBe(900)
 	expect(config.tailDots).toBe(40)
+	expect(config.lineSpacing).toBe(80)
+	expect(config.sideMarginDots).toBe(24)
 	expect("copyLabels" in config).toBe(false)
+})
+
+it("maps side_margin even when the server omits it (absent, not 0)", async () => {
+	const imin = {
+		id: "imin",
+		isAvailable: vi.fn().mockResolvedValue(true),
+		printHTML: vi.fn().mockResolvedValue({ paper: "58mm", dots: 384 }),
+		describe: () => ({ id: "imin" }),
+	}
+	const t = createTransport({
+		drivers: { imin, qz: okDriver("qz"), browser: okDriver("browser") },
+		config: { driver: "imin" },
+		logSink: log,
+	})
+	await t.printHTML("<html/>")
+	const config = imin.printHTML.mock.calls[0][1].config
+	// An ABSENT server key must fall through to the resolver's default, so the
+	// transport never invents a 0-dot margin.
+	expect(config.sideMarginDots).toBeUndefined()
 })
 
 it("records why earlier drivers failed when a fallback succeeds", async () => {

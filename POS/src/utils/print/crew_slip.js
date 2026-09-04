@@ -12,8 +12,9 @@
  *   {item_name} x{qty}                  <- LARGE + bold, one line per item
  *   --------------------------------
  *
- * The header rows are small and label:value on one line; the item lines are
- * the hero — chunky and bold. Nothing money-shaped is rendered at all, which
+ * The header rows share the item lines' typography (label:value on one line,
+ * wrapping under the label when a value is long) and the item lines are the
+ * hero — chunky and bold. Nothing money-shaped is rendered at all, which
  * is also why the slip is safe to hand across the counter, and no banner is
  * printed above either copy.
  *
@@ -42,10 +43,17 @@ function crewSlipStyles(dots) {
 		font-family: 'Courier New', monospace;
 		padding: 4px; width: ${mm}mm; margin: 0; max-width: ${mm}mm;
 		font-weight: normal; color: black;
+		/* Explicit so the renderer's lineSpacing knob drives the slip exactly
+		 * like the receipt; see receipt_layout.scopeReceiptCSS. */
+		line-height: 1.2;
 	}
 	.slip-rule { border-top: 1px dashed #000; margin: 6px 0; }
-	/* Header rows: small, label left, value right, one line each. */
-	.slip-row { display: flex; justify-content: space-between; font-size: 10px; margin: 2px 0; }
+	/* Header rows: label left, value right, the SAME typography as the item
+	 * lines (10px rows printed as an unreadable smudge on the thermal paper).
+	 * The value wraps UNDER its label when the pair does not fit — on a wrapped
+	 * line a lone flex item starts at the left edge — instead of being clipped
+	 * by the frame's overflow:hidden. */
+	.slip-row { display: flex; justify-content: space-between; flex-wrap: wrap; column-gap: 8px; font-size: 16px; font-weight: bold; margin: 2px 0; }
 	/* SIZE:LARGE + BOLD, name flush left / qty flush right. */
 	.slip-line { display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin: 5px 0; }
 	.slip-line .name { flex: 1; padding-right: 8px; }

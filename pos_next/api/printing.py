@@ -22,6 +22,8 @@ PRINT_CONFIG_FIELDS = (
 	"imin_tail_dots",
 	"imin_font_scale",
 	"imin_crew_font_scale",
+	"imin_line_spacing",
+	"imin_side_margin",
 	"print_fallback_enabled",
 )
 
@@ -31,6 +33,9 @@ MAX_COPIES = 5
 MAX_COPY_DELAY_MS = 10000
 MAX_FEED_DOTS = 500
 MAX_TAIL_DOTS = 200
+MIN_LINE_SPACING = 50
+MAX_LINE_SPACING = 150
+MAX_SIDE_MARGIN_DOTS = 64
 
 
 @frappe.whitelist()
@@ -141,6 +146,31 @@ def get_print_config(pos_profile):
 		crew_font_scale = 130
 	crew_font_scale = max(60, min(crew_font_scale, 250))
 
+	# Vertical density of the printed output, as a percent of the values the
+	# receipt CSS was authored with: 100 = as authored, 80 = 20% tighter. Lower
+	# closes up the vertical gaps without shrinking the glyphs. The clamp band
+	# is deliberately narrow — 50% starts colliding lines, 150% wastes paper.
+	try:
+		line_spacing = getattr(settings, "imin_line_spacing", None)
+		line_spacing = 100 if line_spacing is None else int(line_spacing)
+	except (TypeError, ValueError):
+		line_spacing = 100
+	line_spacing = max(MIN_LINE_SPACING, min(line_spacing, MAX_LINE_SPACING))
+
+	# Left/right print margin in printer dots, applied to BOTH sides (16 = 2 mm
+	# at 205 DPI). The rendered bitmap inherits whatever padding the print
+	# format's own CSS puts on body/frame — the stock receipt ships `padding:
+	# 5mm` inside `@media print`, ~40 dots a side — so this is the knob that
+	# claws the width back. It deliberately defaults narrower than that 40; the
+	# renderer pins the sides to this value. 0 is a legal explicit answer
+	# (edge-to-edge), so only garbage/NULL falls back to the default.
+	try:
+		side_margin = getattr(settings, "imin_side_margin", None)
+		side_margin = 16 if side_margin is None else int(side_margin)
+	except (TypeError, ValueError):
+		side_margin = 16
+	side_margin = max(0, min(side_margin, MAX_SIDE_MARGIN_DOTS))
+
 	return {
 		"pos_profile": resolved_profile,
 		"driver": getattr(settings, "print_driver", None) or "browser",
@@ -153,6 +183,8 @@ def get_print_config(pos_profile):
 		"tail_dots": tail,
 		"font_scale": font_scale,
 		"crew_font_scale": crew_font_scale,
+		"line_spacing": line_spacing,
+		"side_margin": side_margin,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

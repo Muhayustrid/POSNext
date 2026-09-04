@@ -194,13 +194,27 @@ export function createIminDriver(deps = {}) {
 				feedDots,
 				fontScale,
 				crewFontScale,
+				lineSpacing,
+				sideMarginDots,
 			} = r
 			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
 			const p = await ensurePrinter()
 			p.setPageFormat(pageFormatFor(paper, dots))
 
-			const renderOpts = { paper, customDots, tailDots, fontScale }
+			// lineSpacing is deliberately NOT per-copy: there is one vertical
+			// density for everything direct printed, receipt and slip alike. The
+			// side margin rides the same object for the same reason — it is a
+			// property of the paper, not of which sheet is on it — so the crew
+			// slip inherits it through the spread below.
+			const renderOpts = {
+				paper,
+				customDots,
+				tailDots,
+				fontScale,
+				lineSpacing,
+				sideMarginDots,
+			}
 			// A crew slip only exists for a multi-copy job: with one copy there is
 			// no second sheet to replace. When it applies, copy 2 (index 1) prints
 			// the slip at its own font scale and every other copy prints the

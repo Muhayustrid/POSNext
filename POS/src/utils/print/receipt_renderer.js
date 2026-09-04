@@ -3,10 +3,15 @@ import html2canvas from "html2canvas"
 import { dotsForPaper } from "./paper"
 import {
 	DEFAULT_FONT_SCALE,
+	DEFAULT_LINE_SPACING,
+	DEFAULT_SIDE_MARGIN_DOTS,
 	DEFAULT_TAIL_DOTS,
+	MAX_SIDE_MARGIN_DOTS,
+	clampInt,
 	receiptBaseCSS,
 	receiptFrameStyle,
 	scaleCssLengths,
+	scaleLineHeights,
 	scopeReceiptCSS,
 	splitStyleBlocks,
 	tailSpacerHTML,
@@ -90,11 +95,23 @@ export function binarize(imageData, threshold = DEFAULT_THRESHOLD) {
  * @param {number} [opts.tailDots] - trailing white space in dots
  * @param {number} [opts.fontScale] - 100 = as-authored; 180 = +80%.
  *   Stored per-device and overridable from the /pos/direct-print page.
+ * @param {number} [opts.lineSpacing] - percent, 100 = as-authored; 80 tightens
+ *   every line-height by 20%. Same device/server resolution as fontScale.
+ * @param {number} [opts.sideMarginDots] - left/right print margin in printer
+ *   dots, applied to BOTH sides. Pins the frame's side padding on top of
+ *   whatever the source CSS set there; 16 = 2 mm.
  * @returns {{host:HTMLElement, frame:HTMLElement, dots:number, tailDots:number, scopedCss:string}}
  */
 export function composeReceiptFrame(html, opts = {}) {
 	const dots = dotsForPaper(opts.paper, opts.customDots)
 	const fontScale = (opts.fontScale ?? DEFAULT_FONT_SCALE) / 100
+	const lineSpacing = (opts.lineSpacing ?? DEFAULT_LINE_SPACING) / 100
+	const sideMarginDots = clampInt(
+		opts.sideMarginDots,
+		0,
+		MAX_SIDE_MARGIN_DOTS,
+		DEFAULT_SIDE_MARGIN_DOTS,
+	)
 	const tail = opts.tailDots ?? DEFAULT_TAIL_DOTS
 	const tailHTML = tailSpacerHTML(tail)
 
@@ -102,10 +119,25 @@ export function composeReceiptFrame(html, opts = {}) {
 	// head. Scoping prevents them from touching the POS page, and the length
 	// rewrite makes `11px` mean the same physical size it had at 96 DPI.
 	const { css, html: stripped } = splitStyleBlocks(html)
-	const base = receiptBaseCSS(FRAME_SCOPE, fontScale)
-	const scoped = css
-		? `${base}\n${scopeReceiptCSS(css, FRAME_SCOPE, fontScale)}`
+	const base = receiptBaseCSS(FRAME_SCOPE, fontScale, lineSpacing)
+	const scopedCss = css
+		? `${base}\n${scopeReceiptCSS(css, FRAME_SCOPE, fontScale, lineSpacing)}`
 		: base
+	// THE OVERRIDE. After the scoped CSS is assembled — base + the template's
+	// own rules — append one more rule on the SAME frame scope declaring only
+	// padding-left/padding-right. CSS resolves equal specificity by document
+	// order, so this wins over any padding the source HTML put on body or the
+	// frame (the stock receipt ships `padding: 5mm` in `@media print`, ~40 dots
+	// a side) with no `!important` and without rewriting the template's text.
+	// Only the two sides are declared, so a top/bottom padding the format asked
+	// for survives untouched.
+	//
+	// Authored directly in dots and deliberately NOT run through scaleCssLengths
+	// or the fontScale factor: the margin is a physical measurement of the paper
+	// (16 dots = 2 mm), not a typographic length that follows the text size.
+	const scoped =
+		`${scopedCss}\n` +
+		`${FRAME_SCOPE}{padding-left:${sideMarginDots}px;padding-right:${sideMarginDots}px;}`
 
 	const host = document.createElement("div")
 	host.style.cssText =
@@ -117,13 +149,19 @@ export function composeReceiptFrame(html, opts = {}) {
 	host.appendChild(frame)
 
 	// Attributes like `style="font-size: 11px"` that survived the split were
-	// never in a stylesheet, so the rewrite above missed them. Walk once:
+	// never in a stylesheet, so the rewrite above missed them. Walk once. The
+	// line-spacing pass rides along because the real receipt format sets
+	// `line-height` INLINE on its invoice-info block — a knob that only reached
+	// stylesheets would tighten everything except the densest block on the page.
 	for (const el of frame.querySelectorAll("[style]")) {
 		// The synthetic tail / any element marked as already-in-dots keeps its
 		// value; otherwise the report's footer would be double-scaled together
 		// with the spacer height.
 		if (el.matches("[data-pn-dots]")) continue
-		el.style.cssText = scaleCssLengths(el.style.cssText, fontScale)
+		el.style.cssText = scaleCssLengths(
+			scaleLineHeights(el.style.cssText, lineSpacing),
+			fontScale,
+		)
 	}
 
 	return {

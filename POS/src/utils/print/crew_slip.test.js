@@ -114,8 +114,12 @@ describe("buildCrewSlipHTML", () => {
 		)
 	})
 
-	it("puts each header label and value on ONE small row — no stacked labels, no gap", () => {
-		const body = bodyOf(buildCrewSlipHTML(doc, {}))
+	it("rows share the item typography and wrap instead of clip", () => {
+		const longInvoice = {
+			...doc,
+			name: "ACC-SINV-2026-00027",
+		}
+		const body = bodyOf(buildCrewSlipHTML(longInvoice, {}))
 		// INVOICE / DATE / CUSTOMER ride the same line as their values.
 		expect(body).toContain("INVOICE")
 		expect(body).toContain("DATE")
@@ -124,6 +128,10 @@ describe("buildCrewSlipHTML", () => {
 		// The stacked-label classes and the INVOICE→DATE gap are gone.
 		expect(body).not.toContain("slip-label")
 		expect(body).not.toContain("slip-gap")
+		// A long invoice number is IN the markup so the stylesheet's wrap (see
+		// the stylesheet test) can carry it onto a second line — the frame's
+		// overflow:hidden must never be what "handles" it by clipping.
+		expect(body).toContain("ACC-SINV-2026-00027")
 	})
 
 	it("carries no money at all — no prices, totals or payments", () => {
@@ -138,19 +146,38 @@ describe("buildCrewSlipHTML", () => {
 		expect(body).not.toMatch(/x\s*\d+\.\d{2}/)
 	})
 
-	it("ships its own stylesheet with dashed section rules and chunky bold item rows", () => {
+	it("ships its own stylesheet with dashed section rules and one shared row typography", () => {
 		const html = buildCrewSlipHTML(doc, { dots: 384 })
 		// Self-contained stylesheet, not the receipt sheet.
 		expect(html).toContain("<style>")
 		expect(html).not.toContain("receiptStylesFor")
-		// The operator's sketch: dashed separators, small (10px) normal-weight
-		// header rows, LARGE (=16px) BOLD item lines.
+		// The operator's sketch: dashed separators and LARGE (=16px) BOLD text.
 		expect(html).toMatch(/border-top:\s*1px dashed/)
 		expect(html).toContain("monospace")
-		expect(html).toMatch(/font-size:\s*10px/)
 		expect(html).toMatch(/font-size:\s*16px/)
 		expect(html).toMatch(/font-weight:\s*bold/)
 		expect(html).toMatch(/font-weight:\s*normal/)
+		// 10px header rows read as a smudge on the thermal paper, so a header
+		// row now shares the item line's typography — there is no small size
+		// left anywhere on the slip.
+		const rowRule = html.match(/\.slip-row\s*\{[^}]*\}/)
+		expect(rowRule).toBeTruthy()
+		expect(rowRule[0]).toContain("font-size: 16px")
+		expect(rowRule[0]).toContain("font-weight: bold")
+		expect(html).not.toMatch(/font-size:\s*10px/)
+		// A long value wraps UNDER its label (a lone flex item on a wrapped line
+		// starts at the line's left edge) instead of being clipped by the frame.
+		expect(rowRule[0]).toMatch(/flex-wrap:\s*wrap/)
+		expect(rowRule[0]).toMatch(/column-gap:\s*\d+px/)
+	})
+
+	it("exposes its line spacing to the shared line-spacing pass", () => {
+		// The body carries an explicit unitless line-height so the renderer's
+		// lineSpacing knob controls the slip exactly like the receipt; without
+		// it the slip would inherit the frame's baseline and ignore the knob.
+		expect(buildCrewSlipHTML(doc, { dots: 384 })).toMatch(
+			/line-height:\s*1\.2;/,
+		)
 	})
 
 	it("survives an empty item list and a missing buyer", () => {

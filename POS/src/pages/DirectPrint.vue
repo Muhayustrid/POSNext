@@ -273,6 +273,46 @@
 							}}
 						</p>
 					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-line-spacing">
+							{{ __("Line spacing (%)") }}
+						</label>
+						<Input
+							id="direct-print-line-spacing"
+							v-model="lineSpacingText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('100')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Vertical density of the printed output. 100 = as authored; lower (e.g. 80) closes up the gaps between lines without shrinking the text. 50–150.",
+								)
+							}}
+						</p>
+					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-side-margin">
+							{{ __("Side margin (dots)") }}
+						</label>
+						<Input
+							id="direct-print-side-margin"
+							v-model="sideMarginDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('16')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Blank space on the left and right of every line, in dots (dots = mm×8, e.g. 16≈2mm). Overrides the padding the receipt format's own CSS sets on either side, so the text uses more of the paper width. 0–64.",
+								)
+							}}
+						</p>
+					</div>
 				</div>
 
 				<!-- What the NEXT print will actually use (device over server) -->
@@ -286,7 +326,7 @@
 					<p>
 						{{
 							__(
-								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}%",
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots",
 								[
 									String(effectiveCfg.paper),
 									String(effectiveCfg.dots),
@@ -296,6 +336,8 @@
 									String(effectiveCfg.tailDots),
 									String(effectiveCfg.fontScale),
 									String(effectiveCfg.crewFontScale),
+									String(effectiveCfg.lineSpacing),
+									String(effectiveCfg.sideMarginDots),
 								],
 							)
 						}}
@@ -599,6 +641,8 @@ const feedDotsText = ref(String(DEFAULT_FEED_DOTS))
 const tailDotsText = ref(String(DEFAULT_TAIL_DOTS))
 const fontScaleText = ref("100")
 const crewFontScaleText = ref("130")
+const lineSpacingText = ref("100")
+const sideMarginDotsText = ref("16")
 const customDotsText = ref("384")
 
 function readCfgIntoForm() {
@@ -630,6 +674,12 @@ function readCfgIntoForm() {
 	const cfs = stored.crewFontScale
 	crewFontScaleText.value =
 		cfs === undefined || cfs === "" || cfs === null ? "130" : String(cfs)
+	const ls = stored.lineSpacing
+	lineSpacingText.value =
+		ls === undefined || ls === "" || ls === null ? "100" : String(ls)
+	const sm = stored.sideMarginDots
+	sideMarginDotsText.value =
+		sm === undefined || sm === "" || sm === null ? "16" : String(sm)
 }
 
 function reloadConfig() {
@@ -732,6 +782,24 @@ function onSaveConfig() {
 				dflt: 130,
 			},
 		)
+		const lineSpacing = parseNumericField(
+			"Line spacing",
+			lineSpacingText.value,
+			{
+				min: 50,
+				max: 150,
+				dflt: 100,
+			},
+		)
+		const sideMarginDots = parseNumericField(
+			"Side margin",
+			sideMarginDotsText.value,
+			{
+				min: 0,
+				max: 64,
+				dflt: 16,
+			},
+		)
 		saveDeviceConfig({
 			host: host || undefined,
 			paper,
@@ -743,6 +811,8 @@ function onSaveConfig() {
 			tailDots,
 			fontScale,
 			crewFontScale,
+			lineSpacing,
+			sideMarginDots,
 		})
 		// Do not call setPageFormat directly — imin_client applies it on next print.
 		showSuccess(__("Device config saved. It will apply on the next print."))
@@ -892,6 +962,8 @@ function serverConfigFromTransport() {
 			tailDots: c.tail_dots,
 			fontScale: c.font_scale,
 			crewFontScale: c.crew_font_scale,
+			lineSpacing: c.line_spacing,
+			sideMarginDots: c.side_margin,
 		}
 	} catch {
 		return {}

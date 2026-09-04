@@ -221,6 +221,70 @@ class TestPrintingAPI(FrappeTestCase):
 		# A NULL column answers the default rather than leaking None to the FE.
 		self.assertIsInstance(cfg["crew_font_scale"], int)
 
+	def test_line_spacing_defaults_to_100(self):
+		cfg = get_print_config(self.profile)
+		self.assertIn("line_spacing", cfg)
+		self.assertEqual(cfg["line_spacing"], 100)
+
+	def test_line_spacing_clamps_absurd_values(self):
+		if not self._has_column("imin_line_spacing"):
+			self.skipTest("imin_line_spacing column not migrated on this site")
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if not settings_name:
+			settings_name = (
+				frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.profile, "enabled": 1})
+				.insert(ignore_permissions=True)
+				.name
+			)
+		frappe.db.set_value("POS Settings", settings_name, "imin_line_spacing", 999)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["line_spacing"], 150)
+		frappe.db.set_value("POS Settings", settings_name, "imin_line_spacing", 10)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["line_spacing"], 50)
+		# Undo so later tests (and the defaults test) see the clean state.
+		# (Int columns here are NOT NULL, so reset to the default, not None.)
+		frappe.db.set_value("POS Settings", settings_name, "imin_line_spacing", 100)
+
+	def test_line_spacing_survives_garbage(self):
+		cfg = get_print_config(self.profile)
+		# A NULL column answers the default rather than leaking None to the FE.
+		self.assertIsInstance(cfg["line_spacing"], int)
+
+	def test_side_margin_defaults_to_16(self):
+		cfg = get_print_config(self.profile)
+		self.assertIn("side_margin", cfg)
+		self.assertEqual(cfg["side_margin"], 16)
+
+	def test_side_margin_clamps_absurd_values(self):
+		if not self._has_column("imin_side_margin"):
+			self.skipTest("imin_side_margin column not migrated on this site")
+		settings_name = frappe.db.get_value(
+			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
+		)
+		if not settings_name:
+			settings_name = (
+				frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.profile, "enabled": 1})
+				.insert(ignore_permissions=True)
+				.name
+			)
+		frappe.db.set_value("POS Settings", settings_name, "imin_side_margin", 999)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["side_margin"], 64)
+		frappe.db.set_value("POS Settings", settings_name, "imin_side_margin", 0)
+		cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["side_margin"], 0)
+		# Undo so later tests (and the defaults test) see the clean state.
+		# (Int columns here are NOT NULL, so reset to the default, not None.)
+		frappe.db.set_value("POS Settings", settings_name, "imin_side_margin", 16)
+
+	def test_side_margin_survives_garbage(self):
+		cfg = get_print_config(self.profile)
+		# A NULL column answers the default rather than leaking None to the FE.
+		self.assertIsInstance(cfg["side_margin"], int)
+
 	def _has_column(self, fieldname):
 		meta = frappe.get_meta("POS Settings")
 		return any(df.fieldname == fieldname for df in meta.get("fields"))

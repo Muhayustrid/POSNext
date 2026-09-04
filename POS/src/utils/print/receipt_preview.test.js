@@ -85,6 +85,38 @@ describe("buildReceiptPreviewSet (preview = print, structural)", () => {
 		expect(seen[0]).toBe(32)
 	})
 
+	it("lifts the effective lineSpacing through, like the real render block", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.lineSpacing)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { lineSpacing: 70 },
+			copies: 2,
+			crewHTML: '<div class="crew">crew</div>',
+			render,
+		})
+		// One knob for everything direct printed: the slip's bitmap inherits it.
+		expect(seen).toEqual([70, 70])
+	})
+
+	it("lifts the effective sideMarginDots through to every bitmap", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.sideMarginDots)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { sideMarginDots: 8 },
+			copies: 2,
+			crewHTML: '<div class="crew">crew</div>',
+			render,
+		})
+		// A property of the paper, so the slip shares it too.
+		expect(seen).toEqual([8, 8])
+	})
+
 	it("single shared bitmap reused across every non-crew row", async () => {
 		const render = vi.fn(async () => ({
 			dataURL: "data:,",
