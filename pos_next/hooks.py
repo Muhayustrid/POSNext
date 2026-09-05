@@ -160,6 +160,7 @@ doc_events = {
 			"pos_next.api.packages.validate_invoice_packages",
 			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
 			"pos_next.overrides.discount_restriction.validate_invoice_discounts",
+			"pos_next.overrides.pos_offer_usage.validate_invoice_offers",
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
@@ -167,11 +168,13 @@ doc_events = {
 			"pos_next.api.wallet.process_loyalty_to_wallet",
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
 			"pos_next.overrides.discount_restriction.record_usage_on_submit",
+			"pos_next.overrides.pos_offer_usage.record_offer_usage_on_submit",
 		],
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.sales_invoice_hooks.release_one_time_offer_usage",
 			"pos_next.overrides.discount_restriction.release_usage_on_cancel",
+			"pos_next.overrides.pos_offer_usage.release_offer_usage_on_cancel",
 		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},

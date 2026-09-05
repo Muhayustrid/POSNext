@@ -903,6 +903,12 @@ def update_invoice(data):
 			invoice_doc.pos_applied_one_time_rules = (
 				json.dumps(sorted(one_time_applied)) if one_time_applied else ""
 			)
+			# Same transport as the one-time list: POS Offer quota enforcement
+			# and usage recording read this on validate/submit/cancel
+			# (pos_next.overrides.pos_offer_usage).
+			invoice_doc.pos_applied_offer_rules = (
+				json.dumps(sorted(applied_rule_names_seen)) if applied_rule_names_seen else ""
+			)
 
 		# Set invoice flags BEFORE calculations
 		if doctype == "Sales Invoice":
