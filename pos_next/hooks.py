@@ -177,10 +177,20 @@ doc_events = {
 	},
 	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
 	"Promotional Scheme": {
-		"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
+		"validate": [
+			"pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
+			"pos_next.overrides.pos_offer_sync.guard_promotional_scheme",
+		],
 		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules",
+		"on_trash": "pos_next.overrides.pos_offer_sync.guard_promotional_scheme",
 	},
-	"Pricing Rule": {"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config"},
+	"Pricing Rule": {
+		"validate": [
+			"pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
+			"pos_next.overrides.pos_offer_sync.guard_pricing_rule",
+		],
+		"on_trash": "pos_next.overrides.pos_offer_sync.guard_pricing_rule",
+	},
 	"Sales Order": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"Quotation": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"Delivery Note": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
