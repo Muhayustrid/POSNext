@@ -288,6 +288,12 @@ def _strip_server_managed_fields(payload):
 	# Packed Items are regenerated from Product Bundle definitions during save.
 	# Accepting client-side packed rows can reintroduce duplicates on re-save.
 	cleaned.pop("packed_items", None)
+	# Both offer stashes are derived server-side during update_invoice (from the
+	# applied pricing rules before clearing) and must not be replayed by the
+	# client — a hostile client could blank the stash (e.g. replay an empty
+	# string), silently bypassing POS Offer quota enforcement at submit.
+	cleaned.pop("pos_applied_offer_rules", None)
+	cleaned.pop("pos_applied_one_time_rules", None)
 	return cleaned
 
 
