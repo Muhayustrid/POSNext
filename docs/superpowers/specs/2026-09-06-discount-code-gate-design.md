@@ -30,3 +30,35 @@ POS Discount Restriction (jendela waktu, scope multi-company, kuota Global/Per C
 3. Kasir edit diskon item / additional discount → dialog minta kode → kode di-validate live → apply.
 4. Submit → server re-validasi + audit tercatat di kode.
 5. Revoke kapan saja: HQ set status kode jadi `Disabled` → submit berikutnya ditolak.
+
+## Addendum (2026-09-06, pasca final review) — pembebasan diskon offer/coupon
+
+**Semantik pembebasan (binding):** POS Offer adalah kanal diskon yang sudah
+disetujui (dihitung server via `apply_offers`), sehingga **dikecualikan dari
+gerbang kode**. Atribusi menempel pada stash pricing rule yang ditulis
+server-side oleh `update_invoice` (klien tidak bisa memalsukannya):
+
+- **Per item (R1–R2):** saat membersihkan `item.pricing_rules`, server menulis
+  nama-nama rule yang ter-apply ke field kustom `Sales Invoice Item.pos_offer_item_rules`
+  (JSON list; field juga di-strip dari payload klien). Gerbang membebaskan diskon
+  sebuah item hanya jika stash item memuat **minimal satu Pricing Rule yang ada
+  dan `disable = 0`** (diverifikasi satu query per invoice; rule tak dikenal /
+  disabled tidak memberi pembebasan).
+- **Header (R3):** additional discount di header bebas kode hanya jika minimal
+  satu rule terverifikasi pada stash invoice (`pos_applied_offer_rules`) punya
+  `apply_on == "Transaction"`. Tidak ada → header dianggap manual → wajib kode.
+- **Edit manual (R4):** mengedit diskon/rate item secara manual menghapus
+  atribusi offer di klien (`pricing_rules` dikosongkan), sehingga diskon
+  manual tidak ikut kebebasan offer.
+
+**Risiko residual yang diterima:** forged attribution — situs yang membangun
+invoice lewat jalur lain (bukan `update_invoice`) bisa menulis nilai
+`pos_offer_item_rules` / `pos_applied_offer_rules` sendiri; verifikasi hanya
+memastikan rule ada dan enabled, bukan bahwa rule itu benar-benar di-apply ke
+baris tersebut. Diterima karena kedua field adalah field internal server-managed
+di jalur POS (di-strip dari payload klien), dan penyalahgunaan menyisakan jejak
+audit di stash.
+
+**Catatan rilis (upgrade):** draft in-flight yang memuat diskon manual (dan
+antrean offline) harus diselesaikan atau dibuang **sebelum** upgrade — setelah
+upgrade, submit akan menuntut kode konfirmasi HQ untuk diskon manual tersebut.

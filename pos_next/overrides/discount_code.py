@@ -19,11 +19,20 @@ Enforcement points (doc_events on Sales Invoice):
 
 The gate applies to POS invoices only (is_pos); back-office invoices are not
 restricted. Returns (is_return) never require a code.
+
+Exemption: POS Offer promotions are a pre-approved discount channel. An item
+whose discount is offer-attributed (its `pos_offer_item_rules` stash carries a
+verified, enabled Pricing Rule — written server-side by
+pos_next.api.invoices.update_invoice) is not a manual discount; the same holds
+for the header additional discount when a verified applied rule with
+apply_on == "Transaction" fired (invoice-level `pos_applied_offer_rules`).
 """
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, now_datetime
+
+from pos_next.overrides.pos_offer_usage import parse_applied_offer_rules
 
 CODE_DOCTYPE = "POS Discount Confirmation Code"
 
@@ -48,13 +57,53 @@ def _item_has_discount(item):
 	return False
 
 
-def invoice_has_manual_discount(doc):
-	"""True when the invoice discounts anything: the header additional
-	discount, or any item row."""
-	if flt(doc.get("discount_amount") or 0) > 0 or flt(doc.get("additional_discount_percentage") or 0) > 0:
-		return True
+def _verified_applied_rules(doc):
+	"""Map of claimed applied Pricing Rule names that are real and enabled:
+	``{rule_name: apply_on}`` — single query over the invoice-level stash and
+	every item's per-row claims. Unknown or disabled claimed rules confer no
+	exemption (the stash fields are server-managed; this is defense in depth).
+	"""
+	claimed = set(parse_applied_offer_rules(doc.get("pos_applied_offer_rules")))
+	for item in doc.get("items") or []:
+		claimed.update(parse_applied_offer_rules(item.get("pos_offer_item_rules")))
+	if not claimed:
+		return {}
 
-	return any(_item_has_discount(item) for item in (doc.get("items") or []))
+	rows = frappe.get_all(
+		"Pricing Rule",
+		filters={"name": ["in", sorted(claimed)], "disable": 0},
+		fields=["name", "apply_on"],
+	)
+	return {row.name: row.apply_on for row in rows}
+
+
+def _item_is_offer_attributed(item, verified_rules):
+	"""True when the item's discount is offer-driven: its per-row stash claims
+	at least one verified, enabled Pricing Rule (R2)."""
+	claimed = parse_applied_offer_rules(item.get("pos_offer_item_rules"))
+	return any(name in verified_rules for name in claimed)
+
+
+def invoice_has_manual_discount(doc):
+	"""True when the invoice discounts anything manually: the header additional
+	discount, or any item row that is not offer-attributed.
+
+	Offer-driven discounts (POS Offer promotions, computed server-side) are
+	exempt: the header only when a verified applied rule has
+	``apply_on == "Transaction"`` (R3), an item when its own stash carries a
+	verified rule (R2).
+	"""
+	verified_rules = _verified_applied_rules(doc)
+
+	if flt(doc.get("discount_amount") or 0) > 0 or flt(doc.get("additional_discount_percentage") or 0) > 0:
+		has_transaction_rule = any(apply_on == "Transaction" for apply_on in verified_rules.values())
+		if not has_transaction_rule:
+			return True
+
+	return any(
+		_item_has_discount(item) and not _item_is_offer_attributed(item, verified_rules)
+		for item in (doc.get("items") or [])
+	)
 
 
 # ==========================================================================
@@ -109,9 +158,17 @@ def record_code_usage_on_submit(doc, method=None):
 	# Serialize concurrent submits on the same code so used_count cannot lose
 	# increments; the audit update lives in the submit transaction and rolls
 	# back with it.
-	row = frappe.db.get_value(CODE_DOCTYPE, code_name, ["status", "used_count"], as_dict=True, for_update=True)
+	row = frappe.db.get_value(
+		CODE_DOCTYPE, code_name, ["status", "used_count", "company"], as_dict=True, for_update=True
+	)
 	if row.status != "Active":
 		frappe.throw(_("Discount code {0} has been disabled by head office.").format(code_value))
+	# Re-verify the company binding under the lock — it may have changed
+	# between the draft-time check and the submit (mirror of the status check).
+	if row.company and doc.get("company") and row.company != doc.get("company"):
+		frappe.throw(
+			_("Discount code {0} is not valid for company {1}.").format(code_value, doc.get("company"))
+		)
 
 	frappe.db.set_value(
 		CODE_DOCTYPE,

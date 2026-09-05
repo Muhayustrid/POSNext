@@ -535,6 +535,7 @@
 				:customer="cartStore.customer"
 				:company="shiftStore.profileCompany"
 				:additional-discount="cartStore.additionalDiscount"
+				:header-discount-from-offer="cartStore.headerDiscountFromOffer"
 				:items="cartStore.invoiceItems"
 				:tax-amount="cartStore.totalTax"
 				:discount-amount="cartStore.totalDiscount"
@@ -2039,6 +2040,9 @@ async function handleEditItem(updatedItem) {
 function handleAdditionalDiscountUpdate(discountAmount) {
 	// Update the additional discount value in the cart store
 	cartStore.additionalDiscount = discountAmount;
+	// A cashier-entered additional discount is manual — drop the offer
+	// attribution so the discount code gate prompts for a code again
+	cartStore.headerDiscountFromOffer = false;
 
 	// Rebuild the cache to recalculate totals
 	cartStore.rebuildIncrementalCache();

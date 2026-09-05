@@ -6,8 +6,8 @@
 Mocked-frappe style (same as test_offers.py) — no database needed; run via
 pos_next/_pn_run_tests.py pos_next.api.test_discount_code
 
-Only individual frappe attributes (db, get_doc, session, has_permission) are
-patched so frappe.throw still raises real ValidationErrors.
+Only individual frappe attributes (db, get_all, get_doc, session,
+has_permission) are patched so frappe.throw still raises real ValidationErrors.
 """
 
 import unittest
@@ -18,21 +18,24 @@ import frappe
 
 from pos_next.api.discount_code import get_status, validate_confirmation_code
 from pos_next.overrides.discount_code import (
-    invoice_has_manual_discount,
-    record_code_usage_on_submit,
-    validate_code,
-    validate_invoice_discounts,
+	invoice_has_manual_discount,
+	record_code_usage_on_submit,
+	validate_code,
+	validate_invoice_discounts,
 )
 from pos_next.pos_next.doctype.pos_discount_confirmation_code.pos_discount_confirmation_code import (
-    CODE_ALPHABET,
-    CODE_LENGTH,
-    POSDiscountConfirmationCode,
-    generate_codes,
+	CODE_ALPHABET,
+	CODE_LENGTH,
+	POSDiscountConfirmationCode,
+	generate_codes,
 )
 
 DB_PATCH = patch("pos_next.overrides.discount_code.frappe.db", new_callable=MagicMock)
+GET_ALL_PATCH = patch(
+	"pos_next.overrides.discount_code.frappe.get_all", new_callable=MagicMock, create=True
+)
 SESSION_PATCH = patch(
-    "pos_next.overrides.discount_code.frappe.session", MagicMock(user="cashier@example.com"), create=True
+	"pos_next.overrides.discount_code.frappe.session", MagicMock(user="cashier@example.com"), create=True
 )
 
 CTRL_PATH = "pos_next.pos_next.doctype.pos_discount_confirmation_code.pos_discount_confirmation_code"
@@ -128,6 +131,167 @@ class TestInvoiceHasManualDiscount(unittest.TestCase):
 		self.assertTrue(invoice_has_manual_discount(doc))
 
 
+class TestOfferExemption(unittest.TestCase):
+	"""Offer-attributed discounts (server-stashed pricing rules) are exempt."""
+
+	def test_item_with_verified_rule_passes_without_code(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [SimpleNamespace(name="PR-OFFER-1", apply_on="Item Code")]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				items=[
+					FakeItem(
+						item_code="IT1",
+						discount_percentage=10,
+						pos_offer_item_rules='["PR-OFFER-1"]',
+					)
+				],
+				discount_confirmation_code="",
+			)
+
+			validate_invoice_discounts(doc, "validate")  # must not raise
+
+			mock_db.get_value.assert_not_called()
+			mock_get_all.assert_called_once_with(
+				"Pricing Rule",
+				filters={"name": ["in", ["PR-OFFER-1"]], "disable": 0},
+				fields=["name", "apply_on"],
+			)
+
+	def test_item_exempt_when_any_claimed_rule_is_verified(self):
+		with GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [SimpleNamespace(name="PR-1", apply_on="Item Code")]
+			doc = FakeDoc(
+				items=[
+					FakeItem(
+						discount_percentage=10,
+						pos_offer_item_rules='["PR-1", "PR-FAKE"]',
+					)
+				],
+				discount_amount=0,
+			)
+
+			self.assertFalse(invoice_has_manual_discount(doc))
+
+	def test_item_with_unknown_claimed_rule_is_gated(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			# Claimed rule does not exist (or is disabled) — no exemption.
+			mock_get_all.return_value = []
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				items=[
+					FakeItem(
+						item_code="IT1",
+						discount_percentage=10,
+						pos_offer_item_rules='["PR-GONE"]',
+					)
+				],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+	def test_item_with_empty_stash_is_gated(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				items=[FakeItem(item_code="IT1", discount_percentage=10, pos_offer_item_rules="")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+			mock_get_all.assert_not_called()
+
+	def test_malformed_item_stash_is_gated(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				items=[
+					FakeItem(
+						item_code="IT1",
+						discount_percentage=10,
+						pos_offer_item_rules="not json",
+					)
+				],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+			mock_get_all.assert_not_called()
+
+	def test_header_discount_exempt_with_verified_transaction_rule(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [SimpleNamespace(name="PR-TRANS", apply_on="Transaction")]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				discount_amount=25000,
+				pos_applied_offer_rules='["PR-TRANS"]',
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			validate_invoice_discounts(doc, "validate")  # must not raise
+
+			mock_db.get_value.assert_not_called()
+
+	def test_header_discount_gated_when_no_verified_rule_is_transaction(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			# Verified rules exist, but none with apply_on == "Transaction".
+			mock_get_all.return_value = [SimpleNamespace(name="PR-ITEM", apply_on="Item Code")]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				discount_amount=25000,
+				pos_applied_offer_rules='["PR-ITEM"]',
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+	def test_header_discount_gated_when_stash_empty(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				discount_amount=25000,
+				pos_applied_offer_rules="",
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+			mock_get_all.assert_not_called()
+
+	def test_manual_item_discount_still_gated_when_header_exempt(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [SimpleNamespace(name="PR-TRANS", apply_on="Transaction")]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				discount_amount=25000,
+				pos_applied_offer_rules='["PR-TRANS"]',
+				items=[FakeItem(item_code="IT1", discount_percentage=10)],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+
 class TestValidateInvoiceDiscounts(unittest.TestCase):
 	def test_non_pos_invoice_skipped(self):
 		with DB_PATCH as mock_db:
@@ -204,13 +368,15 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 			mock_db.set_value.assert_not_called()
 
 	def test_submit_increments_usage_audit(self):
-		with DB_PATCH as mock_db, SESSION_PATCH, patch(
-			"pos_next.overrides.discount_code.now_datetime"
-		) as mock_now:
+		with (
+			DB_PATCH as mock_db,
+			SESSION_PATCH,
+			patch("pos_next.overrides.discount_code.now_datetime") as mock_now,
+		):
 			mock_now.return_value = "2026-09-06 10:00:00"
 			mock_db.get_value.side_effect = self._code_lookup(
 				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
-				lock_result=SimpleNamespace(status="Active", used_count=3),
+				lock_result=SimpleNamespace(status="Active", used_count=3, company=None),
 			)
 			doc = FakeDoc(
 				is_pos=1,
@@ -222,11 +388,12 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 
 			record_code_usage_on_submit(doc, "on_submit")
 
-			# usage audit written under the submit transaction, code row locked
+			# usage audit written under the submit transaction, code row locked;
+			# the lock re-read includes `company` so the binding is re-verified
 			mock_db.get_value.assert_called_with(
 				"POS Discount Confirmation Code",
 				"CODE-1",
-				["status", "used_count"],
+				["status", "used_count", "company"],
 				as_dict=True,
 				for_update=True,
 			)
@@ -243,7 +410,7 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 		with DB_PATCH as mock_db:
 			mock_db.get_value.side_effect = self._code_lookup(
 				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
-				lock_result=SimpleNamespace(status="Disabled", used_count=3),
+				lock_result=SimpleNamespace(status="Disabled", used_count=3, company=None),
 			)
 			doc = FakeDoc(
 				is_pos=1,
@@ -256,6 +423,45 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 				record_code_usage_on_submit(doc, "on_submit")
 
 			mock_db.set_value.assert_not_called()
+
+	def test_company_rebinding_under_lock_blocks(self):
+		with DB_PATCH as mock_db:
+			# The code was re-bound to another company after the draft passed.
+			mock_db.get_value.side_effect = self._code_lookup(
+				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
+				lock_result=SimpleNamespace(status="Active", used_count=3, company="Company B"),
+			)
+			doc = FakeDoc(
+				is_pos=1,
+				name="ACC-SINV-0003",
+				company="Company A",
+				items=[FakeItem(discount_percentage=10)],
+				discount_confirmation_code="ABCD2345",
+			)
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				record_code_usage_on_submit(doc, "on_submit")
+
+			self.assertIn("not valid for company", str(ctx.exception))
+			mock_db.set_value.assert_not_called()
+
+	def test_code_company_still_matches_under_lock_passes(self):
+		with DB_PATCH as mock_db, SESSION_PATCH:
+			mock_db.get_value.side_effect = self._code_lookup(
+				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
+				lock_result=SimpleNamespace(status="Active", used_count=1, company="Company A"),
+			)
+			doc = FakeDoc(
+				is_pos=1,
+				name="ACC-SINV-0004",
+				company="Company A",
+				items=[FakeItem(discount_percentage=10)],
+				discount_confirmation_code="ABCD2345",
+			)
+
+			record_code_usage_on_submit(doc, "on_submit")  # must not raise
+
+			mock_db.set_value.assert_called_once()
 
 
 class TestGetStatusAPI(unittest.TestCase):
@@ -276,7 +482,9 @@ class TestValidateConfirmationCodeAPI(unittest.TestCase):
 	def test_additional_discount_requires_code(self, mock_validate):
 		mock_validate.return_value = "CODE-1"
 
-		result = validate_confirmation_code(code="ABCD2345", company="Company A", items=None, additional_discount=5000)
+		result = validate_confirmation_code(
+			code="ABCD2345", company="Company A", items=None, additional_discount=5000
+		)
 
 		self.assertTrue(result["valid"])
 		self.assertTrue(result["requires_code"])
@@ -308,6 +516,17 @@ class TestValidateConfirmationCodeAPI(unittest.TestCase):
 		self.assertTrue(result["requires_code"])
 		self.assertIn("not valid", result["message"])
 
+	@patch("pos_next.api.discount_code.validate_code")
+	def test_malformed_items_payload_is_rejected_without_raising(self, mock_validate):
+		# Entries that are not dicts used to 500 on .get(); the payload must be
+		# answered defensively instead.
+		result = validate_confirmation_code(code="ABCD2345", company="Company A", items='["garbage", 5]')
+
+		self.assertFalse(result["valid"])
+		self.assertTrue(result["requires_code"])
+		self.assertTrue(result.get("message"))
+		mock_validate.assert_not_called()
+
 
 class TestGenerateCodes(unittest.TestCase):
 	def test_requires_create_permission(self):
@@ -322,13 +541,26 @@ class TestGenerateCodes(unittest.TestCase):
 				with self.assertRaises(frappe.ValidationError):
 					generate_codes(count=bad)
 
+	def test_unknown_company_is_rejected(self):
+		with CTRL_PERM_PATCH, CTRL_DB_PATCH as mock_db:
+			mock_db.exists.return_value = False
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				generate_codes(count=1, company="Company Z")
+
+			self.assertIn("Company Z", str(ctx.exception))
+
 	def test_generates_active_codes_with_company_and_notes(self):
 		created = []
 
 		def fake_get_doc(payload):
 			return SimpleNamespace(**payload, insert=lambda **kwargs: created.append(payload))
 
-		with CTRL_PERM_PATCH as mock_perm, CTRL_GET_DOC_PATCH as mock_get_doc:
+		with (
+			CTRL_PERM_PATCH,
+			CTRL_DB_PATCH as mock_db,
+			CTRL_GET_DOC_PATCH as mock_get_doc,
+		):
+			mock_db.exists.return_value = True
 			mock_get_doc.side_effect = fake_get_doc
 
 			result = generate_codes(count=3, company=" Company A ", notes=" Lebaran promo ")
@@ -357,10 +589,12 @@ class TestGenerateCodes(unittest.TestCase):
 		with (
 			patch(f"{CTRL_PATH}.secrets.choice") as mock_choice,
 			CTRL_PERM_PATCH,
+			CTRL_DB_PATCH as mock_db,
 			CTRL_GET_DOC_PATCH as mock_get_doc,
 		):
 			# deterministic sequence: a colliding code, then a fresh one
 			mock_choice.side_effect = list("AAABBB22") + list("AAABBB23")
+			mock_db.exists.return_value = True
 			mock_get_doc.side_effect = get_doc
 
 			result = generate_codes(count=1)

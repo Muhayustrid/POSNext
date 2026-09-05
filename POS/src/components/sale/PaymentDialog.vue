@@ -2145,6 +2145,11 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
+	/** True while the additional discount mirrors a server-applied offer (exempt from the code gate). */
+	headerDiscountFromOffer: {
+		type: Boolean,
+		default: false,
+	},
 	targetDoctype: {
 		type: String,
 		default: "Sales Invoice",
@@ -2300,9 +2305,10 @@ const additionalDiscountType = ref(settingsStore.usePercentageDiscount ? "percen
 // HQ discount code for manual discounts
 const confirmationCode = ref("");
 // A code is needed when the cart carries any manual discount: the additional
-// discount hits everything, and discounted items count too. Server re-validates.
+// discount hits everything (unless it is a server-applied offer discount),
+// and discounted items count too. Server re-validates.
 const restrictionCodeRequired = computed(() =>
-	restrictionStore.needsCodeForCart(props.additionalDiscount, props.items || [])
+	restrictionStore.needsCodeForCart(props.additionalDiscount, props.items || [], props.headerDiscountFromOffer)
 );
 
 const paymentMethodsResource = createResource({

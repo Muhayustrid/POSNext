@@ -294,6 +294,17 @@ def _strip_server_managed_fields(payload):
 	# string), silently bypassing POS Offer quota enforcement at submit.
 	cleaned.pop("pos_applied_offer_rules", None)
 	cleaned.pop("pos_applied_one_time_rules", None)
+	# Same for the per-item attribution: it is recomputed server-side from the
+	# applied pricing rules; a client-supplied value could claim a fake
+	# exemption from the discount code gate (overrides/discount_code.py).
+	items = cleaned.get("items")
+	if isinstance(items, list) and any(isinstance(item, dict) for item in items):
+		cleaned["items"] = [
+			{k: v for k, v in item.items() if k != "pos_offer_item_rules"}
+			if isinstance(item, dict)
+			else item
+			for item in items
+		]
 	return cleaned
 
 
@@ -884,14 +895,20 @@ def update_invoice(data):
 			# discount_amount fields we already set above.
 			if item.get("pricing_rules"):
 				if erpnext_get_applied_pricing_rules:
-					applied_rule_names_seen.update(
-						erpnext_get_applied_pricing_rules(item.pricing_rules) or []
-					)
+					item_rule_names = erpnext_get_applied_pricing_rules(item.pricing_rules) or []
 				else:
-					applied_rule_names_seen.update(
-						r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
-					)
+					item_rule_names = [r.strip() for r in str(item.pricing_rules).split(",") if r.strip()]
+				applied_rule_names_seen.update(item_rule_names)
+				# Per-item offer attribution for the discount code gate: an item
+				# whose discount comes from an applied pricing rule is offer-driven,
+				# not manual (pos_next.overrides.discount_code verifies the rules).
+				# Always rewritten (never read from the payload — see
+				# _strip_server_managed_fields) so a re-save of a manually edited
+				# row cannot inherit a stale exemption.
+				item.pos_offer_item_rules = json.dumps(sorted(item_rule_names)) if item_rule_names else ""
 				item.pricing_rules = ""
+			else:
+				item.pos_offer_item_rules = ""
 
 		if doctype == "Sales Invoice":
 			one_time_applied = (

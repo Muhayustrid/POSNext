@@ -102,6 +102,17 @@ CUSTOM_FIELDS = {
 			"print_hide": 1,
 			"description": "Selected options at the time of sale (JSON).",
 		},
+		{
+			"fieldname": "pos_offer_item_rules",
+			"label": "POS Offer Item Rules",
+			"fieldtype": "Data",
+			"insert_after": "pos_package_snapshot",
+			"hidden": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "Internal: JSON list of Pricing Rules applied to this item row. Lets the discount code gate exempt offer-driven discounts from the HQ code requirement.",
+		},
 	],
 	"Promotional Scheme": [
 		{

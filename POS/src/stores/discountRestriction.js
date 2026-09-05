@@ -26,11 +26,26 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 	const hasCode = computed(() => Boolean((code.value || "").trim()));
 
 	/**
+	 * Offer attribution on a cart item (pricing_rules mirrored from the offers
+	 * API — the same signal the invoice payload sends). Mirrors posCart's
+	 * hasPricingRules: string or array.
+	 */
+	function hasOfferAttribution(item) {
+		const rules = item.pricing_rules;
+		if (!rules) return false;
+		if (Array.isArray(rules)) return rules.length > 0;
+		return typeof rules === "string" && rules.trim().length > 0;
+	}
+
+	/**
 	 * Same discount semantics the server applies: explicit discount fields, or
-	 * a manual rate edit below price_list_rate.
+	 * a manual rate edit below price_list_rate. Items carrying offer
+	 * attribution are skipped — the server verifies their applied pricing
+	 * rules and exempts offer-driven discounts from the code gate.
 	 */
 	function itemHasDiscount(item) {
 		if (!item) return false;
+		if (hasOfferAttribution(item)) return false;
 		if (Number(item.discount_percentage) > 0 || Number(item.discount_amount) > 0) return true;
 		if (
 			Number(item.is_rate_manually_edited) &&
@@ -44,11 +59,13 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 
 	/**
 	 * Whether checkout needs a code: an additional discount (hits the whole
-	 * cart) or any discounted item does.
+	 * cart) or any discounted item does. An offer-sourced additional discount
+	 * (transaction-scope POS Offer rule, applied by the server) is exempt;
+	 * the server stays the authority — this is prompt-consistency only.
 	 */
-	function needsCodeForCart(additionalDiscount = 0, items = []) {
+	function needsCodeForCart(additionalDiscount = 0, items = [], headerDiscountFromOffer = false) {
 		if (!applicable.value) return false;
-		if (Number(additionalDiscount) > 0) return true;
+		if (Number(additionalDiscount) > 0 && !headerDiscountFromOffer) return true;
 		return items.some((item) => itemHasDiscount(item));
 	}
 

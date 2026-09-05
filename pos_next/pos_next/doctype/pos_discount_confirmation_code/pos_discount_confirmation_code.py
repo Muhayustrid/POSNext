@@ -51,6 +51,9 @@ def generate_codes(count: int = 1, company: str | None = None, notes: str | None
 	company = (company or "").strip() or None
 	notes = (notes or "").strip() or None
 
+	if company and not frappe.db.exists("Company", company):
+		frappe.throw(_("Company {0} does not exist").format(company))
+
 	codes = []
 	attempts = 0
 	while len(codes) < count:

@@ -1,14 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPinia, setActivePinia } from "pinia";
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createPinia, setActivePinia } from "pinia"
 
-const callMock = vi.hoisted(() => vi.fn());
+const callMock = vi.hoisted(() => vi.fn())
 
-vi.mock("@/utils/apiWrapper", () => ({ call: callMock }));
+vi.mock("@/utils/apiWrapper", () => ({ call: callMock }))
 vi.mock("@/utils/logger", () => ({
 	logger: { create: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), success: vi.fn() }) },
-}));
+}))
 
-import { useDiscountRestrictionStore } from "./discountRestriction";
+import { useDiscountRestrictionStore } from "./discountRestriction"
 
 describe("discountRestriction store", () => {
 	beforeEach(() => {
@@ -73,6 +73,22 @@ describe("discountRestriction store", () => {
 				store.itemHasDiscount({ is_rate_manually_edited: 1, rate: 10000, price_list_rate: 10000 })
 			).toBe(false)
 		})
+
+		it("skips items carrying offer attribution (pricing_rules)", () => {
+			const store = useDiscountRestrictionStore()
+			expect(store.itemHasDiscount({ discount_percentage: 10, pricing_rules: ["PR-1"] })).toBe(false)
+			expect(store.itemHasDiscount({ discount_amount: 5000, pricing_rules: "PR-1" })).toBe(false)
+			expect(
+				store.itemHasDiscount({ is_rate_manually_edited: 1, rate: 9000, price_list_rate: 10000, pricing_rules: ["PR-1"] })
+			).toBe(false)
+		})
+
+		it("still counts items whose pricing_rules attribution is empty", () => {
+			const store = useDiscountRestrictionStore()
+			expect(store.itemHasDiscount({ discount_percentage: 10, pricing_rules: [] })).toBe(true)
+			expect(store.itemHasDiscount({ discount_percentage: 10, pricing_rules: null })).toBe(true)
+			expect(store.itemHasDiscount({ discount_percentage: 10, pricing_rules: "" })).toBe(true)
+		})
 	})
 
 	describe("needsCodeForCart", () => {
@@ -80,6 +96,21 @@ describe("discountRestriction store", () => {
 			const store = useDiscountRestrictionStore()
 
 			expect(store.needsCodeForCart(25000, [])).toBe(true)
+		})
+
+		it("does not demand a code for an offer-sourced additional discount", () => {
+			const store = useDiscountRestrictionStore()
+
+			expect(store.needsCodeForCart(25000, [], true)).toBe(false)
+		})
+
+		it("still demands a code when an offer-sourced header discount coexists with a manual item discount", () => {
+			const store = useDiscountRestrictionStore()
+
+			expect(store.needsCodeForCart(25000, [{ discount_percentage: 10 }], true)).toBe(true)
+			expect(
+				store.needsCodeForCart(25000, [{ discount_percentage: 10, pricing_rules: ["PR-1"] }], true)
+			).toBe(false)
 		})
 
 		it("requires a code when any item is discounted", () => {
@@ -90,6 +121,16 @@ describe("discountRestriction store", () => {
 				{ item_code: "ITEM-B", discount_percentage: 10 },
 			]
 			expect(store.needsCodeForCart(0, items)).toBe(true)
+		})
+
+		it("ignores offer-attributed discounted items", () => {
+			const store = useDiscountRestrictionStore()
+
+			const items = [
+				{ item_code: "ITEM-A" },
+				{ item_code: "ITEM-B", discount_percentage: 10, pricing_rules: ["PR-1"] },
+			]
+			expect(store.needsCodeForCart(0, items)).toBe(false)
 		})
 
 		it("does not require a code for undiscounted carts", () => {

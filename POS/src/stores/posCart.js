@@ -123,6 +123,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const pendingItemQty = ref(1);
 	const appliedOffers = ref([]);
 	const appliedCoupon = ref(null);
+	// True while the header additional discount mirrors a server-applied
+	// transaction-scope offer discount (applyHeaderDiscountFromServer) and has
+	// not been overridden manually since. Prompt-consistency only for the
+	// discount code gate (needsCodeForCart); the server stays the authority.
+	const headerDiscountFromOffer = ref(false);
 	const selectionMode = ref("uom"); // 'uom' or 'variant'
 	const currentDraftId = ref(null);
 	const targetDoctype = ref("Sales Invoice");
@@ -281,6 +286,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
 		appliedCoupon.value = null;
+		headerDiscountFromOffer.value = false;
 		currentDraftId.value = null;
 		targetDoctype.value = "Sales Invoice";
 
@@ -378,6 +384,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	// Discount & Offer Management
 	function applyDiscountToCart(discount) {
 		applyDiscount(discount);
+		// A coupon discount replaces whatever the header carried — the
+		// offer-sourced attribution no longer describes this value.
+		headerDiscountFromOffer.value = false;
 		appliedCoupon.value = discount;
 		showSuccess(__("{0} applied successfully", [discount.name]));
 	}
@@ -385,6 +394,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function removeDiscountFromCart() {
 		appliedOffers.value = [];
 		removeDiscount();
+		headerDiscountFromOffer.value = false;
 		appliedCoupon.value = null;
 		showSuccess(__("Discount has been removed from cart"));
 	}
@@ -570,12 +580,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyHeaderDiscountFromServer(headerDiscount) {
 		if (!headerDiscount) {
 			additionalDiscount.value = 0;
+			headerDiscountFromOffer.value = false;
 			rebuildIncrementalCache();
 			return;
 		}
 
 		const amount = Number.parseFloat(headerDiscount.discountAmount) || 0;
 		additionalDiscount.value = amount;
+		// Track that this header discount is server-applied (pre-approved
+		// transaction-scope offer) so the discount code gate prompt does not
+		// demand a code for it. Cleared on any manual override.
+		headerDiscountFromOffer.value = amount > 0;
 		rebuildIncrementalCache();
 	}
 
@@ -1451,6 +1466,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updates.original_rate !== undefined)
 				cartItem.original_rate = updates.original_rate;
 
+			// A manual edit of the discount/rate overrides any offer-driven
+			// pricing on this line — drop the offer attribution so the discount
+			// code gate treats the discount as manual (the server decides via
+			// the applied pricing rules stashed from the payload).
+			if (
+				updates.discount_percentage !== undefined ||
+				updates.discount_amount !== undefined ||
+				updates.rate !== undefined
+			) {
+				cartItem.pricing_rules = null;
+			}
+
 			recalculateItem(cartItem);
 			rebuildIncrementalCache();
 			showSuccess(__("{0} updated", [cartItem.item_name]));
@@ -1910,6 +1937,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		payments,
 		salesTeam,
 		additionalDiscount,
+		headerDiscountFromOffer, // True while the header additional discount is server-applied (offer)
 		taxInclusive,
 		pendingItem,
 		pendingItemQty,

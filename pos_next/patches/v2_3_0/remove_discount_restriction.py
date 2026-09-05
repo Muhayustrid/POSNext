@@ -31,10 +31,35 @@ def _drop_column(table, column):
 		pass
 
 
+def _fix_custom_field_anchors():
+	"""Re-anchor the surviving Custom Field rows on upgraded sites.
+
+	Model sync never moves an existing field, and the old anchor
+	(`pos_discount_restriction`) is dropped above — re-point the fields at
+	their intended neighbours so the form layout matches install.py.
+	Guarded: a missing row (fresh install path) is skipped silently.
+	"""
+	fixups = (
+		{
+			"fieldname": "discount_confirmation_code",
+			"insert_after": "buyer_name",
+			"description": "HQ discount code entered for this invoice's manual discounts.",
+		},
+		{"fieldname": "pos_applied_offer_rules", "insert_after": "discount_confirmation_code"},
+	)
+	for fixup in fixups:
+		fieldname = fixup["fieldname"]
+		filters = {"dt": "Sales Invoice", "fieldname": fieldname}
+		if not frappe.db.exists("Custom Field", filters):
+			continue
+		values = {key: value for key, value in fixup.items() if key != "fieldname"}
+		frappe.db.set_value("Custom Field", filters, values)
+
+
 def execute():
 	# One-time codes are meaningless without their rule; start clean. Codes
 	# generated from now on are multi-use and carry no rule reference.
-	frappe.db.delete("POS Discount Confirmation Code", {"name": ("is", "set")})
+	frappe.db.delete("POS Discount Confirmation Code")
 
 	frappe.db.delete("Custom Field", {"dt": "Sales Invoice", "fieldname": "pos_discount_restriction"})
 	_drop_column("`tabSales Invoice`", "pos_discount_restriction")
@@ -46,3 +71,5 @@ def execute():
 	for doctype in LEGACY_DOCTYPES:
 		if frappe.db.exists("DocType", doctype):
 			frappe.delete_doc("DocType", doctype, force=1)
+
+	_fix_custom_field_anchors()

@@ -12,6 +12,7 @@ authoritative gate lives in the Sales Invoice doc_events
 import json
 
 import frappe
+from frappe import _
 from frappe.utils import flt
 
 from pos_next.overrides.discount_code import invoice_has_manual_discount, validate_code
@@ -42,7 +43,16 @@ def validate_confirmation_code(code: str, company: str, items=None, additional_d
 			items = json.loads(items) if items else []
 		except (ValueError, TypeError):
 			items = []
-	items = items or []
+	if items is None:
+		items = []
+	if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+		# Malformed payload (entries that are not dicts used to 500 on .get()
+		# in the discount detection) — answer defensively instead of raising.
+		return {
+			"valid": False,
+			"requires_code": True,
+			"message": _("Invalid items payload; cannot validate the discount code."),
+		}
 
 	payload = {"items": items, "discount_amount": flt(additional_discount or 0)}
 	if not invoice_has_manual_discount(payload):
