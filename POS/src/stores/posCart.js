@@ -4,6 +4,7 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
+import { resolveOfferUnitDiscount } from "@/utils/offerDiscount";
 import { PACKAGE_ROLE } from "@/utils/packageQuote";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
@@ -1070,7 +1071,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
-				item.discount_percentage = discountPercentage;
+				const unit = resolveOfferUnitDiscount(offer, item.price_list_rate)
+				if (unit.type === "amount") {
+					item.discount_percentage = 0
+					item.discount_amount = unit.value
+				} else {
+					item.discount_percentage = unit.value
+				}
 				item.pricing_rules = [offer.name];
 				recalculateItem(item);
 				applied = true;
