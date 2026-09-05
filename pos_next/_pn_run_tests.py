@@ -18,23 +18,33 @@ import unittest
 import frappe
 
 SITE = "erpnext16.localhost"
-# frappe.init resolves sites/ relative to the cwd, so anchor at the bench root
-# (three levels up from apps/pos_next/pos_next/).
-BENCH_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-APP_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# frappe.init resolves sites/ relative to the cwd, so anchor at the bench root.
+# In the main checkout that is three levels up; in a worktree under
+# .worktrees/<name>/ the depth differs, so walk up until a sites/ dir appears.
+_APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _find_bench_root(start):
+	cur = start
+	while cur != os.path.dirname(cur):
+		if os.path.isdir(os.path.join(cur, "sites")) and os.path.isdir(os.path.join(cur, "apps")):
+			return cur
+		cur = os.path.dirname(cur)
+	raise SystemExit("could not locate bench root above %s" % start)
+
+
+BENCH_ROOT = _find_bench_root(_APP_DIR)
+APP_ROOT = _APP_DIR
 SITES_PATH = os.environ.get("SITES_PATH") or os.path.join(BENCH_ROOT, "sites")
 
 
-def main(module_names):
+def main(module_names, sync=False):
 	if not module_names:
 		print(__doc__, file=sys.stderr)
 		return 2
 
 	os.chdir(BENCH_ROOT)
 
-	# This script lives in pos_next/, which contains a nested pos_next/ module
-	# folder -- leaving the script dir on sys.path makes `pos_next` resolve there
-	# (no .api subpackage). Drop it and use the app root instead.
 	script_dir = os.path.dirname(os.path.abspath(__file__))
 	sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != script_dir]
 	if APP_ROOT not in sys.path:
@@ -43,6 +53,11 @@ def main(module_names):
 	frappe.init(site=SITE, sites_path=SITES_PATH)
 	frappe.connect()
 	frappe.flags.in_test = True
+
+	if sync:
+		from frappe.model.sync import sync_for
+
+		sync_for("pos_next", force=1)
 
 	try:
 		loader = unittest.TestLoader()
@@ -59,4 +74,5 @@ def main(module_names):
 
 
 if __name__ == "__main__":
-	raise SystemExit(main(sys.argv[1:]))
+	args = [a for a in sys.argv[1:] if a != "--sync"]
+	raise SystemExit(main(args, sync="--sync" in sys.argv[1:]))
