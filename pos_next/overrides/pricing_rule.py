@@ -196,7 +196,30 @@ def apply_price_discount_rule(pricing_rule, item_details, args):
 		# Return None: skip the standard discount application for this rule.
 		return None
 
-	return _original_apply_price_discount_rule(pricing_rule, item_details, args)
+	result = _original_apply_price_discount_rule(pricing_rule, item_details, args)
+	_cap_percentage_discount(pricing_rule, item_details)
+	return result
+
+
+def _cap_percentage_discount(pricing_rule, item_details):
+	"""Clamp a POS Offer percentage discount to its per-unit nominal cap.
+
+	``pos_offer_max_discount`` (Currency, stamped by the POS Offer sync engine)
+	caps the discount per unit of the discounted item: effective per-unit
+	discount = min(price_list_rate * pct/100, cap). ERPNext has no native field
+	for this (its Min/Max Amount is a cart qualifying window), so the clamp runs
+	after the engine applies the percentage: when the cap binds, the item is
+	switched to a flat per-unit ``discount_amount`` = cap. Min/Max rules never
+	reach here (they return earlier) and POS Offers never combine both.
+	"""
+	cap = flt(pricing_rule.get("pos_offer_max_discount") or 0)
+	if cap <= 0 or pricing_rule.get("rate_or_discount") != "Discount Percentage":
+		return
+	base = flt(item_details.get("price_list_rate") or 0)
+	pct = flt(item_details.get("discount_percentage") or 0)
+	if base > 0 and pct > 0 and base * pct / 100.0 > cap:
+		item_details.discount_percentage = 0
+		item_details.discount_amount = cap
 
 
 def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
