@@ -8,6 +8,52 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 
+def _reject_campaign_mutation():
+	"""Campaigns are managed centrally from POS Offer (Desk) since 2.0."""
+	frappe.throw(
+		_("Campaign management has moved to POS Offer. Create and edit campaigns there."),
+		frappe.PermissionError,
+	)
+
+
+def _managed_schemes_for_company(company):
+	"""POS Offer campaign schemes in scope for a company.
+
+	POS-Offer schemes carry no company themselves (scope lives on their
+	per-company Pricing Rules), so the company filter above misses them. This
+	returns schemes of enabled offers that list the company (enabled row).
+	"""
+	if not company:
+		return []
+	offer_names = frappe.get_all(
+		"POS Offer Company",
+		filters={"parenttype": "POS Offer", "company": company, "enabled": 1},
+		pluck="parent",
+	)
+	if not offer_names:
+		return []
+	enabled = frappe.get_all("POS Offer", filters={"name": ["in", offer_names], "enabled": 1}, pluck="name")
+	if not enabled:
+		return []
+	return frappe.get_all(
+		"Promotional Scheme",
+		filters={"pos_offer": ["in", enabled]},
+		fields=[
+			"name",
+			"apply_on",
+			"disable",
+			"selling",
+			"buying",
+			"applicable_for",
+			"valid_from",
+			"valid_upto",
+			"company",
+			"mixed_conditions",
+			"is_cumulative",
+		],
+	)
+
+
 def check_promotion_permissions(action="read"):
 	"""
 	Check if user has permissions for promotional scheme operations.
@@ -70,6 +116,13 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 		],
 		order_by="modified desc",
 	)
+
+	# Merge in POS Offer campaign schemes in scope for this company (the
+	# company filter above misses them — their scope lives on the rules).
+	seen_scheme_names = {s.name for s in schemes}
+	for extra in _managed_schemes_for_company(company):
+		if extra.name not in seen_scheme_names:
+			schemes.append(extra)
 
 	# Enrich with pricing rules count and details
 	today = getdate(nowdate())
@@ -250,6 +303,7 @@ def create_promotion(data):
 		"customer_group": "Retail"  # if applicable_for is set
 	}
 	"""
+	_reject_campaign_mutation()
 	check_promotion_permissions("write")
 
 	import json
@@ -366,6 +420,7 @@ def update_promotion(scheme_name, data):
 	Update an existing promotional scheme.
 	Supports updating validity dates, discount values, and slab conditions.
 	"""
+	_reject_campaign_mutation()
 	check_promotion_permissions("write")
 
 	import json
@@ -450,6 +505,7 @@ def update_promotion(scheme_name, data):
 @frappe.whitelist()
 def toggle_promotion(scheme_name, disable=None):
 	"""Enable or disable a promotional scheme."""
+	_reject_campaign_mutation()
 	check_promotion_permissions("write")
 
 	if not frappe.db.exists("Promotional Scheme", scheme_name):
@@ -481,6 +537,7 @@ def toggle_promotion(scheme_name, disable=None):
 @frappe.whitelist()
 def delete_promotion(scheme_name):
 	"""Delete a promotional scheme and its pricing rules."""
+	_reject_campaign_mutation()
 	check_promotion_permissions("delete")
 
 	if not frappe.db.exists("Promotional Scheme", scheme_name):

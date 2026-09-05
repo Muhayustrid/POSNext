@@ -15,6 +15,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
+from pos_next.overrides.pos_offer_usage import get_quota_info
+
 # ============================================================================
 # Constants
 # ============================================================================
@@ -95,6 +97,13 @@ class Offer:
 	recurse_for: float = 0  # Give free item for every N quantity (used when is_recursive=1)
 	apply_recursion_over: float = 0  # Qty for which recursion isn't applicable
 	one_time_per_customer: int = 0  # 1 if each customer may redeem this offer only once
+	# POS Offer campaign metadata (present when the rule belongs to a POS Offer)
+	max_discount_amount: float = 0
+	quota_scope: str | None = None
+	quota_period: str | None = None
+	quota_limit: int = 0
+	quota_used: int = 0
+	quota_remaining: int | None = None
 
 	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
@@ -362,6 +371,7 @@ class OfferBuilder:
 			recurse_for=flt(slab.get("recurse_for", 0)) if not is_price_discount else 0,
 			apply_recursion_over=flt(slab.get("apply_recursion_over", 0)) if not is_price_discount else 0,
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
+			max_discount_amount=flt(rule.get("pos_offer_max_discount", 0)),
 		)
 
 	@staticmethod
@@ -414,6 +424,67 @@ class OfferBuilder:
 
 
 # ============================================================================
+# Quota Enrichment
+# ============================================================================
+
+
+def enrich_offers_with_quota(offers, company, date=None):
+	"""Attach POS Offer quota summaries ({scope, period, limit, used, remaining}) to offers.
+
+	Rules map to offers via their Promotional Scheme's ``pos_offer`` ownership
+	link. Offers without a quota (or without a POS Offer) are untouched.
+	"""
+	scheme_names = {o.promotional_scheme for o in offers if o.promotional_scheme}
+	if not scheme_names:
+		return offers
+	managed = {
+		row.name: row.pos_offer
+		for row in frappe.get_all(
+			"Promotional Scheme", {"name": ["in", scheme_names]}, fields=["name", "pos_offer"]
+		)
+		if row.pos_offer
+	}
+	if not managed:
+		return offers
+
+	offer_names = sorted(set(managed.values()))
+	# get_quota_info reads rows via .get(); frappe.get_all rows are frappe._dict
+	# already, but tolerate attribute-only namespaces (e.g. in unit tests).
+	offer_rows = {
+		row.name: row if isinstance(row, dict) else frappe._dict(**vars(row))
+		for row in frappe.get_all(
+			"POS Offer",
+			{"name": ["in", offer_names]},
+			fields=["name", "enforce_usage_quota", "quota_scope", "quota_period", "global_max_usage"],
+		)
+	}
+	company_rows = {}
+	for row in frappe.get_all(
+		"POS Offer Company",
+		{"parent": ["in", offer_names], "parenttype": "POS Offer"},
+		fields=["parent", "company", "enabled", "max_usage"],
+	):
+		company_rows.setdefault(row.parent, []).append(row)
+
+	for offer in offers:
+		pos_offer = managed.get(offer.promotional_scheme)
+		row = offer_rows.get(pos_offer) if pos_offer else None
+		if not row or not cint(row.enforce_usage_quota):
+			continue
+		info = get_quota_info(
+			row, company, posting_date=date, company_rows=company_rows.get(pos_offer)
+		)
+		if not info:
+			continue
+		offer.quota_scope = info["scope"]
+		offer.quota_period = info["period"]
+		offer.quota_limit = info["limit"]
+		offer.quota_used = info["used"]
+		offer.quota_remaining = info["remaining"]
+	return offers
+
+
+# ============================================================================
 # Main API Functions
 # ============================================================================
 
@@ -447,6 +518,8 @@ def get_offers(pos_profile: str) -> list[dict]:
 		# Get standalone pricing rule offers
 		standalone_offers = _get_standalone_pricing_rule_offers(profile.company, date)
 		offers.extend(standalone_offers)
+
+		offers = enrich_offers_with_quota(offers, profile.company, date=date)
 
 		return [offer.to_dict() for offer in offers]
 
@@ -482,7 +555,8 @@ def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:
 		SELECT
 			name, title, apply_on, selling, promotional_scheme,
 			promotional_scheme_id, coupon_code_based, one_time_per_customer,
-			price_or_product_discount, priority, valid_from, valid_upto
+			price_or_product_discount, priority, valid_from, valid_upto,
+			pos_offer_max_discount
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0
