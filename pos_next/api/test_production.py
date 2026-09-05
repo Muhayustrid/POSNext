@@ -255,6 +255,41 @@ class TestCreateProduction(FrappeTestCase):
 			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
 		)
 
+	def test_disabled_material_rejected_before_entry(self):
+		_seed_stock(self.mat, self.warehouse, 10)
+		frappe.db.set_value("Item", self.mat, "disabled", 1)
+		with self.assertRaises(ValidationError) as ctx:
+			create_production(
+				recipe=self.recipe.name,
+				qty=1,
+				items=json.dumps([{"item_code": self.mat, "qty": 2}]),
+				pos_profile=self.pos_profile,
+			)
+		self.assertIn(self.mat, str(ctx.exception))
+		self.assertEqual(
+			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
+		)
+
+	def test_batch_of_other_item_rejected(self):
+		other_item = _make_test_item(has_batch_no=1)
+		foreign_batch = frappe.get_doc(
+			{"doctype": "Batch", "batch_id": f"B-{uuid.uuid4().hex[:8]}", "item": other_item}
+		).insert(ignore_permissions=True)
+		_seed_stock(self.mat, self.warehouse, 10)
+		frappe.db.set_value("Item", self.mat, "has_batch_no", 1)
+		with self.assertRaises(ValidationError) as ctx:
+			create_production(
+				recipe=self.recipe.name,
+				qty=1,
+				items=json.dumps([{"item_code": self.mat, "qty": 2}]),
+				pos_profile=self.pos_profile,
+				batches=json.dumps({self.mat: foreign_batch.name}),
+			)
+		self.assertIn(foreign_batch.name, str(ctx.exception))
+		self.assertEqual(
+			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
+		)
+
 	def test_recipe_of_other_company_rejected(self):
 		other = frappe.db.get_value("Company", {"name": ["!=", self.company]}, "name")
 		if not other:

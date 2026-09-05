@@ -137,8 +137,6 @@
 					</button>
 				</div>
 
-				<div v-if="errorMessage" class="mt-3 text-sm text-red-600">{{ errorMessage }}</div>
-
 				<div class="mt-4 flex justify-end gap-2">
 					<Button variant="subtle" @click="show = false">{{ __("Cancel") }}</Button>
 					<Button variant="solid" :loading="submitting" :disabled="!canSubmit" @click="submit">
@@ -146,6 +144,8 @@
 					</Button>
 				</div>
 			</template>
+
+			<div v-if="errorMessage" class="mt-3 text-sm text-red-600">{{ errorMessage }}</div>
 		</template>
 	</Dialog>
 </template>

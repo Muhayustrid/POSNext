@@ -33,7 +33,7 @@ def _item_flags(item_codes):
 	rows = frappe.get_all(
 		"Item",
 		filters={"name": ["in", item_codes]},
-		fields=["name", "item_name", "stock_uom", "has_batch_no"],
+		fields=["name", "item_name", "stock_uom", "has_batch_no", "disabled"],
 	)
 	return {r.name: r for r in rows}
 
@@ -181,12 +181,14 @@ def create_production(recipe, qty, items, pos_profile, batches=None):
 			info = flags.get(m["item_code"])
 			if not info:
 				frappe.throw(_("Item {0} does not exist").format(m["item_code"]))
+			if info.disabled:
+				frappe.throw(_("Item {0} is disabled").format(m["item_code"]))
 			if info.has_batch_no:
 				batch_no = batches.get(m["item_code"])
 				if not batch_no:
 					frappe.throw(_("Batch is required for material {0}").format(m["item_code"]))
 				batch_qty = flt(
-					frappe.db.get_value("Batch", batch_no, "batch_qty")
+					frappe.db.get_value("Batch", {"name": batch_no, "item": m["item_code"]}, "batch_qty")
 				)
 				if batch_qty < m["qty"]:
 					frappe.throw(
@@ -203,6 +205,10 @@ def create_production(recipe, qty, items, pos_profile, batches=None):
 							m["item_code"], m["qty"] - available, warehouse
 						)
 					)
+
+		fg_info = flags.get(recipe_doc.production_item)
+		if fg_info and fg_info.disabled:
+			frappe.throw(_("Item {0} is disabled").format(recipe_doc.production_item))
 
 		# ---- build the Manufacture Stock Entry ----
 		se = frappe.new_doc("Stock Entry")
@@ -222,7 +228,6 @@ def create_production(recipe, qty, items, pos_profile, batches=None):
 				row["batch_no"] = m["batch_no"]
 			se.append("items", row)
 
-		fg_info = flags.get(recipe_doc.production_item)
 		fg_row = {
 			"item_code": recipe_doc.production_item,
 			"qty": qty,
