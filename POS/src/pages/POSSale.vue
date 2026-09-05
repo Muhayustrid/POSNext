@@ -2175,6 +2175,12 @@ async function handlePaymentCompleted(paymentData) {
 				buyer_name: (cartStore.buyerName || "").trim(),
 				discount_confirmation_code: restrictionStore.code || "",
 				items: preparedItems,
+				// Relay the applied offer rule names (incl. transaction-scope
+				// rules, which never ride item rows) so the offline replay
+				// builds the same server-side offer stash as the online draft save.
+				pos_relayed_offer_rules: cartStore.appliedOffers
+					.map((entry) => entry.code)
+					.filter(Boolean),
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
 				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
 				grand_total: cartStore.grandTotal,

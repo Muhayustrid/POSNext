@@ -1002,7 +1002,7 @@ export function useInvoice() {
 		};
 	}
 
-	async function saveDraft(targetDoctype = "Sales Invoice") {
+	async function saveDraft(targetDoctype = "Sales Invoice", relayedOfferRules = null) {
 		/**
 		 * Save invoice as draft (Step 1)
 		 * This creates the invoice with docstatus=0
@@ -1027,6 +1027,13 @@ export function useInvoice() {
 			update_stock: 1,
 		};
 
+		// Relay the applied offer rule names (incl. transaction-scope rules,
+		// which never ride item rows); update_invoice re-verifies them before
+		// writing the server-managed offer stash.
+		if (Array.isArray(relayedOfferRules) && relayedOfferRules.length > 0) {
+			invoiceData.pos_relayed_offer_rules = relayedOfferRules;
+		}
+
 		if (targetDoctype === "Sales Order") {
 			const today = new Date().toISOString().split("T")[0];
 			invoiceData.delivery_date = today;
@@ -1042,7 +1049,8 @@ export function useInvoice() {
 		deliveryDate = null,
 		writeOffAmount = 0,
 		isCreditSale = false,
-		receivableAccount = null
+		receivableAccount = null,
+		relayedOfferRules = null
 	) {
 		/**
 		 * Two-step submission process with mutex protection:
@@ -1056,7 +1064,11 @@ export function useInvoice() {
 		 *
 		 * @param {string} targetDoctype - The document type to create (Sales Invoice or Sales Order)
 		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
-		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
+		 * @param {number} writeOffAmount - Amount to write off
+		 * @param {boolean} isCreditSale - Submit as credit sale (no payment rows)
+		 * @param {string|null} receivableAccount - "Pay on Receivable Account" target
+		 * @param {Array|null} relayedOfferRules - Applied offer rule names to relay
+		 *   (incl. transaction-scope rules, which never ride item rows)
 		 */
 		return await submitMutex.withLock(async () => {
 			// Check if already submitting (belt and suspenders with mutex)
@@ -1090,6 +1102,13 @@ export function useInvoice() {
 					is_pos: 1,
 					update_stock: 1, // Critical: ensures stock is updated
 				};
+
+				// Relay the applied offer rule names (incl. transaction-scope
+				// rules, which never ride item rows); update_invoice re-verifies
+				// them before writing the server-managed offer stash.
+				if (Array.isArray(relayedOfferRules) && relayedOfferRules.length > 0) {
+					invoiceData.pos_relayed_offer_rules = relayedOfferRules;
+				}
 
 				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
 				if (receivableAccount) {

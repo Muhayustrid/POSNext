@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { resolveOfferUnitDiscount } from "./offerDiscount"
+import { hasDiscountRelevantChange, resolveOfferUnitDiscount } from "./offerDiscount"
 
 describe("resolveOfferUnitDiscount", () => {
 	const offer = { discount_percentage: 50, max_discount_amount: 20000 }
@@ -45,5 +45,40 @@ describe("resolveOfferUnitDiscount", () => {
 
 	it("ignores cap when base rate is unknown", () => {
 		expect(resolveOfferUnitDiscount(offer, 0).type).toBe("percentage")
+	})
+})
+
+describe("hasDiscountRelevantChange", () => {
+	// EditItemDialog always sends the discount/rate keys (even unchanged), so
+	// key presence alone would drop offer attribution on a quantity-only edit.
+	const item = { discount_percentage: 10, discount_amount: 0, rate: 9000 }
+
+	it("ignores a quantity-only edit that re-sends unchanged discount values", () => {
+		expect(
+			hasDiscountRelevantChange(item, { quantity: 3, discount_percentage: 10, discount_amount: 0, rate: 9000 })
+		).toBe(false)
+	})
+
+	it("detects an actual percentage, amount, or rate change", () => {
+		expect(hasDiscountRelevantChange(item, { discount_percentage: 15 })).toBe(true)
+		expect(hasDiscountRelevantChange(item, { discount_amount: 500 })).toBe(true)
+		expect(hasDiscountRelevantChange(item, { rate: 8000 })).toBe(true)
+	})
+
+	it("detects clearing a discount to zero", () => {
+		const discounted = { discount_percentage: 10, discount_amount: 5000, rate: 9000 }
+		expect(hasDiscountRelevantChange(discounted, { discount_percentage: 0, discount_amount: 0 })).toBe(true)
+	})
+
+	it("ignores updates without discount-relevant keys", () => {
+		expect(hasDiscountRelevantChange(item, { quantity: 5, warehouse: "WH-1" })).toBe(false)
+		expect(hasDiscountRelevantChange(item, {})).toBe(false)
+		expect(hasDiscountRelevantChange(item, null)).toBe(false)
+	})
+
+	it("coerces string/number and missing previous values", () => {
+		expect(hasDiscountRelevantChange({ rate: "9000" }, { rate: 9000 })).toBe(false)
+		expect(hasDiscountRelevantChange({}, { discount_percentage: 0 })).toBe(false)
+		expect(hasDiscountRelevantChange({}, { discount_percentage: 10 })).toBe(true)
 	})
 })

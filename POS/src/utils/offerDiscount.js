@@ -24,3 +24,23 @@ export function resolveOfferUnitDiscount(offer, baseRate) {
 	}
 	return { type: "percentage", value: pct, capped: false }
 }
+
+/**
+ * True when an item edit touches the discount/rate with a value that actually
+ * differs from the item's current one. EditItemDialog always sends
+ * discount_percentage / discount_amount / rate (even unchanged), so key
+ * presence alone would drop the line's offer attribution on a quantity-only
+ * edit and spuriously re-arm the discount code gate prompt until offers
+ * re-apply.
+ *
+ * @param {{discount_percentage?: number|string, discount_amount?: number|string, rate?: number|string}} previousItem item before the update is applied
+ * @param {Record<string, unknown>} updates the update payload
+ * @returns {boolean}
+ */
+export function hasDiscountRelevantChange(previousItem, updates) {
+	if (!updates) return false
+	const changed = (key) =>
+		updates[key] !== undefined &&
+		Number(previousItem?.[key] ?? 0) !== Number(updates[key] ?? 0)
+	return changed("discount_percentage") || changed("discount_amount") || changed("rate")
+}

@@ -4,7 +4,7 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
-import { resolveOfferUnitDiscount } from "@/utils/offerDiscount";
+import { hasDiscountRelevantChange, resolveOfferUnitDiscount } from "@/utils/offerDiscount";
 import { PACKAGE_ROLE } from "@/utils/packageQuote";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
@@ -337,7 +337,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			deliveryDate.value,
 			writeOffAmount.value,
 			Boolean(options.isCreditSale),
-			options.receivableAccount || null
+			options.receivableAccount || null,
+			// Relay the applied offer rule names (incl. transaction-scope rules,
+			// which never ride item rows) so update_invoice stashes them on the
+			// invoice — quota enforcement and the discount code gate's header
+			// exemption key on that server-verified stash.
+			getAppliedOfferCodes()
 		);
 		// Reset write-off amount after successful submission
 		if (result) {
@@ -1449,6 +1454,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 			}
 
+			// Detect a manual discount/rate change BEFORE the values are applied
+			// below (EditItemDialog always sends the discount/rate keys, so only
+			// a value that actually differs from the item's current one counts —
+			// a quantity-only edit keeps the line's offer attribution).
+			const manualDiscountChange = hasDiscountRelevantChange(cartItem, updates);
+
 			// Apply other updates
 			if (updates.quantity !== undefined) cartItem.quantity = updates.quantity;
 			if (updates.warehouse !== undefined) cartItem.warehouse = updates.warehouse;
@@ -1466,15 +1477,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updates.original_rate !== undefined)
 				cartItem.original_rate = updates.original_rate;
 
-			// A manual edit of the discount/rate overrides any offer-driven
+			// A manual change of the discount/rate overrides any offer-driven
 			// pricing on this line — drop the offer attribution so the discount
 			// code gate treats the discount as manual (the server decides via
 			// the applied pricing rules stashed from the payload).
-			if (
-				updates.discount_percentage !== undefined ||
-				updates.discount_amount !== undefined ||
-				updates.rate !== undefined
-			) {
+			if (manualDiscountChange) {
 				cartItem.pricing_rules = null;
 			}
 

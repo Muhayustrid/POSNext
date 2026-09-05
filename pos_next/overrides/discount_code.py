@@ -58,23 +58,28 @@ def _item_has_discount(item):
 
 
 def _verified_applied_rules(doc):
-	"""Map of claimed applied Pricing Rule names that are real and enabled:
-	``{rule_name: apply_on}`` — single query over the invoice-level stash and
-	every item's per-row claims. Unknown or disabled claimed rules confer no
+	"""Verify the claimed applied Pricing Rule names in one query.
+
+	Returns ``(verified_rules, invoice_claims)``: ``verified_rules`` maps each
+	claimed name that exists as an enabled Pricing Rule to its ``apply_on``;
+	``invoice_claims`` is the set of names claimed on the invoice-level
+	``pos_applied_offer_rules`` stash — the only source that can exempt the
+	header discount (R3). Unknown or disabled claimed rules confer no
 	exemption (the stash fields are server-managed; this is defense in depth).
 	"""
-	claimed = set(parse_applied_offer_rules(doc.get("pos_applied_offer_rules")))
+	invoice_claims = set(parse_applied_offer_rules(doc.get("pos_applied_offer_rules")))
+	claimed = set(invoice_claims)
 	for item in doc.get("items") or []:
 		claimed.update(parse_applied_offer_rules(item.get("pos_offer_item_rules")))
 	if not claimed:
-		return {}
+		return {}, invoice_claims
 
 	rows = frappe.get_all(
 		"Pricing Rule",
 		filters={"name": ["in", sorted(claimed)], "disable": 0},
 		fields=["name", "apply_on"],
 	)
-	return {row.name: row.apply_on for row in rows}
+	return {row.name: row.apply_on for row in rows}, invoice_claims
 
 
 def _item_is_offer_attributed(item, verified_rules):
@@ -89,14 +94,18 @@ def invoice_has_manual_discount(doc):
 	discount, or any item row that is not offer-attributed.
 
 	Offer-driven discounts (POS Offer promotions, computed server-side) are
-	exempt: the header only when a verified applied rule has
-	``apply_on == "Transaction"`` (R3), an item when its own stash carries a
-	verified rule (R2).
+	exempt: the header only when the invoice-level stash carries a verified
+	applied rule with ``apply_on == "Transaction"`` (R3 — the stash is the
+	item-derived rules plus the client-relayed transaction rule names, merged
+	by update_invoice), an item when its own stash carries a verified rule
+	(R2).
 	"""
-	verified_rules = _verified_applied_rules(doc)
+	verified_rules, invoice_claims = _verified_applied_rules(doc)
 
 	if flt(doc.get("discount_amount") or 0) > 0 or flt(doc.get("additional_discount_percentage") or 0) > 0:
-		has_transaction_rule = any(apply_on == "Transaction" for apply_on in verified_rules.values())
+		has_transaction_rule = any(
+			verified_rules.get(name) == "Transaction" for name in invoice_claims
+		)
 		if not has_transaction_rule:
 			return True
 

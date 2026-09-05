@@ -279,6 +279,24 @@ def _pricing_rule_to_string(value):
 	return ""
 
 
+def _parse_relayed_offer_rules(raw):
+	"""Parse the client-relayed applied pricing rule names (JSON list string or
+	list — the apply_offers response's applied_pricing_rules). Garbage-safe:
+	anything unusable yields an empty list. Every name is re-verified by the
+	consumers (quota enforcement, discount code gate) before it grants anything.
+	"""
+	if not raw:
+		return []
+	if isinstance(raw, str):
+		try:
+			raw = json.loads(raw)
+		except (ValueError, TypeError):
+			return []
+	if not isinstance(raw, list):
+		return []
+	return sorted({cstr(name) for name in raw if cstr(name)})
+
+
 def _strip_server_managed_fields(payload):
 	"""Remove fields that are derived server-side and should not be replayed."""
 	if not isinstance(payload, dict):
@@ -294,6 +312,9 @@ def _strip_server_managed_fields(payload):
 	# string), silently bypassing POS Offer quota enforcement at submit.
 	cleaned.pop("pos_applied_offer_rules", None)
 	cleaned.pop("pos_applied_one_time_rules", None)
+	# The relayed applied-rule list feeds the stash (update_invoice merges it
+	# into pos_applied_offer_rules) but must not reach the document itself.
+	cleaned.pop("pos_relayed_offer_rules", None)
 	# Same for the per-item attribution: it is recomputed server-side from the
 	# applied pricing rules; a client-supplied value could claim a fake
 	# exemption from the discount code gate (overrides/discount_code.py).
@@ -719,6 +740,11 @@ def update_invoice(data):
 	"""Create or update invoice draft (Step 1)."""
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
+		# The relayed applied-rule list must be read before the strip below —
+		# it is server-managed and must not reach the document; update_invoice
+		# verifies nothing here, the consumers (quota enforcement, discount
+		# code gate) re-verify every claimed rule before it grants anything.
+		relayed_offer_rules = data.get("pos_relayed_offer_rules") if isinstance(data, dict) else None
 		data = _strip_server_managed_fields(data)
 
 		pos_profile = data.get("pos_profile")
@@ -926,6 +952,14 @@ def update_invoice(data):
 			invoice_doc.pos_applied_one_time_rules = (
 				json.dumps(sorted(one_time_applied)) if one_time_applied else ""
 			)
+			# Transaction-scope offers never ride item rows: their rule names
+			# reach us only via the client's relay of the apply_offers response
+			# (pos_relayed_offer_rules, captured before the strip above). Merge
+			# them into the invoice-level offer stash so POS Offer quota
+			# enforcement (pos_offer_usage — one idempotent ledger row per
+			# offer) and the discount code gate's header exemption see the same
+			# rule set; both re-verify the names before granting anything.
+			applied_rule_names_seen.update(_parse_relayed_offer_rules(relayed_offer_rules))
 			# Same transport as the one-time list: POS Offer quota enforcement
 			# and usage recording read this on validate/submit/cancel
 			# (pos_next.overrides.pos_offer_usage).
@@ -1309,6 +1343,9 @@ def submit_invoice(invoice=None, data=None):
 	if not isinstance(data, dict):
 		data = {}
 
+	# Capture the relayed applied-rule list before stripping — it feeds the
+	# offer stash via update_invoice below, but must not reach the document.
+	relayed_offer_rules = invoice.get("pos_relayed_offer_rules")
 	invoice = _strip_server_managed_fields(invoice)
 
 	pos_profile = invoice.get("pos_profile")
@@ -1348,6 +1385,12 @@ def submit_invoice(invoice=None, data=None):
 
 		# Get or create invoice
 		if not invoice_name or not frappe.db.exists(doctype, invoice_name):
+			# Hand the relayed applied-rule list back to update_invoice (it was
+			# stripped above so it cannot reach the document): the offline
+			# replay must build the same offer stash as the online draft save.
+			# update_invoice strips it again before doc creation.
+			if relayed_offer_rules:
+				invoice["pos_relayed_offer_rules"] = relayed_offer_rules
 			created = update_invoice(json.dumps(invoice))
 			if not created or not isinstance(created, dict):
 				frappe.throw(_("Failed to create invoice draft"))
@@ -1356,6 +1399,9 @@ def submit_invoice(invoice=None, data=None):
 				frappe.throw(_("Failed to get invoice name from draft"))
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 		else:
+			# Existing draft: the offer stash was already written by the
+			# update_invoice save that created it — the relay is intentionally
+			# dropped here rather than replayed against a known document.
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 			invoice_doc.update(invoice)
 

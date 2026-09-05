@@ -235,8 +235,58 @@ class TestOfferExemption(unittest.TestCase):
 				is_pos=1,
 				company="Company A",
 				discount_amount=25000,
+				# In production this stash is item-derived rules plus the
+				# client-relayed transaction rule names, merged by update_invoice.
 				pos_applied_offer_rules='["PR-TRANS"]',
 				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			validate_invoice_discounts(doc, "validate")  # must not raise
+
+			mock_db.get_value.assert_not_called()
+
+	def test_item_claimed_transaction_rule_does_not_exempt_header(self):
+		# R3 keys the header exemption on the INVOICE-level stash only — an
+		# item claiming a Transaction rule must not free the header discount.
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [SimpleNamespace(name="PR-TRANS", apply_on="Transaction")]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				discount_amount=25000,
+				pos_applied_offer_rules="",
+				items=[
+					FakeItem(
+						item_code="IT1",
+						discount_percentage=10,
+						pos_offer_item_rules='["PR-TRANS"]',
+					)
+				],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+	def test_relay_merged_stash_exempts_header_and_items(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				SimpleNamespace(name="PR-ITEM-1", apply_on="Item Code"),
+				SimpleNamespace(name="PR-TRANS", apply_on="Transaction"),
+			]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				discount_amount=25000,
+				pos_applied_offer_rules='["PR-ITEM-1", "PR-TRANS"]',
+				items=[
+					FakeItem(
+						item_code="IT1",
+						discount_percentage=10,
+						pos_offer_item_rules='["PR-ITEM-1"]',
+					)
+				],
 				discount_confirmation_code="",
 			)
 

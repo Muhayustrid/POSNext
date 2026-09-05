@@ -45,8 +45,13 @@ server-side oleh `update_invoice` (klien tidak bisa memalsukannya):
   dan `disable = 0`** (diverifikasi satu query per invoice; rule tak dikenal /
   disabled tidak memberi pembebasan).
 - **Header (R3):** additional discount di header bebas kode hanya jika minimal
-  satu rule terverifikasi pada stash invoice (`pos_applied_offer_rules`) punya
+  satu rule terverifikasi pada **stash invoice** (`pos_applied_offer_rules`) punya
   `apply_on == "Transaction"`. Tidak ada → header dianggap manual → wajib kode.
+  Karena rule transaction-scope tidak pernah menempel pada baris item, nama rule-nya
+  sampai ke stash lewat **relay klien**: payload invoice membawa
+  `pos_relayed_offer_rules` (daftar `applied_pricing_rules` dari respons
+  `apply_offers`), yang di-merge `update_invoice` ke stash (field di-strip dari
+  input dokumen; setiap nama diverifikasi ada + enabled sebelum memberi apa pun).
 - **Edit manual (R4):** mengedit diskon/rate item secara manual menghapus
   atribusi offer di klien (`pricing_rules` dikosongkan), sehingga diskon
   manual tidak ikut kebebasan offer.
@@ -62,3 +67,7 @@ audit di stash.
 **Catatan rilis (upgrade):** draft in-flight yang memuat diskon manual (dan
 antrean offline) harus diselesaikan atau dibuang **sebelum** upgrade — setelah
 upgrade, submit akan menuntut kode konfirmasi HQ untuk diskon manual tersebut.
+
+**Kupon (POS Coupon) sengaja tetap digerbangi:** tidak ada kanal atribusi untuk
+kupon — diskon kupon dianggap diskon manual dan wajib kode konfirmasi HQ; fitur
+pembebasan kupon di luar lingkup sesuai keputusan produk.
