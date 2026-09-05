@@ -31,6 +31,28 @@ function getDiscountSortValue(offer) {
 	return Number.parseFloat(offer?.discount_amount) || 0;
 }
 
+/**
+ * Normalize quota fields coming from get_offers so the UI can rely on typed
+ * values: `quota_limit` (int, 0 = no quota/unlimited), `quota_used` (int),
+ * `quota_remaining` (int | null; null = unlimited) and `quota_exhausted`.
+ * @param {Object} offer
+ */
+function normalizeOfferQuota(offer = {}) {
+	const limit = Number.parseInt(offer.quota_limit, 10) || 0;
+	const hasQuota = limit > 0;
+	let remaining = null;
+	if (hasQuota && offer.quota_remaining !== null && offer.quota_remaining !== undefined) {
+		remaining = Math.max(Number.parseInt(offer.quota_remaining, 10) || 0, 0);
+	}
+	return {
+		...offer,
+		quota_limit: hasQuota ? limit : 0,
+		quota_used: Number.parseInt(offer.quota_used, 10) || 0,
+		quota_remaining: remaining,
+		quota_exhausted: hasQuota && remaining === 0,
+	};
+}
+
 export const usePOSOffersStore = defineStore("posOffers", () => {
 	const availableOffers = ref([]);
 	const cartSnapshot = ref(defaultSnapshot());
@@ -150,7 +172,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		if (!Array.isArray(offers)) {
 			availableOffers.value = [];
 		} else {
-			availableOffers.value = offers;
+			availableOffers.value = offers.map(normalizeOfferQuota);
 		}
 		hasFetched.value = true;
 	}
@@ -334,6 +356,10 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				return false;
 			}
 
+			if (offer?.quota_exhausted) {
+				return false;
+			}
+
 			const eligibility = checkOfferEligibility(offer);
 			return eligibility.eligible;
 		});
@@ -348,6 +374,10 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	const autoEligibleOffers = computed(() => {
 		return availableOffers.value.filter((offer) => {
 			if (!offer?.auto || offer?.coupon_based) {
+				return false;
+			}
+
+			if (offer?.quota_exhausted) {
 				return false;
 			}
 
