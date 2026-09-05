@@ -1,9 +1,9 @@
 // Copyright (c) 2026, BrainWise and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on("POS Discount Restriction", {
+frappe.ui.form.on("POS Discount Confirmation Code", {
 	refresh(frm) {
-		if (frm.is_new() || !frm.doc.require_confirmation_code) return;
+		if (frm.is_new()) return;
 
 		frm.add_custom_button(__("Generate Codes"), () => {
 			frappe.prompt(
@@ -21,18 +21,28 @@ frappe.ui.form.on("POS Discount Restriction", {
 						options: "Company",
 						label: __("Restrict to Company (optional)"),
 					},
+					{
+						fieldname: "notes",
+						fieldtype: "Small Text",
+						label: __("Notes (optional)"),
+					},
 				],
 				(values) => {
-					frm
-						.call("generate_codes", {
-							count: values.count,
-							company: values.company,
+					frappe
+						.call({
+							method:
+								"pos_next.pos_next.doctype.pos_discount_confirmation_code.pos_discount_confirmation_code.generate_codes",
+							args: {
+								count: values.count,
+								company: values.company,
+								notes: values.notes,
+							},
 						})
 						.then((r) => {
 							const codes = (r.message && r.message.codes) || [];
 							if (!codes.length) return;
 							frappe.msgprint({
-								title: __("Confirmation Codes Generated"),
+								title: __("Discount Codes Generated"),
 								message:
 									"<ul>" +
 									codes
@@ -43,13 +53,13 @@ frappe.ui.form.on("POS Discount Restriction", {
 										.join("") +
 									"</ul>" +
 									`<p class="text-muted">${__(
-										"Each code is one-time use. Share it only with the intended cashier/customer."
+										"Each code stays usable until it is disabled, for every manual discount. Share it only with the intended outlet."
 									)}</p>`,
 								indicator: "green",
 							});
 						});
 				},
-				__("Generate Confirmation Codes")
+				__("Generate Discount Codes")
 			);
 		});
 	},

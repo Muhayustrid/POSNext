@@ -3,7 +3,7 @@
 
 """Unit tests for the rebuilt POS Offer form validation.
 
-Mocked-frappe style (same as test_discount_restriction.py) — run via
+Mocked-frappe style (same as test_offers.py) — run via
 pos_next/_pn_run_tests.py pos_next.api.test_pos_offer_validation
 """
 

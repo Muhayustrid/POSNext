@@ -1,5 +1,7 @@
 # POS Discount Restriction — Design Spec
 
+> **SUPERSEDED (2026-09-06)** — rule system dihapus; diganti discount code gate sederhana. Lihat `2026-09-06-discount-code-gate-design.md`. Dokumen ini tersisa sebagai referensi historis.
+
 Date: 2026-09-04
 Branch: `batasi-diskon`
 Status: Approved-by-default (design decisions below used recommended defaults; reviewable async)

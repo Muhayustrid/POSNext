@@ -2297,10 +2297,10 @@ const localAdditionalDiscount = ref(0);
 // Initialize discount type from settings (default to percentage if enabled, otherwise amount)
 const additionalDiscountType = ref(settingsStore.usePercentageDiscount ? "percentage" : "amount");
 
-// HQ confirmation code for restricted discounts
+// HQ discount code for manual discounts
 const confirmationCode = ref("");
-// A code is needed when the active rule covers the cart: an additional discount
-// hits everything, and restricted item discounts do too. Server re-validates.
+// A code is needed when the cart carries any manual discount: the additional
+// discount hits everything, and discounted items count too. Server re-validates.
 const restrictionCodeRequired = computed(() =>
 	restrictionStore.needsCodeForCart(props.additionalDiscount, props.items || [])
 );

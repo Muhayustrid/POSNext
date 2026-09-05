@@ -610,8 +610,8 @@ const discountTypeOptions = computed(() => [
 	{ value: "amount", label: __("Amount") },
 ]);
 
-// HQ confirmation code needed: an active restriction rule covers this item and
-// this edit applies a discount (percentage/amount or a manual rate reduction).
+// HQ discount code needed: this edit applies a discount (percentage/amount or
+// a manual rate reduction) and no code has been entered yet.
 const restrictionCodeRequired = computed(() => {
 	if (!restrictionStore.applicable || restrictionStore.hasCode) return false;
 	const hasRateDiscount =
@@ -620,7 +620,7 @@ const restrictionCodeRequired = computed(() => {
 		Number(localRate.value) > 0 &&
 		Number(localRate.value) < Number(originalPriceListRate.value);
 	const applied = calculatedDiscount.value > 0 || hasRateDiscount;
-	return Boolean(applied && restrictionStore.needsCodeForItem(localItem.value?.item_code));
+	return Boolean(applied);
 });
 
 // Initialize local state when item changes

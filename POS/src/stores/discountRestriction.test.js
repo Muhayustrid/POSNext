@@ -1,24 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createPinia, setActivePinia } from "pinia"
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 
-const callMock = vi.hoisted(() => vi.fn())
+const callMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/utils/apiWrapper", () => ({ call: callMock }))
+vi.mock("@/utils/apiWrapper", () => ({ call: callMock }));
 vi.mock("@/utils/logger", () => ({
 	logger: { create: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), success: vi.fn() }) },
-}))
+}));
 
-import { useDiscountRestrictionStore } from "./discountRestriction"
-
-const activeStatus = {
-	applicable: true,
-	rule: { name: "RULE-1", title: "Promo Ramadan" },
-	enforce_quota: 1,
-	quota: { mode: "Per Company", limit: 50, used: 10, remaining: 40 },
-	quota_exhausted: false,
-	requires_code: 1,
-	code_items: ["ITEM-A", "ITEM-B"],
-}
+import { useDiscountRestrictionStore } from "./discountRestriction";
 
 describe("discountRestriction store", () => {
 	beforeEach(() => {
@@ -28,28 +18,33 @@ describe("discountRestriction store", () => {
 
 	describe("fetchStatus", () => {
 		it("stores the server status", async () => {
-			callMock.mockResolvedValue(activeStatus)
+			callMock.mockResolvedValue({ enabled: true })
 			const store = useDiscountRestrictionStore()
 
 			await store.fetchStatus("Company A")
 
-			expect(callMock).toHaveBeenCalledWith("pos_next.api.discount_restriction.get_status", {
+			expect(callMock).toHaveBeenCalledWith("pos_next.api.discount_code.get_status", {
 				company: "Company A",
 			})
 			expect(store.applicable).toBe(true)
-			expect(store.activeRule).toEqual({ name: "RULE-1", title: "Promo Ramadan" })
-			expect(store.requiresCode).toBe(true)
-			expect(store.quota).toEqual(activeStatus.quota)
 		})
 
-		it("treats a failed fetch as not applicable (server still enforces)", async () => {
+		it("defaults to enabled when the fetch fails (server still enforces)", async () => {
 			callMock.mockRejectedValue(new Error("offline"))
 			const store = useDiscountRestrictionStore()
 
 			await store.fetchStatus("Company A")
 
+			expect(store.applicable).toBe(true)
+		})
+
+		it("can be switched off by the server payload", async () => {
+			callMock.mockResolvedValue({ enabled: false })
+			const store = useDiscountRestrictionStore()
+
+			await store.fetchStatus("Company A")
+
 			expect(store.applicable).toBe(false)
-			expect(store.requiresCode).toBe(false)
 		})
 
 		it("ignores an empty company", async () => {
@@ -58,34 +53,6 @@ describe("discountRestriction store", () => {
 			await store.fetchStatus("")
 
 			expect(callMock).not.toHaveBeenCalled()
-		})
-	})
-
-	describe("needsCodeForItem", () => {
-		it("is false when the rule does not require codes", async () => {
-			callMock.mockResolvedValue({ ...activeStatus, requires_code: 0 })
-			const store = useDiscountRestrictionStore()
-			await store.fetchStatus("Company A")
-
-			expect(store.needsCodeForItem("ITEM-A")).toBe(false)
-		})
-
-		it("is true for listed items only", async () => {
-			callMock.mockResolvedValue(activeStatus)
-			const store = useDiscountRestrictionStore()
-			await store.fetchStatus("Company A")
-
-			expect(store.needsCodeForItem("ITEM-A")).toBe(true)
-			expect(store.needsCodeForItem("ITEM-B")).toBe(true)
-			expect(store.needsCodeForItem("ITEM-C")).toBe(false)
-		})
-
-		it("is true for every item when the list is empty", async () => {
-			callMock.mockResolvedValue({ ...activeStatus, code_items: [] })
-			const store = useDiscountRestrictionStore()
-			await store.fetchStatus("Company A")
-
-			expect(store.needsCodeForItem("ANY-ITEM")).toBe(true)
 		})
 	})
 
@@ -110,33 +77,34 @@ describe("discountRestriction store", () => {
 
 	describe("needsCodeForCart", () => {
 		it("requires a code for an additional discount", async () => {
-			callMock.mockResolvedValue(activeStatus)
 			const store = useDiscountRestrictionStore()
-			await store.fetchStatus("Company A")
 
 			expect(store.needsCodeForCart(25000, [])).toBe(true)
 		})
 
-		it("requires a code when a restricted item is discounted", async () => {
-			callMock.mockResolvedValue(activeStatus)
+		it("requires a code when any item is discounted", () => {
 			const store = useDiscountRestrictionStore()
-			await store.fetchStatus("Company A")
 
 			const items = [
-				{ item_code: "ITEM-A", discount_percentage: 10 },
-				{ item_code: "ITEM-C", discount_percentage: 50 },
+				{ item_code: "ITEM-A" },
+				{ item_code: "ITEM-B", discount_percentage: 10 },
 			]
 			expect(store.needsCodeForCart(0, items)).toBe(true)
 		})
 
-		it("does not require a code for unrestricted carts", async () => {
-			callMock.mockResolvedValue(activeStatus)
+		it("does not require a code for undiscounted carts", () => {
+			const store = useDiscountRestrictionStore()
+
+			expect(store.needsCodeForCart(0, [{ item_code: "ITEM-A" }])).toBe(false)
+			expect(store.needsCodeForCart(0, [])).toBe(false)
+		})
+
+		it("does not require a code when the gate is disabled", async () => {
+			callMock.mockResolvedValue({ enabled: false })
 			const store = useDiscountRestrictionStore()
 			await store.fetchStatus("Company A")
 
-			const items = [{ item_code: "ITEM-C", discount_percentage: 50 }]
-			expect(store.needsCodeForCart(0, items)).toBe(false)
-			expect(store.needsCodeForCart(0, [{ item_code: "ITEM-A" }])).toBe(false)
+			expect(store.needsCodeForCart(25000, [{ discount_percentage: 50 }])).toBe(false)
 		})
 	})
 
@@ -163,8 +131,7 @@ describe("discountRestriction store", () => {
 			expect(callMock).not.toHaveBeenCalled()
 		})
 
-		it("validateCode sends only restricted, discounted items", async () => {
-			callMock.mockResolvedValue(activeStatus)
+		it("validateCode sends only discounted items", async () => {
 			const store = useDiscountRestrictionStore()
 			await store.fetchStatus("Company A")
 			store.setCode("ABCD2345")
@@ -179,7 +146,8 @@ describe("discountRestriction store", () => {
 			const result = await store.validateCode({ items, additionalDiscount: 0 })
 
 			expect(result.valid).toBe(true)
-			const [, params] = callMock.mock.calls[0]
+			const [method, params] = callMock.mock.calls[0]
+			expect(method).toBe("pos_next.api.discount_code.validate_confirmation_code")
 			expect(params).toMatchObject({
 				code: "ABCD2345",
 				company: "Company A",
@@ -188,11 +156,11 @@ describe("discountRestriction store", () => {
 			const sentItems = JSON.parse(params.items)
 			expect(sentItems).toEqual([
 				{ item_code: "ITEM-A", discount_percentage: 10, discount_amount: 0, rate: 0, price_list_rate: 0, is_rate_manually_edited: 0 },
+				{ item_code: "ITEM-C", discount_percentage: 99, discount_amount: 0, rate: 0, price_list_rate: 0, is_rate_manually_edited: 0 },
 			])
 		})
 
 		it("validateCode returns an error payload instead of throwing", async () => {
-			callMock.mockResolvedValue(activeStatus)
 			const store = useDiscountRestrictionStore()
 			await store.fetchStatus("Company A")
 			store.setCode("ABCD2345")
@@ -206,15 +174,14 @@ describe("discountRestriction store", () => {
 	})
 
 	describe("reset", () => {
-		it("clears status and code", async () => {
-			callMock.mockResolvedValue(activeStatus)
+		it("clears status and code but keeps the gate enabled", async () => {
 			const store = useDiscountRestrictionStore()
 			await store.fetchStatus("Company A")
 			store.setCode("ABCD2345")
 
 			store.reset()
 
-			expect(store.applicable).toBe(false)
+			expect(store.applicable).toBe(true)
 			expect(store.hasCode).toBe(false)
 		})
 	})

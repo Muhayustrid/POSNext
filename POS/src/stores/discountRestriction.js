@@ -6,39 +6,24 @@ import { computed, ref } from "vue";
 const log = logger.create("DiscountRestriction");
 
 /**
- * Discount Restriction store
+ * Discount code gate store.
  *
- * Mirrors the active POS Discount Restriction rule for the shift's company so
- * the POS UI can prompt for an HQ confirmation code and warn about quota
- * before checkout. This is UX only — the server re-validates every rule on
- * draft save and submit (pos_next.overrides.discount_restriction).
+ * Every manual discount (item-level or the cart-level additional discount)
+ * requires a code issued by head office; codes stay usable until disabled.
+ * This store holds the entered code and validates it live for UI feedback —
+ * the server re-validates on every draft save and submit
+ * (pos_next.overrides.discount_code), so a tampered client cannot bypass it.
  */
 export const useDiscountRestrictionStore = defineStore("discountRestriction", () => {
 	// State
-	const status = ref({ applicable: false });
+	const status = ref({ enabled: true });
 	const code = ref("");
 	const isLoading = ref(false);
 	const _company = ref("");
 
 	// Getters
-	const applicable = computed(() => Boolean(status.value.applicable));
-	const activeRule = computed(() => (applicable.value ? status.value.rule : null));
-	const requiresCode = computed(() => applicable.value && Boolean(status.value.requires_code));
-	const enforceQuota = computed(() => applicable.value && Boolean(status.value.enforce_quota));
-	const quotaExhausted = computed(() => applicable.value && Boolean(status.value.quota_exhausted));
-	const quota = computed(() => (applicable.value ? status.value.quota : null));
-	const codeItems = computed(() => (applicable.value ? status.value.code_items || [] : []));
+	const applicable = computed(() => status.value.enabled !== false);
 	const hasCode = computed(() => Boolean((code.value || "").trim()));
-
-	/**
-	 * Whether discounting this item requires an HQ confirmation code.
-	 * An empty code_items list on the rule means every item does.
-	 */
-	function needsCodeForItem(itemCode) {
-		if (!requiresCode.value) return false;
-		if (codeItems.value.length === 0) return true;
-		return codeItems.value.includes(itemCode);
-	}
 
 	/**
 	 * Same discount semantics the server applies: explicit discount fields, or
@@ -59,12 +44,12 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 
 	/**
 	 * Whether checkout needs a code: an additional discount (hits the whole
-	 * cart) or any restricted item discount.
+	 * cart) or any discounted item does.
 	 */
 	function needsCodeForCart(additionalDiscount = 0, items = []) {
-		if (!requiresCode.value) return false;
+		if (!applicable.value) return false;
 		if (Number(additionalDiscount) > 0) return true;
-		return items.some((item) => itemHasDiscount(item) && needsCodeForItem(item.item_code));
+		return items.some((item) => itemHasDiscount(item));
 	}
 
 	// Actions
@@ -73,28 +58,30 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 		_company.value = company;
 		isLoading.value = true;
 		try {
-			const result = await call("pos_next.api.discount_restriction.get_status", { company });
-			status.value = result || { applicable: false };
+			const result = await call("pos_next.api.discount_code.get_status", { company });
+			status.value = result || { enabled: true };
 		} catch (error) {
 			// Status is a UX hint — the server gate still protects checkout.
-			log.warn("Failed to load discount restriction status", error);
-			status.value = { applicable: false };
+			// Default to enabled so the POS keeps asking for the code.
+			log.warn("Failed to load discount gate status", error);
+			status.value = { enabled: true };
 		} finally {
 			isLoading.value = false;
 		}
 	}
 
 	/**
-	 * Live-validate the entered code against the active rule. Returns the
-	 * server payload { valid, message, requires_code } without throwing.
+	 * Live-validate the entered code against the cart about to be saved.
+	 * Returns the server payload { valid, requires_code, message } without
+	 * throwing.
 	 */
 	async function validateCode({ items = [], additionalDiscount = 0 } = {}) {
 		const value = (code.value || "").trim();
 		if (!value) {
-			return { valid: false, requires_code: true, message: "Confirmation code is required" };
+			return { valid: false, requires_code: true, message: "Discount code is required" };
 		}
-		const restrictedItems = items
-			.filter((item) => itemHasDiscount(item) && needsCodeForItem(item.item_code))
+		const discountedItems = items
+			.filter((item) => itemHasDiscount(item))
 			.map((item) => ({
 				item_code: item.item_code,
 				discount_percentage: item.discount_percentage || 0,
@@ -104,18 +91,18 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 				is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			}));
 		try {
-			return await call("pos_next.api.discount_restriction.validate_confirmation_code", {
+			return await call("pos_next.api.discount_code.validate_confirmation_code", {
 				code: value,
 				company: _company.value,
-				items: JSON.stringify(restrictedItems),
+				items: JSON.stringify(discountedItems),
 				additional_discount: additionalDiscount || 0,
 			});
 		} catch (error) {
-			log.warn("Confirmation code validation failed", error);
+			log.warn("Discount code validation failed", error);
 			return {
 				valid: false,
 				requires_code: true,
-				message: "Could not validate the confirmation code. Please try again.",
+				message: "Could not validate the discount code. Please try again.",
 			};
 		}
 	}
@@ -129,7 +116,7 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 	}
 
 	function reset() {
-		status.value = { applicable: false };
+		status.value = { enabled: true };
 		_company.value = "";
 		clearCode();
 	}
@@ -141,14 +128,8 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 		isLoading,
 		// Getters
 		applicable,
-		activeRule,
-		requiresCode,
-		enforceQuota,
-		quotaExhausted,
-		quota,
-		codeItems,
 		hasCode,
-		needsCodeForItem,
+		// Helpers
 		itemHasDiscount,
 		needsCodeForCart,
 		// Actions
