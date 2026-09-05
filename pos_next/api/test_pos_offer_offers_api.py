@@ -11,6 +11,7 @@ import frappe
 
 from pos_next.api.offers import enrich_offers_with_quota
 from pos_next.api.promotions import (
+	_items_with_names,
 	_managed_schemes_for_company,
 	_rule_discount_summary,
 	_scheme_discount_summary,
@@ -233,3 +234,36 @@ class TestPromotionCardHelpers(unittest.TestCase):
 			{"kind": "Discount Amount", "discount_percentage": 0.0, "discount_amount": 5000.0},
 			_rule_discount_summary(doc),
 		)
+
+
+class TestItemsWithNames(unittest.TestCase):
+	"""_items_with_names maps codes to {item_code, item_name} for card display."""
+
+	GET_ALL_PROMO_PATCH = patch("pos_next.api.promotions.frappe.get_all")
+
+	def test_maps_codes_to_names(self):
+		with self.GET_ALL_PROMO_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				SimpleNamespace(item_code="SKU001", item_name="T-shirt"),
+				SimpleNamespace(item_code="SKU002", item_name="Laptop"),
+			]
+			self.assertEqual(
+				[
+					{"item_code": "SKU002", "item_name": "Laptop"},
+					{"item_code": "SKU001", "item_name": "T-shirt"},
+				],
+				_items_with_names(["SKU002", "SKU001"]),
+			)
+
+	def test_falls_back_to_code_when_name_missing(self):
+		with self.GET_ALL_PROMO_PATCH as mock_get_all:
+			mock_get_all.return_value = []
+			self.assertEqual(
+				[{"item_code": "SKU001", "item_name": "SKU001"}],
+				_items_with_names(["SKU001"]),
+			)
+
+	def test_empty_codes_skip_query(self):
+		with self.GET_ALL_PROMO_PATCH as mock_get_all:
+			self.assertEqual([], _items_with_names([]))
+			mock_get_all.assert_not_called()

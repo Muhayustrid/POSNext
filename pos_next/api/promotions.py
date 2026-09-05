@@ -63,6 +63,24 @@ def _rule_discount_summary(pr_doc):
 	}
 
 
+def _items_with_names(codes):
+	"""Map item codes to {item_code, item_name} pairs for card display.
+
+	Cashiers know items by name; codes alone are hard to read. Unknown codes
+	fall back to themselves so the list never silently drops entries.
+	"""
+	codes = [code for code in codes if code]
+	if not codes:
+		return []
+	rows = {
+		row.item_code: row.item_name
+		for row in frappe.get_all(
+			"Item", filters={"item_code": ["in", codes]}, fields=["item_code", "item_name"]
+		)
+	}
+	return [{"item_code": code, "item_name": rows.get(code) or code} for code in codes]
+
+
 def _reject_campaign_mutation():
 	"""Campaigns are managed centrally from POS Offer (Desk) since 2.0."""
 	frappe.throw(
@@ -295,6 +313,12 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 
 	# Combine both lists
 	all_promotions = schemes + pricing_rules
+
+	# Attach item names for the cards (cashiers read names, not codes)
+	for promotion in all_promotions:
+		targets = promotion.get("targets")
+		if targets and targets.get("items"):
+			targets["items"] = _items_with_names(targets["items"])
 
 	return all_promotions
 

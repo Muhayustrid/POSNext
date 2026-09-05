@@ -212,12 +212,16 @@
 									<!-- Promotion cards -->
 									<div
 										v-else
-										class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4"
+										class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 items-start"
 									>
 										<button
 											v-for="promotion in filteredPromotions"
 											:key="promotion.name"
-											@click="!PROMOTIONS_READ_ONLY && handleSelectPromotion(promotion)"
+											@click="
+												PROMOTIONS_READ_ONLY
+													? togglePromotionExpand(promotion)
+													: handleSelectPromotion(promotion)
+											"
 											:class="[
 												'text-start p-4 rounded-xl border transition-all',
 												selectedPromotion?.name === promotion.name
@@ -249,13 +253,23 @@
 														</Badge>
 													</div>
 												</div>
-												<Badge
-													variant="subtle"
-													:theme="getStatusTheme(promotion.status)"
-													size="sm"
-												>
-													{{ promotion.status || __("Active") }}
-												</Badge>
+												<div class="flex items-center gap-1.5">
+													<FeatherIcon
+														name="chevron-down"
+														class="w-4 h-4 text-gray-400 transition-transform"
+														:class="{
+															'rotate-180':
+																expandedPromotion === promotion.name,
+														}"
+													/>
+													<Badge
+														variant="subtle"
+														:theme="getStatusTheme(promotion.status)"
+														size="sm"
+													>
+														{{ promotion.status || __("Active") }}
+													</Badge>
+												</div>
 											</div>
 
 											<!-- Reward -->
@@ -278,7 +292,7 @@
 												</span>
 											</div>
 
-											<!-- What gets discounted -->
+											<!-- What gets discounted (compact preview) -->
 											<div
 												v-if="targetChips(promotion).length"
 												class="flex flex-wrap gap-1.5 mb-3"
@@ -291,6 +305,48 @@
 													<span class="font-medium me-1">{{ chip.label }}:</span>
 													{{ chip.valuesText }}
 												</span>
+											</div>
+
+											<!-- Expanded: full discounted list -->
+											<div
+												v-if="expandedPromotion === promotion.name"
+												class="mt-1 mb-3 pt-3 border-t border-gray-100"
+											>
+												<p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __("Discounted Items") }}
+												</p>
+												<div class="max-h-44 overflow-y-auto flex flex-col gap-1">
+													<div
+														v-for="group in targetGroups(promotion)"
+														:key="group.key"
+														class="flex flex-col gap-1"
+													>
+														<p class="text-[10px] font-medium uppercase text-gray-400">
+															{{ group.label }}
+														</p>
+														<div
+															v-for="(value, index) in group.values"
+															:key="`${group.key}-${index}`"
+															class="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-2 py-1 text-xs"
+														>
+															<span class="font-medium text-gray-800 truncate">
+																{{ itemLabel(value) }}
+															</span>
+															<span
+																v-if="value && value.item_code && itemLabel(value) !== value.item_code"
+																class="text-gray-400 shrink-0"
+															>
+																{{ value.item_code }}
+															</span>
+														</div>
+													</div>
+													<p
+														v-if="targetGroups(promotion).length === 0"
+														class="text-xs text-gray-500"
+													>
+														{{ __("All items (transaction discount)") }}
+													</p>
+												</div>
 											</div>
 
 											<div
@@ -1694,9 +1750,13 @@ function populateFormFromPromotion(promotion) {
 
 // Read-only card helpers: reward + what gets discounted (server sends
 // `discount` {kind, discount_percentage|discount_amount|free_item, free_qty},
-// `targets` {apply_on, items, item_groups, brands} and, for POS Offer
-// campaigns, `max_discount` — the per-unit nominal cap).
-const MAX_TARGETS_SHOWN = 3
+// `targets` {apply_on, items[{item_code,item_name}], item_groups, brands} and,
+// for POS Offer campaigns, `max_discount` — the per-unit nominal cap).
+//
+// The card preview stays minimal (at most 2 names per target group, a plain
+// count beyond that); pressing the card expands the full discounted list.
+const PREVIEW_NAMES_SHOWN = 2
+const expandedPromotion = ref(null)
 
 function discountLabel(promotion) {
 	const discount = promotion.discount
@@ -1714,24 +1774,35 @@ function discountLabel(promotion) {
 	return ""
 }
 
+function itemLabel(item) {
+	if (typeof item === "string") return item
+	return item.item_name || item.item_code || ""
+}
+
+function togglePromotionExpand(promotion) {
+	expandedPromotion.value = expandedPromotion.value === promotion.name ? null : promotion.name
+}
+
+function targetGroups(promotion) {
+	const targets = promotion.targets || {}
+	return [
+		{ key: "items", label: __("Item"), values: targets.items || [] },
+		{ key: "item_groups", label: __("Group"), values: targets.item_groups || [] },
+		{ key: "brands", label: __("Brand"), values: targets.brands || [] },
+	].filter((group) => group.values.length > 0)
+}
+
 function targetChips(promotion) {
 	const targets = promotion.targets
 	if (!targets || targets.apply_on === "Transaction") {
 		return [{ label: __("Scope"), valuesText: __("All Items") }]
 	}
-	const groups = [
-		{ label: __("Item"), values: targets.items || [] },
-		{ label: __("Group"), values: targets.item_groups || [] },
-		{ label: __("Brand"), values: targets.brands || [] },
-	].filter((group) => group.values.length > 0)
-
-	return groups.map((group) => {
-		const shown = group.values.slice(0, MAX_TARGETS_SHOWN).join(", ")
-		const extra = group.values.length - MAX_TARGETS_SHOWN
-		return {
-			label: group.label,
-			valuesText: extra > 0 ? `${shown} +${extra}` : shown,
+	return targetGroups(promotion).map((group) => {
+		const names = group.values.map(itemLabel)
+		if (names.length > PREVIEW_NAMES_SHOWN) {
+			return { label: group.label, valuesText: __("{0} items", [names.length]) }
 		}
+		return { label: group.label, valuesText: names.join(", ") }
 	})
 }
 
