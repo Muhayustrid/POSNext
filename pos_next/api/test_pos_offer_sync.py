@@ -25,7 +25,7 @@ GET_ALL_PATCH = patch("pos_next.overrides.pos_offer_sync.frappe.get_all")
 GET_DOC_PATCH = patch("pos_next.overrides.pos_offer_sync.frappe.get_doc")
 NEW_DOC_PATCH = patch("pos_next.overrides.pos_offer_sync.frappe.new_doc")
 DELETE_DOC_PATCH = patch("pos_next.overrides.pos_offer_sync.frappe.delete_doc")
-RENAME_DOC_PATCH = patch("pos_next.overrides.pos_offer_sync.frappe.rename_doc")
+RENAME_DOC_PATCH = patch("pos_next.overrides.pos_offer_sync.rename_doc")
 
 SLAB_DOCS = ("Promotional Scheme Price Discount", "Promotional Scheme Product Discount")
 
@@ -68,7 +68,8 @@ class FakeChildDoc:
 		self.name = None
 		self.fields = {}
 		self.children = {"items": [], "item_groups": [], "brands": []}
-		self.inserted = False
+		self.inserted = False  # ORM insert() (hooks + generator)
+		self.header_inserted = False  # low-level db_insert() (no hooks)
 		self.saved = 0
 
 	def update(self, values):
@@ -87,6 +88,13 @@ class FakeChildDoc:
 
 	def insert(self, *args, **kwargs):
 		self.inserted = True
+		self.name = self.name or f"NEW-{self.doctype}"
+		return self
+
+	def db_insert(self, *args, **kwargs):
+		# low-level header insert used by _upsert_scheme (no validate/on_update);
+		# deliberately does NOT set `inserted` — only the ORM insert() does.
+		self.header_inserted = True
 		self.name = self.name or f"NEW-{self.doctype}"
 		return self
 
@@ -230,7 +238,14 @@ class TestSyncCreate(unittest.TestCase):
 			self.assertEqual(1, scheme.fields["selling"])
 			self.assertEqual("Item Code", scheme.fields["apply_on"])
 			self.assertEqual("2026-09-30", scheme.fields["valid_upto"])
-			self.assertTrue(scheme.inserted)
+			# the container must stay company-less (scope lives on the rules) —
+			# new_doc() otherwise auto-fills company from the default-company default
+			self.assertIsNone(scheme.fields.get("company"))
+			# the container header must be written low-level (db_insert): a plain
+			# ORM insert trips ERPNext's "Price or product discount slabs are
+			# required" validation and fires its scheme→rule generator.
+			self.assertTrue(scheme.header_inserted)
+			self.assertFalse(scheme.inserted)
 
 
 class TestSyncUpdate(unittest.TestCase):
@@ -362,7 +377,11 @@ class TestOfferTrash(unittest.TestCase):
 			self.assertTrue(header_calls)
 			self.assertEqual({"disable": 1, "pos_offer": None}, header_calls[0].args[2])
 			mock_rename.assert_called_once_with(
-				"Promotional Scheme", "Promo Gula", "Promo Gula (DELETED)", ignore_permissions=True
+				"Promotional Scheme",
+				"Promo Gula",
+				"Promo Gula (DELETED)",
+				ignore_permissions=True,
+				show_alert=False,
 			)
 
 

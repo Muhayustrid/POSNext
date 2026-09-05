@@ -23,6 +23,7 @@ doc_events) block manual edits to managed artifacts unless
 
 import frappe
 from frappe import _
+from frappe.model.rename_doc import rename_doc
 from frappe.utils import cint, flt, nowdate
 
 OFFER_DOCTYPE = "POS Offer"
@@ -80,7 +81,10 @@ def handle_offer_trash(offer, method=None):
 		new_name = f"{scheme_name} (DELETED)"
 		if frappe.db.exists(SCHEME_DOCTYPE, new_name):
 			new_name = f"{scheme_name} (DELETED {nowdate()})"
-		frappe.rename_doc(SCHEME_DOCTYPE, scheme_name, new_name, ignore_permissions=True)
+		# model-level rename_doc: the top-level frappe.rename_doc wrapper no
+		# longer accepts ignore_permissions, and a plain rename would demand
+		# Promotional Scheme write permission from whoever deletes the offer.
+		rename_doc(SCHEME_DOCTYPE, scheme_name, new_name, ignore_permissions=True, show_alert=False)
 
 
 # ==========================================================================
@@ -131,6 +135,10 @@ def _upsert_scheme(offer):
 		"valid_from": offer.valid_from,
 		"valid_upto": offer.valid_to,
 		"disable": 0 if cint(offer.enabled) else 1,
+		# the container must stay company-less: its scope lives on the
+		# per-company Pricing Rules. new_doc() would otherwise auto-fill
+		# `company` from the user/global default company.
+		"company": None,
 	}
 	if scheme_name:
 		frappe.db.set_value(SCHEME_DOCTYPE, scheme_name, values, update_modified=True)
@@ -140,8 +148,13 @@ def _upsert_scheme(offer):
 	scheme.name = offer.title
 	scheme.pos_offer = offer.name
 	scheme.update(values)
-	# insert with no slabs: ERPNext's on_update rule generator creates nothing
-	scheme.insert(ignore_permissions=True)
+	# Write the header row directly. ERPNext's Promotional Scheme validate()
+	# (re-run by its own on_update) demands at least one discount slab, which a
+	# generated container cannot have yet — slab rows are inserted by
+	# _sync_scheme_children right after. A plain insert() would also fire
+	# ERPNext's scheme→rule generator (on_update); db_insert creates the row
+	# with no hooks, so nothing is generated here.
+	scheme.db_insert()
 	return scheme.name
 
 
