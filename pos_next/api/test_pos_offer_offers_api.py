@@ -89,7 +89,9 @@ class TestEnrichOffersWithQuota(unittest.TestCase):
 		Filters must always be passed as the `filters` keyword."""
 
 		def strict_get_all(doctype, *args, **kwargs):
-			if args and "fields" in kwargs:
+			# trip on BOTH real-frappe crash shapes: positional filters combined
+			# with kwarg fields, and fields passed positionally alongside filters
+			if (args and "fields" in kwargs) or len(args) > 1:
 				raise TypeError("DatabaseQuery.execute() got multiple values for argument 'fields'")
 			return offers_get_all_side_effect()(doctype, *args, **kwargs)
 

@@ -109,6 +109,11 @@ def new_doc_recorder():
 	def new_doc(doctype):
 		if doctype == "Promotional Scheme":
 			doc = FakeChildDoc("Promotional Scheme")
+			# simulate frappe's new_doc() default-filling `company` from the
+			# site's default-company global default — without this seed the
+			# company regression assertion in test_scheme_values_stamped cannot
+			# discriminate (an empty double holds no company either way).
+			doc.fields["company"] = "juri (Demo)"
 		elif doctype == "Pricing Rule":
 			doc = FakeChildDoc("Pricing Rule")
 		elif doctype in ("Promotional Scheme Price Discount", "Promotional Scheme Product Discount"):
