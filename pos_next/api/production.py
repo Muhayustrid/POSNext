@@ -1,8 +1,11 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import json
+from uuid import uuid4
+
 import frappe
-from frappe import _
+from frappe import ValidationError, _
 from frappe.utils import flt, getdate
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 
@@ -126,3 +129,144 @@ def _batch_list(item_code, warehouse):
 			)
 	out.sort(key=lambda x: x["expiry_date"] or getdate("9999-12-31"))
 	return out
+
+
+def _parse_items(items):
+	if isinstance(items, str):
+		items = json.loads(items)
+	return [
+		{"item_code": d["item_code"], "qty": flt(d.get("qty"))}
+		for d in items
+		if d.get("item_code")
+	]
+
+
+@frappe.whitelist()
+def create_production(recipe, qty, items, pos_profile, batches=None):
+	"""Consume materials and produce the recipe's item in one Manufacture Stock Entry."""
+	try:
+		company, warehouse = _resolve_profile(pos_profile)
+		qty = flt(qty)
+		if qty <= 0:
+			frappe.throw(_("Production quantity must be greater than zero"))
+
+		recipe_doc = frappe.get_doc("POS Production Recipe", recipe)
+		if recipe_doc.disabled:
+			frappe.throw(_("Recipe {0} is disabled").format(recipe_doc.recipe_name))
+		if not any(c.company == company and c.enabled for c in recipe_doc.companies):
+			frappe.throw(
+				_("Recipe {0} is not available for company {1}").format(recipe_doc.recipe_name, company)
+			)
+
+		materials = _parse_items(items)
+		if not materials:
+			frappe.throw(_("At least one material is required"))
+		batches = json.loads(batches) if isinstance(batches, str) else (batches or {})
+
+		flags = _item_flags([m["item_code"] for m in materials] + [recipe_doc.production_item])
+
+		# ---- pre-flight stock validation (trust boundary: client data is untrusted) ----
+		merged = {}
+		for m in materials:
+			if m["qty"] <= 0:
+				frappe.throw(_("Quantity for {0} must be greater than zero").format(m["item_code"]))
+			if m["item_code"] == recipe_doc.production_item:
+				frappe.throw(_("Material {0} is the production item itself").format(m["item_code"]))
+			if m["item_code"] in merged:
+				merged[m["item_code"]]["qty"] += m["qty"]
+			else:
+				merged[m["item_code"]] = dict(m)
+
+		for m in merged.values():
+			info = flags.get(m["item_code"])
+			if not info:
+				frappe.throw(_("Item {0} does not exist").format(m["item_code"]))
+			if info.has_batch_no:
+				batch_no = batches.get(m["item_code"])
+				if not batch_no:
+					frappe.throw(_("Batch is required for material {0}").format(m["item_code"]))
+				batch_qty = flt(
+					frappe.db.get_value("Batch", batch_no, "batch_qty")
+				)
+				if batch_qty < m["qty"]:
+					frappe.throw(
+						_("Material {0} batch {1} has only {2}, need {3}").format(
+							m["item_code"], batch_no, batch_qty, m["qty"]
+						)
+					)
+				m["batch_no"] = batch_no
+			else:
+				available = _stock_qty(m["item_code"], warehouse)
+				if available < m["qty"]:
+					frappe.throw(
+						_("Material {0} is short by {1} in {2}").format(
+							m["item_code"], m["qty"] - available, warehouse
+						)
+					)
+
+		# ---- build the Manufacture Stock Entry ----
+		se = frappe.new_doc("Stock Entry")
+		se.company = company
+		se.purpose = "Manufacture"
+		se.remarks = f"POS Production: {recipe_doc.recipe_name}"
+		se.set_stock_entry_type()
+
+		for m in merged.values():
+			row = {
+				"item_code": m["item_code"],
+				"qty": m["qty"],
+				"s_warehouse": warehouse,
+				"use_serial_batch_fields": 1,
+			}
+			if m.get("batch_no"):
+				row["batch_no"] = m["batch_no"]
+			se.append("items", row)
+
+		fg_info = flags.get(recipe_doc.production_item)
+		fg_row = {
+			"item_code": recipe_doc.production_item,
+			"qty": qty,
+			"t_warehouse": warehouse,
+			"is_finished_item": 1,
+			"use_serial_batch_fields": 1,
+		}
+		if fg_info and fg_info.has_batch_no:
+			fg_batch = frappe.new_doc("Batch")
+			fg_batch.batch_id = f"{recipe_doc.production_item}-{uuid4().hex[:6].upper()}"
+			fg_batch.item = recipe_doc.production_item
+			fg_batch.insert(ignore_permissions=True)
+			fg_row["batch_no"] = fg_batch.name
+		se.append("items", fg_row)
+
+		# Cashiers have no Stock Entry doctype permission; the POS Production Log
+		# insert below stays permission-enforced and is the real access gate.
+		se.flags.ignore_permissions = True
+		se.insert()
+		se.submit()
+
+		snapshot = [
+			{"item_code": m["item_code"], "qty": m["qty"], "batch_no": m.get("batch_no")}
+			for m in merged.values()
+		]
+		log = frappe.new_doc("POS Production Log")
+		log.recipe = recipe_doc.name
+		log.production_item = recipe_doc.production_item
+		log.qty = qty
+		log.items_used = json.dumps(snapshot)
+		log.stock_entry = se.name
+		log.pos_profile = pos_profile
+		log.company = company
+		log.insert()
+		log.submit()
+
+		return {
+			"stock_entry": se.name,
+			"production_log": log.name,
+			"production_item": recipe_doc.production_item,
+			"qty": qty,
+		}
+	except ValidationError:
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Create Production Error")
+		frappe.throw(_("Error creating production: {0}").format(str(e)))

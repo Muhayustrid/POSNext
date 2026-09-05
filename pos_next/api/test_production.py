@@ -1,13 +1,15 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import json
 import uuid
 
 import frappe
+from frappe import ValidationError
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, getdate
+from frappe.utils import add_days, flt, getdate
 
-from pos_next.api.production import get_production_recipes
+from pos_next.api.production import create_production, get_production_recipes
 
 
 class TestProductionDoctypes(FrappeTestCase):
@@ -157,3 +159,159 @@ class TestGetProductionRecipes(FrappeTestCase):
 			[b["batch_no"] for b in row["batches"]], [dated.name, undated.name]
 		)
 		self.assertEqual(row["batches"][0]["expiry_date"], expiry)
+
+
+def _seed_stock(item_code, warehouse, qty, batch_no=None):
+	se = frappe.new_doc("Stock Entry")
+	se.purpose = "Material Receipt"
+	se.company = frappe.db.get_value("Warehouse", warehouse, "company")
+	se.set_stock_entry_type()
+	row = {
+		"item_code": item_code,
+		"qty": qty,
+		"t_warehouse": warehouse,
+		"use_serial_batch_fields": 1,
+		"basic_rate": 10,
+	}
+	if batch_no:
+		row["batch_no"] = batch_no
+	se.append("items", row)
+	se.insert()
+	se.submit()
+	return se.name
+
+
+class TestCreateProduction(FrappeTestCase):
+	def setUp(self):
+		self.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
+		if not self.pos_profile:
+			self.skipTest("no POS Profile on this site")
+		self.company, self.warehouse = frappe.db.get_value(
+			"POS Profile", self.pos_profile, ["company", "warehouse"]
+		)
+		if not self.warehouse:
+			self.warehouse = frappe.db.get_value(
+				"Warehouse", {"company": self.company, "is_group": 0, "disabled": 0}, "name"
+			)
+		self.fg = _make_test_item()
+		self.mat = _make_test_item()
+		self.recipe = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"CR {uuid.uuid4().hex[:6]}",
+				"production_item": self.fg,
+				"output_qty": 1,
+				"items": [{"item_code": self.mat, "qty": 2}],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+
+	def _bin_qty(self, item_code):
+		return flt(
+			frappe.db.get_value(
+				"Bin", {"item_code": item_code, "warehouse": self.warehouse}, "actual_qty"
+			)
+		)
+
+	def test_happy_path_moves_stock_and_creates_log(self):
+		_seed_stock(self.mat, self.warehouse, 10)
+		result = create_production(
+			recipe=self.recipe.name,
+			qty=3,
+			items=json.dumps([{"item_code": self.mat, "qty": 6}]),
+			pos_profile=self.pos_profile,
+		)
+		# material consumed, finished goods produced
+		self.assertEqual(self._bin_qty(self.mat), 4)
+		self.assertEqual(self._bin_qty(self.fg), 3)
+
+		se = frappe.get_doc("Stock Entry", result["stock_entry"])
+		self.assertEqual(se.docstatus, 1)
+		self.assertEqual(se.purpose, "Manufacture")
+		self.assertIn("POS Production:", se.remarks)
+		self.assertTrue(any(d.is_finished_item for d in se.items))
+
+		log = frappe.get_doc("POS Production Log", result["production_log"])
+		self.assertEqual(log.docstatus, 1)
+		self.assertEqual(log.stock_entry, se.name)
+		self.assertEqual(log.recipe, self.recipe.name)
+		self.assertEqual(flt(log.qty), 3)
+		used = json.loads(log.items_used)
+		self.assertEqual(used[0]["item_code"], self.mat)
+
+	def test_insufficient_stock_rejected_before_entry(self):
+		_seed_stock(self.mat, self.warehouse, 1)
+		with self.assertRaises(ValidationError) as ctx:
+			create_production(
+				recipe=self.recipe.name,
+				qty=1,
+				items=json.dumps([{"item_code": self.mat, "qty": 5}]),
+				pos_profile=self.pos_profile,
+			)
+		self.assertIn(self.mat, str(ctx.exception))
+		# nothing was created for this recipe (FrappeTestCase rolls back per class,
+		# not per test, so a global count would see entries from earlier tests)
+		self.assertEqual(
+			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
+		)
+
+	def test_recipe_of_other_company_rejected(self):
+		other = frappe.db.get_value("Company", {"name": ["!=", self.company]}, "name")
+		if not other:
+			self.skipTest("only one company on this site")
+		frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"OC {uuid.uuid4().hex[:6]}",
+				"production_item": self.fg,
+				"output_qty": 1,
+				"items": [{"item_code": self.mat, "qty": 1}],
+				"companies": [{"company": other, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+		with self.assertRaises(ValidationError):
+			create_production(
+				recipe=frappe.get_all("POS Production Recipe", limit=1, order_by="creation desc")[0].name,
+				qty=1,
+				items=json.dumps([{"item_code": self.mat, "qty": 1}]),
+				pos_profile=self.pos_profile,
+			)
+
+	def test_batch_material_consumes_chosen_batch(self):
+		mat_b = _make_test_item(has_batch_no=1)
+		batch = frappe.new_doc("Batch")
+		batch.batch_id = f"B-{uuid.uuid4().hex[:8]}"
+		batch.item = mat_b
+		batch.insert(ignore_permissions=True)
+		_seed_stock(mat_b, self.warehouse, 4, batch_no=batch.name)
+		_seed_stock(self.mat, self.warehouse, 4)
+
+		result = create_production(
+			recipe=self.recipe.name,
+			qty=2,
+			items=json.dumps(
+				[
+					{"item_code": self.mat, "qty": 2},
+					{"item_code": mat_b, "qty": 3},
+				]
+			),
+			pos_profile=self.pos_profile,
+			batches=json.dumps({mat_b: batch.name}),
+		)
+		se = frappe.get_doc("Stock Entry", result["stock_entry"])
+		row = next(d for d in se.items if d.item_code == mat_b)
+		self.assertTrue(row.serial_and_batch_bundle or row.batch_no)
+		self.assertEqual(flt(frappe.db.get_value("Batch", batch.name, "batch_qty")), 1)
+
+	def test_finished_good_with_batch_gets_new_batch(self):
+		frappe.db.set_value("Item", self.fg, "has_batch_no", 1)
+		_seed_stock(self.mat, self.warehouse, 10)
+		result = create_production(
+			recipe=self.recipe.name,
+			qty=2,
+			items=json.dumps([{"item_code": self.mat, "qty": 4}]),
+			pos_profile=self.pos_profile,
+		)
+		se = frappe.get_doc("Stock Entry", result["stock_entry"])
+		fg_row = next(d for d in se.items if d.is_finished_item)
+		self.assertTrue(fg_row.serial_and_batch_bundle or fg_row.batch_no)
