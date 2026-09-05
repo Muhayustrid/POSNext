@@ -54,6 +54,26 @@
 						<span>{{ __("View Shift") }}</span>
 					</button>
 					<button
+						v-if="canProduction && !offlineStore.isOffline"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors lg:hidden"
+						@click="openProduction()"
+					>
+						<svg
+							class="w-5 h-5 text-amber-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+							/>
+						</svg>
+						<span>{{ __("Production") }}</span>
+					</button>
+					<button
 						v-if="canAccessShiftActions"
 						@click="openDraftDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-3 transition-colors relative"
@@ -258,7 +278,10 @@
 				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
-				<ManagementSlider @menu-clicked="handleManagementMenuClick" />
+				<ManagementSlider
+					:show-production="canProduction"
+					@menu-clicked="handleManagementMenuClick"
+				/>
 
 				<!-- Main Content Container -->
 				<div
@@ -621,6 +644,15 @@
 							offersDialogRef.value
 						)
 				"
+			/>
+
+			<!-- Production Dialog -->
+			<ProductionDialog
+				v-model="showProductionDialog"
+				:pos-profile="shiftStore.profileName"
+				:company="shiftStore.profileCompany"
+				:currency="shiftStore.profileCurrency"
+				@production-created="handleProductionCreated"
 			/>
 
 			<!-- Batch/Serial Dialog -->
@@ -1061,6 +1093,7 @@ import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
 import POSFooter from "@/components/common/POSFooter.vue";
 import ManagementSlider from "@/components/pos/ManagementSlider.vue";
+import ProductionDialog from "@/components/pos/ProductionDialog.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
 import CouponDialog from "@/components/sale/CouponDialog.vue";
@@ -1086,6 +1119,7 @@ import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
+import { usePermissions } from "@/composables/usePermissions";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
@@ -2965,8 +2999,25 @@ function restoreBodyStyles() {
 			showInvoiceManagement.value = true;
 		} else if (menuItem === "products") {
 			showStockLookup.value = true;
+		} else if (menuItem === "production") {
+			openProduction();
 		}
 	}
+
+// Production
+const showProductionDialog = ref(false);
+const { usePermissionCheck } = usePermissions();
+const { hasPermission: canProduction } = usePermissionCheck("POS Production Log", "create");
+
+function openProduction() {
+	if (offlineStore.isOffline) return;
+	showProductionDialog.value = true;
+}
+
+function handleProductionCreated(result) {
+	showSuccess(__("Production complete: {0} × {1}", [result.production_item, result.qty]));
+	handleRefresh();
+}
 
 // Load invoice history data
 async function loadInvoiceHistoryData() {
