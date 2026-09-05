@@ -2,75 +2,90 @@
  "actions": [],
  "allow_rename": 1,
  "autoname": "field:title",
- "creation": "2021-06-06 14:05:24.843820",
+ "creation": "2026-09-05 00:00:00.000000",
  "doctype": "DocType",
- "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "applicability_section",
+  "campaign_section",
   "title",
-  "description",
-  "column_break_4",
-  "disable",
-  "section_break_3",
-  "apply_on",
-  "offer",
-  "company",
-  "pos_profile",
-  "warehouse",
-  "column_break_8",
-  "item",
-  "item_group",
-  "brand",
+  "enabled",
+  "column_break_3",
   "valid_from",
-  "valid_upto",
-  "coupon_based",
-  "auto",
-  "quantity_and_amount_section",
-  "min_qty",
-  "max_qty",
-  "column_break_16",
-  "min_amt",
-  "max_amt",
-  "apply_for_section",
-  "apply_type",
-  "replace_item",
-  "replace_cheapest_item",
-  "column_break_15",
-  "apply_item_code",
-  "apply_item_group",
-  "less_then",
-  "product_discount_scheme_section",
-  "given_qty",
-  "price_discount_scheme_section",
-  "discount_type",
-  "column_break_26",
-  "rate",
-  "discount_amount",
+  "valid_to",
+  "description",
+  "target_section",
+  "apply_on",
+  "offer_type",
+  "column_break_8",
+  "targets",
+  "reward_section",
   "discount_percentage",
-  "loyalty_point_scheme_section",
-  "loyalty_program",
-  "loyalty_points"
+  "max_discount_amount",
+  "column_break_14",
+  "discount_amount",
+  "free_item",
+  "free_qty",
+  "conditions_section",
+  "min_qty",
+  "column_break_19",
+  "min_amt",
+  "companies_section",
+  "companies",
+  "quota_section",
+  "enforce_usage_quota",
+  "column_break_26",
+  "quota_scope",
+  "quota_period",
+  "global_max_usage"
  ],
  "fields": [
   {
-   "fieldname": "applicability_section",
-   "fieldtype": "Section Break"
+   "fieldname": "campaign_section",
+   "fieldtype": "Section Break",
+   "label": "Campaign"
   },
   {
    "fieldname": "title",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Title",
    "reqd": 1,
    "unique": 1
   },
   {
-   "default": "0",
-   "fieldname": "disable",
+   "default": "1",
+   "fieldname": "enabled",
    "fieldtype": "Check",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Disable"
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Valid From"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Valid To",
+   "reqd": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "target_section",
+   "fieldtype": "Section Break",
+   "label": "Target"
   },
   {
    "default": "Item Code",
@@ -78,241 +93,155 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Qualifying Transaction / Item",
+   "label": "Apply On",
    "options": "\nItem Code\nItem Group\nBrand\nTransaction",
    "reqd": 1
   },
   {
-   "fieldname": "company",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "Company",
-   "options": "Company",
+   "default": "Discount Percentage",
+   "fieldname": "offer_type",
+   "fieldtype": "Select",
+   "label": "Offer Type",
+   "options": "Discount Percentage\nDiscount Amount\nFree Item",
    "reqd": 1
-  },
-  {
-   "fieldname": "pos_profile",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "POS Profile",
-   "options": "POS Profile"
-  },
-  {
-   "fetch_from": "pos_profile.warehouse",
-   "fieldname": "warehouse",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "Warehouse",
-   "options": "Warehouse",
-   "search_index": 1
   },
   {
    "fieldname": "column_break_8",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "item",
+   "fieldname": "targets",
+   "fieldtype": "Table",
+   "label": "Targets",
+   "options": "POS Offer Detail"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "reward_section",
+   "fieldtype": "Section Break",
+   "label": "Reward"
+  },
+  {
+   "depends_on": "eval:doc.offer_type==='Discount Percentage'",
+   "fieldname": "discount_percentage",
+   "fieldtype": "Percent",
+   "label": "Discount Percentage"
+  },
+  {
+   "depends_on": "eval:doc.offer_type==='Discount Percentage'",
+   "description": "Nominal cap per unit of the discounted item: effective discount per unit = min(unit price × %, cap). 0 = no cap.",
+   "fieldname": "max_discount_amount",
+   "fieldtype": "Currency",
+   "label": "Max Discount Amount"
+  },
+  {
+   "fieldname": "column_break_14",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.offer_type==='Discount Amount'",
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency",
+   "label": "Discount Amount"
+  },
+  {
+   "depends_on": "eval:doc.offer_type==='Free Item'",
+   "fieldname": "free_item",
    "fieldtype": "Link",
-   "label": "Apply Rule On Item Code",
+   "label": "Free Item",
    "options": "Item"
   },
   {
-   "fieldname": "item_group",
-   "fieldtype": "Link",
-   "label": "Apply Rule On Item Group",
-   "options": "Item Group"
+   "default": "1",
+   "depends_on": "eval:doc.offer_type==='Free Item'",
+   "fieldname": "free_qty",
+   "fieldtype": "Float",
+   "label": "Free Qty"
   },
   {
-   "fieldname": "brand",
-   "fieldtype": "Link",
-   "label": "Apply Rule On Brand",
-   "options": "Brand"
+   "collapsible": 1,
+   "fieldname": "conditions_section",
+   "fieldtype": "Section Break",
+   "label": "Qualifying Conditions"
   },
   {
-   "default": "0",
    "fieldname": "min_qty",
    "fieldtype": "Float",
-   "label": "Min Quantity"
+   "label": "Min Qty",
+   "description": "0 = no minimum"
   },
   {
-   "default": "0",
-   "fieldname": "max_qty",
-   "fieldtype": "Float",
-   "label": "Max Quantity"
-  },
-  {
-   "fieldname": "column_break_16",
+   "fieldname": "column_break_19",
    "fieldtype": "Column Break"
   },
   {
    "fieldname": "min_amt",
-   "fieldtype": "Float",
-   "label": "Min Amount"
+   "fieldtype": "Currency",
+   "label": "Min Amount",
+   "description": "0 = no minimum"
   },
   {
-   "fieldname": "max_amt",
-   "fieldtype": "Float",
-   "label": "Max Amount"
+   "fieldname": "companies_section",
+   "fieldtype": "Section Break",
+   "label": "Companies"
   },
   {
-   "default": "Today",
-   "fieldname": "valid_from",
-   "fieldtype": "Date",
-   "label": "Valid From",
+   "fieldname": "companies",
+   "fieldtype": "Table",
+   "label": "Companies",
+   "options": "POS Offer Company",
    "reqd": 1
   },
   {
-   "fieldname": "valid_upto",
-   "fieldtype": "Date",
-   "label": "Valid Upto"
-  },
-  {
-   "fieldname": "apply_for_section",
+   "collapsible": 1,
+   "fieldname": "quota_section",
    "fieldtype": "Section Break",
-   "label": "Apply For"
+   "label": "Usage Quota"
   },
   {
-   "fieldname": "apply_type",
-   "fieldtype": "Select",
-   "label": "Apply Type",
-   "options": "\nItem Code\nItem Group"
-  },
-  {
-   "fieldname": "column_break_15",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "apply_item_code",
-   "fieldtype": "Link",
-   "label": "Item Code",
-   "options": "Item"
-  },
-  {
-   "fieldname": "apply_item_group",
-   "fieldtype": "Link",
-   "label": "Item Group",
-   "options": "Item Group"
-  },
-  {
-   "fieldname": "price_discount_scheme_section",
-   "fieldtype": "Section Break",
-   "label": "Price Discount Scheme "
-  },
-  {
-   "fieldname": "discount_type",
-   "fieldtype": "Select",
-   "label": "Discount Type",
-   "options": "\nRate\nDiscount Percentage\nDiscount Amount"
+   "default": "0",
+   "description": "Count submitted invoices using this offer and refuse when the limit is reached. 0 limit = unlimited.",
+   "fieldname": "enforce_usage_quota",
+   "fieldtype": "Check",
+   "label": "Enforce Usage Quota"
   },
   {
    "fieldname": "column_break_26",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "rate",
-   "fieldtype": "Float",
-   "label": "Rate"
-  },
-  {
-   "fieldname": "discount_amount",
-   "fieldtype": "Float",
-   "label": "Discount Amount"
-  },
-  {
-   "fieldname": "discount_percentage",
-   "fieldtype": "Float",
-   "label": "Discount Percentage"
-  },
-  {
-   "fieldname": "product_discount_scheme_section",
-   "fieldtype": "Section Break",
-   "label": "Product Discount Scheme"
-  },
-  {
-   "fieldname": "loyalty_point_scheme_section",
-   "fieldtype": "Section Break",
-   "label": "Loyalty Point Scheme"
-  },
-  {
-   "fieldname": "loyalty_program",
-   "fieldtype": "Link",
-   "label": "Default Loyalty Program",
-   "options": "Loyalty Program"
-  },
-  {
-   "fieldname": "loyalty_points",
-   "fieldtype": "Int",
-   "label": "Loyalty Points"
-  },
-  {
-   "fieldname": "given_qty",
-   "fieldtype": "Float",
-   "label": "Given Quantity"
-  },
-  {
-   "fieldname": "quantity_and_amount_section",
-   "fieldtype": "Section Break",
-   "label": "Quantity and Amount Conditions"
-  },
-  {
-   "fieldname": "offer",
+   "default": "Global",
+   "depends_on": "eval:doc.enforce_usage_quota",
+   "fieldname": "quota_scope",
    "fieldtype": "Select",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Promo Type",
-   "options": "Item Price\nGive Product\nGrand Total\nLoyalty Point",
-   "reqd": 1
+   "label": "Quota Scope",
+   "options": "Global\nPer Company"
   },
   {
-   "fieldname": "section_break_3",
-   "fieldtype": "Section Break"
-  },
-  {
-   "default": "1",
-   "fieldname": "auto",
-   "fieldtype": "Check",
-   "label": "Auto Apply"
-  },
-  {
-   "fieldname": "description",
-   "fieldtype": "Small Text",
-   "label": "Description",
-   "reqd": 1
-  },
-  {
-   "fieldname": "column_break_4",
-   "fieldtype": "Column Break"
+   "default": "Campaign Total",
+   "depends_on": "eval:doc.enforce_usage_quota",
+   "description": "Daily resets automatically at midnight (counted per posting date).",
+   "fieldname": "quota_period",
+   "fieldtype": "Select",
+   "label": "Quota Period",
+   "options": "Campaign Total\nDaily"
   },
   {
    "default": "0",
-   "fieldname": "replace_item",
-   "fieldtype": "Check",
-   "label": "Replace Same Item"
-  },
-  {
-   "default": "0",
-   "fieldname": "replace_cheapest_item",
-   "fieldtype": "Check",
-   "label": "Replace Cheapest Item"
-  },
-  {
-   "fieldname": "less_then",
-   "fieldtype": "Float",
-   "label": "Item Rate Should Less Then"
-  },
-  {
-   "default": "0",
-   "fieldname": "coupon_based",
-   "fieldtype": "Check",
-   "label": "Coupon Code Based"
+   "depends_on": "eval:doc.enforce_usage_quota && doc.quota_scope==='Global'",
+   "fieldname": "global_max_usage",
+   "fieldtype": "Int",
+   "label": "Global Max Usage",
+   "description": "0 = unlimited"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:12.013952",
+ "modified": "2026-09-05 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Offer",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {
@@ -324,27 +253,6 @@
    "read": 1,
    "report": 1,
    "role": "System Manager",
-   "share": 1,
-   "write": 1
-  },
-  {
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Sales User",
-   "share": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Sales Manager",
    "share": 1,
    "write": 1
   },
@@ -368,37 +276,20 @@
    "print": 1,
    "read": 1,
    "report": 1,
-   "role": "Sales Master Manager",
-   "share": 1,
-   "write": 1
-  },
-  {
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Accounts User",
-   "share": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
    "role": "Accounts Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager"
   }
  ],
- "row_format": "Dynamic",
- "show_name_in_global_search": 1,
- "show_preview_popup": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
  "track_changes": 1
 }

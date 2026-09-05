@@ -5,31 +5,33 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "item_code",
-  "item_group",
-  "brand"
+  "company",
+  "enabled",
+  "max_usage"
  ],
  "fields": [
   {
-   "fieldname": "item_code",
+   "fieldname": "company",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Item Code",
-   "options": "Item"
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
   },
   {
-   "fieldname": "item_group",
-   "fieldtype": "Link",
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Item Group",
-   "options": "Item Group"
+   "label": "Enabled"
   },
   {
-   "fieldname": "brand",
-   "fieldtype": "Link",
+   "default": "0",
+   "description": "Used in Per Company quota mode. 0 = unlimited.",
+   "fieldname": "max_usage",
+   "fieldtype": "Int",
    "in_list_view": 1,
-   "label": "Brand",
-   "options": "Brand"
+   "label": "Max Usage"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -38,7 +40,7 @@
  "modified": "2026-09-05 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
- "name": "POS Offer Detail",
+ "name": "POS Offer Company",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",
