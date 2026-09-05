@@ -1071,13 +1071,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
+				// Always a percentage: a binding cap folds into an effective
+				// percentage so the discount scales with qty (discount_amount is
+				// a line-total field here and would under-charge for qty > 1)
 				const unit = resolveOfferUnitDiscount(offer, item.price_list_rate)
-				if (unit.type === "amount") {
-					item.discount_percentage = 0
-					item.discount_amount = unit.value
-				} else {
-					item.discount_percentage = unit.value
-				}
+				item.discount_percentage = unit.value
 				item.pricing_rules = [offer.name];
 				recalculateItem(item);
 				applied = true;
