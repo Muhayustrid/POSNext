@@ -48,6 +48,7 @@
 								isOfferApplied(offer)
 									? 'bg-green-50 border-green-500 shadow-md'
 									: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 hover:border-green-400 hover:shadow-lg cursor-pointer',
+								{ 'opacity-50 grayscale': offer.quota_exhausted },
 							]"
 						>
 							<!-- Applied Badge -->
@@ -127,6 +128,21 @@
 								>
 									{{ __("+ Free Item") }}
 								</div>
+								<span
+									v-if="offer.quota_limit > 0"
+									class="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+									:class="
+										offer.quota_exhausted
+											? 'bg-red-100 text-red-700'
+											: 'bg-amber-100 text-amber-700'
+									"
+								>
+									{{
+										offer.quota_exhausted
+											? __("Quota used up")
+											: __("Left {0}/{1}", [offer.quota_remaining, offer.quota_limit])
+									}}
+								</span>
 							</div>
 
 							<!-- Offer Details -->
