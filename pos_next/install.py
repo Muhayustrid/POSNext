@@ -62,6 +62,17 @@ CUSTOM_FIELDS = {
 			"translatable": 0,
 			"description": "One-time HQ confirmation code entered for restricted discounts.",
 		},
+		{
+			"fieldname": "pos_applied_offer_rules",
+			"label": "POS Applied Offer Rules",
+			"fieldtype": "Small Text",
+			"insert_after": "pos_discount_restriction",
+			"hidden": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "Internal: JSON list of Pricing Rules applied to this invoice. Used to enforce POS Offer quotas and record usage on submit/cancel.",
+		},
 	],
 	"Sales Invoice Item": [
 		{
@@ -102,6 +113,31 @@ CUSTOM_FIELDS = {
 			"print_hide": 1,
 			"description": "Selected options at the time of sale (JSON).",
 		},
+	],
+	"Promotional Scheme": [
+		{
+			"fieldname": "pos_offer",
+			"label": "POS Offer",
+			"fieldtype": "Link",
+			"options": "POS Offer",
+			"insert_after": "valid_from",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"description": "POS Offer that manages this scheme (set by the sync engine).",
+		}
+	],
+	"Pricing Rule": [
+		{
+			"fieldname": "pos_offer_max_discount",
+			"label": "POS Offer Max Discount",
+			"fieldtype": "Currency",
+			"insert_after": "discount_amount",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"description": "Per-unit nominal cap for POS Offer percentage discounts (0 = no cap).",
+		}
 	],
 }
 
