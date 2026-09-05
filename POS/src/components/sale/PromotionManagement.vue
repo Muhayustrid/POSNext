@@ -168,12 +168,20 @@
 									</Button>
 								</div>
 
-								<!-- Promotions List -->
-								<div class="flex-1 overflow-y-auto">
+								<!-- Promotions list lives in the main content area (read-only info cards) -->
+							</div>
+
+							<!-- RIGHT SIDE: Work Area -->
+							<div class="flex-1 overflow-y-auto bg-white">
+								<!-- Informational card grid (read-only mode) / selection area -->
+								<div
+									v-if="!selectedPromotion && !isCreating"
+									class="p-6"
+								>
 									<!-- Loading State -->
 									<div
 										v-if="loading && promotions.length === 0"
-										class="flex items-center justify-center py-12"
+										class="flex items-center justify-center py-16"
 									>
 										<div class="text-center">
 											<LoadingIndicator class="w-6 h-6 mx-auto mb-2" />
@@ -186,47 +194,45 @@
 									<!-- Empty State -->
 									<div
 										v-else-if="filteredPromotions.length === 0"
-										class="text-center py-12 px-4"
+										class="flex items-center justify-center py-16"
 									>
-										<div class="text-gray-400 mb-3">
-											<FeatherIcon name="inbox" class="w-12 h-12 mx-auto" />
+										<div class="text-center px-8 max-w-md">
+											<div class="text-gray-300 mb-4">
+												<FeatherIcon name="tag" class="w-16 h-16 mx-auto" />
+											</div>
+											<h3 class="text-xl font-semibold text-gray-900 mb-2">
+												{{ __("No promotions found") }}
+											</h3>
+											<p class="text-sm text-gray-600">
+												{{ __("Active campaigns for this outlet appear here.") }}
+											</p>
 										</div>
-										<p class="text-sm text-gray-600">
-											{{ __("No promotions found") }}
-										</p>
 									</div>
 
-									<!-- Promotion Items -->
-									<div v-else class="p-2 flex flex-col gap-1">
+									<!-- Promotion cards -->
+									<div
+										v-else
+										class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4"
+									>
 										<button
 											v-for="promotion in filteredPromotions"
 											:key="promotion.name"
 											@click="!PROMOTIONS_READ_ONLY && handleSelectPromotion(promotion)"
 											:class="[
-												'w-full text-start p-3 rounded-md transition-all',
+												'text-start p-4 rounded-xl border transition-all',
 												selectedPromotion?.name === promotion.name
-													? 'bg-blue-50 ring-2 ring-blue-500 ring-inset'
-													: 'hover:bg-gray-100',
+													? 'bg-blue-50 border-blue-300 ring-2 ring-blue-500 ring-inset'
+													: 'bg-white border-gray-200 hover:border-gray-300 hover:shadow-md',
 											]"
 										>
-											<div class="flex items-start justify-between mb-2">
+											<div class="flex items-start justify-between gap-2 mb-3">
 												<div class="flex-1 min-w-0">
-													<div class="flex items-center gap-2">
-														<p
-															:class="[
-																'text-sm font-medium truncate',
-																selectedPromotion?.name ===
-																promotion.name
-																	? 'text-blue-900'
-																	: 'text-gray-900',
-															]"
-														>
-															{{ promotion.name }}
-														</p>
+													<p class="text-sm font-semibold text-gray-900 truncate">
+														{{ promotion.name }}
+													</p>
+													<div class="flex items-center gap-1.5 mt-1">
 														<Badge
-															v-if="
-																promotion.source === 'Pricing Rule'
-															"
+															v-if="promotion.source === 'Pricing Rule'"
 															variant="subtle"
 															theme="blue"
 															size="sm"
@@ -234,10 +240,7 @@
 															{{ __("Rule") }}
 														</Badge>
 														<Badge
-															v-else-if="
-																promotion.source ===
-																'Promotional Scheme'
-															"
+															v-else
 															variant="subtle"
 															theme="purple"
 															size="sm"
@@ -245,13 +248,6 @@
 															{{ __("Scheme") }}
 														</Badge>
 													</div>
-													<p class="text-xs text-gray-500 mt-0.5">
-														{{
-															__("{0} items", [
-																promotion.items_count || 0,
-															])
-														}}
-													</p>
 												</div>
 												<Badge
 													variant="subtle"
@@ -261,64 +257,57 @@
 													{{ promotion.status || __("Active") }}
 												</Badge>
 											</div>
-											<div class="flex items-center justify-between text-xs">
+
+											<!-- Reward -->
+											<div
+												v-if="discountLabel(promotion)"
+												class="flex items-baseline gap-2 mb-3"
+											>
+												<span class="text-base font-bold text-green-700">
+													{{ discountLabel(promotion) }}
+												</span>
+												<span
+													v-if="Number(promotion.max_discount) > 0"
+													class="text-[11px] text-gray-500"
+												>
+													{{
+														__("max {0}", [
+															formatCurrency(promotion.max_discount, props.currency),
+														])
+													}}
+												</span>
+											</div>
+
+											<!-- What gets discounted -->
+											<div
+												v-if="targetChips(promotion).length"
+												class="flex flex-wrap gap-1.5 mb-3"
+											>
+												<span
+													v-for="chip in targetChips(promotion)"
+													:key="chip.label"
+													class="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700"
+												>
+													<span class="font-medium me-1">{{ chip.label }}:</span>
+													{{ chip.valuesText }}
+												</span>
+											</div>
+
+											<div
+												class="flex items-center justify-between text-xs pt-2 border-t border-gray-100"
+											>
 												<Badge variant="subtle">
 													{{ translateApplyOn(promotion.apply_on) }}
 												</Badge>
 												<span class="text-gray-500">
 													{{
 														promotion.valid_upto
-															? formatDate(promotion.valid_upto)
+															? __("until {0}", [formatDate(promotion.valid_upto)])
 															: __("No expiry")
 													}}
 												</span>
 											</div>
 										</button>
-									</div>
-								</div>
-							</div>
-
-							<!-- RIGHT SIDE: Work Area -->
-							<div class="flex-1 overflow-y-auto bg-white">
-								<!-- Empty State: No Selection -->
-								<div
-									v-if="!selectedPromotion && !isCreating"
-									class="flex items-center justify-center h-full"
-								>
-									<div class="text-center px-8 max-w-md">
-										<div class="text-gray-300 mb-4">
-											<FeatherIcon name="tag" class="w-16 h-16 mx-auto" />
-										</div>
-										<h3 class="text-xl font-semibold text-gray-900 mb-2">
-											{{ __("Select a Promotion") }}
-										</h3>
-										<p class="text-sm text-gray-600 mb-6">
-											{{
-												__(
-													"Choose a promotion from the list to view and edit, or create a new one to get started"
-												)
-											}}
-										</p>
-										<Button
-											v-if="!PROMOTIONS_READ_ONLY && permissions.create"
-											@click="handleCreateNew"
-											variant="solid"
-										>
-											<template #prefix>
-												<FeatherIcon name="plus" class="w-4 h-4" />
-											</template>
-											{{ __("Create New Promotion") }}
-										</Button>
-										<p
-											v-else-if="!PROMOTIONS_READ_ONLY"
-											class="text-sm text-amber-600"
-										>
-											{{
-												__(
-													"You don't have permission to create promotions"
-												)
-											}}
-										</p>
 									</div>
 								</div>
 
@@ -1043,7 +1032,7 @@
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
 import { useItemSearchStore } from "@/stores/itemSearch";
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency";
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency } from "@/utils/currency";
 import { __ } from "@/utils/translation";
 import CouponManagement from "./CouponManagement.vue";
 import SelectInput from "../common/SelectInput.vue";
@@ -1701,6 +1690,49 @@ function populateFormFromPromotion(promotion) {
 		form.value.min_amt = slab.min_amount || 0;
 		form.value.max_amt = slab.max_amount || 0;
 	}
+}
+
+// Read-only card helpers: reward + what gets discounted (server sends
+// `discount` {kind, discount_percentage|discount_amount|free_item, free_qty},
+// `targets` {apply_on, items, item_groups, brands} and, for POS Offer
+// campaigns, `max_discount` — the per-unit nominal cap).
+const MAX_TARGETS_SHOWN = 3
+
+function discountLabel(promotion) {
+	const discount = promotion.discount
+	if (!discount) return ""
+	if (discount.kind === "Free Item") {
+		return __("Free Item: {0} ×{1}", [discount.free_item || "-", discount.free_qty || 1])
+	}
+	if (discount.kind === "Discount Percentage" && Number(discount.discount_percentage) > 0) {
+		const pct = Number(discount.discount_percentage)
+		return `${Number.isInteger(pct) ? pct : pct.toFixed(1)}% ${__("OFF")}`
+	}
+	if (discount.kind === "Discount Amount" && Number(discount.discount_amount) > 0) {
+		return __("{0} OFF", [formatCurrency(discount.discount_amount, props.currency)])
+	}
+	return ""
+}
+
+function targetChips(promotion) {
+	const targets = promotion.targets
+	if (!targets || targets.apply_on === "Transaction") {
+		return [{ label: __("Scope"), valuesText: __("All Items") }]
+	}
+	const groups = [
+		{ label: __("Item"), values: targets.items || [] },
+		{ label: __("Group"), values: targets.item_groups || [] },
+		{ label: __("Brand"), values: targets.brands || [] },
+	].filter((group) => group.values.length > 0)
+
+	return groups.map((group) => {
+		const shown = group.values.slice(0, MAX_TARGETS_SHOWN).join(", ")
+		const extra = group.values.length - MAX_TARGETS_SHOWN
+		return {
+			label: group.label,
+			valuesText: extra > 0 ? `${shown} +${extra}` : shown,
+		}
+	})
 }
 
 function formatDate(dateStr) {

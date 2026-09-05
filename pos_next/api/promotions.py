@@ -8,6 +8,61 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 
+def _target_summary(doc):
+	"""Eligibility targets for the informational promotion cards (POS dialog).
+
+	Only the column matching ``apply_on`` is populated (mirroring the Targets
+	grid and the sync engine); Transaction-scoped promotions carry no rows.
+	"""
+	apply_on = doc.get("apply_on") or "Transaction"
+	summary = {"apply_on": apply_on, "items": [], "item_groups": [], "brands": []}
+	if apply_on == "Transaction":
+		return summary
+
+	columns = {
+		"Item Code": ("items", "item_code"),
+		"Item Group": ("item_groups", "item_group"),
+		"Brand": ("brands", "brand"),
+	}
+	field, column = columns.get(apply_on, ("items", "item_code"))
+	summary[field] = [row.get(column) for row in (doc.get(field) or []) if row.get(column)]
+	return summary
+
+
+def _scheme_discount_summary(scheme_doc):
+	"""First reward of a Promotional Scheme (its slabs) for card display."""
+	product_slabs = scheme_doc.get("product_discount_slabs") or []
+	if product_slabs:
+		slab = product_slabs[0]
+		return {
+			"kind": "Free Item",
+			"free_item": slab.get("free_item"),
+			"free_qty": flt(slab.get("free_qty") or 0) or 1,
+		}
+	price_slabs = scheme_doc.get("price_discount_slabs") or []
+	slab = price_slabs[0] if price_slabs else frappe._dict()
+	return {
+		"kind": slab.get("rate_or_discount") or "",
+		"discount_percentage": flt(slab.get("discount_percentage") or 0),
+		"discount_amount": flt(slab.get("discount_amount") or 0),
+	}
+
+
+def _rule_discount_summary(pr_doc):
+	"""Reward of a standalone Pricing Rule for card display."""
+	if pr_doc.get("price_or_product_discount") == "Product":
+		return {
+			"kind": "Free Item",
+			"free_item": pr_doc.get("free_item"),
+			"free_qty": flt(pr_doc.get("free_qty") or 0) or 1,
+		}
+	return {
+		"kind": pr_doc.get("rate_or_discount") or "",
+		"discount_percentage": flt(pr_doc.get("discount_percentage") or 0),
+		"discount_amount": flt(pr_doc.get("discount_amount") or 0),
+	}
+
+
 def _reject_campaign_mutation():
 	"""Campaigns are managed centrally from POS Offer (Desk) since 2.0."""
 	frappe.throw(
@@ -50,6 +105,7 @@ def _managed_schemes_for_company(company):
 			"company",
 			"mixed_conditions",
 			"is_cumulative",
+			"pos_offer",
 		],
 	)
 
@@ -113,6 +169,7 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 			"company",
 			"mixed_conditions",
 			"is_cumulative",
+			"pos_offer",
 		],
 		order_by="modified desc",
 	)
@@ -148,6 +205,20 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 			scheme["items_count"] = len(scheme_doc.brands or [])
 		else:
 			scheme["items_count"] = 0
+
+		# Reward + eligibility targets for the informational cards
+		scheme["discount"] = _scheme_discount_summary(scheme_doc)
+		scheme["targets"] = _target_summary(scheme_doc)
+		if scheme.get("pos_offer"):
+			# POS Offer campaigns stamp the per-unit cap on their rules
+			scheme["max_discount"] = flt(
+				frappe.db.get_value(
+					"Pricing Rule",
+					{"promotional_scheme": scheme.name},
+					"pos_offer_max_discount",
+				)
+				or 0
+			)
 
 		# Calculate status based on dates and disable flag
 		if scheme.disable:
@@ -207,6 +278,10 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 			pr["items_count"] = len(pr_doc.brands or [])
 		else:
 			pr["items_count"] = 0
+
+		# Reward + eligibility targets for the informational cards
+		pr["discount"] = _rule_discount_summary(pr_doc)
+		pr["targets"] = _target_summary(pr_doc)
 
 		# Calculate status
 		if pr.disable:

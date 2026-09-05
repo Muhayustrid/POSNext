@@ -10,7 +10,12 @@ from unittest.mock import MagicMock, patch
 import frappe
 
 from pos_next.api.offers import enrich_offers_with_quota
-from pos_next.api.promotions import _managed_schemes_for_company
+from pos_next.api.promotions import (
+	_managed_schemes_for_company,
+	_rule_discount_summary,
+	_scheme_discount_summary,
+	_target_summary,
+)
 
 
 class FakeOffer:
@@ -167,3 +172,64 @@ class TestPromotionMutationGuards(unittest.TestCase):
 		]:
 			with self.assertRaises(frappe.PermissionError):
 				fn(*args)
+
+
+class TestPromotionCardHelpers(unittest.TestCase):
+	"""_target_summary / _scheme_discount_summary / _rule_discount_summary
+	feed the informational promotion cards (what is discounted, by how much)."""
+
+	def test_target_summary_lists_matching_column_only(self):
+		doc = frappe._dict(
+			apply_on="Item Code",
+			items=[frappe._dict(item_code="SKU001"), frappe._dict(item_code="SKU002")],
+			item_groups=[frappe._dict(item_group="Minuman")],
+			brands=[],
+		)
+		summary = _target_summary(doc)
+		self.assertEqual(["SKU001", "SKU002"], summary["items"])
+		self.assertEqual([], summary["item_groups"])
+		self.assertEqual([], summary["brands"])
+		self.assertEqual("Item Code", summary["apply_on"])
+
+	def test_target_summary_transaction_is_empty(self):
+		summary = _target_summary(frappe._dict(apply_on="Transaction", items=[frappe._dict(item_code="X")]))
+		self.assertEqual("Transaction", summary["apply_on"])
+		self.assertEqual([], summary["items"])
+
+	def test_scheme_discount_summary_percentage(self):
+		doc = frappe._dict(
+			product_discount_slabs=[],
+			price_discount_slabs=[
+				frappe._dict(rate_or_discount="Discount Percentage", discount_percentage=50, discount_amount=0)
+			],
+		)
+		self.assertEqual(
+			{"kind": "Discount Percentage", "discount_percentage": 50.0, "discount_amount": 0.0},
+			_scheme_discount_summary(doc),
+		)
+
+	def test_scheme_discount_summary_free_item(self):
+		doc = frappe._dict(
+			product_discount_slabs=[frappe._dict(free_item="BONUS-1", free_qty=2)],
+			price_discount_slabs=[],
+		)
+		self.assertEqual(
+			{"kind": "Free Item", "free_item": "BONUS-1", "free_qty": 2.0},
+			_scheme_discount_summary(doc),
+		)
+
+	def test_scheme_discount_summary_no_slabs(self):
+		doc = frappe._dict(product_discount_slabs=[], price_discount_slabs=[])
+		self.assertEqual({"kind": "", "discount_percentage": 0.0, "discount_amount": 0.0}, _scheme_discount_summary(doc))
+
+	def test_rule_discount_summary_amount(self):
+		doc = frappe._dict(
+			price_or_product_discount="Price",
+			rate_or_discount="Discount Amount",
+			discount_percentage=0,
+			discount_amount=5000,
+		)
+		self.assertEqual(
+			{"kind": "Discount Amount", "discount_percentage": 0.0, "discount_amount": 5000.0},
+			_rule_discount_summary(doc),
+		)
