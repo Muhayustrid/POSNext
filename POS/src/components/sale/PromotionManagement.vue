@@ -99,12 +99,29 @@
 											{ label: __('Disabled Only'), value: 'disabled' },
 										]"
 									/>
+
+									<!-- Read-only notice -->
+									<div
+										class="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800"
+									>
+										<FeatherIcon
+											name="info"
+											class="w-4 h-4 shrink-0 mt-0.5"
+										/>
+										<span>
+											{{
+												__(
+													"Campaigns are managed by head office via POS Offer. This list is informational only."
+												)
+											}}
+										</span>
+									</div>
 								</div>
 
 								<!-- Create New Button -->
 								<div class="p-4 bg-white border-b flex flex-col gap-2">
 									<Button
-										v-if="permissions.create"
+										v-if="!PROMOTIONS_READ_ONLY && permissions.create"
 										@click="handleCreateNew"
 										variant="solid"
 										class="w-full"
@@ -116,7 +133,7 @@
 									</Button>
 									<!-- Permission Warning -->
 									<div
-										v-else
+										v-else-if="!PROMOTIONS_READ_ONLY"
 										class="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg"
 									>
 										<div class="flex items-start gap-2">
@@ -184,7 +201,7 @@
 										<button
 											v-for="promotion in filteredPromotions"
 											:key="promotion.name"
-											@click="handleSelectPromotion(promotion)"
+											@click="!PROMOTIONS_READ_ONLY && handleSelectPromotion(promotion)"
 											:class="[
 												'w-full text-start p-3 rounded-md transition-all',
 												selectedPromotion?.name === promotion.name
@@ -283,7 +300,7 @@
 											}}
 										</p>
 										<Button
-											v-if="permissions.create"
+											v-if="!PROMOTIONS_READ_ONLY && permissions.create"
 											@click="handleCreateNew"
 											variant="solid"
 										>
@@ -292,7 +309,10 @@
 											</template>
 											{{ __("Create New Promotion") }}
 										</Button>
-										<p v-else class="text-sm text-amber-600">
+										<p
+											v-else-if="!PROMOTIONS_READ_ONLY"
+											class="text-sm text-amber-600"
+										>
 											{{
 												__(
 													"You don't have permission to create promotions"
@@ -1035,13 +1055,17 @@ import TranslatedHTML from "../common/TranslatedHTML.vue";
 // Use shared toast
 const { showSuccess, showError, showWarning } = useToast();
 
-// Permission checks
+// Permission checks (kept for the coupons tab, which receives them via props)
 const { canCreatePromotion, canEditPromotion, canDeletePromotion } = usePOSPermissions();
+
+// Campaigns are managed via POS Offer (Desk) — this dialog is informational only.
+const PROMOTIONS_READ_ONLY = true
+
 const permissions = ref({
-	create: true,
-	write: true,
-	delete: true,
-});
+	create: false,
+	write: false,
+	delete: false,
+})
 
 const props = defineProps({
 	modelValue: Boolean,
