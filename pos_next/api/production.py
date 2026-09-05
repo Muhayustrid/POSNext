@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, getdate
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 
 
@@ -121,8 +121,8 @@ def _batch_list(item_code, warehouse):
 				{
 					"batch_no": b.batch_no,
 					"qty": flt(b.qty),
-					"expiry_date": frappe.db.get_value("Batch", b.batch_no, "expiry_date"),
+					"expiry_date": b.expiry_date,
 				}
 			)
-	out.sort(key=lambda x: x["expiry_date"] or "9999-12-31")
+	out.sort(key=lambda x: x["expiry_date"] or getdate("9999-12-31"))
 	return out

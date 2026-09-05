@@ -5,6 +5,7 @@ import uuid
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import add_days, getdate
 
 from pos_next.api.production import get_production_recipes
 
@@ -25,17 +26,17 @@ class TestProductionDoctypes(FrappeTestCase):
 		self.assertTrue(frappe.get_meta("POS Production Log").is_submittable)
 
 
-def _make_test_item(code_suffix=""):
+def _make_test_item(code_suffix="", **extra):
 	code = f"PRD-T-{uuid.uuid4().hex[:8]}{code_suffix}"
-	frappe.get_doc(
-		{
-			"doctype": "Item",
-			"item_code": code,
-			"item_name": code,
-			"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name") or "All Item Groups",
-			"stock_uom": "Nos",
-		}
-	).insert(ignore_permissions=True)
+	doc = {
+		"doctype": "Item",
+		"item_code": code,
+		"item_name": code,
+		"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name") or "All Item Groups",
+		"stock_uom": "Nos",
+	}
+	doc.update(extra)
+	frappe.get_doc(doc).insert(ignore_permissions=True)
 	return code
 
 
@@ -108,3 +109,51 @@ class TestGetProductionRecipes(FrappeTestCase):
 		doc.save(ignore_permissions=True)
 		payload = get_production_recipes(self.pos_profile)
 		self.assertFalse(any(r["name"] == name for r in payload["recipes"]))
+
+	def _receipt(self, item_code, qty, batch_no=None):
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"stock_entry_type": "Material Receipt",
+				"company": self.company,
+				"items": [
+					{
+						"item_code": item_code,
+						"qty": qty,
+						"t_warehouse": self.warehouse,
+						"use_serial_batch_fields": 1,
+						"batch_no": batch_no,
+						"basic_rate": 10,
+					}
+				],
+			}
+		).insert(ignore_permissions=True)
+		se.submit()
+
+	def test_batched_material_lists_mixed_expiry_batches(self):
+		self.mat = _make_test_item(has_batch_no=1)
+		undated = frappe.get_doc(
+			{"doctype": "Batch", "batch_id": f"PRD-B-{uuid.uuid4().hex[:8]}", "item": self.mat}
+		).insert(ignore_permissions=True)
+		expiry = add_days(getdate(), 30)
+		dated = frappe.get_doc(
+			{
+				"doctype": "Batch",
+				"batch_id": f"PRD-B-{uuid.uuid4().hex[:8]}",
+				"item": self.mat,
+				"expiry_date": expiry,
+			}
+		).insert(ignore_permissions=True)
+		self._receipt(self.mat, 3, batch_no=undated.name)
+		self._receipt(self.mat, 5, batch_no=dated.name)
+		self._make_recipe([self.company])
+
+		payload = get_production_recipes(self.pos_profile)
+		recipe = next(r for r in payload["recipes"] if r["production_item"] == self.fg)
+		row = recipe["items"][0]
+		self.assertTrue(row["has_batch_no"])
+		self.assertEqual(row["available_qty"], 8)
+		self.assertEqual(
+			[b["batch_no"] for b in row["batches"]], [dated.name, undated.name]
+		)
+		self.assertEqual(row["batches"][0]["expiry_date"], expiry)
