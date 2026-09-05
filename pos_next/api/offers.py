@@ -440,7 +440,9 @@ def enrich_offers_with_quota(offers, company, date=None):
 	managed = {
 		row.name: row.pos_offer
 		for row in frappe.get_all(
-			"Promotional Scheme", {"name": ["in", scheme_names]}, fields=["name", "pos_offer"]
+			"Promotional Scheme",
+			filters={"name": ["in", scheme_names]},
+			fields=["name", "pos_offer"],
 		)
 		if row.pos_offer
 	}
@@ -454,14 +456,14 @@ def enrich_offers_with_quota(offers, company, date=None):
 		row.name: row if isinstance(row, dict) else frappe._dict(**vars(row))
 		for row in frappe.get_all(
 			"POS Offer",
-			{"name": ["in", offer_names]},
+			filters={"name": ["in", offer_names]},
 			fields=["name", "enforce_usage_quota", "quota_scope", "quota_period", "global_max_usage"],
 		)
 	}
 	company_rows = {}
 	for row in frappe.get_all(
 		"POS Offer Company",
-		{"parent": ["in", offer_names], "parenttype": "POS Offer"},
+		filters={"parent": ["in", offer_names], "parenttype": "POS Offer"},
 		fields=["parent", "company", "enabled", "max_usage"],
 	):
 		company_rows.setdefault(row.parent, []).append(row)

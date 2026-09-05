@@ -81,6 +81,28 @@ class TestEnrichOffersWithQuota(unittest.TestCase):
 			self.assertEqual(0, offer.quota_limit)
 			self.assertIsNone(offer.quota_remaining)
 
+	def test_get_all_called_with_keyword_filters(self):
+		"""Regression: `get_all(dt, {filters}, fields=[...])` (positional filters
+		+ keyword fields) crashes on real frappe with "DatabaseQuery.execute()
+		got multiple values for argument 'fields'", and get_offers swallowed the
+		error into an empty list — no offers ever reached the POS.
+		Filters must always be passed as the `filters` keyword."""
+
+		def strict_get_all(doctype, *args, **kwargs):
+			if args and "fields" in kwargs:
+				raise TypeError("DatabaseQuery.execute() got multiple values for argument 'fields'")
+			return offers_get_all_side_effect()(doctype, *args, **kwargs)
+
+		offer = FakeOffer("PR-A", promotional_scheme="S-Promo Gula")
+		with GET_ALL_PATCH as mock_get_all, DB_PATCH as mock_db:
+			mock_get_all.side_effect = strict_get_all
+			mock_db.count.return_value = 1
+
+			enrich_offers_with_quota([offer], "Company A", date="2026-09-05")
+
+			self.assertEqual("Per Company", offer.quota_scope)
+			self.assertEqual(1, offer.quota_used)
+
 	def test_quota_not_enforced_untouched(self):
 		offer = FakeOffer("PR-A", promotional_scheme="S-Promo Gula")
 
