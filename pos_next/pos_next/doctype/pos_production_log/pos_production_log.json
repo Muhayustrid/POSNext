@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "autoname": "format:PPLOG-{YY}{MM}-{#####}",
+ "creation": "2026-09-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "recipe",
+  "production_item",
+  "column_break_1",
+  "qty",
+  "section_items",
+  "items_used",
+  "section_refs",
+  "stock_entry",
+  "column_break_2",
+  "pos_profile",
+  "company"
+ ],
+ "fields": [
+  {"fieldname": "recipe", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Recipe", "options": "POS Production Recipe", "reqd": 1, "search_index": 1},
+  {"fieldname": "production_item", "fieldtype": "Link", "in_list_view": 1, "label": "Production Item", "options": "Item", "reqd": 1},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "qty", "fieldtype": "Float", "in_list_view": 1, "label": "Qty Produced", "reqd": 1},
+  {"fieldname": "section_items", "fieldtype": "Section Break", "label": "Materials Used"},
+  {"description": "JSON snapshot of the materials actually consumed (cashier may have edited the recipe)",
+   "fieldname": "items_used", "fieldtype": "Long Text", "label": "Items Used"},
+  {"fieldname": "section_refs", "fieldtype": "Section Break", "label": "References"},
+  {"fieldname": "stock_entry", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Stock Entry", "options": "Stock Entry", "read_only": 1, "reqd": 1, "search_index": 1},
+  {"fieldname": "column_break_2", "fieldtype": "Column Break"},
+  {"fieldname": "pos_profile", "fieldtype": "Link", "label": "POS Profile", "options": "POS Profile", "read_only": 1},
+  {"fieldname": "company", "fieldtype": "Link", "in_standard_filter": 1, "label": "Company", "options": "Company", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Pos Next",
+ "name": "POS Production Log",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1, "report": 1, "email": 1, "print": 1, "share": 1, "export": 1},
+  {"role": "Nexus POS Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "report": 1, "email": 1, "print": 1, "share": 1, "export": 1},
+  {"role": "POSNext Cashier", "read": 1, "create": 1, "submit": 1, "print": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
