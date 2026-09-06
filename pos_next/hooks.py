@@ -171,6 +171,7 @@ doc_events = {
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
 			"pos_next.overrides.discount_code.record_code_usage_on_submit",
 			"pos_next.overrides.pos_offer_usage.record_offer_usage_on_submit",
+			"pos_next.overrides.queue_counter.bump_queue_counter",
 		],
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",

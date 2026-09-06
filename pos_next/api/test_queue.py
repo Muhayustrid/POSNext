@@ -86,6 +86,48 @@ class TestQueueAPI(FrappeTestCase):
 		self.assertEqual(a["queue_number"], 1)
 		self.assertEqual(b["queue_number"], 1)
 
+	def test_submit_bumps_counter_to_printed_number(self):
+		from pos_next.overrides.queue_counter import bump_queue_counter
+
+		# struk offline menyimpan nomor 7 tanpa server tahu
+		frappe.get_doc({
+			"doctype": "POS Queue Counter",
+			"company": self.company,
+			"date": nowdate(),
+			"current_number": 2,
+		}).insert(ignore_permissions=True)
+		bump_queue_counter(
+			frappe._dict(
+				company=self.company,
+				pos_queue_number=7,
+				pos_queue_date=nowdate(),
+			),
+			None,
+		)
+		out = get_next_queue_number(self.profile)
+		self.assertEqual(out["queue_number"], 8)
+
+	def test_submit_lower_number_does_not_lower_counter(self):
+		from pos_next.overrides.queue_counter import bump_queue_counter
+
+		# counter 9, invoice sync bernomor 3 -> next tetap 10
+		frappe.get_doc({
+			"doctype": "POS Queue Counter",
+			"company": self.company,
+			"date": nowdate(),
+			"current_number": 9,
+		}).insert(ignore_permissions=True)
+		bump_queue_counter(
+			frappe._dict(
+				company=self.company,
+				pos_queue_number=3,
+				pos_queue_date=nowdate(),
+			),
+			None,
+		)
+		out = get_next_queue_number(self.profile)
+		self.assertEqual(out["queue_number"], 10)
+
 	def test_counter_rolls_to_new_date(self):
 		get_next_queue_number(self.profile)
 		# Backdate the counter row; the next number for today starts at 1 again.
