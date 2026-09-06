@@ -60,6 +60,26 @@
 			</div>
 		</button>
 
+		<!-- Production -->
+		<button
+			v-if="props.showProduction"
+			@click="handleMenuClick('production')"
+			:class="[
+				'w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group',
+				activeMenu === 'production'
+					? 'bg-amber-100 text-amber-600'
+					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+			]"
+			:title="__('Production')"
+		>
+			<FeatherIcon name="tool" class="w-5 h-5" />
+			<div
+				class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50"
+			>
+				{{ __("Production") }}
+			</div>
+		</button>
+
 		<!-- Spacer to push settings to bottom -->
 		<div class="flex-1"></div>
 
@@ -88,15 +108,19 @@
 </template>
 
 <script setup>
-import { FeatherIcon } from "frappe-ui";
-import { ref } from "vue";
+import { FeatherIcon } from "frappe-ui"
+import { ref } from "vue"
 
-const emit = defineEmits(["menu-clicked"]);
+const props = defineProps({
+	showProduction: { type: Boolean, default: false },
+})
 
-const activeMenu = ref("");
+const emit = defineEmits(["menu-clicked"])
+
+const activeMenu = ref("")
 
 function handleMenuClick(menuItem) {
-	activeMenu.value = menuItem;
-	emit("menu-clicked", menuItem);
+	activeMenu.value = menuItem
+	emit("menu-clicked", menuItem)
 }
 </script>
