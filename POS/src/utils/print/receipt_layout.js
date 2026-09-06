@@ -268,6 +268,12 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 				device.crewFontScale ?? server.crewFontScale,
 				DEFAULT_CREW_FONT_SCALE,
 			)
+	// The crew slip is a separate sheet switch, decoupled from the copy count:
+	// copies are identical receipts, the slip prints once after them. The
+	// EOD lane has no crew slip at all.
+	const crewSlipEnabled = eod
+		? false
+		: Boolean(device.crewSlipEnabled ?? server.crewSlipEnabled)
 	// One vertical-density knob for everything direct printed — the receipt AND
 	// the crew slip tighten together, so the two copies stay comparable.
 	const lineSpacing = clampInt(
@@ -301,6 +307,7 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		tailDots,
 		fontScale,
 		crewFontScale,
+		crewSlipEnabled,
 		lineSpacing,
 		sideMarginDots,
 		dots,

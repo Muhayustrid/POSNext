@@ -97,6 +97,22 @@ describe("resolvePrintConfig", () => {
 	it("clamps an absurd feed down to the SDK ceiling", () => {
 		expect(resolvePrintConfig({ feedDots: 9999 }, {}).feedDots).toBe(500)
 	})
+
+	it("resolves crewSlipEnabled: device wins, server next, default false", () => {
+		expect(
+			resolvePrintConfig({ crewSlipEnabled: true }, { crewSlipEnabled: false }),
+		).toMatchObject({ crewSlipEnabled: true })
+		expect(resolvePrintConfig({}, { crewSlipEnabled: true })).toMatchObject({
+			crewSlipEnabled: true,
+		})
+		expect(resolvePrintConfig({}, {})).toMatchObject({ crewSlipEnabled: false })
+	})
+
+	it("never enables a crew slip on the eod lane", () => {
+		expect(
+			resolvePrintConfig({ crewSlipEnabled: true }, {}, { kind: "eod" }),
+		).toMatchObject({ crewSlipEnabled: false })
+	})
 })
 
 describe("scaleCssLengths (96 DPI -> 205 DPI dots)", () => {
