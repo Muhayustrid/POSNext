@@ -12,8 +12,8 @@ them; usage is audited on submit.
 
 Enforcement points (doc_events on Sales Invoice):
 - validate:   hard gate on draft save AND submit — a discounted invoice must
-              carry an active, company-matching code in
-              `discount_confirmation_code`.
+              carry an active code that is valid today and for the invoice's
+              company in `discount_confirmation_code`.
 - on_submit:  re-check the code under a row lock and stamp the usage audit
               fields (used_count, last_used_*).
 
@@ -30,11 +30,14 @@ apply_on == "Transaction" fired (invoice-level `pos_applied_offer_rules`).
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, now_datetime
+from frappe.utils import cint, flt, getdate, now_datetime
 
 from pos_next.overrides.pos_offer_usage import parse_applied_offer_rules
 
 CODE_DOCTYPE = "POS Discount Confirmation Code"
+CODE_COMPANY_DOCTYPE = "POS Discount Code Company"
+# Scopes that consult the child outlet list; anything else is valid everywhere.
+_SCOPED_MODES = ("Selected Outlets", "All Outlets Except")
 
 
 # ==========================================================================
@@ -120,6 +123,46 @@ def invoice_has_manual_discount(doc):
 # ==========================================================================
 
 
+def _code_usability_error(row, company, companies, today=None):
+	"""None when the code row is usable for `company` right now; otherwise the
+	reason as a user-facing message.
+
+	`row` carries the parent fields (status, validity window, company_scope);
+	`companies` is the code's scoped outlet list (None when the scope does not
+	need it). `today` is injectable for callers with their own clock.
+	"""
+	code = row.get("code") or row.get("name")
+	if row.get("status") != "Active":
+		return _("Discount code {0} has been disabled by head office.").format(code)
+
+	today = getdate(today or frappe.utils.today())
+	if row.get("valid_from") and today < getdate(row.valid_from):
+		return _("Discount code {0} is not valid yet (starts on {1}).").format(code, row.valid_from)
+	if row.get("valid_upto") and today > getdate(row.valid_upto):
+		return _("Discount code {0} has expired (was valid until {1}).").format(code, row.valid_upto)
+
+	scope = row.get("company_scope") or ""
+	if not company or scope not in _SCOPED_MODES:
+		return None
+	outlets = set(companies or [])
+	if scope == "Selected Outlets":
+		allowed = company in outlets
+	else:
+		allowed = company not in outlets
+	if not allowed:
+		return _("Discount code {0} is not valid for company {1}.").format(code, company)
+	return None
+
+
+def _scoped_outlets(code_name):
+	"""Outlet names listed on the code's companies child table."""
+	return frappe.get_all(
+		CODE_COMPANY_DOCTYPE,
+		filters={"parenttype": CODE_DOCTYPE, "parent": code_name},
+		plucks="company",
+	)
+
+
 def validate_code(code_value, company):
 	"""Read-only code validation. Returns the code document name; raises a
 	precise ValidationError on any problem."""
@@ -127,13 +170,23 @@ def validate_code(code_value, company):
 	if not code_value:
 		frappe.throw(_("A discount code from head office is required for this discount."))
 
-	row = frappe.db.get_value(CODE_DOCTYPE, {"code": code_value}, ["name", "status", "company"], as_dict=True)
+	row = frappe.db.get_value(
+		CODE_DOCTYPE,
+		{"code": code_value},
+		["name", "code", "status", "valid_from", "valid_upto", "company_scope"],
+		as_dict=True,
+	)
 	if not row:
 		frappe.throw(_("Discount code {0} is not valid.").format(code_value))
-	if row.status != "Active":
-		frappe.throw(_("Discount code {0} has been disabled by head office.").format(code_value))
-	if row.company and company and row.company != company:
-		frappe.throw(_("Discount code {0} is not valid for company {1}.").format(code_value, company))
+
+	# Child rows are only queried when the scope actually consults them.
+	companies = None
+	if company and (row.company_scope or "") in _SCOPED_MODES:
+		companies = _scoped_outlets(row.name)
+
+	error = _code_usability_error(row, company, companies)
+	if error:
+		frappe.throw(error)
 
 	return row.name
 
@@ -168,16 +221,21 @@ def record_code_usage_on_submit(doc, method=None):
 	# increments; the audit update lives in the submit transaction and rolls
 	# back with it.
 	row = frappe.db.get_value(
-		CODE_DOCTYPE, code_name, ["status", "used_count", "company"], as_dict=True, for_update=True
+		CODE_DOCTYPE,
+		code_name,
+		["name", "code", "status", "valid_from", "valid_upto", "company_scope", "used_count"],
+		as_dict=True,
+		for_update=True,
 	)
-	if row.status != "Active":
-		frappe.throw(_("Discount code {0} has been disabled by head office.").format(code_value))
-	# Re-verify the company binding under the lock — it may have changed
-	# between the draft-time check and the submit (mirror of the status check).
-	if row.company and doc.get("company") and row.company != doc.get("company"):
-		frappe.throw(
-			_("Discount code {0} is not valid for company {1}.").format(code_value, doc.get("company"))
-		)
+	# Re-verify full usability under the lock — status, validity window and
+	# outlet scope may all have changed between the draft-time check and the
+	# submit (mirror of the old status/company re-check).
+	companies = None
+	if doc.get("company") and (row.company_scope or "") in _SCOPED_MODES:
+		companies = _scoped_outlets(row.name)
+	error = _code_usability_error(row, doc.get("company"), companies)
+	if error:
+		frappe.throw(error)
 
 	frappe.db.set_value(
 		CODE_DOCTYPE,

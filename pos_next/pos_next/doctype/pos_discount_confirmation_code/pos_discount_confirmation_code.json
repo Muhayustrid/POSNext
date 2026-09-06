@@ -2,16 +2,20 @@
  "actions": [],
  "autoname": "hash",
  "creation": "2026-09-04 00:00:00",
- "description": "Discount access code issued by head office. Cashiers must enter an active code before applying any manual discount (item-level or cart-level). Codes stay usable until head office disables them.",
+ "description": "Discount access code issued by head office. Cashiers must enter an active code before applying any manual discount (item-level or cart-level). Codes carry a validity window (empty dates = always valid until disabled) and an outlet scope (all outlets, a selection, or all except a selection). Leave the code empty to auto-generate it on save.",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "code",
-  "company",
+  "valid_from",
+  "valid_upto",
   "column_break_head",
   "status",
   "notes",
+  "scope_section",
+  "company_scope",
+  "companies",
   "usage_section",
   "used_count",
   "column_break_usage",
@@ -21,21 +25,25 @@
  ],
  "fields": [
   {
+   "description": "Leave empty to auto-generate on save.",
    "fieldname": "code",
    "fieldtype": "Data",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Code",
-   "reqd": 1,
    "unique": 1
   },
   {
-   "description": "Optional — restrict this code to a single company. Leave empty to accept it at every outlet.",
-   "fieldname": "company",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "Company",
-   "options": "Company"
+   "default": "Today",
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Valid From"
+  },
+  {
+   "description": "Leave empty: valid until disabled.",
+   "fieldname": "valid_upto",
+   "fieldtype": "Date",
+   "label": "Valid Upto"
   },
   {
    "fieldname": "column_break_head",
@@ -55,6 +63,26 @@
    "fieldtype": "Small Text",
    "in_list_view": 1,
    "label": "Notes"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Outlet Scope"
+  },
+  {
+   "default": "All Outlets",
+   "fieldname": "company_scope",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company Scope",
+   "options": "All Outlets\nSelected Outlets\nAll Outlets Except"
+  },
+  {
+   "fieldname": "companies",
+   "fieldtype": "Table",
+   "label": "Outlets",
+   "options": "POS Discount Code Company"
   },
   {
    "fieldname": "usage_section",
@@ -95,7 +123,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-06 00:00:00.000000",
+ "modified": "2026-09-06 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Discount Confirmation Code",

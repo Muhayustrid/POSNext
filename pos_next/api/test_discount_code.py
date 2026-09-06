@@ -56,6 +56,20 @@ class FakeDoc(dict):
 		self[key] = value
 
 
+def _code_row(**overrides):
+	"""Parent row as returned by db.get_value(as_dict=True)."""
+	row = {
+		"name": "CODE-1",
+		"code": "ABCD2345",
+		"status": "Active",
+		"valid_from": None,
+		"valid_upto": None,
+		"company_scope": "All Outlets",
+	}
+	row.update(overrides)
+	return frappe._dict(row)
+
+
 class TestValidateCode(unittest.TestCase):
 	def test_missing_code_raises(self):
 		with DB_PATCH as mock_db:
@@ -71,29 +85,94 @@ class TestValidateCode(unittest.TestCase):
 
 	def test_disabled_code_raises(self):
 		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = SimpleNamespace(name="CODE-1", status="Disabled", company=None)
+			mock_db.get_value.return_value = _code_row(status="Disabled")
 			with self.assertRaises(frappe.ValidationError) as ctx:
 				validate_code("ABCD2345", "Company A")
 			self.assertIn("disabled", str(ctx.exception))
 
-	def test_company_mismatch_raises(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = SimpleNamespace(
-				name="CODE-1", status="Active", company="Company B"
-			)
-			with self.assertRaises(frappe.ValidationError):
-				validate_code("ABCD2345", "Company A")
-
-	def test_code_without_company_valid_everywhere(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = SimpleNamespace(name="CODE-1", status="Active", company=None)
+	def test_scope_all_outlets_valid_for_any_company(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="All Outlets")
 
 			self.assertEqual(validate_code("ABCD2345", "Company A"), "CODE-1")
 			self.assertEqual(validate_code("ABCD2345", "Company B"), "CODE-1")
+			mock_get_all.assert_not_called()
+
+	def test_empty_scope_valid_for_any_company(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="")
+
+			self.assertEqual(validate_code("ABCD2345", "Company A"), "CODE-1")
+			self.assertEqual(validate_code("ABCD2345", "Company B"), "CODE-1")
+			mock_get_all.assert_not_called()
+
+	def test_selected_outlets_passes_for_listed_company(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="Selected Outlets")
+			mock_get_all.return_value = ["Company A"]
+
+			self.assertEqual(validate_code("ABCD2345", "Company A"), "CODE-1")
+
+	def test_selected_outlets_raises_for_other_company(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="Selected Outlets")
+			mock_get_all.return_value = ["Company B"]
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_code("ABCD2345", "Company A")
+
+			self.assertIn("not valid for company Company A", str(ctx.exception))
+
+	def test_all_outlets_except_passes_for_unlisted_company(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="All Outlets Except")
+			mock_get_all.return_value = ["Company B"]
+
+			self.assertEqual(validate_code("ABCD2345", "Company A"), "CODE-1")
+
+	def test_all_outlets_except_raises_for_listed_company(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="All Outlets Except")
+			mock_get_all.return_value = ["Company A"]
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_code("ABCD2345", "Company A")
+
+	def test_empty_company_argument_skips_scope_check(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_db.get_value.return_value = _code_row(company_scope="Selected Outlets")
+
+			self.assertEqual(validate_code("ABCD2345", None), "CODE-1")
+			self.assertEqual(validate_code("ABCD2345", ""), "CODE-1")
+			mock_get_all.assert_not_called()
+
+	def test_not_yet_valid_code_raises(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.return_value = _code_row(valid_from="2999-01-01")
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_code("ABCD2345", "Company A")
+
+			self.assertIn("not valid yet", str(ctx.exception))
+
+	def test_expired_code_raises(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.return_value = _code_row(valid_upto="2000-01-01")
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_code("ABCD2345", "Company A")
+
+			self.assertIn("expired", str(ctx.exception))
+
+	def test_validity_window_open_today_passes(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.return_value = _code_row(valid_from="2000-01-01", valid_upto="2999-12-31")
+
+			self.assertEqual(validate_code("ABCD2345", "Company A"), "CODE-1")
 
 	def test_valid_code_normalizes_case(self):
 		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = SimpleNamespace(name="CODE-1", status="Active", company=None)
+			mock_db.get_value.return_value = _code_row()
 
 			self.assertEqual(validate_code("abcd2345", "Company A"), "CODE-1")
 			self.assertEqual(mock_db.get_value.call_args[0][1], {"code": "ABCD2345"})
@@ -377,7 +456,7 @@ class TestValidateInvoiceDiscounts(unittest.TestCase):
 
 	def test_discount_with_valid_code_passes(self):
 		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = SimpleNamespace(name="CODE-1", status="Active", company=None)
+			mock_db.get_value.return_value = _code_row()
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
@@ -399,6 +478,21 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 			return validate_result
 
 		return lookup
+
+	@staticmethod
+	def _lock_row(**overrides):
+		"""Locked re-read of the code row (for_update)."""
+		row = {
+			"name": "CODE-1",
+			"code": "ABCD2345",
+			"status": "Active",
+			"valid_from": None,
+			"valid_upto": None,
+			"company_scope": "All Outlets",
+			"used_count": 3,
+		}
+		row.update(overrides)
+		return frappe._dict(row)
 
 	def test_non_pos_invoice_skipped(self):
 		with DB_PATCH as mock_db:
@@ -425,8 +519,8 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 		):
 			mock_now.return_value = "2026-09-06 10:00:00"
 			mock_db.get_value.side_effect = self._code_lookup(
-				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
-				lock_result=SimpleNamespace(status="Active", used_count=3, company=None),
+				validate_result=_code_row(),
+				lock_result=self._lock_row(used_count=3),
 			)
 			doc = FakeDoc(
 				is_pos=1,
@@ -439,11 +533,12 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 			record_code_usage_on_submit(doc, "on_submit")
 
 			# usage audit written under the submit transaction, code row locked;
-			# the lock re-read includes `company` so the binding is re-verified
+			# the lock re-read carries status/validity/scope so usability is
+			# re-verified before the stamp
 			mock_db.get_value.assert_called_with(
 				"POS Discount Confirmation Code",
 				"CODE-1",
-				["status", "used_count", "company"],
+				["name", "code", "status", "valid_from", "valid_upto", "company_scope", "used_count"],
 				as_dict=True,
 				for_update=True,
 			)
@@ -459,8 +554,8 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 	def test_code_disabled_between_draft_and_submit_blocks(self):
 		with DB_PATCH as mock_db:
 			mock_db.get_value.side_effect = self._code_lookup(
-				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
-				lock_result=SimpleNamespace(status="Disabled", used_count=3, company=None),
+				validate_result=_code_row(),
+				lock_result=self._lock_row(status="Disabled"),
 			)
 			doc = FakeDoc(
 				is_pos=1,
@@ -474,13 +569,35 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 
 			mock_db.set_value.assert_not_called()
 
-	def test_company_rebinding_under_lock_blocks(self):
+	def test_code_expired_between_draft_and_submit_blocks(self):
 		with DB_PATCH as mock_db:
-			# The code was re-bound to another company after the draft passed.
+			# Valid at draft time, valid_upto passed before the submit.
 			mock_db.get_value.side_effect = self._code_lookup(
-				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
-				lock_result=SimpleNamespace(status="Active", used_count=3, company="Company B"),
+				validate_result=_code_row(),
+				lock_result=self._lock_row(valid_upto="2000-01-01"),
 			)
+			doc = FakeDoc(
+				is_pos=1,
+				name="ACC-SINV-0005",
+				company="Company A",
+				items=[FakeItem(discount_percentage=10)],
+				discount_confirmation_code="ABCD2345",
+			)
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				record_code_usage_on_submit(doc, "on_submit")
+
+			self.assertIn("expired", str(ctx.exception))
+			mock_db.set_value.assert_not_called()
+
+	def test_scope_rebinding_under_lock_blocks(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			# The code was re-scoped to other outlets after the draft passed.
+			mock_db.get_value.side_effect = self._code_lookup(
+				validate_result=_code_row(),
+				lock_result=self._lock_row(company_scope="Selected Outlets"),
+			)
+			mock_get_all.return_value = ["Company B"]
 			doc = FakeDoc(
 				is_pos=1,
 				name="ACC-SINV-0003",
@@ -495,12 +612,13 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 			self.assertIn("not valid for company", str(ctx.exception))
 			mock_db.set_value.assert_not_called()
 
-	def test_code_company_still_matches_under_lock_passes(self):
-		with DB_PATCH as mock_db, SESSION_PATCH:
+	def test_code_scope_still_covers_company_under_lock_passes(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all, SESSION_PATCH:
 			mock_db.get_value.side_effect = self._code_lookup(
-				validate_result=SimpleNamespace(name="CODE-1", status="Active", company=None),
-				lock_result=SimpleNamespace(status="Active", used_count=1, company="Company A"),
+				validate_result=_code_row(),
+				lock_result=self._lock_row(company_scope="Selected Outlets", used_count=1),
 			)
+			mock_get_all.return_value = ["Company A"]
 			doc = FakeDoc(
 				is_pos=1,
 				name="ACC-SINV-0004",
@@ -650,8 +768,11 @@ class TestGenerateCodes(unittest.TestCase):
 			self.assertEqual(len(created), 3)
 			for payload in created:
 				self.assertEqual(payload["status"], "Active")
-				self.assertEqual(payload["company"], "Company A")
 				self.assertEqual(payload["notes"], "Lebaran promo")
+				# legacy single-company field is gone: scope + child row instead
+				self.assertNotIn("company", payload)
+				self.assertEqual(payload["company_scope"], "Selected Outlets")
+				self.assertEqual(payload["companies"], [{"company": "Company A"}])
 			for code in result["codes"]:
 				self.assertEqual(len(code), CODE_LENGTH)
 				self.assertTrue(set(code) <= set(CODE_ALPHABET))
@@ -690,12 +811,30 @@ class TestControllerValidate(unittest.TestCase):
 		doc = object.__new__(POSDiscountConfirmationCode)
 		doc.__dict__.update(fields)
 		doc.doctype = "POS Discount Confirmation Code"
+		# defaults matching the doctype (explicit values win)
+		doc.valid_from = fields.get("valid_from")
+		doc.valid_upto = fields.get("valid_upto")
+		doc.company_scope = fields.get("company_scope", "All Outlets")
+		doc.companies = fields.get("companies", [])
 		return doc
 
 	def test_code_is_normalized_and_alphabet_checked(self):
 		doc = self._doc(code="abcd2345", used_count=0, __islocal=1)
 		doc.validate()
 		self.assertEqual(doc.code, "ABCD2345")
+
+	def test_blank_code_is_auto_generated(self):
+		with patch(f"{CTRL_PATH}.secrets.choice") as mock_choice, CTRL_DB_PATCH as mock_db:
+			# deterministic sequence: a colliding code, then a fresh one
+			mock_choice.side_effect = list("AAABBB22") + list("AAABBB23")
+			mock_db.exists.side_effect = [True, False]
+
+			doc = self._doc(code="", used_count=0, __islocal=1)
+			doc.validate()
+
+			self.assertEqual(doc.code, "AAABBB23")
+			# first candidate collided, generation retried once
+			self.assertEqual(mock_db.exists.call_count, 2)
 
 	def test_ambiguous_characters_rejected(self):
 		doc = self._doc(code="AB1", used_count=0, __islocal=1)
@@ -714,6 +853,39 @@ class TestControllerValidate(unittest.TestCase):
 			mock_db.get_value.return_value = "ABCD2345"
 			doc = self._doc(code="ABCD2345", used_count=2, name="CODE-1", status="Disabled")
 			doc.validate()  # must not raise
+
+	def test_valid_upto_before_valid_from_raises(self):
+		doc = self._doc(
+			code="ABCD2345", used_count=0, __islocal=1, valid_from="2026-09-10", valid_upto="2026-09-01"
+		)
+		with self.assertRaises(frappe.ValidationError):
+			doc.validate()
+
+	def test_validity_window_in_order_passes(self):
+		doc = self._doc(
+			code="ABCD2345",
+			used_count=0,
+			__islocal=1,
+			valid_from="2026-09-01",
+			valid_upto="2026-09-30",
+		)
+		doc.validate()  # must not raise
+
+	def test_scope_without_outlets_raises(self):
+		for scope in ("Selected Outlets", "All Outlets Except"):
+			doc = self._doc(code="ABCD2345", used_count=0, __islocal=1, company_scope=scope, companies=[])
+			with self.assertRaises(frappe.ValidationError):
+				doc.validate()
+
+	def test_scope_with_outlet_passes(self):
+		doc = self._doc(
+			code="ABCD2345",
+			used_count=0,
+			__islocal=1,
+			company_scope="Selected Outlets",
+			companies=[{"company": "Company A"}],
+		)
+		doc.validate()  # must not raise
 
 
 if __name__ == "__main__":

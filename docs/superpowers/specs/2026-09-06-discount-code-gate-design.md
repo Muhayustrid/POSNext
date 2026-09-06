@@ -71,3 +71,36 @@ upgrade, submit akan menuntut kode konfirmasi HQ untuk diskon manual tersebut.
 **Kupon (POS Coupon) sengaja tetap digerbangi:** tidak ada kanal atribusi untuk
 kupon — diskon kupon dianggap diskon manual dan wajib kode konfirmasi HQ; fitur
 pembebasan kupon di luar lingkup sesuai keputusan produk.
+
+## Addendum 2 (2026-09-06) — auto-generate, outlet scope, validity window
+
+**Auto-generate:** field `code` tidak lagi `reqd` — baris dengan kode kosong
+di-generate otomatis saat save (`secrets.choice` x 8 dari alphabet tanpa
+`0O1IL`, unik terhadap kode lain, retry terbatas). Kode yang sudah dipakai
+(`used_count > 0`) tetap tidak boleh diubah nilainya.
+
+**Scope outlet 3-mode:** field Link `company` tunggal diganti `company_scope`
+(Select: `All Outlets` / `Selected Outlets` / `All Outlets Except`) + child
+table `companies` (`POS Discount Code Company`, kolom `company`). Semantik:
+
+- `All Outlets` (atau kosong, utk data lama) → berlaku di semua outlet.
+- `Selected Outlets` → hanya di outlet yang terdaftar.
+- `All Outlets Except` → di semua outlet KECUALI yang terdaftar.
+- Invoice tanpa company → pemeriksaan scope dilewati (senada leniensi lama).
+
+`generate_codes(count, company, notes)` tetap: `company` kini membuat kode
+dengan scope `Selected Outlets` + satu baris child (bukan field lama).
+
+**Validity window:** `valid_from` (default hari ini; NULL = berlaku seketika)
+dan `valid_upto` (opsional; NULL = berlaku sampai di-disable). Penegakan di
+server membandingkan `frappe.utils.today()`; pesan error menyebut alasannya
+(disabled / belum berlaku / kedaluwarsa / tidak berlaku untuk company X).
+`on_submit` re-check di bawah row lock kini memverifikasi ulang status,
+window, dan scope sekaligus (bukan hanya status + company seperti sebelumnya).
+
+**Migrasi:** patch `v2_3_1.discount_code_company_scope` ([post_model_sync],
+butuh child doctype; kolom `company` lama masih ada di DB karena model sync
+tak pernah drop kolom) membaca baris ber-`company`, men-set
+`company_scope = "Selected Outlets"`, dan menyisipkan child row-nya; baris
+yang sudah punya child dilewati (idempotent). Kolom `company` sisa di tabel
+tidak di-drop (kebersihan kolom basi menyusul bila perlu, pola patch v2_3_0).
