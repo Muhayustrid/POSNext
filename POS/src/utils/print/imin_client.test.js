@@ -417,7 +417,7 @@ describe("createIminDriver", () => {
 			SLOW_TEST_TIMEOUT_MS,
 		)
 
-		it("logs one line per copy with the reservation numbers", async () => {
+		it("logs one line per sheet with the reservation numbers", async () => {
 			// The pause cannot be observed remotely (POS Print Log only sees the
 			// whole print), so the driver has to say per copy how the wall clock
 			// was spent — otherwise a swallowed pause on site is undiagnosable.
@@ -443,26 +443,27 @@ describe("createIminDriver", () => {
 			})
 			expect(logInfo).toHaveBeenCalledTimes(2)
 
-			const copies = logInfo.mock.calls.map((call) => call[1])
-			for (const [idx, copy] of copies.entries()) {
-				// 1-based copy index and the bitmap height the estimate came from.
-				expect(copy).toMatchObject({
-					copy: idx + 1,
+			const sheets = logInfo.mock.calls.map((call) => call[1])
+			for (const [idx, sheet] of sheets.entries()) {
+				// 1-based sheet index and the bitmap height the estimate came from.
+				expect(sheet).toMatchObject({
+					sheet: idx + 1,
+					kind: "receipt",
 					heightDots: HEIGHT_DOTS,
 				})
 				// The reservation is what is left of settle + estimated print time
 				// after the pipeline already ran, so reserve + elapsed reconstructs
 				// the full estimate exactly — and pins it to the exported rate.
-				expect(copy.reserveMs + copy.elapsedMs).toBe(SETTLE_MS + ESTIMATE_MS)
-				if (idx < copies.length - 1) {
+				expect(sheet.reserveMs + sheet.elapsedMs).toBe(SETTLE_MS + ESTIMATE_MS)
+				if (idx < sheets.length - 1) {
 					// The logged pause is the one actually slept out.
-					expect(copy.pauseMs).toBe(copy.reserveMs + COPY_DELAY_MS)
+					expect(sheet.pauseMs).toBe(sheet.reserveMs + COPY_DELAY_MS)
 				}
 			}
-			// The final copy has no successor, so nothing is slept regardless of
+			// The final sheet has no successor, so nothing is slept regardless of
 			// what the reservation computed.
-			expect(copies[1].pauseMs).toBe(0)
-			expect(copies[0].pauseMs).toBeGreaterThan(0)
+			expect(sheets[1].pauseMs).toBe(0)
+			expect(sheets[0].pauseMs).toBeGreaterThan(0)
 		})
 
 		it(
@@ -599,185 +600,73 @@ describe("createIminDriver", () => {
 		})
 	})
 
-	describe("crew slip (copy 2 is a compact slip, not a copy of the receipt)", () => {
+	describe("crew slip (own toggle, prints once after the copies)", () => {
 		// Stand-in for buildCrewSlipHTML output: a document that is NOT the
-		// main receipt. No banner — the slip is unlabelled on paper.
+		// main receipt. Distinct dataURLs so the assertions can tell which
+		// bitmap reached the printer in which order.
 		const crewHTML = '<div class="crew">crew</div>'
 		const renderFor = () =>
-			vi.fn().mockResolvedValue({ dataURL: "x", width: 384 })
-
-		it("renders crewHTML for copy 2 and the plain main html for copy 1", async () => {
-			const render = renderFor()
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({ paper: "58mm", cut: false }),
-			})
-			await d.printHTML("<body>receipt</body>", {
-				render,
-				crewHTML,
-				config: { copies: 2, copyDelayMs: 0 },
-			})
-			expect(render).toHaveBeenCalledTimes(2)
-			const [first, second] = render.mock.calls
-			// The customer copy is the receipt exactly as built — no banner.
-			expect(first[0]).toBe("<body>receipt</body>")
-			// The crew slip is the whole bitmap; nothing is prepended to it.
-			expect(second[0]).toBe(crewHTML)
-			expect(printer.printSingleBitmap).toHaveBeenCalledTimes(2)
-		})
-
-		it("ignores crewHTML for a single copy", async () => {
-			const render = renderFor()
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({ paper: "58mm", cut: false }),
-			})
-			await d.printHTML("<body>receipt</body>", {
-				render,
-				crewHTML,
-				config: { copies: 1 },
-			})
-			expect(render).toHaveBeenCalledTimes(1)
-			expect(render.mock.calls[0][0]).toBe("<body>receipt</body>")
-			expect(printer.printSingleBitmap).toHaveBeenCalledTimes(1)
-		})
-
-		it("keeps the main receipt for copies 1 and 3 of a three-copy run", async () => {
-			// Distinct dataURLs so the assertions can tell which bitmap reached
-			// the printer per copy.
-			const render = vi.fn(async (html) => ({
+			vi.fn(async (html) => ({
 				dataURL: html === crewHTML ? "data:crew" : "data:receipt",
 				width: 384,
 			}))
+
+		it("prints one crew slip after a single copy when enabled", async () => {
+			const render = renderFor()
 			const d = createIminDriver({
 				factory: () => printer,
 				loadConfig: () => ({ paper: "58mm", cut: false }),
 			})
-			await d.printHTML("<body>receipt</body>", {
+			const res = await d.printHTML("<body>receipt</body>", {
 				render,
 				crewHTML,
-				config: { copies: 3, copyDelayMs: 0 },
+				config: { crewSlipEnabled: true, copies: 1, copyDelayMs: 0 },
 			})
-			// Two renders only: the receipt once (copies 1 and 3 share it) and the
-			// slip for copy 2.
+			// Two renders only: the receipt once and the slip once, even though
+			// copies is 1 — the slip is no longer copy 2.
 			const sources = render.mock.calls.map((call) => call[0])
 			expect(sources).toEqual(["<body>receipt</body>", crewHTML])
 			const urls = printer.printSingleBitmap.mock.calls.map((call) => call[0])
-			expect(urls).toEqual(["data:receipt", "data:crew", "data:receipt"])
+			expect(urls).toEqual(["data:receipt", "data:crew"])
+			expect(res.copies).toBe(2)
 		})
 
-		it("prints the same plain receipt for every copy when no crewHTML is passed", async () => {
+		it("prints identical copies and no slip when disabled", async () => {
 			const render = renderFor()
 			const d = createIminDriver({
 				factory: () => printer,
 				loadConfig: () => ({ paper: "58mm", cut: false }),
 			})
-			await d.printHTML("<body>receipt</body>", {
-				render,
-				config: { copies: 2, copyDelayMs: 0 },
-			})
-			// One render, sent twice: identical sheets, nothing above them.
-			expect(render).toHaveBeenCalledTimes(1)
-			expect(render.mock.calls[0][0]).toBe("<body>receipt</body>")
-			expect(printer.printSingleBitmap).toHaveBeenCalledTimes(2)
-			expect(printer.printSingleBitmap.mock.calls[0][0]).toBe(
-				printer.printSingleBitmap.mock.calls[1][0],
-			)
-		})
-
-		it("renders the crew slip at crewFontScale and the receipt at fontScale", async () => {
-			const render = renderFor()
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({
-					paper: "58mm",
-					cut: false,
-					fontScale: 140,
-					crewFontScale: 90,
-				}),
-			})
-			await d.printHTML("<body>receipt</body>", {
+			const res = await d.printHTML("<body>receipt</body>", {
 				render,
 				crewHTML,
-				config: { copies: 2, copyDelayMs: 0, tailDots: 30 },
+				config: { crewSlipEnabled: false, copies: 2, copyDelayMs: 0 },
 			})
-			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
-			// The customer copy keeps the receipt knob; the slip has its own.
-			expect(firstOpts).toEqual(
-				expect.objectContaining({ fontScale: 140, tailDots: 30 }),
-			)
-			expect(crewOpts).toEqual(
-				expect.objectContaining({ fontScale: 90, tailDots: 30 }),
-			)
+			// The toggle gates the slip: crewHTML is handed over but never
+			// rendered, and every sheet is the receipt.
+			expect(render.mock.calls.map((call) => call[0])).toEqual([
+				"<body>receipt</body>",
+			])
+			const urls = printer.printSingleBitmap.mock.calls.map((call) => call[0])
+			expect(urls).toEqual(["data:receipt", "data:receipt"])
+			expect(res.copies).toBe(2)
 		})
 
-		it("carries the one line-spacing knob onto both copies", async () => {
-			// There is a single vertical-density setting for everything direct
-			// printed: the receipt and the slip tighten/loosen together.
+		it("prints copies then crew when both are on", async () => {
 			const render = renderFor()
 			const d = createIminDriver({
 				factory: () => printer,
 				loadConfig: () => ({ paper: "58mm", cut: false }),
 			})
-			await d.printHTML("<body>receipt</body>", {
+			const res = await d.printHTML("<body>receipt</body>", {
 				render,
 				crewHTML,
-				config: { copies: 2, copyDelayMs: 0, lineSpacing: 70 },
+				config: { crewSlipEnabled: true, copies: 2, copyDelayMs: 0 },
 			})
-			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
-			expect(firstOpts.lineSpacing).toBe(70)
-			expect(crewOpts.lineSpacing).toBe(70)
-		})
-
-		it("carries the side margin onto both copies via the shared spread", async () => {
-			// The margin is a property of the paper, not of which slip is on it,
-			// so the crew copy must inherit it through the same renderOpts.
-			const render = renderFor()
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({ paper: "58mm", cut: false }),
-			})
-			await d.printHTML("<body>receipt</body>", {
-				render,
-				crewHTML,
-				config: { copies: 2, copyDelayMs: 0, sideMarginDots: 8 },
-			})
-			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
-			expect(firstOpts.sideMarginDots).toBe(8)
-			expect(crewOpts.sideMarginDots).toBe(8)
-		})
-
-		it("defaults the crew slip to the 100 crew knob — same size as the receipt", async () => {
-			const render = renderFor()
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({ paper: "58mm", cut: false }),
-			})
-			await d.printHTML("<body>receipt</body>", {
-				render,
-				crewHTML,
-				config: { copies: 2, copyDelayMs: 0 },
-			})
-			const [firstOpts, crewOpts] = render.mock.calls.map((call) => call[1])
-			expect(firstOpts.fontScale).toBe(100)
-			expect(crewOpts.fontScale).toBe(100)
-		})
-
-		it("falls back to the receipt scale for the slip only when the crew knob is unset on both ends", async () => {
-			// resolvePrintConfig always answers crewFontScale (default 100), so the
-			// slip never inherits the receipt scale silently. Pinned here so a
-			// future refactor of the resolver cannot change that by accident.
-			const render = renderFor()
-			const d = createIminDriver({
-				factory: () => printer,
-				loadConfig: () => ({ paper: "58mm", cut: false, fontScale: 170 }),
-			})
-			await d.printHTML("<body>receipt</body>", {
-				render,
-				crewHTML,
-				config: { copies: 2, copyDelayMs: 0 },
-			})
-			expect(render.mock.calls[1][1].fontScale).not.toBe(170)
+			// Order: every identical receipt copy first, the slip strictly last.
+			const urls = printer.printSingleBitmap.mock.calls.map((call) => call[0])
+			expect(urls).toEqual(["data:receipt", "data:receipt", "data:crew"])
+			expect(res.copies).toBe(3)
 		})
 	})
 })
