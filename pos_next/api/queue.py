@@ -48,10 +48,13 @@ def get_next_queue_number(pos_profile: str) -> dict:
 						"current_number": next_number,
 					}
 				).insert(ignore_permissions=True)
-		except frappe.exceptions.ValidationError:
-			# Lost the insert race for the day's first number (the doctype's
-			# (company, date) validate fired): the winner's row is committed
-			# by now, so retry reads and locks it instead of re-inserting.
+		except (frappe.exceptions.ValidationError, frappe.exceptions.DuplicateEntryError):
+			# Lost the insert race for the day's first number: the doctype's
+			# (company, date) validate fired, or the DB's unique index
+			# rejected the row (frappe surfaces that from the insert path as
+			# DuplicateEntryError / UniqueValidationError). The winner's row
+			# is committed by now, so retry reads and locks it instead of
+			# re-inserting.
 			frappe.db.rollback()
 			continue
 		# frappe.db.commit() is deliberate (spec design): the queue number is

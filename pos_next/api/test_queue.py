@@ -136,6 +136,29 @@ class TestQueueAPI(FrappeTestCase):
 		self.assertIn("queue_enabled", settings)
 		self.assertIsInstance(settings["queue_enabled"], bool)
 
+	def test_lost_insert_race_retries(self):
+		# First-day insert race: the first insert hits the DB unique index and
+		# frappe's insert path surfaces it as DuplicateEntryError. The retry
+		# must still allocate the day's first number instead of 500ing.
+		# (Call counting is fragile — the insert path itself resolves docs via
+		# frappe.get_doc — so assert the failure fired exactly once.)
+		from unittest.mock import patch
+
+		real_get_doc = frappe.get_doc
+		simulated_failures = []
+
+		def losing_first_insert(*args, **kwargs):
+			if not simulated_failures:
+				simulated_failures.append(1)
+				raise frappe.exceptions.DuplicateEntryError
+			return real_get_doc(*args, **kwargs)
+
+		with patch("frappe.get_doc", side_effect=losing_first_insert):
+			out = get_next_queue_number(self.profile)
+
+		self.assertEqual(len(simulated_failures), 1)
+		self.assertEqual(out["queue_number"], 1)
+
 	def test_counter_rolls_to_new_date(self):
 		get_next_queue_number(self.profile)
 		# Backdate the counter row; the next number for today starts at 1 again.
