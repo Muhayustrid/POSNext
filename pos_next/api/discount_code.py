@@ -64,3 +64,20 @@ def validate_confirmation_code(code: str, company: str, items=None, additional_d
 		return {"valid": False, "requires_code": True, "message": str(e)}
 
 	return {"valid": True, "requires_code": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def check_code(code: str, company: str):
+	"""Validate a discount code VALUE alone — no cart context.
+
+	Powers the locked-fields UX: the POS asks for the code BEFORE the discount
+	inputs unlock, so there is no discounted cart to check yet (and
+	validate_confirmation_code would skip the code check entirely). Returns
+	{valid, message?} without throwing, for inline feedback.
+	"""
+	try:
+		validate_code(code, company)
+	except frappe.ValidationError as e:
+		return {"valid": False, "message": str(e)}
+
+	return {"valid": True}

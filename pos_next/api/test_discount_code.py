@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import frappe
 
-from pos_next.api.discount_code import get_status, validate_confirmation_code
+from pos_next.api.discount_code import check_code, get_status, validate_confirmation_code
 from pos_next.overrides.discount_code import (
 	invoice_has_manual_discount,
 	record_code_usage_on_submit,
@@ -517,6 +517,37 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 class TestGetStatusAPI(unittest.TestCase):
 	def test_gate_is_always_enabled(self):
 		self.assertEqual(get_status(company="Company A"), {"enabled": True})
+
+
+class TestCheckCodeAPI(unittest.TestCase):
+	"""check_code validates the code VALUE alone (locked-fields UX: no cart
+	context yet, so the cart-aware endpoint would skip the check)."""
+
+	@patch("pos_next.api.discount_code.validate_code")
+	def test_valid_code_returns_valid(self, mock_validate):
+		mock_validate.return_value = "CODE-1"
+
+		result = check_code(code="ABCD2345", company="Company A")
+
+		self.assertEqual(result, {"valid": True})
+
+	@patch("pos_next.api.discount_code.validate_code")
+	def test_validate_code_receives_raw_code_and_company(self, mock_validate):
+		mock_validate.return_value = "CODE-1"
+
+		check_code(code="abcd2345", company="Company A")
+
+		# The API passes the value through raw; validate_code normalizes it.
+		mock_validate.assert_called_once_with("abcd2345", "Company A")
+
+	@patch("pos_next.api.discount_code.validate_code")
+	def test_invalid_code_returns_message_without_raising(self, mock_validate):
+		mock_validate.side_effect = frappe.ValidationError("Discount code WRONG1 is not valid.")
+
+		result = check_code(code="WRONG1", company="Company A")
+
+		self.assertFalse(result["valid"])
+		self.assertIn("not valid", result["message"])
 
 
 class TestValidateConfirmationCodeAPI(unittest.TestCase):

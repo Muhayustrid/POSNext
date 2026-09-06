@@ -698,13 +698,15 @@
 								<div class="grid grid-cols-4 gap-1.5">
 									<!-- Counter Input (2/4 = 1/2) -->
 									<div
-										class="col-span-2 flex items-center border border-orange-300 rounded-lg bg-white overflow-hidden"
+										class="col-span-2 flex items-center border border-orange-300 rounded-lg overflow-hidden"
+										:class="additionalDiscountLocked ? 'bg-gray-50 cursor-not-allowed' : 'bg-white'"
+										:title="additionalDiscountLocked ? __('Enter the HQ confirmation code to apply a discount') : ''"
 									>
 										<!-- Decrement Button -->
 										<button
 											@click="decrementDiscount"
-											:disabled="localAdditionalDiscount <= 0"
-											class="h-9 w-9 flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent transition-colors flex-shrink-0"
+											:disabled="additionalDiscountLocked || localAdditionalDiscount <= 0"
+											class="h-9 w-9 flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors flex-shrink-0"
 										>
 											<svg
 												class="w-4 h-4"
@@ -737,12 +739,14 @@
 													: subtotal
 											"
 											step="1"
-											class="flex-1 h-9 px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+											:disabled="additionalDiscountLocked"
+											class="flex-1 h-9 px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
 										/>
 										<!-- Increment Button -->
 										<button
 											@click="incrementDiscount"
-											class="h-9 w-9 flex items-center justify-center text-orange-600 hover:bg-orange-50 transition-colors flex-shrink-0"
+											:disabled="additionalDiscountLocked"
+											class="h-9 w-9 flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors flex-shrink-0"
 										>
 											<svg
 												class="w-4 h-4"
@@ -765,8 +769,9 @@
 											additionalDiscountType = 'percentage';
 											handleAdditionalDiscountTypeChange();
 										"
+										:disabled="additionalDiscountLocked"
 										:class="[
-											'h-9 rounded-lg text-sm font-bold transition-colors',
+											'h-9 rounded-lg text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
 											additionalDiscountType === 'percentage'
 												? 'bg-orange-500 text-white'
 												: 'bg-white text-orange-600 border border-orange-300 hover:bg-orange-50',
@@ -780,8 +785,9 @@
 											additionalDiscountType = 'amount';
 											handleAdditionalDiscountTypeChange();
 										"
+										:disabled="additionalDiscountLocked"
 										:class="[
-											'h-9 rounded-lg text-sm font-bold transition-colors',
+											'h-9 rounded-lg text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
 											additionalDiscountType === 'amount'
 												? 'bg-orange-500 text-white'
 												: 'bg-white text-orange-600 border border-orange-300 hover:bg-orange-50',
@@ -791,18 +797,29 @@
 									</button>
 								</div>
 							</div>
-								<!-- HQ confirmation code for restricted discounts -->
-								<div v-if="restrictionCodeRequired" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
+								<!-- HQ confirmation code unlocks the additional discount -->
+								<div v-if="additionalDiscountLocked" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
 									<label class="block text-xs font-medium text-orange-700 mb-1 text-start">
 										{{ __("Confirmation Code (HQ)") }}
 									</label>
-									<input
-										v-model="confirmationCode"
-										type="text"
-										:placeholder="__('Enter the code from head office')"
-										maxlength="8"
-										class="w-full h-9 border border-orange-300 rounded-lg px-3 text-sm uppercase tracking-widest bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-									/>
+									<div class="flex items-center gap-1.5">
+										<input
+											v-model="confirmationCode"
+											type="text"
+											:placeholder="__('Enter the code from head office')"
+											maxlength="8"
+											class="w-full h-9 border border-orange-300 rounded-lg px-3 text-sm uppercase tracking-widest bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+											@keyup.enter="unlockWithCode"
+										/>
+										<button
+											type="button"
+											@click="unlockWithCode"
+											class="h-9 w-9 flex-shrink-0 rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center justify-center"
+											:title="__('Unlock additional discount')"
+										>
+											<FeatherIcon name="unlock" class="w-4 h-4" />
+										</button>
+									</div>
 								</div>
 							
 							<!-- Subtotal -->
@@ -2076,7 +2093,7 @@ import {
 import { getPaymentIcon } from "@/utils/payment";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { Dialog, createResource, call } from "frappe-ui";
+import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
@@ -2309,6 +2326,12 @@ const confirmationCode = ref("");
 // and discounted items count too. Server re-validates.
 const restrictionCodeRequired = computed(() =>
 	restrictionStore.needsCodeForCart(props.additionalDiscount, props.items || [], props.headerDiscountFromOffer)
+);
+
+// Locked-fields UX: the additional-discount controls stay disabled until a
+// valid HQ code unlocks them (the completePayment gate stays as a backstop).
+const additionalDiscountLocked = computed(
+	() => restrictionStore.applicable && !restrictionStore.hasCode
 );
 
 const paymentMethodsResource = createResource({
@@ -3546,6 +3569,25 @@ function getMethodTotal(methodName) {
 	return paymentEntries.value
 		.filter((entry) => entry.mode_of_payment === methodName)
 		.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+}
+
+// Unlock the additional-discount controls: validate the code value alone (no
+// cart context needed here) and keep it in the store — the completePayment
+// gate no-ops once hasCode.
+async function unlockWithCode() {
+	restrictionStore.setCode(confirmationCode.value);
+	if (!restrictionStore.hasCode) {
+		showWarning(__("Enter the code from head office first"));
+		return;
+	}
+	const result = await restrictionStore.checkCode();
+	if (!result?.valid) {
+		restrictionStore.clearCode();
+		// Keep the typed text for an easy retry.
+		showWarning(result?.message || __("Invalid discount code"));
+		return;
+	}
+	showInfo(__("Code accepted — discount unlocked"));
 }
 
 // Additional discount handlers

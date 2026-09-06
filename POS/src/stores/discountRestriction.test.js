@@ -214,6 +214,51 @@ describe("discountRestriction store", () => {
 		})
 	})
 
+	describe("checkCode", () => {
+		it("rejects an empty or whitespace code without calling the server", async () => {
+			const store = useDiscountRestrictionStore()
+			store.setCode("   ")
+
+			const result = await store.checkCode()
+
+			expect(result).toEqual({
+				valid: false,
+				requires_code: true,
+				message: "Discount code is required",
+			})
+			expect(callMock).not.toHaveBeenCalled()
+		})
+
+		it("checks the code value against the server with the company from fetchStatus", async () => {
+			const store = useDiscountRestrictionStore()
+			await store.fetchStatus("Company A")
+			store.setCode("abcd2345")
+			callMock.mockClear()
+			callMock.mockResolvedValue({ valid: true })
+
+			const result = await store.checkCode()
+
+			expect(result.valid).toBe(true)
+			expect(callMock).toHaveBeenCalledWith("pos_next.api.discount_code.check_code", {
+				code: "ABCD2345",
+				company: "Company A",
+			})
+		})
+
+		it("returns an error payload instead of throwing", async () => {
+			const store = useDiscountRestrictionStore()
+			await store.fetchStatus("Company A")
+			store.setCode("ABCD2345")
+			callMock.mockRejectedValue(new Error("boom"))
+
+			const result = await store.checkCode()
+
+			expect(result.valid).toBe(false)
+			expect(result.requires_code).toBe(true)
+			expect(result.message).toBe("Could not validate the discount code. Please try again.")
+		})
+	})
+
 	describe("reset", () => {
 		it("clears status and code but keeps the gate enabled", async () => {
 			const store = useDiscountRestrictionStore()

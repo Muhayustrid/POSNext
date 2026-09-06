@@ -190,11 +190,11 @@
 																type="number"
 																min="0"
 																step="0.01"
-																:readonly="!canEditRate"
+																:readonly="!canEditRate || rateLockedByCode"
 																:class="
-																	canEditRate
-																		? 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-																		: 'bg-gray-50 cursor-not-allowed'
+																	!canEditRate || rateLockedByCode
+																		? 'bg-gray-50 cursor-not-allowed'
+																		: 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 																"
 																class="w-full h-7 border border-gray-300 rounded-lg ps-12 pe-3 text-sm font-semibold"
 																:title="rateEditDisabledReason"
@@ -357,6 +357,7 @@
 														<SelectInput
 															v-model="discountType"
 															:options="discountTypeOptions"
+															:disabled="discountLocked"
 															@change="handleDiscountTypeChange"
 														/>
 													</div>
@@ -381,7 +382,13 @@
 																		: undefined
 																"
 																step="0.01"
-																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+																:disabled="discountLocked"
+																:class="
+																	discountLocked
+																		? 'bg-gray-50 cursor-not-allowed'
+																		: 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+																"
+																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm"
 																@input="calculateDiscount"
 															/>
 															<span
@@ -398,18 +405,29 @@
 												</div>
 											</div>
 
-												<!-- HQ confirmation code for restricted discounts -->
-												<div v-if="restrictionCodeRequired" class="border-t border-gray-200 pt-4">
+												<!-- HQ confirmation code unlocks the discount fields -->
+												<div v-if="discountLocked" class="border-t border-gray-200 pt-4">
 													<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
 														{{ __("Confirmation Code (HQ)") }}
 													</label>
-													<input
-														v-model="confirmationCode"
-														type="text"
-														:placeholder="__('Enter the code from head office')"
-														maxlength="8"
-														class="w-full h-9 border border-gray-300 rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-													/>
+													<div class="flex items-center gap-2">
+														<input
+															v-model="confirmationCode"
+															type="text"
+															:placeholder="__('Enter the code from head office')"
+															maxlength="8"
+															class="w-full h-9 border border-gray-300 rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+															@keyup.enter="unlockWithCode"
+														/>
+														<button
+															type="button"
+															@click="unlockWithCode"
+															class="h-9 w-9 flex-shrink-0 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center justify-center"
+															:title="__('Unlock discount fields')"
+														>
+															<FeatherIcon name="unlock" class="w-4 h-4" />
+														</button>
+													</div>
 												</div>
 											
 											<!-- Totals -->
@@ -580,6 +598,9 @@ const rateEditDisabledReason = computed(() => {
 	if (hasPricingRules.value) {
 		return __("Locked (offer applied)");
 	}
+	if (rateLockedByCode.value) {
+		return __("Enter the HQ confirmation code to edit the rate");
+	}
 	return "";
 });
 
@@ -622,6 +643,17 @@ const restrictionCodeRequired = computed(() => {
 	const applied = calculatedDiscount.value > 0 || hasRateDiscount;
 	return Boolean(applied);
 });
+
+// Locked-fields UX: the discount inputs stay disabled until a valid HQ code
+// unlocks them (the apply-time gate below stays as a server-side backstop).
+const discountLocked = computed(() => restrictionStore.applicable && !restrictionStore.hasCode);
+
+// A manual rate below a known reference price is a discount in disguise, so
+// the rate field locks too — items without a reference price (price_list_rate
+// 0, open price) stay editable.
+const rateLockedByCode = computed(
+	() => discountLocked.value && Number(originalPriceListRate.value) > 0
+);
 
 // Initialize local state when item changes
 watch(
@@ -912,6 +944,24 @@ function removeSerial(serialNo) {
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+}
+
+// Unlock the discount fields: validate the code value alone (no cart context
+// yet) and keep it in the store — the apply-time gate no-ops once hasCode.
+async function unlockWithCode() {
+	restrictionStore.setCode(confirmationCode.value);
+	if (!restrictionStore.hasCode) {
+		showError(__("Enter the code from head office first"));
+		return;
+	}
+	const result = await restrictionStore.checkCode();
+	if (!result?.valid) {
+		restrictionStore.clearCode();
+		// Keep the typed text for an easy retry.
+		showError(result?.message || __("Invalid discount code"));
+		return;
+	}
+	showSuccess(__("Code accepted — discount unlocked"));
 }
 
 async function updateItem() {

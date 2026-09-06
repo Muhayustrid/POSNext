@@ -124,6 +124,32 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 		}
 	}
 
+	/**
+	 * Validate the code VALUE alone — no cart context. Powers the
+	 * locked-fields UX: the discount inputs stay disabled until this passes,
+	 * so there is no discounted cart for validateCode to check yet. Returns
+	 * the server payload { valid, message? } without throwing.
+	 */
+	async function checkCode() {
+		const value = (code.value || "").trim();
+		if (!value) {
+			return { valid: false, requires_code: true, message: "Discount code is required" };
+		}
+		try {
+			return await call("pos_next.api.discount_code.check_code", {
+				code: value,
+				company: _company.value,
+			});
+		} catch (error) {
+			log.warn("Discount code check failed", error);
+			return {
+				valid: false,
+				requires_code: true,
+				message: "Could not validate the discount code. Please try again.",
+			};
+		}
+	}
+
 	function setCode(value) {
 		code.value = (value || "").trim().toUpperCase();
 	}
@@ -152,6 +178,7 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 		// Actions
 		fetchStatus,
 		validateCode,
+		checkCode,
 		setCode,
 		clearCode,
 		reset,
