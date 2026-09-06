@@ -56,18 +56,22 @@ class TestPrintingAPI(FrappeTestCase):
 		return any(df.fieldname == "print_fallback_enabled" for df in meta.get("fields"))
 
 	def test_fallback_enabled_defaults_to_true_when_unset(self):
-		# print_fallback_enabled defaults to 1 on the doctype. When no POS
-		# Settings row exists for the profile, or the column is NULL, the
-		# transport must still get fallback_enabled=True — a False there
-		# silently disables the whole fallback chain.
+		# print_fallback_enabled defaults to 1 on the doctype. When no active
+		# POS Settings row exists for the profile the transport must still
+		# get fallback_enabled=True — a False there silently disables the
+		# whole fallback chain. (The column is NOT NULL DEFAULT 1 in the
+		# schema — an explicit NULL is unreachable, so "unset" means no row.)
 		settings_name = frappe.db.get_value(
 			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
 		)
-		if settings_name and self._has_fallback_column():
-			frappe.db.set_value("POS Settings", settings_name, "print_fallback_enabled", None)
-
-		cfg = get_print_config(self.profile)
-		self.assertTrue(cfg["fallback_enabled"])
+		if settings_name:
+			frappe.db.set_value("POS Settings", settings_name, "enabled", 0)
+		try:
+			cfg = get_print_config(self.profile)
+			self.assertTrue(cfg["fallback_enabled"])
+		finally:
+			if settings_name:
+				frappe.db.set_value("POS Settings", settings_name, "enabled", 1)
 
 	def test_fallback_enabled_false_only_when_explicit(self):
 		# Only meaningful when the real column exists — on unmigrated sites

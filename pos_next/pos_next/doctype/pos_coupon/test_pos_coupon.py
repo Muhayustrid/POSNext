@@ -2,7 +2,7 @@
 # See license.txt
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
 	_get_customer_coupon_usage_count,
@@ -20,8 +20,11 @@ class TestPOSCoupon(unittest.TestCase):
 			counts = {"Sales Invoice": 1, "POS Invoice": 2}
 			return counts[doctype]
 
-		mock_db.table_exists.side_effect = table_exists
-		mock_db.count.side_effect = count
+		# Explicit MagicMock: patch auto-derives the child mock class from the
+		# target attribute, and an AsyncMock here returns a coroutine instead
+		# of the value on Python 3.14.
+		mock_db.table_exists = MagicMock(side_effect=table_exists)
+		mock_db.count = MagicMock(side_effect=count)
 		mock_get_meta.return_value = Mock(has_field=Mock(return_value=True))
 
 		used_count = _get_customer_coupon_usage_count("Customer A", "SAVE10")
@@ -39,8 +42,8 @@ class TestPOSCoupon(unittest.TestCase):
 	@patch("pos_next.pos_next.doctype.pos_coupon.pos_coupon.frappe.get_meta")
 	@patch("pos_next.pos_next.doctype.pos_coupon.pos_coupon.frappe.db")
 	def test_one_use_coupon_skips_doctypes_without_coupon_field(self, mock_db, mock_get_meta):
-		mock_db.table_exists.return_value = True
-		mock_db.count.return_value = 4
+		mock_db.table_exists = MagicMock(return_value=True)
+		mock_db.count = MagicMock(return_value=4)
 		mock_get_meta.side_effect = [
 			Mock(has_field=Mock(return_value=True)),
 			Mock(has_field=Mock(return_value=False)),

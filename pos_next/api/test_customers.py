@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from pos_next.api.customers import (
 	_get_customer_assignment_context,
@@ -37,7 +37,10 @@ class TestCustomersAPI(unittest.TestCase):
 
 	@patch("pos_next.api.customers.frappe.db")
 	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_db):
-		mock_db.get_value.return_value = "LOYALTY-A"
+		# Explicit MagicMock: patch auto-derives the child mock class from the
+		# target attribute, and an AsyncMock here returns a coroutine instead
+		# of the value on Python 3.14.
+		mock_db.get_value = MagicMock(return_value="LOYALTY-A")
 
 		result = get_default_loyalty_program_from_settings(pos_profile="POS-A")
 

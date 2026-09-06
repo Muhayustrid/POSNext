@@ -197,6 +197,10 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		si.company = ctx.company
 		si.customer = ctx.customer
 		si.debit_to = ctx.debit_to
+		# Pin the doc currency to the company's, else the site's global default
+		# currency (IDR here, INR fixtures on CI) leaks in and trips the party
+		# account currency check.
+		si.currency = frappe.get_cached_value("Company", ctx.company, "default_currency")
 		si.update_stock = 1
 		si.posting_date = nowdate()
 		si.naming_series = ctx.naming_series

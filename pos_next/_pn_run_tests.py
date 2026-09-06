@@ -38,6 +38,33 @@ APP_ROOT = _APP_DIR
 SITES_PATH = os.environ.get("SITES_PATH") or os.path.join(BENCH_ROOT, "sites")
 
 
+def _disable_client_cache_persistence():
+	"""Make frappe's ClientCache local-only for the test process.
+
+	The real set_value pickles values into Redis; when tests patch
+	frappe.get_doc / frappe.db with MagicMocks, frappe.utils.today() →
+	get_system_settings() would try to pickle the mock and every such test
+	dies with PicklingError. We keep the in-process cache (repeat reads —
+	hooks, get_tables — stay cached; dropping it changes query patterns
+	mid-flow and can deadlock MySQLdb on an unread result set), but skip
+	the Redis write entirely.
+	"""
+	import time as _time
+
+	from frappe.utils.redis_wrapper import CachedValue as _CachedValue
+
+	cc = frappe.client_cache
+	if not getattr(cc, "healthy", False):
+		return
+
+	def _local_only_set_value(key, val, *, shared=False):
+		key = cc.redis.make_key(key, shared=shared)
+		with cc.lock:
+			cc.cache[key] = _CachedValue(value=val, expiry=_time.monotonic() + cc.local_ttl)
+
+	cc.set_value = _local_only_set_value
+
+
 def main(module_names, sync=False):
 	if not module_names:
 		print(__doc__, file=sys.stderr)
@@ -52,6 +79,7 @@ def main(module_names, sync=False):
 
 	frappe.init(site=SITE, sites_path=SITES_PATH)
 	frappe.connect()
+	_disable_client_cache_persistence()
 	frappe.flags.in_test = True
 
 	if sync:
