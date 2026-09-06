@@ -481,6 +481,13 @@ def _apply_offers_and_stamp(payload, selected_offers):
 		if apply_on:
 			payload["apply_discount_on"] = apply_on
 
+	# Transaction-scope rule names reach the server only via this relay
+	# (mirrors the frontend's applyHeaderDiscountFromServer contract);
+	# update_invoice merges them into pos_applied_offer_rules.
+	applied_rules = resp.get("applied_pricing_rules")
+	if applied_rules:
+		payload["pos_relayed_offer_rules"] = applied_rules
+
 	return resp
 
 

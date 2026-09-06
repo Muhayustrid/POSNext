@@ -20,12 +20,19 @@ Enforcement points (doc_events on Sales Invoice):
 The gate applies to POS invoices only (is_pos); back-office invoices are not
 restricted. Returns (is_return) never require a code.
 
-Exemption: POS Offer promotions are a pre-approved discount channel. An item
-whose discount is offer-attributed (its `pos_offer_item_rules` stash carries a
-verified, enabled Pricing Rule — written server-side by
-pos_next.api.invoices.update_invoice) is not a manual discount; the same holds
-for the header additional discount when a verified applied rule with
-apply_on == "Transaction" fired (invoice-level `pos_applied_offer_rules`).
+Exemption: pre-approved discount channels need no code.
+- POS Offer promotions: an item whose discount is offer-attributed (its
+  `pos_offer_item_rules` stash carries a verified, enabled Pricing Rule —
+  written server-side by pos_next.api.invoices.update_invoice) is not a manual
+  discount; the same holds for the header additional discount when a verified
+  applied rule with apply_on == "Transaction" fired (invoice-level
+  `pos_applied_offer_rules`).
+- ERPNext Pricing Rules / Promotional Schemes: erpnext's own engine stamps the
+  applied rule names on each item row (`pricing_rules`, JSON list). Claims from
+  that marker are verified against enabled Pricing Rules exactly like the
+  stash, so a named rule that does not exist (or is disabled) confers no
+  exemption. Promotional Schemes generate Pricing Rules, so they are covered
+  by the same marker.
 """
 
 import frappe
@@ -60,6 +67,13 @@ def _item_has_discount(item):
 	return False
 
 
+def _engine_rule_claims(item):
+	"""Rule names claimed via erpnext's own marker (`pricing_rules` on the item
+	row, JSON list — set by the pricing rule engine and by the POS apply-offers
+	flow). Same JSON shape as the offer stash, so the same parser applies."""
+	return parse_applied_offer_rules(item.get("pricing_rules"))
+
+
 def _verified_applied_rules(doc):
 	"""Verify the claimed applied Pricing Rule names in one query.
 
@@ -67,13 +81,16 @@ def _verified_applied_rules(doc):
 	claimed name that exists as an enabled Pricing Rule to its ``apply_on``;
 	``invoice_claims`` is the set of names claimed on the invoice-level
 	``pos_applied_offer_rules`` stash — the only source that can exempt the
-	header discount (R3). Unknown or disabled claimed rules confer no
-	exemption (the stash fields are server-managed; this is defense in depth).
+	header discount (R3). Claims from item stashes and erpnext's
+	``pricing_rules`` marker are verified too (they can exempt an item),
+	but never the header. Unknown or disabled claimed rules confer no
+	exemption (defense in depth).
 	"""
 	invoice_claims = set(parse_applied_offer_rules(doc.get("pos_applied_offer_rules")))
 	claimed = set(invoice_claims)
 	for item in doc.get("items") or []:
 		claimed.update(parse_applied_offer_rules(item.get("pos_offer_item_rules")))
+		claimed.update(_engine_rule_claims(item))
 	if not claimed:
 		return {}, invoice_claims
 
@@ -86,9 +103,11 @@ def _verified_applied_rules(doc):
 
 
 def _item_is_offer_attributed(item, verified_rules):
-	"""True when the item's discount is offer-driven: its per-row stash claims
-	at least one verified, enabled Pricing Rule (R2)."""
-	claimed = parse_applied_offer_rules(item.get("pos_offer_item_rules"))
+	"""True when the item's discount is rule-driven: its per-row stash or
+	erpnext's ``pricing_rules`` marker claims at least one verified, enabled
+	Pricing Rule (R2)."""
+	claimed = set(parse_applied_offer_rules(item.get("pos_offer_item_rules")))
+	claimed.update(_engine_rule_claims(item))
 	return any(name in verified_rules for name in claimed)
 
 
