@@ -37,6 +37,7 @@ import { call } from "@/utils/apiWrapper"
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
 import {
 	buildReceiptDocumentHTML,
+	buildReceiptHTML,
 	effectiveReceiptDots,
 	RECEIPT_STYLES,
 	receiptStylesFor,
@@ -189,6 +190,22 @@ describe("silentPrintInvoiceFromDoc embeds the effective paper width", () => {
 		const html = transport.printHTML.mock.calls[0][0]
 		// 384 dots -> 48mm in the embedded @page/body width.
 		expect(html).toContain("48mm")
+	})
+})
+
+describe("buildReceiptHTML (queue block)", () => {
+	it("renders the queue block first when pos_queue_number is set", () => {
+		const html = buildReceiptHTML({ ...doc, pos_queue_number: 48 })
+		const receiptStart = html.indexOf('class="receipt"')
+		const queueStart = html.indexOf('class="queue-number"')
+		expect(queueStart).toBeGreaterThan(-1)
+		expect(queueStart).toBeGreaterThan(receiptStart)
+		expect(html.indexOf('class="header"')).toBeGreaterThan(queueStart)
+		expect(html).toContain(">048<")
+	})
+
+	it("renders no queue block without a number", () => {
+		expect(buildReceiptHTML(doc)).not.toContain("queue-number")
 	})
 })
 

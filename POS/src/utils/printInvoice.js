@@ -14,6 +14,7 @@ import {
 	receiptStylesFor,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
+import { formatQueueNumber } from "@/utils/queue/queueNumber"
 export { receiptStylesFor }
 
 const log = logger.create("PrintInvoice")
@@ -212,6 +213,15 @@ export function buildReceiptHTML(invoiceData) {
 
 	return `
 			<div class="receipt">
+				${
+					invoiceData.pos_queue_number
+						? `<div class="queue-number"><div class="queue-label">${__(
+								"NO. ANTRIAN",
+							)}</div><div class="queue-value">${formatQueueNumber(
+								invoiceData.pos_queue_number,
+							)}</div></div>`
+						: ""
+				}
 				<div class="header">
 					<div class="company-name">${invoiceData.company || "POS Next"}</div>
 					<div style="font-size: 12px;">${invoiceData.header || __("TAX INVOICE")}</div>

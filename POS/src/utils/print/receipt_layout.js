@@ -139,6 +139,9 @@ export function receiptStylesFor(dots) {
 	}
 	.receipt { width: 100%; }
 	.header { text-align: center; margin-bottom: 8px; border-bottom: 2px dashed #000; padding-bottom: 4px; }
+	.queue-number { text-align: center; margin-bottom: 8px; border-bottom: 2px dashed #000; padding-bottom: 4px; }
+	.queue-label { font-size: 11px; }
+	.queue-value { font-size: 26px; font-weight: bold; }
 	.company-name { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
 	.invoice-info { margin-bottom: 6px; font-size: 11px; }
 	.invoice-info div { display: flex; justify-content: space-between; margin-bottom: 2px; }
