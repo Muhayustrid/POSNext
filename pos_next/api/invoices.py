@@ -297,6 +297,52 @@ def _parse_relayed_offer_rules(raw):
 	return sorted({cstr(name) for name in raw if cstr(name)})
 
 
+def _derive_item_offer_rules(pricing_rules):
+	"""Resolve an item's `pricing_rules` value to the applied rule names — the
+	single normalization update_invoice and submit_invoice both use to build
+	the server-side per-item offer attribution."""
+	if not pricing_rules:
+		return []
+	if erpnext_get_applied_pricing_rules:
+		return [name for name in (erpnext_get_applied_pricing_rules(pricing_rules) or []) if name]
+	return [r.strip() for r in str(pricing_rules).split(",") if r.strip()]
+
+
+def _reapply_item_offer_attribution(invoice_doc, payload_items, db_attribution):
+	"""Restore the server-derived per-item offer attribution after the child
+	rows were rebuilt from the stripped submit payload (existing-draft branch
+	of ``submit_invoice``).
+
+	``BaseDocument.update`` re-appends every child from its payload dict, so
+	fields the strip removed (``pos_offer_item_rules`` — the client must never
+	relay it verbatim) are lost in memory while the discount fields survive.
+	Rows matched by ``name`` get their DB value back (written by the preceding
+	``update_invoice`` save); rows without a DB snapshot are derived from the
+	payload item's ``pricing_rules`` exactly like update_invoice derives it.
+	The field itself is never read from the payload.
+	"""
+	unnamed = []
+	for item in payload_items or []:
+		if not isinstance(item, dict) or item.get("name"):
+			continue
+		rules = _derive_item_offer_rules(item.get("pricing_rules"))
+		unnamed.append(json.dumps(sorted(rules)) if rules else "")
+
+	unnamed_idx = 0
+	for row in invoice_doc.get("items") or []:
+		name = row.get("name")
+		if name is not None and name in db_attribution:
+			row.pos_offer_item_rules = db_attribution[name]
+		elif name is None:
+			row.pos_offer_item_rules = unnamed[unnamed_idx] if unnamed_idx < len(unnamed) else ""
+			unnamed_idx += 1
+		else:
+			# Named row without a DB snapshot (fabricated name — cannot happen
+			# for a doc loaded from the DB): no attribution, and never the
+			# value from the payload.
+			row.pos_offer_item_rules = ""
+
+
 def _strip_server_managed_fields(payload):
 	"""Remove fields that are derived server-side and should not be replayed."""
 	if not isinstance(payload, dict):
@@ -920,10 +966,7 @@ def update_invoice(data):
 			# discount itself is preserved via the discount_percentage /
 			# discount_amount fields we already set above.
 			if item.get("pricing_rules"):
-				if erpnext_get_applied_pricing_rules:
-					item_rule_names = erpnext_get_applied_pricing_rules(item.pricing_rules) or []
-				else:
-					item_rule_names = [r.strip() for r in str(item.pricing_rules).split(",") if r.strip()]
+				item_rule_names = _derive_item_offer_rules(item.pricing_rules)
 				applied_rule_names_seen.update(item_rule_names)
 				# Per-item offer attribution for the discount code gate: an item
 				# whose discount comes from an applied pricing rule is offer-driven,
@@ -1403,7 +1446,18 @@ def submit_invoice(invoice=None, data=None):
 			# update_invoice save that created it — the relay is intentionally
 			# dropped here rather than replayed against a known document.
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
+			# The row rebuild below re-appends every child from its stripped
+			# payload dict, which would drop the server-derived per-item offer
+			# attribution (the client must never relay it verbatim) and wrongly
+			# gate offer-discounted items at the discount code gate. Snapshot
+			# the DB values now, then restore/re-derive after the rebuild.
+			db_item_attribution = {
+				row.get("name"): (row.get("pos_offer_item_rules") or "")
+				for row in (invoice_doc.get("items") or [])
+				if row.get("name")
+			}
 			invoice_doc.update(invoice)
+			_reapply_item_offer_attribution(invoice_doc, invoice.get("items"), db_item_attribution)
 
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
