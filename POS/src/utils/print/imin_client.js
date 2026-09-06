@@ -11,6 +11,12 @@
  *     (observed on-device as "nothing comes out, second run prints").
  *   - setPageFormat: 1 = 58mm, 0 = 80mm.
  *
+ * Sheet layout (2026-09-06): a job prints `copies` IDENTICAL receipt sheets,
+ * then at most one crew slip — strictly last. The slip is gated purely by
+ * the crewSlipEnabled knob (device > server > false), never by the copy
+ * count; the tear-off pause runs between every pair of sheets, none after
+ * the last one.
+ *
  * Correction history: an earlier revision forbade feeding, taken from the
  * note at the top of iMin's demo imin-customer-odoo.js ("printSingleBitmap
  * 内部已经做了 partialCut"). That claim does not hold for this build — the
@@ -169,17 +175,20 @@ export function createIminDriver(deps = {}) {
 		 * @param {string} html
 		 * @param {object} [opts]
 		 * @param {(html, o) => Promise<{dataURL:string}>} [opts.render] - injected for tests
-		 * @param {string} [opts.crewHTML] - complete document to print INSTEAD OF
-		 *   the second copy (the compact crew slip). Rendered with the resolved
-		 *   crewFontScale and printed exactly as handed over — nothing is
-		 *   prepended to it, and nothing is printed above any copy.
-		 * @param {object} [opts.config] - server (transport) config used as the
-		 *   fallback below each device value. An explicit device value
-		 *   (including false / "58mm") always wins; only an ABSENT device key
-		 *   falls through to the server value. `??` (not `||`) keeps that
-		 *   distinction. Returns the EFFECTIVE { paper, dots } so the caller
-		 *   can log what was actually printed.
-		 * @returns {Promise<{paper:string, dots:number}>}
+		 * @param {string} [opts.crewHTML] - complete document for the compact
+			 *   crew slip. Gated ONLY by the resolved crewSlipEnabled (never by
+			 *   the copy count), it renders at the resolved crewFontScale and
+			 *   prints exactly once AFTER every receipt copy — nothing is
+			 *   prepended to it, and nothing is printed above any sheet.
+			 * @param {object} [opts.config] - server (transport) config used as the
+			 *   fallback below each device value. An explicit device value
+			 *   (including false / "58mm") always wins; only an ABSENT device key
+			 *   falls through to the server value. `??` (not `||`) keeps that
+			 *   distinction. Returns the EFFECTIVE { paper, dots } so the caller
+			 *   can log what was actually printed.
+			 * @returns {Promise<{paper:string, dots:number, copies:number}>}
+			 *   copies counts every sheet that reached the printer: the receipt
+			 *   copies plus the crew slip when it applied.
 		 */
 		async printHTML(html, opts = {}) {
 			const r = resolvePrintConfig(loadConfig(), opts.config || {}, {
@@ -190,6 +199,7 @@ export function createIminDriver(deps = {}) {
 				customDots,
 				cut,
 				copies,
+				crewSlipEnabled,
 				copyDelayMs,
 				dots,
 				tailDots,
@@ -217,23 +227,27 @@ export function createIminDriver(deps = {}) {
 				lineSpacing,
 				sideMarginDots,
 			}
-			// A crew slip only exists for a multi-copy job: with one copy there is
-			// no second sheet to replace. When it applies, copy 2 (index 1) prints
-			// the slip at its own font scale and every other copy prints the
-			// receipt exactly as built — no banner above either sheet, so the paper
-			// looks like one receipt and one order list.
-			const crewApplies = Boolean(opts.crewHTML) && copies > 1
-			// Every non-crew copy is the same html with the same options, so one
-			// bitmap serves them all; only the slip is a second render.
+			// The crew slip is gated purely by its own toggle, not by the copy
+			// count: crewSlipEnabled on means exactly one slip after ALL receipt
+			// copies — even for a single-copy job. When it applies the slip
+			// prints at its own font scale and every other sheet prints the
+			// receipt exactly as built — no banner above either sheet, so the
+			// paper looks like N receipts and one order list.
+			const crewApplies = Boolean(opts.crewHTML) && crewSlipEnabled
+			// Every receipt sheet is the same html with the same options, so one
+			// bitmap serves them all; only the slip is a second render. The sheet
+			// list fixes the order: copies identical receipts, slip last.
 			const [bitmap, crewBitmap] = await Promise.all([
 				render(html, renderOpts),
 				crewApplies
 					? render(opts.crewHTML, { ...renderOpts, fontScale: crewFontScale })
 					: null,
 			])
+			const sheets = Array.from({ length: copies }, () => bitmap)
+			if (crewApplies) sheets.push(crewBitmap)
 
-			for (let i = 0; i < copies; i++) {
-				const bmp = crewApplies && i === 1 ? crewBitmap : bitmap
+			for (let i = 0; i < sheets.length; i++) {
+				const bmp = sheets[i]
 				const tQueued = Date.now()
 				await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
 
@@ -249,14 +263,15 @@ export function createIminDriver(deps = {}) {
 
 				await waitIdle(p)
 
-				// Tear-off pause before the next copy; never after the final one.
+				// Tear-off pause before the next SHEET (receipt or slip alike);
+				// never after the final one.
 				//
 				// Measured from QUEUE time, not from here. On device (2026-09-03)
 				// getPrinterStatus() already reports 0 while the head is still
 				// printing, so waitIdle passes instantly and a bare copyDelayMs is
 				// consumed by the copy still coming out: the pause visibly existed
 				// with fontScale 60 (short bitmap) and vanished at fontScale 100
-				// (tall bitmap). Invariant: the gap between two copies is always
+				// (tall bitmap). Invariant: the gap between two sheets is always
 				// at least copyDelayMs, ON TOP of whatever the pipeline actually
 				// took — the reservation only extends the pause (when status went
 				// idle early) and shrinks to zero when the pipeline overran the
@@ -267,24 +282,26 @@ export function createIminDriver(deps = {}) {
 					0,
 					SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
 				)
-				const isLastCopy = i === copies - 1
-				const pauseMs = isLastCopy ? 0 : reserveMs + copyDelayMs
+				const isLastSheet = i === sheets.length - 1
+				const pauseMs = isLastSheet ? 0 : reserveMs + copyDelayMs
 				// The reservation is invisible to POS Print Log (it only sees the
-				// whole print), so say per copy how the wall clock was spent — this
-				// is what makes a swallowed pause on site diagnosable after the fact.
-				log.info("copy printed", {
-					copy: i + 1,
+				// whole print), so say per sheet how the wall clock was spent —
+				// this is what makes a swallowed pause on site diagnosable after
+				// the fact. kind tells a swallowed crew slip apart from a copy.
+				log.info("sheet printed", {
+					sheet: i + 1,
+					kind: crewApplies && i === sheets.length - 1 ? "crew" : "receipt",
 					heightDots: bmp.height,
 					elapsedMs: elapsed,
 					reserveMs,
 					pauseMs,
 				})
-				if (!isLastCopy) {
+				if (!isLastSheet) {
 					await new Promise((r) => setTimeout(r, pauseMs))
 				}
 			}
 
-			return { paper, dots, copies, tailDots }
+			return { paper, dots, copies: sheets.length, tailDots }
 		},
 
 		describe() {

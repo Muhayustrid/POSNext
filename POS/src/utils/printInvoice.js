@@ -14,6 +14,7 @@ import {
 	receiptStylesFor,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
+import { formatQueueNumber } from "@/utils/queue/queueNumber"
 export { receiptStylesFor }
 
 const log = logger.create("PrintInvoice")
@@ -95,6 +96,9 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		paid_amount: paidAmount,
 		change_amount: Number.parseFloat(raw.change_amount) || 0,
 		outstanding_amount: Math.max(0, grandTotal - paidAmount),
+		// Queue stamp rides the raw payload; a page-reloaded receipt keeps it.
+		pos_queue_number: raw.pos_queue_number ?? null,
+		pos_queue_date: raw.pos_queue_date || null,
 		status: grandTotal - paidAmount < 0.01 ? "Paid" : "Unpaid",
 		docstatus: 0,
 	}
@@ -209,6 +213,15 @@ export function buildReceiptHTML(invoiceData) {
 
 	return `
 			<div class="receipt">
+				${
+					invoiceData.pos_queue_number
+						? `<div class="queue-number"><div class="queue-label">${__(
+								"NO. ANTRIAN",
+							)}</div><div class="queue-value">${formatQueueNumber(
+								invoiceData.pos_queue_number,
+							)}</div></div>`
+						: ""
+				}
 				<div class="header">
 					<div class="company-name">${invoiceData.company || "POS Next"}</div>
 					<div style="font-size: 12px;">${invoiceData.header || __("TAX INVOICE")}</div>

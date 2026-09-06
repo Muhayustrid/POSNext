@@ -92,7 +92,7 @@ describe("buildReceiptPreviewSet (preview = print, structural)", () => {
 			return { dataURL: "data:,", width: 384, height: 100 }
 		})
 		await buildReceiptPreviewSet("<body>receipt</body>", {
-			device: { lineSpacing: 70 },
+			device: { lineSpacing: 70, crewSlipEnabled: true },
 			copies: 2,
 			crewHTML: '<div class="crew">crew</div>',
 			render,
@@ -108,7 +108,7 @@ describe("buildReceiptPreviewSet (preview = print, structural)", () => {
 			return { dataURL: "data:,", width: 384, height: 100 }
 		})
 		await buildReceiptPreviewSet("<body>receipt</body>", {
-			device: { sideMarginDots: 8 },
+			device: { sideMarginDots: 8, crewSlipEnabled: true },
 			copies: 2,
 			crewHTML: '<div class="crew">crew</div>',
 			render,
@@ -135,7 +135,7 @@ describe("buildReceiptPreviewSet (preview = print, structural)", () => {
 	})
 })
 
-describe("buildReceiptPreviewSet (crew slip as copy 2)", () => {
+describe("buildReceiptPreviewSet (crew slip as the last sheet)", () => {
 	const crewHTML = '<div class="crew">crew</div>'
 	const render = () =>
 		vi.fn(async (html) => ({
@@ -145,49 +145,54 @@ describe("buildReceiptPreviewSet (crew slip as copy 2)", () => {
 			html,
 		}))
 
-	it("renders crewHTML for copy 2 exactly like the driver does", async () => {
+	it("appends the crew slip after a single copy, exactly like the driver", async () => {
+		const r = render()
+		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { crewSlipEnabled: true, crewFontScale: 90 },
+			copies: 1,
+			crewHTML,
+			render: r,
+		})
+		// Two sheets even at one copy: the slip is its own switch, not "copy 2".
+		expect(set.copies.map((c) => c.label)).toEqual(["Copy 1", "CREW COPY"])
+		expect(r.mock.calls[0][0]).toBe("<body>receipt</body>")
+		// The slip's bitmap is rendered from crewHTML at its own font knob,
+		// the same call the driver makes.
+		expect(r.mock.calls[1][0]).toBe(crewHTML)
+		expect(r.mock.calls[1][1]).toMatchObject({ fontScale: 90 })
+	})
+
+	it("prints plain copies only when the crew switch is off", async () => {
 		const r = render()
 		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
 			copies: 2,
 			crewHTML,
 			render: r,
 		})
-		// Same branch the driver takes, so the preview cannot claim a crew slip
-		// the printer will not produce (or the other way round).
-		expect(r.mock.calls[0][0]).toBe("<body>receipt</body>")
-		expect(r.mock.calls[1][0]).toBe(crewHTML)
-		// UI-only caption: nothing is printed above either sheet.
-		expect(set.copies[1].label).toBe("CREW COPY")
-		expect(set.copies[0].label).toBe("Copy 1")
-	})
-
-	it("keeps the main receipt for copies 1 and 3", async () => {
-		const r = render()
-		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
-			copies: 3,
-			crewHTML,
-			render: r,
-		})
-		// Two renders only: the receipt once (copies 1 and 3 share it) and the
-		// slip for copy 2 — same as the driver.
-		const sources = r.mock.calls.map((call) => call[0])
-		expect(sources).toEqual(["<body>receipt</body>", crewHTML])
-		expect(set.copies[0].bitmap).toBe(set.copies[2].bitmap)
-		expect(set.copies[1].bitmap).not.toBe(set.copies[0].bitmap)
-		expect(set.copies[2].label).toBe("Copy 3")
-	})
-
-	it("ignores crewHTML for a one-copy preview", async () => {
-		const r = render()
-		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
-			copies: 1,
-			crewHTML,
-			render: r,
-		})
+		// No crewSlipEnabled -> no slip render at all, just identical receipts.
 		expect(r).toHaveBeenCalledTimes(1)
 		expect(r.mock.calls[0][0]).toBe("<body>receipt</body>")
-		expect(set.copies).toHaveLength(1)
-		expect(set.copies[0].label).toBe("Copy 1")
+		expect(set.copies.map((c) => c.label)).toEqual(["Copy 1", "Copy 2"])
+	})
+
+	it("appends the crew slip after all N copies, with the summed delay", async () => {
+		const r = render()
+		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { crewSlipEnabled: true, copyDelayMs: 800 },
+			copies: 2,
+			crewHTML,
+			render: r,
+		})
+		expect(set.copies.map((c) => c.label)).toEqual([
+			"Copy 1",
+			"Copy 2",
+			"CREW COPY",
+		])
+		// The two receipts share one bitmap; the slip is its own.
+		expect(set.copies[0].bitmap).toBe(set.copies[1].bitmap)
+		expect(set.copies[2].bitmap).not.toBe(set.copies[0].bitmap)
+		// The slip leaves the printer after both copies' tear-off pauses.
+		expect(set.copies.map((c) => c.delayMs)).toEqual([0, 800, 1600])
 	})
 
 	it("previews the crew slip at the crew font scale, the receipt at its own", async () => {
@@ -197,7 +202,7 @@ describe("buildReceiptPreviewSet (crew slip as copy 2)", () => {
 			return { dataURL: "data:,", width: 384, height: 100 }
 		})
 		await buildReceiptPreviewSet("<body>receipt</body>", {
-			device: { fontScale: 110, crewFontScale: 90 },
+			device: { fontScale: 110, crewFontScale: 90, crewSlipEnabled: true },
 			copies: 2,
 			crewHTML,
 			render: r,
@@ -231,11 +236,13 @@ describe("buildReceiptPreviewSet (eod lane)", () => {
 			html,
 		}))
 		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { crewSlipEnabled: true },
 			copies: 2,
 			crewHTML: '<div class="crew">crew</div>',
 			kind: "eod",
 			render,
 		})
+		// Even with the switch on, the eod lane resolves crewSlipEnabled to off.
 		expect(render).toHaveBeenCalledTimes(1)
 		expect(render.mock.calls[0][0]).toBe("<body>receipt</body>")
 		expect(set.copies.map((c) => c.label)).toEqual(["Copy 1", "Copy 2"])

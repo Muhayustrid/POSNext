@@ -4,10 +4,11 @@
  * The point of a preview is that it *is* the print. So this mirrors the iMin
  * driver's render block exactly — same `resolvePrintConfig`, same
  * `renderHTMLToBitmap`, same tailDots/paper/customDots, and the same two
- * bitmaps: one for every plain copy, the crew slip (at its own font scale) for
- * copy 2. There is no second renderer; if the two ever disagree, the preview
- * lies. Keeping the copy loop here (rather than in the Vue page) is what makes
- * "preview = print" structural.
+ * bitmaps: one for every plain copy, plus the crew slip (at its own font
+ * scale) as a final sheet whenever the crew switch is on. There is no second
+ * renderer; if the two ever disagree, the preview lies. Keeping the copy loop
+ * here (rather than in the Vue page) is what makes "preview = print"
+ * structural.
  *
  * Nothing here touches the printer, so it works on a laptop with no iMin
  * attached. What it cannot show is the physical part: where the tear bar
@@ -25,8 +26,8 @@ import { resolvePrintConfig } from "./receipt_layout"
  * @param {object} [opts.server] - transport/POS Settings config.
  * @param {number} [opts.copies] - override the configured copy count
  *   (the preview buttons pass 1 or 2 explicitly).
- * @param {string} [opts.crewHTML] - the crew slip that replaces copy 2, same
- *   contract as the driver's opts.crewHTML.
+ * @param {string} [opts.crewHTML] - the crew slip printed as the final sheet,
+ *   same contract as the driver's opts.crewHTML.
  * @param {string} [opts.kind] - print lane ("receipt" or "eod"), forwarded to
  *   the resolver so an EOD preview shows the eod knobs. An EOD print has no
  *   crew slip, so crewHTML is ignored entirely for that lane.
@@ -58,18 +59,17 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 		lineSpacing: r.lineSpacing,
 		sideMarginDots: r.sideMarginDots,
 	}
-	// Mirrors imin_client: a crew slip only replaces copy 2 of a multi-copy
-	// job, and never exists on the EOD lane.
-	const crewApplies = Boolean(opts.crewHTML) && !eod && r.copies > 1
+	// Mirrors imin_client: the crew slip is a separate sheet appended after all
+	// N copies, gated only by the crew switch, and never exists on the EOD lane.
+	const crewApplies = Boolean(opts.crewHTML) && !eod && r.crewSlipEnabled
 	const [shared, crewBitmap] = await Promise.all([
 		render(html, renderOpts),
 		crewApplies
 			? render(opts.crewHTML, { ...renderOpts, fontScale: r.crewFontScale })
 			: null,
 	])
-	const bitmaps = Array.from({ length: r.copies }, (_, idx) =>
-		crewApplies && idx === 1 ? crewBitmap : shared,
-	)
+	const bitmaps = Array.from({ length: r.copies }, () => shared)
+	if (crewApplies) bitmaps.push(crewBitmap)
 
 	return {
 		dots: r.dots,
@@ -81,10 +81,12 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 			index,
 			// Screen-only caption so the operator knows which sheet is which —
 			// the paper itself carries no banner.
-			label: crewApplies && index === 1 ? "CREW COPY" : `Copy ${index + 1}`,
-			// Copy 1 shows now; later copies are revealed after their delay by
+			label: index < r.copies ? `Copy ${index + 1}` : "CREW COPY",
+			// Copy 1 shows now; later sheets are revealed after their delay by
 			// the caller, so the tear-off pause between copies is visible.
 			visible: index === 0,
+			// The crew row sits at index N, so this is naturally N * copyDelayMs
+			// — the same wait the driver inserts before the slip prints.
 			delayMs: index * r.copyDelayMs,
 			bitmap,
 		})),

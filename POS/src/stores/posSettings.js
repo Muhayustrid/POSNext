@@ -145,6 +145,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	);
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon));
 
+	// Computed - Queue
+	const queueEnabled = computed(() => Boolean(settings.value.queue_enabled));
+
 	// Computed - Printing
 	const allowPrintLastInvoice = computed(() => Boolean(settings.value.allow_print_last_invoice));
 	const silentPrint = computed(() => Boolean(settings.value.silent_print));
@@ -408,6 +411,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowCustomerPurchaseOrder,
 		allowDuplicateCustomerNames,
 		fetchCoupon,
+
+		// Computed - Queue
+		queueEnabled,
 
 		// Computed - Printing
 		allowPrintLastInvoice,

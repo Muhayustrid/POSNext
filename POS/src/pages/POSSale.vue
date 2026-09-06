@@ -1157,6 +1157,7 @@ import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
+import { acquireQueueNumber } from "@/utils/queue/queueNumber";
 
 // Initialize stores
 const cartStore = usePOSCartStore();
@@ -2201,6 +2202,21 @@ async function handlePaymentCompleted(paymentData) {
 			// are all correctly formatted for ERPNext
 			const preparedItems = cartStore.formatItemsForSubmission(cartStore.invoiceItems);
 
+			// Offline path is inherently offline: continue the per-company queue
+			// locally (the sync replay raises the server counter, on_submit hook).
+			let queueStamp = null;
+			if (posSettingsStore.queueEnabled && shiftStore.profileCompany) {
+				try {
+					queueStamp = await acquireQueueNumber({
+						company: shiftStore.profileCompany,
+						posProfile: cartStore.posProfile,
+						offline: true,
+					});
+				} catch (err) {
+					log.warn("queue number unavailable, printing without it:", err);
+				}
+			}
+
 			const invoiceData = {
 				pos_profile: cartStore.posProfile,
 				posa_pos_opening_shift: cartStore.posOpeningShift,
@@ -2225,6 +2241,12 @@ async function handlePaymentCompleted(paymentData) {
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
+				...(queueStamp
+					? {
+							pos_queue_number: queueStamp.queue_number,
+							pos_queue_date: queueStamp.date,
+						}
+					: {}),
 			};
 
 			// Save to the offline queue first so we can use the worker's
@@ -2282,6 +2304,9 @@ async function handlePaymentCompleted(paymentData) {
 				outstanding_amount: Math.max(0, grandTotal - paidAmount),
 				status: Math.max(0, grandTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
 				docstatus: 0,
+				// The printed receipt shows the queue number even before sync.
+				pos_queue_number: queueStamp ? queueStamp.queue_number : null,
+				pos_queue_date: queueStamp ? queueStamp.date : null,
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);

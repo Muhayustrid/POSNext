@@ -32,6 +32,7 @@
  */
 
 import { DOTS_PER_MM } from "./paper"
+import { formatQueueNumber } from "@/utils/queue/queueNumber"
 
 /**
  * Slip typography. `dots` is the paper width in printer dots, exactly as
@@ -53,6 +54,11 @@ function crewSlipStyles(dots) {
 	.slip-rule { border-top: 1px dashed #000; margin: 14px 0 4px; }
 	.receipt { padding-bottom: 10px; }
 	.slip-title { text-align: center; font-weight: bold; font-size: 11px; margin: 2px 0; }
+	/* Queue block: above the title, centred, big number — the crew calls the
+	 * customer by it before they read anything else on the slip. */
+	.slip-queue { text-align: center; margin: 2px 0 6px; }
+	.slip-queue-label { font-size: 11px; }
+	.slip-queue-value { font-size: 24px; font-weight: bold; }
 	/* Header rows: label column, colon starts the value cell — the same
 	 * alignment (and 54px column) the customer receipt's info block uses. */
 	.slip-row { display: flex; margin: 1px 0; font-size: 11px; }
@@ -121,12 +127,24 @@ export function buildCrewSlipHTML(invoiceData, { dots } = {}) {
 		})
 		.join("")
 
+	// Queue block rides above the title (FIRST element when present); absent
+	// number -> empty string, so the slip is byte-identical to before.
+	const queueBlock =
+		doc.pos_queue_number != null && doc.pos_queue_number !== ""
+			? `<div class="slip-queue"><div class="slip-queue-label">${__(
+					"NO. ANTRIAN",
+				)}</div><div class="slip-queue-value">${formatQueueNumber(
+					doc.pos_queue_number,
+				)}</div></div>`
+			: ""
+
 	// Title (literal ORDER, like the receipt's company line) → rule → header
 	// rows → rule → item lines (no closing rule: the slip ends where the last
 	// item ends), with every piece optional and no two rules ever adjacent.
 	const sections = [rows.join(""), itemLines].filter(Boolean)
 	const title = `<div class="slip-title">${__("ORDER")}</div>`
 	const body =
+		queueBlock +
 		title +
 		sections
 			.map((section) => `<div class="slip-rule"></div>${section}`)

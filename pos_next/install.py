@@ -62,6 +62,28 @@ CUSTOM_FIELDS = {
 			"translatable": 0,
 			"description": "Internal: JSON list of Pricing Rules applied to this invoice. Used to enforce POS Offer quotas and record usage on submit/cancel.",
 		},
+		{
+			"fieldname": "pos_queue_number",
+			"label": "POS Queue Number",
+			"fieldtype": "Int",
+			"insert_after": "pos_applied_offer_rules",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "Daily per-outlet queue number stamped at checkout; printed at the top of the receipt.",
+		},
+		{
+			"fieldname": "pos_queue_date",
+			"label": "POS Queue Date",
+			"fieldtype": "Date",
+			"insert_after": "pos_queue_number",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "Calendar date the queue number belongs to.",
+		},
 	],
 	"Sales Invoice Item": [
 		{
@@ -137,6 +159,17 @@ CUSTOM_FIELDS = {
 			"no_copy": 1,
 			"print_hide": 1,
 			"description": "Per-unit nominal cap for POS Offer percentage discounts (0 = no cap).",
+		}
+	],
+	"Company": [
+		{
+			"fieldname": "enable_pos_queue",
+			"label": "Enable POS Queue Number",
+			"fieldtype": "Check",
+			"insert_after": "default_bank_account",
+			"default": "0",
+			"translatable": 0,
+			"description": "Print a daily queue number on receipts from this outlet.",
 		}
 	],
 }

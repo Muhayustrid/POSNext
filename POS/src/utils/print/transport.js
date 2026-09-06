@@ -71,6 +71,9 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						tailDots: current.tail_dots,
 						fontScale: current.font_scale,
 						crewFontScale: current.crew_font_scale,
+						// Crew slip lane: the driver decides whether to print the
+						// extra crew slip, independent of `copies`.
+						crewSlipEnabled: current.crew_slip_enabled,
 						lineSpacing: current.line_spacing,
 						sideMarginDots: current.side_margin,
 						// Closing/EOD lane: the driver resolves these against the eod*
@@ -203,6 +206,7 @@ export async function initTransportFromServer(posProfile) {
 		tail_dots: cfg.tail_dots,
 		font_scale: cfg.font_scale,
 		crew_font_scale: cfg.crew_font_scale,
+		crew_slip_enabled: cfg.crew_slip_enabled,
 		line_spacing: cfg.line_spacing,
 		side_margin: cfg.side_margin,
 		// Stored verbatim (snake_case, exactly as the API returns); printHTML

@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+// crew_slip now consumes formatQueueNumber, whose module imports apiWrapper
+// (frappe-ui) and logger — mock both so the slip stays unit-testable in node.
+vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn() }))
+vi.mock("@/utils/logger", () => ({
+	logger: { create: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) },
+}))
 
 // Same trivial translation helper printInvoice.test.js installs. crew_slip
 // only runs labels through __(), never content it does not control.
@@ -163,13 +170,27 @@ describe("buildCrewSlipHTML", () => {
 		expect(html.match(/\.slip-label\s*\{[^}]*\}/)[0]).toContain(
 			"min-width: 54px",
 		)
-		// Item lines: the ONLY bold thing, 16px.
+		// Item lines and the queue value are bold; 24px is the queue number.
 		const lineRule = html.match(/\.slip-line\s*\{[^}]*\}/)
 		expect(lineRule[0]).toContain("font-size: 14px")
 		expect(lineRule[0]).toContain("font-weight: bold")
 		expect(rowRule[0]).not.toContain("bold")
-		// Only 11px and 16px exist on the slip.
-		expect(html).not.toMatch(/font-size:\s*(?!11px|14px)\d+px/)
+		// Only 11px, 14px and 24px exist on the slip.
+		expect(html).not.toMatch(/font-size:\s*(?!11px|14px|24px)\d+px/)
+	})
+
+	it("prints the queue block before the title when pos_queue_number is set", () => {
+		const body = bodyOf(
+			buildCrewSlipHTML({ ...doc, pos_queue_number: 48 }, {}),
+		)
+		const queueStart = body.indexOf(">048<")
+		expect(queueStart).toBeGreaterThan(-1)
+		expect(body.indexOf("slip-title")).toBeGreaterThan(queueStart)
+		expect(body).toContain("NO. ANTRIAN")
+	})
+
+	it("prints no queue markup without a number", () => {
+		expect(bodyOf(buildCrewSlipHTML(doc, {}))).not.toContain("slip-queue")
 	})
 
 	it("orders header rows like the customer receipt: Invoice, Cashier, Date, Customer", () => {

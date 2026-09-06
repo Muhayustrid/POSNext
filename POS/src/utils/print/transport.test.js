@@ -170,6 +170,27 @@ it("maps side_margin even when the server omits it (absent, not 0)", async () =>
 	expect(config.sideMarginDots).toBeUndefined()
 })
 
+it("forwards crew_slip_enabled to the driver as crewSlipEnabled", async () => {
+	const imin = {
+		id: "imin",
+		isAvailable: vi.fn().mockResolvedValue(true),
+		printHTML: vi.fn().mockResolvedValue({ paper: "58mm", dots: 384 }),
+		describe: () => ({ id: "imin" }),
+	}
+	const t = createTransport({
+		drivers: { imin, qz: okDriver("qz"), browser: okDriver("browser") },
+		config: { driver: "imin" },
+		logSink: log,
+	})
+	// Unset: stays absent so the resolver's default applies.
+	await t.printHTML("<html/>")
+	expect(imin.printHTML.mock.calls[0][1].config.crewSlipEnabled).toBeUndefined()
+
+	t.setConfig({ crew_slip_enabled: true })
+	await t.printHTML("<html/>")
+	expect(imin.printHTML.mock.calls[1][1].config.crewSlipEnabled).toBe(true)
+})
+
 it("maps the eod server knobs camelCase for the Closing/EOD lane", async () => {
 	const imin = {
 		id: "imin",
