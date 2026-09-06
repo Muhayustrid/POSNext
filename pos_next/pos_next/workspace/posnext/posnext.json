@@ -75,7 +75,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Configuration",
-   "link_count": 2,
+   "link_count": 4,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -97,6 +97,26 @@
    "link_count": 0,
    "link_to": "POS Profile",
    "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "POS Production Recipe",
+   "link_count": 0,
+   "link_type": "DocType",
+   "link_to": "POS Production Recipe",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "POS Production Log",
+   "link_count": 0,
+   "link_type": "DocType",
+   "link_to": "POS Production Log",
    "onboard": 0,
    "type": "Link"
   },
