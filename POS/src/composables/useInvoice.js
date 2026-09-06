@@ -3,6 +3,9 @@ import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
+import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSShiftStore } from "@/stores/posShift";
+import { acquireQueueNumber } from "@/utils/queue/queueNumber";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
@@ -22,6 +25,9 @@ export function useInvoice() {
 	const serialStore = useSerialNumberStore();
 	// HQ confirmation code for restricted discounts (validated per rule server-side)
 	const restrictionStore = useDiscountRestrictionStore();
+	// Queue-number gate (per-company setting) and the profile's company
+	const posSettingsStore = usePOSSettingsStore();
+	const shiftStore = usePOSShiftStore();
 
 	// State
 	const invoiceItems = ref([]);
@@ -1088,6 +1094,25 @@ export function useInvoice() {
 				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
 					buildCustomerCreditPayload(rawPayments);
 
+				// Daily per-outlet queue number, allocated before the draft save so
+				// it rides the invoice everywhere (server print, history, sync).
+				let queueStamp = null;
+				if (
+					posSettingsStore.queueEnabled &&
+					shiftStore.profileCompany &&
+					targetDoctype === "Sales Invoice"
+				) {
+					try {
+						queueStamp = await acquireQueueNumber({
+							company: shiftStore.profileCompany,
+							posProfile: posProfile.value,
+							offline: isOffline(),
+						});
+					} catch (err) {
+						log.warn("queue number unavailable, printing without it:", err);
+					}
+				}
+
 				const invoiceData = {
 					doctype: targetDoctype,
 					pos_profile: posProfile.value,
@@ -1101,6 +1126,12 @@ export function useInvoice() {
 					discount_confirmation_code: restrictionStore.code || "",
 					is_pos: 1,
 					update_stock: 1, // Critical: ensures stock is updated
+					...(queueStamp
+						? {
+								pos_queue_number: queueStamp.queue_number,
+								pos_queue_date: queueStamp.date,
+							}
+						: {}),
 				};
 
 				// Relay the applied offer rule names (incl. transaction-scope

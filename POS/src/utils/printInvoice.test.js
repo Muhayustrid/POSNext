@@ -34,6 +34,7 @@ globalThis.__ = (message, replacements = []) => {
 }
 
 import { call } from "@/utils/apiWrapper"
+import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
 import {
 	buildReceiptDocumentHTML,
 	effectiveReceiptDots,
@@ -43,6 +44,7 @@ import {
 	silentPrintInvoice,
 	silentPrintInvoiceFromDoc,
 	printWithSilentFallback,
+	hydrateLocalOnlyInvoice,
 } from "./printInvoice"
 import * as transport from "@/utils/print/transport"
 
@@ -187,6 +189,32 @@ describe("silentPrintInvoiceFromDoc embeds the effective paper width", () => {
 		const html = transport.printHTML.mock.calls[0][0]
 		// 384 dots -> 48mm in the embedded @page/body width.
 		expect(html).toContain("48mm")
+	})
+})
+
+describe("hydrateLocalOnlyInvoice (queue-stamp passthrough)", () => {
+	it("rebuilds a page-reloaded offline receipt with its queue number", async () => {
+		getOfflineInvoiceByOfflineId.mockResolvedValueOnce({
+			items: [{ item_code: "A", qty: 1 }],
+			payments: [{ mode_of_payment: "Cash", amount: 5000 }],
+			grand_total: 5000,
+			pos_queue_number: 12,
+			pos_queue_date: "2026-09-06",
+		})
+		const hydrated = await hydrateLocalOnlyInvoice({ name: "pos_offline_abc" })
+		expect(hydrated.pos_queue_number).toBe(12)
+		expect(hydrated.pos_queue_date).toBe("2026-09-06")
+	})
+
+	it("maps an absent queue stamp to null, not undefined", async () => {
+		getOfflineInvoiceByOfflineId.mockResolvedValueOnce({
+			items: [{ item_code: "A", qty: 1 }],
+			payments: [],
+			grand_total: 5000,
+		})
+		const hydrated = await hydrateLocalOnlyInvoice({ name: "pos_offline_def" })
+		expect(hydrated.pos_queue_number).toBeNull()
+		expect(hydrated.pos_queue_date).toBeNull()
 	})
 })
 
