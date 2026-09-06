@@ -203,11 +203,11 @@
 							:options="copiesOptions"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
-							{{ __("1 = one receipt. 2 = customer + crew.") }}
+							{{ __("1 = one receipt. 2 = two identical receipts.") }}
 						</p>
 					</div>
 
-					<div v-if="Number(cfg.copies) > 1">
+					<div v-if="Number(cfg.copies) > 1 || crewSlipChoice === '1'">
 						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-copy-delay">
 							{{ __("Delay between copies (ms)") }}
 						</label>
@@ -220,6 +220,27 @@
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Tear-off pause so the first copy can be removed. Default 800.") }}
+						</p>
+					</div>
+
+					<div>
+						<label
+							class="mb-1 block text-xs font-medium text-gray-700"
+							for="direct-print-crew-slip"
+						>
+							{{ __("Crew slip") }}
+						</label>
+						<Select
+							id="direct-print-crew-slip"
+							v-model="crewSlipChoice"
+							:options="crewOptions"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"One short order slip for the outlet, printed after the customer copies — independent of the copy count.",
+								)
+							}}
 						</p>
 					</div>
 
@@ -355,7 +376,7 @@
 					<p>
 						{{
 							__(
-								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots",
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots · Crew {10}",
 								[
 									String(effectiveCfg.paper),
 									String(effectiveCfg.dots),
@@ -367,6 +388,7 @@
 									String(effectiveCfg.crewFontScale),
 									String(effectiveCfg.lineSpacing),
 									String(effectiveCfg.sideMarginDots),
+									effectiveCfg.crewSlipEnabled ? "On" : "Off",
 								],
 							)
 						}}
@@ -428,7 +450,7 @@
 					<p class="mt-1 text-xs text-gray-500">
 						{{
 							__(
-								"Renders the sample receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer — copy 2 is the crew slip, at its own font scale, when the profile prints two. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
+								"Renders the sample receipt through the same bitmap path a real print uses, at the same width, with the same tail spacer — the crew slip is the last sheet, at its own font scale, when enabled. Nothing reaches the printer. What it cannot show is where the physical tear bar sits — that still needs the device.",
 							)
 						}}
 					</p>
@@ -927,6 +949,13 @@ const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
 	value: n,
 }))
 
+const crewOptions = [
+	{ label: "Server default", value: "" },
+	{ label: "On", value: "1" },
+	{ label: "Off", value: "0" },
+]
+const crewSlipChoice = ref("") // "" | "1" | "0"
+
 // Physical/global half of the device config, plus the copy counts of both
 // lanes (Select-driven, so no text parsing).
 const cfg = reactive({
@@ -936,9 +965,10 @@ const cfg = reactive({
 	copies: 1,
 	eodCopies: 1,
 })
-// Two copies printing (customer + outlet crew). Device-level delay
+// Delay between consecutive sheets (receipt copies and the crew slip).
+// Device-level delay
 // overrides the POS Settings value — same override pattern as `paper`/
-// `cut`, but specific to multi-copy jobs. Raw text so the field can be
+// `cut`, but specific to multi-sheet jobs. Raw text so the field can be
 // empty (meaning 'use server default 800ms').
 const copyDelayText = ref("800")
 const feedDotsText = ref(String(DEFAULT_FEED_DOTS))
@@ -995,6 +1025,12 @@ function readReceiptIntoForm(stored) {
 	const sm = stored.sideMarginDots
 	sideMarginDotsText.value =
 		sm === undefined || sm === "" || sm === null ? "16" : String(sm)
+	crewSlipChoice.value =
+		stored.crewSlipEnabled === true
+			? "1"
+			: stored.crewSlipEnabled === false
+				? "0"
+				: ""
 }
 
 function readEodIntoForm(stored) {
@@ -1190,6 +1226,12 @@ function onSaveReceiptConfig() {
 			crewFontScale,
 			lineSpacing,
 			sideMarginDots,
+			crewSlipEnabled:
+				crewSlipChoice.value === "1"
+					? true
+					: crewSlipChoice.value === "0"
+						? false
+						: undefined, // JSON.stringify drops it = unset
 		})
 		showSuccess(__("Receipt layout saved. It will apply on the next print."))
 		refreshEffectiveConfig()
@@ -1383,7 +1425,7 @@ function sampleReceiptHTML(bundle) {
 	)
 }
 
-/** Crew slip for the sample — copy 2 whenever the profile prints two. */
+/** Crew slip for the sample — rendered once, after the copies, when enabled. */
 function sampleCrewHTML(bundle) {
 	return buildCrewSlipHTML(bundle.invoiceDoc, {
 		dots: effectiveReceiptDots(),
@@ -1586,7 +1628,8 @@ async function runPreview(copiesOverride) {
 		const set = await buildReceiptPreviewSet(sampleReceiptHTML(bundle), {
 			device,
 			server,
-			// Copy 2 is the compact crew slip, exactly as the driver prints it.
+			// The crew slip prints once, after all the copies, gated by its own
+			// switch — exactly as the driver prints it.
 			crewHTML: sampleCrewHTML(bundle),
 		})
 		previewDots.value = set.dots
