@@ -55,7 +55,7 @@ doctype_js = {
 	"POS Package": "public/js/pos_package.js",
 	"POS Discount Confirmation Code": "public/js/pos_discount_code.js",
 }
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_list_js = {"POS Discount Confirmation Code": "public/js/pos_discount_code_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
