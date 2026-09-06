@@ -116,6 +116,12 @@ def get_pos_settings(pos_profile):
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
 
+	# Mirror the bootstrap preload feed so both feeds agree; the UI treats a
+	# missing key as disabled.
+	settings["queue_enabled"] = bool(
+		frappe.db.get_value("Company", frappe.db.get_value("POS Profile", pos_profile, "company"), "enable_pos_queue")
+	)
+
 	return settings
 
 
