@@ -9,8 +9,11 @@ import {
 	parseNumericField,
 	saveDeviceConfig,
 	DEFAULT_CREW_FONT_SCALE,
+	DEFAULT_EOD_COPIES,
 	DEFAULT_FEED_DOTS,
 	DEFAULT_FONT_SCALE,
+	DEFAULT_LINE_SPACING,
+	DEFAULT_SIDE_MARGIN_DOTS,
 	DEFAULT_TAIL_DOTS,
 	DPI_SCALE,
 	receiptBaseCSS,
@@ -189,6 +192,12 @@ describe("receiptBaseCSS", () => {
 		expect(bigger).not.toBe(css)
 	})
 
+	it("scales its baseline line-height by the line-spacing factor", () => {
+		expect(receiptBaseCSS(".pn", 1)).toContain("line-height:1.35")
+		expect(receiptBaseCSS(".pn", 1, 0.8)).toContain("line-height:1.08")
+		expect(receiptBaseCSS(".pn", 2, 1.2)).toContain("line-height:1.62")
+	})
+
 	it("no longer styles a copy banner — the print path has none", () => {
 		expect(receiptBaseCSS(".pn", 1)).not.toContain("pn-copy-label")
 	})
@@ -209,9 +218,9 @@ describe("resolvePrintConfig fontScale", () => {
 })
 
 describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
-	it("defaults to 130 — the slip is read across a counter, so it starts bigger", () => {
-		expect(DEFAULT_CREW_FONT_SCALE).toBe(130)
-		expect(resolvePrintConfig({}, {}).crewFontScale).toBe(130)
+	it("defaults to 100 — the slip mirrors the customer receipt's size by default", () => {
+		expect(DEFAULT_CREW_FONT_SCALE).toBe(100)
+		expect(resolvePrintConfig({}, {}).crewFontScale).toBe(100)
 	})
 
 	it("device wins over server, server over the default", () => {
@@ -225,7 +234,7 @@ describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
 	it("is independent of the main font scale", () => {
 		const r = resolvePrintConfig({ fontScale: 200 }, {})
 		expect(r.fontScale).toBe(200)
-		expect(r.crewFontScale).toBe(130)
+		expect(r.crewFontScale).toBe(100)
 	})
 
 	it("clamps to the same 60..250 band as the main knob", () => {
@@ -235,13 +244,13 @@ describe("resolvePrintConfig crewFontScale (the crew slip's own knob)", () => {
 		)
 	})
 
-	it("falls back to the crew default on garbage instead of 100", () => {
+	it("falls back to the crew default on garbage instead of 60", () => {
 		expect(
 			resolvePrintConfig({ crewFontScale: "garbage" }, {}).crewFontScale,
-		).toBe(130)
+		).toBe(100)
 		expect(
 			resolvePrintConfig({}, { crewFontScale: "garbage" }).crewFontScale,
-		).toBe(130)
+		).toBe(100)
 	})
 })
 
@@ -254,11 +263,239 @@ describe("clampFontScale", () => {
 		expect(clampFontScale("130")).toBe(130)
 	})
 
-	it("takes a custom default (the crew knob defaults to 130)", () => {
-		expect(clampFontScale(null, DEFAULT_CREW_FONT_SCALE)).toBe(130)
-		expect(clampFontScale("", DEFAULT_CREW_FONT_SCALE)).toBe(130)
-		expect(clampFontScale("nope", DEFAULT_CREW_FONT_SCALE)).toBe(130)
+	it("takes a custom default (the crew knob defaults to 100)", () => {
+		expect(clampFontScale(null, DEFAULT_CREW_FONT_SCALE)).toBe(100)
+		expect(clampFontScale("", DEFAULT_CREW_FONT_SCALE)).toBe(100)
+		expect(clampFontScale("nope", DEFAULT_CREW_FONT_SCALE)).toBe(100)
 		expect(clampFontScale(20, DEFAULT_CREW_FONT_SCALE)).toBe(60)
+	})
+})
+
+describe("resolvePrintConfig lineSpacing (vertical density knob)", () => {
+	it("defaults to 100 — the receipt prints exactly as authored", () => {
+		expect(DEFAULT_LINE_SPACING).toBe(100)
+		expect(resolvePrintConfig({}, {}).lineSpacing).toBe(100)
+	})
+
+	it("device wins over server, server over the default", () => {
+		expect(
+			resolvePrintConfig({ lineSpacing: 80 }, { lineSpacing: 120 }).lineSpacing,
+		).toBe(80)
+		expect(resolvePrintConfig({}, { lineSpacing: 120 }).lineSpacing).toBe(120)
+	})
+
+	it("clamps to the 50..150 percent band", () => {
+		expect(resolvePrintConfig({ lineSpacing: 10 }, {}).lineSpacing).toBe(50)
+		expect(resolvePrintConfig({ lineSpacing: 999 }, {}).lineSpacing).toBe(150)
+		expect(resolvePrintConfig({}, { lineSpacing: 400 }).lineSpacing).toBe(150)
+	})
+
+	it("falls back to the default on garbage or an empty value", () => {
+		expect(resolvePrintConfig({ lineSpacing: "garbage" }, {}).lineSpacing).toBe(
+			100,
+		)
+		expect(resolvePrintConfig({ lineSpacing: "" }, {}).lineSpacing).toBe(100)
+		expect(resolvePrintConfig({}, { lineSpacing: null }).lineSpacing).toBe(100)
+	})
+})
+
+describe("scopeReceiptCSS line-height (the lineSpacing knob)", () => {
+	it("scales unitless declarations (1.4 at 80% -> 1.12)", () => {
+		const out = scopeReceiptCSS("body{line-height:1.4}", ".pn", 1, 0.8)
+		expect(out).toContain("line-height:1.12")
+	})
+
+	it("scales px values BEFORE the DPI translation, like any other length", () => {
+		const out = scopeReceiptCSS("body{line-height:20px}", ".pn", 1, 0.8)
+		expect(out).toContain(
+			`line-height:${Math.round(16 * DPI_SCALE * 100) / 100}px`,
+		)
+	})
+
+	it("scales %, em and rem declarations too", () => {
+		expect(scopeReceiptCSS("body{line-height:120%}", ".pn", 1, 0.5)).toContain(
+			"line-height:60%",
+		)
+		expect(scopeReceiptCSS("body{line-height:1.2em}", ".pn", 1, 1.5)).toContain(
+			"line-height:1.8em",
+		)
+		expect(scopeReceiptCSS("body{line-height:2rem}", ".pn", 1, 0.75)).toContain(
+			"line-height:1.5rem",
+		)
+	})
+
+	it("only touches line-height, and only when the knob moves", () => {
+		expect(scopeReceiptCSS("body{line-height:1.4}", ".pn", 1)).toContain(
+			"line-height:1.4",
+		)
+		expect(
+			scopeReceiptCSS("body{line-height:normal}", ".pn", 1, 0.8),
+		).toContain("line-height:normal")
+		expect(scopeReceiptCSS("body{margin:4px}", ".pn", 1, 0.8)).toContain(
+			`margin:${Math.round(4 * DPI_SCALE * 100) / 100}px`,
+		)
+	})
+})
+
+describe("resolvePrintConfig sideMarginDots (left/right print margin)", () => {
+	it("defaults to 16 dots (2 mm) — narrower than the ~40 the templates ship", () => {
+		expect(DEFAULT_SIDE_MARGIN_DOTS).toBe(16)
+		expect(resolvePrintConfig({}, {}).sideMarginDots).toBe(16)
+	})
+
+	it("device wins over server, server over the default", () => {
+		expect(
+			resolvePrintConfig({ sideMarginDots: 8 }, { sideMarginDots: 32 })
+				.sideMarginDots,
+		).toBe(8)
+		expect(resolvePrintConfig({}, { sideMarginDots: 32 }).sideMarginDots).toBe(
+			32,
+		)
+	})
+
+	it("clamps to the 0..64 dot band", () => {
+		expect(resolvePrintConfig({ sideMarginDots: 999 }, {}).sideMarginDots).toBe(
+			64,
+		)
+		expect(resolvePrintConfig({}, { sideMarginDots: 400 }).sideMarginDots).toBe(
+			64,
+		)
+	})
+
+	it("honours an explicit 0 — the operator wants the full paper width", () => {
+		expect(resolvePrintConfig({ sideMarginDots: 0 }, {}).sideMarginDots).toBe(0)
+		expect(resolvePrintConfig({}, { sideMarginDots: 0 }).sideMarginDots).toBe(0)
+	})
+
+	it("falls back to the default on garbage or an empty value", () => {
+		expect(
+			resolvePrintConfig({ sideMarginDots: "garbage" }, {}).sideMarginDots,
+		).toBe(16)
+		expect(resolvePrintConfig({ sideMarginDots: "" }, {}).sideMarginDots).toBe(
+			16,
+		)
+		expect(
+			resolvePrintConfig({}, { sideMarginDots: null }).sideMarginDots,
+		).toBe(16)
+	})
+})
+
+describe('resolvePrintConfig kind: "eod" (Closing/EOD lane)', () => {
+	const device = {
+		eodCopies: 2,
+		eodCopyDelayMs: 900,
+		eodFeedDots: 200,
+		eodTailDots: 40,
+		eodFontScale: 120,
+		eodLineSpacing: 90,
+		eodSideMarginDots: 32,
+	}
+	const server = {
+		eodCopies: 3,
+		eodCopyDelayMs: 1000,
+		eodFeedDots: 210,
+		eodTailDots: 50,
+		eodFontScale: 130,
+		eodLineSpacing: 110,
+		eodSideMarginDots: 40,
+	}
+
+	it("reads the eod* device keys over server, server over the defaults", () => {
+		expect(resolvePrintConfig(device, server, { kind: "eod" })).toMatchObject({
+			copies: 2,
+			copyDelayMs: 900,
+			feedDots: 200,
+			tailDots: 40,
+			fontScale: 120,
+			lineSpacing: 90,
+			sideMarginDots: 32,
+		})
+		expect(resolvePrintConfig({}, server, { kind: "eod" })).toMatchObject({
+			copies: 3,
+			copyDelayMs: 1000,
+			feedDots: 210,
+			tailDots: 50,
+			fontScale: 130,
+			lineSpacing: 110,
+			sideMarginDots: 40,
+		})
+	})
+
+	it("falls back to the eod defaults when nothing is set", () => {
+		expect(DEFAULT_EOD_COPIES).toBe(1)
+		expect(resolvePrintConfig({}, {}, { kind: "eod" })).toMatchObject({
+			copies: 1,
+			copyDelayMs: 800,
+			feedDots: 160,
+			tailDots: 24,
+			fontScale: 100,
+			lineSpacing: 100,
+			sideMarginDots: 16,
+		})
+	})
+
+	it("clamps to the same bands as the receipt knobs", () => {
+		const r = (d) => resolvePrintConfig(d, {}, { kind: "eod" })
+		expect(r({ eodCopies: 99 }).copies).toBe(5)
+		expect(r({ eodCopyDelayMs: 99999 }).copyDelayMs).toBe(10000)
+		expect(r({ eodFeedDots: 9999 }).feedDots).toBe(500)
+		expect(r({ eodTailDots: 999 }).tailDots).toBe(200)
+		expect(r({ eodFontScale: 10 }).fontScale).toBe(60)
+		expect(r({ eodLineSpacing: 10 }).lineSpacing).toBe(50)
+		expect(r({ eodSideMarginDots: 999 }).sideMarginDots).toBe(64)
+	})
+
+	it("ignores the receipt knobs, and the receipt lane ignores eod*", () => {
+		const eod = resolvePrintConfig(
+			{ copies: 2, fontScale: 150, tailDots: 99, sideMarginDots: 64 },
+			{},
+			{ kind: "eod" },
+		)
+		expect(eod.copies).toBe(1)
+		expect(eod.fontScale).toBe(100)
+		expect(eod.tailDots).toBe(24)
+		expect(eod.sideMarginDots).toBe(16)
+		// No opts (or kind "receipt") must not pick the eod overrides up.
+		expect(
+			resolvePrintConfig({ eodCopies: 3, eodFontScale: 200 }, {}).copies,
+		).toBe(1)
+		expect(resolvePrintConfig({ eodFontScale: 200 }, {}).fontScale).toBe(100)
+	})
+
+	it("keeps paper/customDots/cut global — they describe the paper, not the job", () => {
+		const r = resolvePrintConfig(
+			{},
+			{ paper: "custom", customDots: 512, cut: true },
+			{ kind: "eod" },
+		)
+		expect(r.paper).toBe("custom")
+		expect(r.customDots).toBe(512)
+		expect(r.cut).toBe(true)
+		expect(r.dots).toBe(512)
+	})
+
+	it("mirrors the eod fontScale into crewFontScale so the return shape holds", () => {
+		expect(
+			resolvePrintConfig({ eodFontScale: 120 }, {}, { kind: "eod" })
+				.crewFontScale,
+		).toBe(120)
+		expect(
+			resolvePrintConfig({ eodFontScale: 999 }, {}, { kind: "eod" })
+				.crewFontScale,
+		).toBe(250)
+	})
+
+	it('a call without opts resolves exactly like kind "receipt"', () => {
+		const d = { paper: "58mm", copies: 2, copyDelayMs: 900, fontScale: 110 }
+		const s = {
+			tailDots: 32,
+			lineSpacing: 80,
+			sideMarginDots: 24,
+			feedDots: 200,
+		}
+		expect(resolvePrintConfig(d, s)).toEqual(
+			resolvePrintConfig(d, s, { kind: "receipt" }),
+		)
 	})
 })
 

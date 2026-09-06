@@ -28,6 +28,9 @@ export async function printEODReport(closingShiftName, posProfile) {
 			closingShiftName,
 			EOD_PRINT_FORMAT,
 			posProfile,
+			// Its own lane: the EOD report carries its own layout knobs and never
+			// a crew slip.
+			"eod",
 		)
 		return { method: "silent", success: true }
 	} catch (error) {

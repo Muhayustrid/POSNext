@@ -239,4 +239,21 @@ describe("crew slip (copy 2 when the profile prints two copies)", () => {
 		expect(transport.printHTML).toHaveBeenCalledTimes(1)
 		expect(transport.printHTML.mock.calls[0][1].crewHTML).toBeFalsy()
 	})
+
+	it("silentPrintDoc passes the print kind through to the transport", async () => {
+		await silentPrintDoc(
+			"POS Closing Shift",
+			"POS-CLOSE-1",
+			"EOD Report",
+			null,
+			"eod",
+		)
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({ kind: "eod" }),
+		)
+		// The default lane is unchanged: receipt, explicitly.
+		await silentPrintDoc("Sales Invoice", "SINV-2", "POS Next Receipt")
+		expect(transport.printHTML.mock.calls[1][1].kind).toBe("receipt")
+	})
 })

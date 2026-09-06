@@ -52,6 +52,8 @@ describe("printEODReport (EOD print logContext)", () => {
 			"SHIFT-1",
 			"POS Next EOD Report",
 			"POS Profile juri1",
+			// Its own print lane — the eod knobs, never a crew slip.
+			"eod",
 		)
 	})
 
@@ -62,6 +64,7 @@ describe("printEODReport (EOD print logContext)", () => {
 			"SHIFT-2",
 			"POS Next EOD Report",
 			null,
+			"eod",
 		)
 	})
 })

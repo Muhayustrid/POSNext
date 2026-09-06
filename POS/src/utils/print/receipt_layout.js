@@ -186,8 +186,18 @@ const MAX_COPIES = 5
 const MAX_COPY_DELAY_MS = 10000
 const DEFAULT_COPIES = 1
 const DEFAULT_COPY_DELAY_MS = 800
+/**
+ * The Closing/EOD lane defaults to a single report: unlike a sale there is no
+ * customer copy to hand over, so one sheet is the norm.
+ */
+export const DEFAULT_EOD_COPIES = 1
 
-function clampInt(v, lo, hi, dflt) {
+/**
+ * Clamp an integer-ish setting into [lo, hi], falling back to `dflt` for
+ * absent/empty/garbage values. Shared by resolvePrintConfig and the renderer,
+ * so a knob clamps identically no matter which layer reads it.
+ */
+export function clampInt(v, lo, hi, dflt) {
 	if (v == null || v === "") return dflt
 	const n = Number(v)
 	if (!Number.isFinite(n)) return dflt
@@ -203,48 +213,80 @@ function clampInt(v, lo, hi, dflt) {
  * wins; only an ABSENT device key falls through to the server value; then the
  * module default. `??` (not `||`) keeps that distinction.
  *
+ * `opts.kind` splits the knob set per print lane: "eod" (the default is
+ * "receipt") reads `eod<Name>` keys on both the device and the server object,
+ * so tuning one lane can never retune the other. paper/customDots/cut stay
+ * global — they describe the paper, not which job is on it.
+ *
  * There is no copy-label knob here any more: nothing is printed above a copy.
  * The banners read like a second receipt the customer never asked for, so both
  * the CUSTOMER COPY and the CREW COPY label went. Copies are identical
  * bitmaps; the Direct Print preview captions its rows instead, which costs no
  * paper.
  */
-export function resolvePrintConfig(device = {}, server = {}) {
+export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 	const paper = device.paper ?? server.paper ?? "58mm"
 	const customDots = device.customDots ?? server.customDots ?? undefined
 	const cut = device.cut ?? server.cut ?? false
+
+	const eod = opts.kind === "eod"
+	// One knob's per-kind key: "eod" upper-cases the first letter onto the eod
+	// prefix, so `copyDelayMs` becomes `eodCopyDelayMs` on device AND server.
+	const pick = (name) => {
+		const key = eod ? `eod${name[0].toUpperCase()}${name.slice(1)}` : name
+		return device[key] ?? server[key]
+	}
+
 	const copies = clampInt(
-		device.copies ?? server.copies ?? DEFAULT_COPIES,
+		pick("copies"),
 		1,
 		MAX_COPIES,
-		DEFAULT_COPIES,
+		eod ? DEFAULT_EOD_COPIES : DEFAULT_COPIES,
 	)
 	const copyDelayMs = clampInt(
-		device.copyDelayMs ?? server.copyDelayMs ?? DEFAULT_COPY_DELAY_MS,
+		pick("copyDelayMs"),
 		0,
 		MAX_COPY_DELAY_MS,
 		DEFAULT_COPY_DELAY_MS,
 	)
-	const feedDots = clampInt(
-		device.feedDots ?? server.feedDots ?? DEFAULT_FEED_DOTS,
-		8,
-		500,
-		DEFAULT_FEED_DOTS,
-	)
+	const feedDots = clampInt(pick("feedDots"), 8, 500, DEFAULT_FEED_DOTS)
 	const tailDots = clampInt(
-		device.tailDots ?? server.tailDots ?? DEFAULT_TAIL_DOTS,
+		pick("tailDots"),
 		0,
 		MAX_TAIL_DOTS,
 		DEFAULT_TAIL_DOTS,
 	)
 	// Percent (100 = as authored). Extra headroom on top of the fixed 205/96
 	// translation, for tills where the operator wants chunkier text still.
-	const fontScale = clampFontScale(device.fontScale ?? server.fontScale)
+	const fontScale = clampFontScale(pick("fontScale"))
 	// The crew slip has its own knob: it is read across a counter, so it
-	// defaults chunkier than the receipt itself.
-	const crewFontScale = clampFontScale(
-		device.crewFontScale ?? server.crewFontScale,
-		DEFAULT_CREW_FONT_SCALE,
+	// defaults chunkier than the receipt itself. An EOD print has no crew
+	// slip, so the field mirrors the eod fontScale to keep the shape stable.
+	const crewFontScale = eod
+		? fontScale
+		: clampFontScale(
+				device.crewFontScale ?? server.crewFontScale,
+				DEFAULT_CREW_FONT_SCALE,
+			)
+	// One vertical-density knob for everything direct printed — the receipt AND
+	// the crew slip tighten together, so the two copies stay comparable.
+	const lineSpacing = clampInt(
+		pick("lineSpacing"),
+		MIN_LINE_SPACING,
+		MAX_LINE_SPACING,
+		DEFAULT_LINE_SPACING,
+	)
+	// Side margin in printer dots, BOTH sides. The bitmap inherits whatever
+	// padding the print format's own CSS puts on body/frame (the stock receipt
+	// ships `padding: 5mm` inside `@media print` = 40 dots a side), so without
+	// a knob the operator has no way to reclaim the width. The default is
+	// deliberately narrower than that 40 — it is what the renderer pins the
+	// sides to, overriding the template.
+	const sideMarginDots = clampInt(
+		pick("sideMarginDots"),
+		0,
+		MAX_SIDE_MARGIN_DOTS,
+		DEFAULT_SIDE_MARGIN_DOTS,
 	)
 
 	const dots = dotsForPaper(paper, customDots)
@@ -259,6 +301,8 @@ export function resolvePrintConfig(device = {}, server = {}) {
 		tailDots,
 		fontScale,
 		crewFontScale,
+		lineSpacing,
+		sideMarginDots,
 		dots,
 	}
 }
@@ -297,9 +341,31 @@ const LENGTH_RE = /(-?\d*\.?\d+)(px|pt|mm|cm|in)\b/g
 export const DEFAULT_FONT_SCALE = 100
 /** The crew slip starts chunkier: it is read across a counter, not handed to
  * the customer, and it carries no prices to crowd the line. */
-export const DEFAULT_CREW_FONT_SCALE = 130
+export const DEFAULT_CREW_FONT_SCALE = 100
 const MIN_FONT_SCALE = 60
 const MAX_FONT_SCALE = 250
+
+/**
+ * Vertical density of the printed output, as a PERCENT of the values the CSS
+ * was authored with. 100 = as authored, 80 = 20% tighter, 150 = 50% looser.
+ * It multiplies line-height only (never the glyph size), so the operator can
+ * close up the gaps the receipt ships with without shrinking the text.
+ */
+export const DEFAULT_LINE_SPACING = 100
+const MIN_LINE_SPACING = 50
+const MAX_LINE_SPACING = 150
+
+/**
+ * Left/right print margin in PRINTER DOTS, applied to both sides. Physical
+ * (8 dots = 1 mm at 205 DPI), so it never scales with fontScale — 16 dots is
+ * 2 mm of white paper whatever size the text is.
+ *
+ * The ceiling of 64 dots (8 mm) exists because a margin eats into the paper
+ * the receipt's content needs: at 384 dots, two 64-dot margins leave only 256
+ * for text, which is where the 32-character iMin Font-A budget starts to break.
+ */
+export const DEFAULT_SIDE_MARGIN_DOTS = 16
+export const MAX_SIDE_MARGIN_DOTS = 64
 
 /**
  * Parse one numeric settings field for saving.
@@ -334,6 +400,33 @@ export function scaleCssLengths(text, fontScale = 1) {
 		const factor = UNIT_DOTS[unit] * (SCALABLE_UNITS.has(unit) ? fontScale : 1)
 		const dots = Number(num) * factor
 		return `${Math.round(dots * 100) / 100}px`
+	})
+}
+
+// `line-height: <value>` — the declaration the line-spacing knob drives. The
+// value runs to the next `;` or `}` so spaces, units and keywords all reach the
+// parser below.
+const LINE_HEIGHT_RE = /(line-height\s*:\s*)([^;}]+)/gi
+const LINE_HEIGHT_VALUE_RE = /^(-?\d*\.?\d+)(px|pt|em|rem|%)?$/i
+
+/**
+ * Multiply every line-height DECLARATION by `factor`.
+ *
+ * A separate pass, deliberately: scaleCssLengths matches length units only, so
+ * the far more common unitless form (`line-height: 1.4`, a ratio of the font's
+ * own size) would be invisible to it. Unitless, px/pt/em/rem and % values all
+ * scale by the factor here; keywords (`normal`, `inherit`) and the
+ * `font: 12px/1.4 ...` shorthand are left alone. Unit values are scaled BEFORE
+ * scaleCssLengths runs, so px keeps going through the normal DPI translation
+ * afterwards.
+ */
+export function scaleLineHeights(text, factor = 1) {
+	if (!text || factor === 1) return text
+	return String(text).replace(LINE_HEIGHT_RE, (decl, prop, value) => {
+		const m = String(value).trim().match(LINE_HEIGHT_VALUE_RE)
+		if (!m) return decl
+		const scaled = Math.round(Number(m[1]) * factor * 100) / 100
+		return `${prop}${scaled}${(m[2] || "").toLowerCase()}`
 	})
 }
 
@@ -399,8 +492,12 @@ function scopeSelector(sel, scope) {
  * Scope a receipt stylesheet to the bitmap frame and convert its lengths to
  * dots. `@page` is dropped (meaningless for a bitmap) and `@media print` is
  * unwrapped, because rasterising for the thermal head *is* the print context.
+ *
+ * `lineSpacing` (1 = as authored, 0.8 = 20% tighter) scales every line-height
+ * declaration on the way through, so the operator's vertical-density knob
+ * reaches the receipt's own CSS and not just the frame baseline.
  */
-export function scopeReceiptCSS(css, scope, fontScale = 1) {
+export function scopeReceiptCSS(css, scope, fontScale = 1, lineSpacing = 1) {
 	const clean = String(css || "").replace(/\/\*[\s\S]*?\*\//g, "")
 	const parts = []
 	for (const { prelude, body } of splitTopLevelRules(clean)) {
@@ -413,16 +510,18 @@ export function scopeReceiptCSS(css, scope, fontScale = 1) {
 			if (at === "media") {
 				// Screen-only blocks never apply to a receipt; print blocks do.
 				if (!/\bscreen\b/i.test(prelude) || /\bprint\b/i.test(prelude)) {
-					parts.push(scopeReceiptCSS(body, scope, fontScale))
+					parts.push(scopeReceiptCSS(body, scope, fontScale, lineSpacing))
 				}
 				continue
 			}
 			if (at === "supports") {
-				parts.push(scopeReceiptCSS(body, scope, fontScale))
+				parts.push(scopeReceiptCSS(body, scope, fontScale, lineSpacing))
 				continue
 			}
 			// @font-face / @keyframes carry no selectors to scope.
-			parts.push(`${prelude}{${scaleCssLengths(body, fontScale)}}`)
+			parts.push(
+				`${prelude}{${scaleCssLengths(scaleLineHeights(body, lineSpacing), fontScale)}}`,
+			)
 			continue
 		}
 		const selectors = prelude
@@ -431,7 +530,9 @@ export function scopeReceiptCSS(css, scope, fontScale = 1) {
 			.filter(Boolean)
 			.join(", ")
 		if (!selectors) continue
-		parts.push(`${selectors}{${scaleCssLengths(body, fontScale)}}`)
+		parts.push(
+			`${selectors}{${scaleCssLengths(scaleLineHeights(body, lineSpacing), fontScale)}}`,
+		)
 	}
 	return parts.join("\n")
 }
@@ -442,11 +543,16 @@ export function scopeReceiptCSS(css, scope, fontScale = 1) {
  * cover what the receipt stylesheet leaves unset — a print format's own rules
  * come after this and win.
  *
+ * `lineSpacing` (1 = as authored) moves the baseline line-height with the same
+ * knob that scales the receipt's own declarations, so an author stylesheet that
+ * says nothing about line-height still follows the setting.
+ *
  * 22 dots ~= 2.7mm, and monospace at that size gives ~32 characters across a
  * 58mm line, which is the iMin Font-A budget.
  */
-export function receiptBaseCSS(scope, fontScale = 1) {
+export function receiptBaseCSS(scope, fontScale = 1, lineSpacing = 1) {
 	const base = Math.round(22 * fontScale)
-	return `${scope}{font-family:'Courier New',Courier,monospace;font-weight:bold;color:#000;background:#fff;font-size:${base}px;line-height:1.35;padding:16px;}
+	const leading = Math.round(1.35 * lineSpacing * 100) / 100
+	return `${scope}{font-family:'Courier New',Courier,monospace;font-weight:bold;color:#000;background:#fff;font-size:${base}px;line-height:${leading};padding:16px;}
 ${scope} .pn-receipt-tail{background:#fff;}`
 }

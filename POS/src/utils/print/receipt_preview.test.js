@@ -85,6 +85,38 @@ describe("buildReceiptPreviewSet (preview = print, structural)", () => {
 		expect(seen[0]).toBe(32)
 	})
 
+	it("lifts the effective lineSpacing through, like the real render block", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.lineSpacing)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { lineSpacing: 70 },
+			copies: 2,
+			crewHTML: '<div class="crew">crew</div>',
+			render,
+		})
+		// One knob for everything direct printed: the slip's bitmap inherits it.
+		expect(seen).toEqual([70, 70])
+	})
+
+	it("lifts the effective sideMarginDots through to every bitmap", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.sideMarginDots)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		await buildReceiptPreviewSet("<body>receipt</body>", {
+			device: { sideMarginDots: 8 },
+			copies: 2,
+			crewHTML: '<div class="crew">crew</div>',
+			render,
+		})
+		// A property of the paper, so the slip shares it too.
+		expect(seen).toEqual([8, 8])
+	})
+
 	it("single shared bitmap reused across every non-crew row", async () => {
 		const render = vi.fn(async () => ({
 			dataURL: "data:,",
@@ -172,6 +204,56 @@ describe("buildReceiptPreviewSet (crew slip as copy 2)", () => {
 		})
 		// What you preview is what prints: the slip's knob drives its bitmap.
 		expect(seen).toEqual([110, 90])
+	})
+})
+
+describe("buildReceiptPreviewSet (eod lane)", () => {
+	it("resolves the eod knobs through the same resolver the driver uses", async () => {
+		const seen = []
+		const render = vi.fn(async (_html, o) => {
+			seen.push(o.fontScale)
+			return { dataURL: "data:,", width: 384, height: 100 }
+		})
+		const set = await buildReceiptPreviewSet("<div/>", {
+			device: { eodCopies: 2, eodFontScale: 120 },
+			kind: "eod",
+			render,
+		})
+		expect(set.copies).toHaveLength(2)
+		expect(seen).toEqual([120])
+	})
+
+	it("never renders crewHTML for an eod preview — there is no crew copy", async () => {
+		const render = vi.fn(async (html) => ({
+			dataURL: "data:,",
+			width: 384,
+			height: 100,
+			html,
+		}))
+		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
+			copies: 2,
+			crewHTML: '<div class="crew">crew</div>',
+			kind: "eod",
+			render,
+		})
+		expect(render).toHaveBeenCalledTimes(1)
+		expect(render.mock.calls[0][0]).toBe("<body>receipt</body>")
+		expect(set.copies.map((c) => c.label)).toEqual(["Copy 1", "Copy 2"])
+	})
+
+	it("applies the explicit copies override to the eod copy count", async () => {
+		const render = vi.fn(async () => ({
+			dataURL: "data:,",
+			width: 384,
+			height: 100,
+		}))
+		const set = await buildReceiptPreviewSet("<div/>", {
+			device: { eodCopies: 2 },
+			copies: 1,
+			kind: "eod",
+			render,
+		})
+		expect(set.copies).toHaveLength(1)
 	})
 })
 

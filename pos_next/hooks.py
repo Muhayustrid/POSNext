@@ -88,6 +88,8 @@ doctype_list_js = {"POS Discount Confirmation Code": "public/js/pos_discount_cod
 jinja = {
 	"methods": [
 		"pos_next.pos_next.utils.pos_closing_print.get_items_sold",
+		"pos_next.pos_next.utils.pos_closing_print.get_sales_recap",
+		"pos_next.pos_next.utils.pos_closing_print.format_rupiah",
 	]
 }
 
