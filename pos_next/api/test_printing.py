@@ -252,6 +252,16 @@ class TestPrintingAPI(FrappeTestCase):
 		# A NULL column answers the default rather than leaking None to the FE.
 		self.assertIsInstance(cfg["crew_font_scale"], int)
 
+	def test_crew_slip_enabled_from_settings_row(self):
+		with _settings_row(imin_crew_slip_enabled=1):
+			cfg = get_print_config(self.profile)
+		self.assertTrue(cfg["crew_slip_enabled"])
+
+	def test_crew_slip_enabled_defaults_off(self):
+		with _settings_row():
+			cfg = get_print_config(self.profile)
+		self.assertFalse(cfg["crew_slip_enabled"])
+
 	def test_line_spacing_defaults_to_100(self):
 		cfg = get_print_config(self.profile)
 		self.assertIn("line_spacing", cfg)
