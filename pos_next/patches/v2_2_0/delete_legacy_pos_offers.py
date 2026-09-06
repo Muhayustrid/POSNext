@@ -8,5 +8,8 @@ def execute():
 	2.0 semantics, and nothing read the doctype anyway. pre_model_sync so the
 	rows are gone before doctype sync drops the legacy columns.
 	"""
-	frappe.db.delete("POS Offer Detail", {})
-	frappe.db.delete("POS Offer", {})
+	# pre_model_sync runs before doctype sync creates the tables on a fresh
+	# install — nothing to wipe there.
+	for doctype in ("POS Offer Detail", "POS Offer"):
+		if frappe.db.table_exists(doctype):
+			frappe.db.delete(doctype, {})

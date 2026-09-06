@@ -59,7 +59,10 @@ def _fix_custom_field_anchors():
 def execute():
 	# One-time codes are meaningless without their rule; start clean. Codes
 	# generated from now on are multi-use and carry no rule reference.
-	frappe.db.delete("POS Discount Confirmation Code")
+	# pre_model_sync runs before the table exists on sites that never had
+	# the code doctype (fresh installs, upgrades from pre-2.3 versions).
+	if frappe.db.table_exists("POS Discount Confirmation Code"):
+		frappe.db.delete("POS Discount Confirmation Code")
 
 	frappe.db.delete("Custom Field", {"dt": "Sales Invoice", "fieldname": "pos_discount_restriction"})
 	_drop_column("`tabSales Invoice`", "pos_discount_restriction")
