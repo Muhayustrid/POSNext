@@ -113,6 +113,13 @@ class TestValidateCode(unittest.TestCase):
 
 			self.assertEqual(validate_code("ABCD2345", "Company A"), "CODE-1")
 
+			# pin the exact child query: frappe.get_all takes `pluck` (singular)
+			mock_get_all.assert_called_once_with(
+				"POS Discount Code Company",
+				filters={"parenttype": "POS Discount Confirmation Code", "parent": "CODE-1"},
+				pluck="company",
+			)
+
 	def test_selected_outlets_raises_for_other_company(self):
 		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
 			mock_db.get_value.return_value = _code_row(company_scope="Selected Outlets")

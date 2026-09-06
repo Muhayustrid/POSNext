@@ -159,7 +159,7 @@ def _scoped_outlets(code_name):
 	return frappe.get_all(
 		CODE_COMPANY_DOCTYPE,
 		filters={"parenttype": CODE_DOCTYPE, "parent": code_name},
-		plucks="company",
+		pluck="company",
 	)
 
 

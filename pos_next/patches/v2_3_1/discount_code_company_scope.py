@@ -40,4 +40,4 @@ def execute():
 				"parenttype": CODE_DOCTYPE,
 				"parentfield": "companies",
 			}
-		).insert(ignore_permissions=True)
+		).insert(ignore_permissions=True, ignore_links=True)
