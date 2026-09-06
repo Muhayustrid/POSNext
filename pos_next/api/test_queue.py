@@ -128,6 +128,14 @@ class TestQueueAPI(FrappeTestCase):
 		out = get_next_queue_number(self.profile)
 		self.assertEqual(out["queue_number"], 10)
 
+	def test_bootstrap_settings_include_queue_enabled(self):
+		from pos_next.api.bootstrap import _get_pos_settings
+
+		profile = frappe.get_doc("POS Profile", self.profile)
+		settings = _get_pos_settings(profile)
+		self.assertIn("queue_enabled", settings)
+		self.assertIsInstance(settings["queue_enabled"], bool)
+
 	def test_counter_rolls_to_new_date(self):
 		get_next_queue_number(self.profile)
 		# Backdate the counter row; the next number for today starts at 1 again.

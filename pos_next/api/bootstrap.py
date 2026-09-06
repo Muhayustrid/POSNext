@@ -222,6 +222,9 @@ def _get_pos_settings(pos_profile_doc):
 			1 if (pos_profile_doc.write_off_account and (pos_profile_doc.write_off_limit or 0) > 0) else 0
 		)
 		settings["disable_rounded_total"] = pos_profile_doc.disable_rounded_total or 0
+		settings["queue_enabled"] = bool(
+			frappe.db.get_value("Company", pos_profile_doc.company, "enable_pos_queue")
+		)
 
 		return settings
 	except Exception:
