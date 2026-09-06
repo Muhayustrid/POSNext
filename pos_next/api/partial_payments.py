@@ -622,6 +622,7 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
 			"status",
 			"creation",
 			"currency",
+			"pos_queue_number",
 		],
 		order_by="posting_date desc, posting_time desc",
 		limit=limit,

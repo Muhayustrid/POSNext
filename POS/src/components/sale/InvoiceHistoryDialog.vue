@@ -94,6 +94,13 @@
 								<p class="text-sm font-bold text-gray-900 text-end">
 									{{ formatCurrency(invoice.grand_total) }}
 								</p>
+								<p
+									v-if="invoice.pos_queue_number"
+									class="text-xs font-mono font-semibold text-indigo-600 mt-0.5"
+									:title="__('Queue Number')"
+								>
+									#{{ formatQueueNumber(invoice.pos_queue_number) }}
+								</p>
 								<div class="flex items-center gap-1 mt-2">
 									<Button
 										variant="ghost"
@@ -167,6 +174,7 @@ import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
+import { formatQueueNumber } from "@/utils/queue/queueNumber"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"

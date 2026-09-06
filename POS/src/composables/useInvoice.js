@@ -1208,6 +1208,9 @@ export function useInvoice() {
 					}
 
 					resetInvoice();
+					// Surface the stamped queue number to the checkout caller so the
+					// success dialog can show it without a re-fetch.
+					if (queueStamp) result.pos_queue_number = queueStamp.queue_number;
 					return result;
 				} catch (error) {
 					// Preserve original error object with all its properties

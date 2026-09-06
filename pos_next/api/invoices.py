@@ -1842,7 +1842,8 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			status,
 			docstatus,
 			is_return,
-			return_against
+			return_against,
+			pos_queue_number
 		FROM
 			`tabSales Invoice`
 		WHERE

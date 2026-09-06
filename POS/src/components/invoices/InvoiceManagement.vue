@@ -341,6 +341,34 @@
 													<div
 														class="flex items-center gap-4 mt-1 text-sm text-gray-600"
 													>
+														<div
+															v-if="invoice.pos_queue_number"
+															class="flex items-center"
+															:title="__('Queue Number')"
+														>
+															<svg
+																class="w-4 h-4 me-1 text-indigo-500"
+																fill="none"
+																stroke="currentColor"
+																viewBox="0 0 24 24"
+															>
+																<path
+																	stroke-linecap="round"
+																	stroke-linejoin="round"
+																	stroke-width="2"
+																	d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
+																/>
+															</svg>
+															<span
+																class="font-mono font-semibold text-indigo-600"
+															>
+																#{{
+																	formatQueueNumber(
+																		invoice.pos_queue_number
+																	)
+																}}
+															</span>
+														</div>
 														<div class="flex items-center">
 															<svg
 																class="w-4 h-4 me-1"
@@ -609,6 +637,40 @@
 
 										<!-- Card Body -->
 										<div class="px-5 py-4 flex flex-col gap-3">
+											<!-- Queue Number -->
+											<div
+												v-if="invoice.pos_queue_number"
+												class="flex items-start"
+											>
+												<svg
+													class="w-5 h-5 me-2 mt-0.5 flex-shrink-0 text-indigo-500"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
+													/>
+												</svg>
+												<div class="flex-1">
+													<div class="text-xs text-gray-500">
+														{{ __("No. Antrian") }}
+													</div>
+													<div
+														class="text-sm font-semibold font-mono text-indigo-600"
+													>
+														#{{
+															formatQueueNumber(
+																invoice.pos_queue_number
+															)
+														}}
+													</div>
+												</div>
+											</div>
+
 											<!-- Customer Info -->
 											<div class="flex items-start">
 												<svg
@@ -1036,6 +1098,7 @@ import { useInvoiceFilters } from "@/composables/useInvoiceFilters";
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
+import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { useFormatters } from "@/composables/useFormatters";
 import { useToast } from "@/composables/useToast";
 import { Button, call, LoadingIndicator } from "frappe-ui";

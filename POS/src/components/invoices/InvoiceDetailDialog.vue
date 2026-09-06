@@ -42,13 +42,19 @@
 										invoiceData.customer_name || invoiceData.customer
 									}}</span>
 								</div>
-								<div class="text-start">
-									<span class="text-gray-600">{{ __("Date:") }}</span>
-									<span class="ms-2 font-medium text-gray-900"
-										>{{ formatDate(invoiceData.posting_date) }}
-										{{ formatTime(invoiceData.posting_time) }}</span
-									>
-								</div>
+							<div class="text-start">
+								<span class="text-gray-600">{{ __("Date:") }}</span>
+								<span class="ms-2 font-medium text-gray-900"
+									>{{ formatDate(invoiceData.posting_date) }}
+									{{ formatTime(invoiceData.posting_time) }}</span
+								>
+							</div>
+							<div v-if="invoiceData.pos_queue_number" class="text-start">
+								<span class="text-gray-600">{{ __("No. Antrian:") }}</span>
+								<span class="ms-2 font-mono font-semibold text-indigo-600"
+									>#{{ formatQueueNumber(invoiceData.pos_queue_number) }}</span
+								>
+							</div>
 								<div v-if="invoiceData.return_against" class="text-start">
 									<span class="text-gray-600">{{ __("Return Against:") }}</span>
 									<span class="ms-2 font-medium text-gray-900">{{
@@ -487,6 +493,7 @@
 import { useFormatters } from "@/composables/useFormatters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
+import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { logger } from "@/utils/logger";
 import { hydrateLocalOnlyInvoice, isLocalOnlyInvoiceName } from "@/utils/printInvoice";
 import { Button, Dialog, call } from "frappe-ui";

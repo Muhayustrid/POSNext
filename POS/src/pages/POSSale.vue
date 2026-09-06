@@ -987,6 +987,16 @@
 								__("Invoice {0} created successfully!", [uiStore.lastInvoiceName])
 							}}
 						</h3>
+						<div v-if="lastQueueNumberLabel" class="mt-4">
+							<div
+								class="text-xs font-semibold uppercase tracking-wide text-gray-500"
+							>
+								{{ __("No. Antrian") }}
+							</div>
+							<div class="mt-1 text-4xl font-bold text-indigo-600">
+								{{ lastQueueNumberLabel }}
+							</div>
+						</div>
 						<p class="mt-2 text-sm text-gray-500">
 							{{ __("Paid: {0}", [formatCurrency(uiStore.lastPaidAmount)]) }}
 						</p>
@@ -2320,7 +2330,12 @@ async function handlePaymentCompleted(paymentData) {
 				draftsStore.deleteDraft(draftIdToDelete);
 			}
 
-			uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+			uiStore.showSuccess(
+				offlineReceiptName,
+				grandTotal,
+				paymentData.paid_amount,
+				offlinePrintDoc.pos_queue_number || null,
+			);
 			showSuccess(__("Invoice saved offline. Will sync when online"));
 
 			if (shiftStore.autoPrintEnabled) {
@@ -2394,7 +2409,12 @@ async function handlePaymentCompleted(paymentData) {
 					log.debug("Background invoice cache refresh failed:", err)
 				);
 
-				uiStore.showSuccess(invoiceName, invoiceTotal, paidAmount);
+				uiStore.showSuccess(
+					invoiceName,
+					invoiceTotal,
+					paidAmount,
+					result?.pos_queue_number ?? null,
+				);
 				showSuccess(__("Invoice {0} created successfully", [invoiceName]));
 
 				if (shiftStore.autoPrintEnabled) {
@@ -3141,6 +3161,12 @@ function handleViewInvoice(invoice) {
 // interleaving feed/cut on one device.
 const printJobsInFlight = new Map();
 const activePrintCount = ref(0);
+
+// Queue number on the checkout success dialog, formatted like the receipt
+// (zero-padded 3 digits) so the cashier calls what the paper shows.
+const lastQueueNumberLabel = computed(() =>
+	uiStore.lastQueueNumber ? `#${String(uiStore.lastQueueNumber).padStart(3, "0")}` : "",
+);
 
 function handlePrintInvoice(invoiceData) {
 	const name = (invoiceData || {}).name || null;
