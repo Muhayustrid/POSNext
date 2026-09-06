@@ -67,11 +67,10 @@
 							<th class="py-1 text-start">{{ __("Qty") }}</th>
 							<th class="py-1 text-start">{{ __("Stock") }}</th>
 							<th class="py-1 text-start" v-if="hasAnyBatch">{{ __("Batch") }}</th>
-							<th></th>
 						</tr>
 					</thead>
 					<tbody>
-						<tr v-for="(row, idx) in materialRows" :key="row.item_code" class="border-t border-gray-100">
+						<tr v-for="row in materialRows" :key="row.item_code" class="border-t border-gray-100">
 							<td class="py-1.5 pe-2">
 								<div>{{ row.item_name }}</div>
 								<div v-if="rowHasInsufficientStock(row)" class="text-xs text-red-500">
@@ -103,14 +102,6 @@
 										{{ b.batch_no }} ({{ b.qty }})
 									</option>
 								</select>
-							</td>
-							<td class="py-1.5 text-end">
-								<button
-									class="text-red-500 hover:text-red-700 text-xs"
-									@click="materialRows.splice(idx, 1)"
-								>
-									{{ __("Remove") }}
-								</button>
 							</td>
 						</tr>
 					</tbody>
