@@ -16,6 +16,12 @@ CODE_COMPANY_DOCTYPE = "POS Discount Code Company"
 
 
 def execute():
+	# Sites installed after the Link was removed never had the legacy column,
+	# so there is nothing to migrate — the SELECT below would 1054 on them.
+	if not frappe.db.table_exists(CODE_DOCTYPE) or not frappe.db.has_column(
+		CODE_DOCTYPE, "company"
+	):
+		return
 	legacy = frappe.db.sql(
 		"""
 		select name, company
