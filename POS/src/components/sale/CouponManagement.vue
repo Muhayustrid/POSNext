@@ -698,7 +698,11 @@ import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue";
 import { useToast } from "@/composables/useToast";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { usePOSSettingsStore } from "@/stores/posSettings";
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency";
+import {
+	DEFAULT_CURRENCY,
+	DEFAULT_LOCALE,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency";
 import { Badge, Button, Card, FormControl, LoadingIndicator, createResource } from "frappe-ui";
 import { FeatherIcon } from "frappe-ui";
 import { storeToRefs } from "pinia";
@@ -1130,10 +1134,7 @@ function formatDate(dateStr) {
 }
 
 function formatCurrency(amount) {
-	return new Intl.NumberFormat(DEFAULT_LOCALE, {
-		style: "currency",
-		currency: props.currency,
-	}).format(amount || 0);
+	return formatCurrencyUtil(Number(amount || 0), props.currency);
 }
 
 function getStatusTheme(status) {

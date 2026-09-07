@@ -41,6 +41,9 @@ export function getPrecision() {
 
 export const DEFAULT_CURRENCY = "USD";
 export const DEFAULT_LOCALE = "en-US";
+// Money display locale: Indonesian grouping (1.234) with no decimals shown.
+// DEFAULT_LOCALE stays en-US for dates/symbols.
+export const CURRENCY_LOCALE = "id-ID";
 
 const SYMBOLS = {
 	USD: "$",
@@ -99,19 +102,17 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 }
 
 /** Format value as currency string with symbol */
-export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
+export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = CURRENCY_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "";
 	const abs = Math.abs(value);
-	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(
-		abs
-	)}`;
+	const formatted = `${getSymbol(currency)} ${getFormatter(0, locale).format(abs)}`;
 	return value < 0 ? `-${formatted}` : formatted;
 }
 
 /** Format value as number string (no symbol) */
-export function formatCurrencyNumber(value, locale = DEFAULT_LOCALE) {
-	if (typeof value !== "number" || Number.isNaN(value)) return "0.00";
-	return getFormatter(settings.currency, locale).format(value);
+export function formatCurrencyNumber(value, locale = CURRENCY_LOCALE) {
+	if (typeof value !== "number" || Number.isNaN(value)) return "0";
+	return getFormatter(0, locale).format(value);
 }
 
 /** Get CSS class for positive/negative values */

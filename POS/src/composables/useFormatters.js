@@ -2,15 +2,15 @@
  * useFormatters composable
  * Provides common formatting functions for use across all components
  */
+import { formatCurrencyNumber } from "@/utils/currency";
 
 /**
- * Format currency values to 2 decimal places
+ * Format currency values (Indonesian grouping, no decimals)
  * @param {number} amount - The amount to format
- * @returns {string} Formatted amount with 2 decimal places
+ * @returns {string} Formatted amount
  */
 function formatCurrency(amount) {
-	if (amount === null || amount === undefined) return "0.00";
-	return Number.parseFloat(amount).toFixed(2);
+	return formatCurrencyNumber(Number.parseFloat(amount));
 }
 
 /**

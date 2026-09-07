@@ -2087,6 +2087,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
+	formatCurrencyNumber,
 	getCurrencySymbol,
 	roundCurrency,
 } from "@/utils/currency";
@@ -3634,7 +3635,7 @@ function handleAdditionalDiscountChange() {
 					__("Maximum allowed discount is {0}% ({1} {2})", [
 						settingsStore.maxDiscountAllowed,
 						props.currency,
-						maxAmount.toFixed(2),
+						formatCurrencyNumber(maxAmount),
 					])
 				);
 			}
