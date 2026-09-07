@@ -56,6 +56,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		imin_custom_dots: 384,
 		imin_cut_paper: 1,
 		print_fallback_enabled: 1,
+		// Queue
+		enable_pos_queue: 0,
+		queue_enabled: 0,
 		// Delivery
 		use_delivery_charges: 0,
 		auto_set_delivery_charges: 0,
@@ -292,6 +295,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			imin_custom_dots: 384,
 			imin_cut_paper: 1,
 			print_fallback_enabled: 1,
+			enable_pos_queue: 0,
+			queue_enabled: 0,
 			use_delivery_charges: 0,
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,

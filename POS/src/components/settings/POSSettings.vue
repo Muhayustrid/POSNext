@@ -171,6 +171,17 @@
 								>
 									{{ __("Sales Management") }}
 								</button>
+								<button
+									@click="activeTab = 'printing'"
+									:class="[
+										'px-4 py-2 text-sm font-medium rounded-md transition-all duration-200',
+										activeTab === 'printing'
+											? 'bg-white text-gray-900 shadow-sm'
+											: 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50',
+									]"
+								>
+									{{ __("Printing") }}
+								</button>
 							</div>
 
 							<!-- Stock Settings Section - Prominent -->
@@ -1106,6 +1117,503 @@
 									</div>
 								</div>
 							</div>
+
+							<!-- Printing Section -->
+							<div
+								v-if="activeTab === 'printing'"
+								class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+							>
+								<div :class="printingSectionClasses.header">
+									<div class="flex items-center justify-between">
+										<div class="flex items-center gap-3">
+											<div :class="printingSectionClasses.iconContainer">
+												<svg
+													:class="printingSectionClasses.icon"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														:d="icons.printer"
+														/>
+												</svg>
+											</div>
+											<div>
+												<h3 class="text-lg font-bold text-gray-900">
+													{{ __("Printing") }}
+												</h3>
+												<p class="text-xs text-gray-600 mt-0.5">
+													{{
+														__(
+															"Nomor antrian, driver cetak, dan tata letak struk untuk profile ini"
+														)
+													}}
+												</p>
+											</div>
+										</div>
+										<div :class="printingSectionClasses.badge">
+											<svg
+												:class="printingSectionClasses.badgeIcon"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="icons.checkCircle"
+													/>
+											</svg>
+												<span :class="printingSectionClasses.badgeText">{{
+													__("Print Controls")
+												}}</span>
+										</div>
+									</div>
+								</div>
+								<div class="p-6 flex flex-col gap-6">
+									<!-- Queue Number -->
+									<div :class="queueSubsectionClasses.container">
+										<div class="flex items-center gap-2 mb-4">
+											<svg
+												:class="queueSubsectionClasses.icon"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="icons.tag"
+													/>
+											</svg>
+											<h4 class="text-sm font-semibold text-gray-900">
+												{{ __("Nomor Antrian") }}
+											</h4>
+										</div>
+										<div class="flex flex-col gap-3">
+											<CheckboxField
+												v-model="settings.enable_pos_queue"
+												:label="__('Aktifkan Nomor Antrian POS')"
+												:description="
+													__(
+														'Cetak nomor antrian harian di struk. Nomor dihitung per perusahaan per hari, reset tengah malam.'
+													)
+												"
+											/>
+										</div>
+									</div>
+									<!-- Print Driver -->
+									<div :class="driverSubsectionClasses.container">
+										<div class="flex items-center gap-2 mb-4">
+											<svg
+												:class="driverSubsectionClasses.icon"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="icons.info"
+													/>
+											</svg>
+											<h4 class="text-sm font-semibold text-gray-900">
+												{{ __("Driver Cetak") }}
+											</h4>
+										</div>
+										<div class="flex flex-col gap-3">
+											<SelectField
+												v-model="settings.print_driver"
+												:label="__('Driver Cetak')"
+												:options="printDriverOptions"
+												:description="
+													__(
+														'Jalur cetak tanpa dialog: browser, QZ Tray, atau servis printer iMin.'
+													)
+												"
+											/>
+												<CheckboxField
+													v-model="settings.print_fallback_enabled"
+													:label="__('Aktifkan Print Fallback')"
+													:description="
+														__('Bila gagal, turun ke jalur berikutnya (iMin → QZ → Browser).')
+													"
+												/>
+
+												<!-- iMin access trigger: same bait as the Direct
+													 Print page — loads the SDK and probes the
+													 print service so the device asks permission
+													 for this origin without leaving Settings. -->
+												<div
+													class="flex flex-col gap-2 pt-3 border-t border-indigo-200"
+												>
+													<div class="flex items-center gap-3 flex-wrap">
+														<Button
+															variant="solid"
+															size="sm"
+															:loading="iminProbing"
+															@click="requestIminAccess"
+														>
+															{{ __("Minta Akses Printer iMin") }}
+														</Button>
+														<div
+															v-if="iminAccess"
+															class="flex items-center gap-2"
+														>
+															<div
+																class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+																:class="
+																	iminAccess.ok
+																		? 'bg-green-500'
+																		: 'bg-red-500'
+																"
+															></div>
+															<span
+																class="text-xs font-medium"
+																:class="
+																	iminAccess.ok
+																		? 'text-green-700'
+																		: 'text-red-700'
+																"
+															>
+																{{
+																	iminAccess.ok
+																		? __("Printer iMin terhubung")
+																		: iminAccess.message ||
+																		  __("Tidak terhubung")
+																}}
+															</span>
+														</div>
+													</div>
+													<p class="text-xs text-gray-500 leading-tight">
+														{{
+															__(
+																'Tekan sekali per device: servis iMin akan meminta izin untuk situs ini — sama seperti membuka halaman Direct Print.'
+															)
+														}}
+													</p>
+												</div>
+											</div>
+										</div>
+									<!-- iMin Sales Receipt -->
+									<div
+										v-if="settings.print_driver === 'imin'"
+										:class="iminSubsectionClasses.container"
+									>
+										<div class="flex items-center gap-2 mb-4">
+											<svg
+												:class="iminSubsectionClasses.icon"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="icons.printer"
+													/>
+											</svg>
+											<h4 class="text-sm font-semibold text-gray-900">
+												{{ __('Struk Penjualan — iMin') }}
+											</h4>
+										</div>
+										<div class="flex flex-col gap-3">
+											<SelectField
+												v-model="settings.imin_paper_width"
+												:label="__('Lebar Kertas')"
+												:options="paperWidthOptions"
+												:description="
+													__('58mm = 384 dots, 80mm = 576 dots, custom = isi jumlah dots di bawah.')
+												"
+											/>
+											<NumberField
+												v-if="settings.imin_paper_width === 'custom'"
+												v-model="settings.imin_custom_dots"
+												:label="__('Jumlah Dots Custom')"
+												:description="
+													__('Lebar cetak dalam dots (kelipatan 8, maks 576).')
+												"
+												:min="8"
+												:max="576"
+												:step="8"
+											/>
+											<CheckboxField
+												v-model="settings.imin_cut_paper"
+												:label="__('Gunting Kertas Setelah Cetak')"
+												:description="__('Gunting kertas setelah struk selesai dicetak.')"
+											/>
+											<NumberField
+												v-model="settings.imin_print_copies"
+												:label="__('Jumlah Rangkap')"
+												:description="
+													__(
+														'Jumlah rangkap per transaksi (rangkap customer dulu, lalu crew/outlet).'
+													)
+												"
+												:min="1"
+												:max="5"
+											/>
+											<NumberField
+												v-if="(settings.imin_print_copies || 1) > 1"
+												v-model="settings.imin_copy_delay_ms"
+												:label="__('Jeda Antar Rangkap (ms)')"
+												:description="
+													__('Jeda antar rangkap agar rangkap pertama bisa disobek. Default 800.')
+												"
+												:min="0"
+												:max="10000"
+												:step="100"
+											/>
+											<CheckboxField
+												v-model="settings.imin_crew_slip_enabled"
+												:label="__('Cetak Slip Crew')"
+												:description="
+													__(
+														'Satu slip order pendek untuk outlet, dicetak setelah rangkap customer — terpisah dari jumlah rangkap.'
+													)
+												"
+											/>
+											<NumberField
+												v-model="settings.imin_font_scale"
+												:label="__('Skala Font Struk (%)')"
+												:description="
+													__(
+														'Ukuran teks struk (%). 100 = normal; naikkan bila cetakan terlalu kecil. 60–250.'
+													)
+												"
+												:min="60"
+												:max="250"
+												:step="5"
+											/>
+											<NumberField
+												v-model="settings.imin_crew_font_scale"
+												:label="__('Skala Font Slip Crew (%)')"
+												:description="
+													__(
+														'Ukuran teks khusus slip crew (%). 60–250.'
+													)
+												"
+												:min="60"
+												:max="250"
+												:step="5"
+											/>
+											<NumberField
+												v-model="settings.imin_line_spacing"
+												:label="__('Jarak Baris (%)')"
+												:description="
+													__(
+														'Kerapatan baris (%). Lebih kecil = lebih rapat, ukuran teks tetap. 50–150.'
+													)
+												"
+												:min="50"
+												:max="150"
+												:step="5"
+											/>
+											<NumberField
+												v-model="settings.imin_side_margin"
+												:label="__('Margin Kiri-Kanan (dots)')"
+												:description="
+													__(
+														'Margin kiri-kanan dalam dots (8 dots ≈ 1 mm). 0–64.'
+													)
+												"
+												:min="0"
+												:max="64"
+											/>
+											<NumberField
+												v-model="settings.imin_top_margin"
+												:label="__('Margin Atas (dots)')"
+												:description="
+													__(
+														'Ruang kosong di atas isi struk (dots). 0 = pakai padding bawaan format. 0–128.'
+													)
+												"
+												:min="0"
+												:max="128"
+											/>
+											<NumberField
+												v-model="settings.imin_queue_gap"
+												:label="__('Jarak Nomor Antrian (dots)')"
+												:description="
+													__(
+														'Jarak nomor antrian ke isi struk di bawahnya (dots, 40 ≈ 5 mm). 0–128.'
+													)
+												"
+												:min="0"
+												:max="128"
+											/>
+											<NumberField
+												v-model="settings.imin_feed_dots"
+												:label="__('Majukan Kertas (dots)')"
+												:description="
+													__(
+														'Majukan kertas tiap rangkap selesai agar lewat bibir sobek. 160 ≈ 20 mm.'
+													)
+												"
+												:min="0"
+												:max="500"
+												:step="8"
+											/>
+											<NumberField
+												v-model="settings.imin_tail_dots"
+												:label="__('Ruang Ekor (dots)')"
+												:description="
+													__(
+														'Ruang kosong di dalam bitmap agar baris terakhir lewat bibir sobek. 24 ≈ 3 mm.'
+													)
+												"
+												:min="0"
+												:max="255"
+											/>
+										</div>
+									</div>
+									<!-- iMin Closing / EOD -->
+									<div
+										v-if="settings.print_driver === 'imin'"
+										:class="eodSubsectionClasses.container"
+									>
+										<div class="flex items-center gap-2 mb-4">
+											<svg
+												:class="eodSubsectionClasses.icon"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="icons.clipboard"
+													/>
+											</svg>
+											<h4 class="text-sm font-semibold text-gray-900">
+												{{ __('Tutup Kasir / EOD — iMin') }}
+											</h4>
+										</div>
+										<div class="flex flex-col gap-3">
+											<NumberField
+												v-model="settings.imin_eod_print_copies"
+												:label="__('Jumlah Rangkap EOD')"
+												:description="
+													__(
+														'Jumlah rangkap struk tutup kasir (EOD) — jalur cetak terpisah. 1–5.'
+													)
+												"
+												:min="1"
+												:max="5"
+											/>
+											<NumberField
+												v-if="(settings.imin_eod_print_copies || 1) > 1"
+												v-model="settings.imin_eod_copy_delay_ms"
+												:label="__('Jeda Antar Rangkap EOD (ms)')"
+												:description="
+													__('Jeda antar rangkap struk EOD. Default 800.')
+												"
+												:min="0"
+												:max="10000"
+												:step="100"
+											/>
+											<NumberField
+												v-model="settings.imin_eod_feed_dots"
+												:label="__('Majukan Kertas EOD (dots)')"
+												:description="
+													__('Majukan kertas setelah struk EOD. 160 ≈ 20 mm.')
+												"
+												:min="8"
+												:max="500"
+												:step="8"
+											/>
+											<NumberField
+												v-model="settings.imin_eod_tail_dots"
+												:label="__('Ruang Ekor EOD (dots)')"
+												:description="
+													__('Ruang kosong di bawah baris terakhir struk EOD. 24 ≈ 3 mm.')
+												"
+												:min="0"
+												:max="255"
+											/>
+											<NumberField
+												v-model="settings.imin_eod_font_scale"
+												:label="__('Skala Font EOD (%)')"
+												:description="
+													__(
+														'Ukuran teks laporan EOD (%). Lebih kecil = lebih banyak baris muat. 60–250.'
+													)
+												"
+												:min="60"
+												:max="250"
+												:step="5"
+											/>
+											<NumberField
+												v-model="settings.imin_eod_line_spacing"
+												:label="__('Jarak Baris EOD (%)')"
+												:description="
+													__('Kerapatan baris laporan EOD (%). 50–150.')
+												"
+												:min="50"
+												:max="150"
+												:step="5"
+											/>
+											<NumberField
+												v-model="settings.imin_eod_side_margin"
+												:label="__('Margin Kiri-Kanan EOD (dots)')"
+												:description="
+													__('Margin kiri-kanan struk EOD. 0 = sampai tepi. 0–64.')
+												"
+												:min="0"
+												:max="64"
+											/>
+											<NumberField
+												v-model="settings.imin_eod_top_margin"
+												:label="__('Margin Atas EOD (dots)')"
+												:description="
+													__(
+														'Ruang kosong di atas isi laporan EOD (dots). 0 = pakai padding bawaan format.'
+													)
+												"
+												:min="0"
+												:max="128"
+											/>
+										</div>
+									</div>
+									<!-- Per-device overrides note -->
+									<div class="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+										<div class="flex items-start gap-2">
+											<svg
+												class="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="icons.info"
+													/>
+											</svg>
+											<p class="text-xs text-blue-800 leading-relaxed">
+												{{
+													__(
+														'Ini nilai default server untuk profile ini. Tiap device bisa menimpanya dan melakukan test print lewat halaman'
+													)
+												}}
+												<router-link to="/direct-print" class="font-semibold underline">
+													{{ __("Direct Print") }}
+												</router-link>
+												{{ __('.') }}
+											</p>
+										</div>
+									</div>
+								</div>
+							</div>
 						</div>
 
 						<!-- Empty State -->
@@ -1159,6 +1667,7 @@ import { logger } from "@/utils/logger";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 import { useQzTray } from "@/composables/useQzTray";
+import { ensureIminSdk, getTransport, initTransportFromServer } from "@/utils/print/transport";
 
 const log = logger.create("POSSettings");
 const { detectSettingsChanges, updateSettingsSnapshot, emitStockSyncConfigured } = usePOSEvents();
@@ -1197,6 +1706,32 @@ const settings = ref({
 	silent_print: 0,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
+	// Printing
+	enable_pos_queue: 0,
+	print_driver: "browser",
+	print_fallback_enabled: 1,
+	imin_paper_width: "58mm",
+	imin_custom_dots: 384,
+	imin_cut_paper: 1,
+	imin_print_copies: 1,
+	imin_copy_delay_ms: 800,
+	imin_feed_dots: 160,
+	imin_tail_dots: 24,
+	imin_font_scale: 100,
+	imin_crew_font_scale: 100,
+	imin_crew_slip_enabled: 0,
+	imin_line_spacing: 100,
+	imin_side_margin: 16,
+	imin_top_margin: 0,
+	imin_queue_gap: 40,
+	imin_eod_print_copies: 1,
+	imin_eod_copy_delay_ms: 800,
+	imin_eod_feed_dots: 160,
+	imin_eod_tail_dots: 24,
+	imin_eod_font_scale: 100,
+	imin_eod_line_spacing: 100,
+	imin_eod_side_margin: 16,
+	imin_eod_top_margin: 0,
 });
 
 // Stock Sync Settings (localStorage persisted)
@@ -1240,11 +1775,54 @@ const warehouseOptions = computed(() => {
 // Dynamic classes using configuration helpers (DRY principle)
 const stockSectionClasses = computed(() => getSectionHeaderClasses("purple"));
 const salesSectionClasses = computed(() => getSectionHeaderClasses("green"));
+const printingSectionClasses = computed(() => getSectionHeaderClasses("teal"));
 const warehouseSubsectionClasses = computed(() => getSubsectionClasses("gray"));
 const stockPolicySubsectionClasses = computed(() => getSubsectionClasses("blue"));
 const stockSyncSubsectionClasses = computed(() => getSubsectionClasses("indigo"));
 const pricingSubsectionClasses = computed(() => getSubsectionClasses("emerald"));
 const operationsSubsectionClasses = computed(() => getSubsectionClasses("teal"));
+const queueSubsectionClasses = computed(() => getSubsectionClasses("blue"));
+const driverSubsectionClasses = computed(() => getSubsectionClasses("indigo"));
+const iminSubsectionClasses = computed(() => getSubsectionClasses("emerald"));
+const eodSubsectionClasses = computed(() => getSubsectionClasses("gray"));
+
+// Printing options
+const printDriverOptions = [
+	{ label: "Browser", value: "browser" },
+	{ label: "QZ Tray", value: "qz" },
+	{ label: "iMin", value: "imin" },
+];
+const paperWidthOptions = [
+	{ label: "58mm (384 dots)", value: "58mm" },
+	{ label: "80mm (576 dots)", value: "80mm" },
+	{ label: "Custom", value: "custom" },
+];
+
+// iMin access trigger — the same bait the Direct Print page performs on
+// mount: inject the SDK, connect to the device's print service and probe
+// status. The service asks the operator to allow this origin (once per
+// device), so silent print works without opening /pos/direct-print first.
+const iminProbing = ref(false);
+const iminAccess = ref(null);
+
+async function requestIminAccess() {
+	iminProbing.value = true;
+	iminAccess.value = null;
+	try {
+		const loaded = await ensureIminSdk();
+		if (!loaded) throw new Error("iMin SDK gagal dimuat");
+		const driver = getTransport().getDriver("imin");
+		const s = await driver.getStatus();
+		iminAccess.value = {
+			ok: Boolean(s?.ok),
+			message: s?.ok ? "" : s?.message || "",
+		};
+	} catch (e) {
+		iminAccess.value = { ok: false, message: e?.message || String(e) };
+	} finally {
+		iminProbing.value = false;
+	}
+}
 
 // Resources
 const warehousesResource = createResource({
@@ -1405,6 +1983,13 @@ async function saveSettings() {
 			originalAllowNegativeStock.value = result.allow_negative_stock;
 			originalTaxInclusive.value = result.tax_inclusive;
 		}
+
+		// Print knobs live in the transport singleton, which is loaded once
+		// per session — without this refresh, copies/crew/margins keep their
+		// pre-save values until the next full page reload.
+		initTransportFromServer(props.posProfile).catch((err) => {
+			log.warn("print config refresh failed:", err?.message || err);
+		});
 
 		// Update warehouse in POS Profile if changed
 		if (warehouseChanged && selectedWarehouse.value) {
