@@ -149,36 +149,19 @@ CUSTOM_FIELDS = {
 			"description": "POS Offer that manages this scheme (set by the sync engine).",
 		}
 	],
-	"Pricing Rule": [
-		{
-			"fieldname": "pos_offer_max_discount",
-			"label": "POS Offer Max Discount",
-			"fieldtype": "Currency",
-			"insert_after": "discount_amount",
-			"read_only": 1,
-			"no_copy": 1,
-			"print_hide": 1,
-			"description": "Per-unit nominal cap for POS Offer percentage discounts (0 = no cap).",
-		}
-	],
-	"Company": [
-		{
-			"fieldname": "pos_settings_section",
-			"label": "POS",
-			"fieldtype": "Section Break",
-			"insert_after": "default_bank_account",
-		},
-		{
-			"fieldname": "enable_pos_queue",
-			"label": "Enable POS Queue Number",
-			"fieldtype": "Check",
-			"insert_after": "pos_settings_section",
-			"default": "0",
-			"translatable": 0,
-			"description": "Print a daily queue number on receipts from this outlet.",
-		}
-	],
-}
+		"Pricing Rule": [
+			{
+				"fieldname": "pos_offer_max_discount",
+				"label": "POS Offer Max Discount",
+				"fieldtype": "Currency",
+				"insert_after": "discount_amount",
+				"read_only": 1,
+				"no_copy": 1,
+				"print_hide": 1,
+				"description": "Per-unit nominal cap for POS Offer percentage discounts (0 = no cap).",
+			}
+		],
+	}
 
 
 def after_install():

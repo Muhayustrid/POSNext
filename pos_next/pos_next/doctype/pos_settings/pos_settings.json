@@ -70,6 +70,9 @@
   "imin_crew_slip_enabled",
   "imin_line_spacing",
   "imin_side_margin",
+  "imin_top_margin",
+  "enable_pos_queue",
+  "imin_queue_gap",
   "imin_eod_print_copies",
   "imin_eod_copy_delay_ms",
   "imin_eod_feed_dots",
@@ -77,6 +80,7 @@
   "imin_eod_font_scale",
   "imin_eod_line_spacing",
   "imin_eod_side_margin",
+  "imin_eod_top_margin",
   "print_fallback_enabled",
   "section_break_delivery",
   "use_delivery_charges",
@@ -572,6 +576,13 @@
    "label": "Top Margin (dots)"
   },
   {
+   "default": "0",
+   "description": "Print a daily queue number on receipts from this outlet. Numbers are counted per company per day.",
+   "fieldname": "enable_pos_queue",
+   "fieldtype": "Check",
+   "label": "Enable POS Queue Number"
+  },
+  {
    "default": "40",
    "depends_on": "eval:doc.print_driver==='imin'",
    "description": "Gap between the queue number and the content below it, in dots (dots = mm x 8, e.g. 40 = 5 mm). Applies to the customer receipt and the crew slip alike. 0-128.",
@@ -770,7 +781,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-07 10:30:00.000000",
+ "modified": "2026-09-07 13:05:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

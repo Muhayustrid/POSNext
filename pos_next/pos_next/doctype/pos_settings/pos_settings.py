@@ -118,9 +118,7 @@ def get_pos_settings(pos_profile):
 
 	# Mirror the bootstrap preload feed so both feeds agree; the UI treats a
 	# missing key as disabled.
-	settings["queue_enabled"] = bool(
-		frappe.db.get_value("Company", frappe.db.get_value("POS Profile", pos_profile, "company"), "enable_pos_queue")
-	)
+	settings["queue_enabled"] = bool(settings.get("enable_pos_queue"))
 
 	return settings
 

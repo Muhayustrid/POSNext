@@ -8,6 +8,18 @@ from frappe.utils import nowdate
 from pos_next.api.queue import get_next_queue_number
 
 
+def _queue_toggle(profile, value=None):
+	"""Get (or set) enable_pos_queue on the profile's POS Settings row."""
+	name = frappe.db.get_value("POS Settings", {"pos_profile": profile}, "name")
+	if name is None:
+		name = frappe.get_doc(
+			{"doctype": "POS Settings", "pos_profile": profile, "enabled": 1}
+		).insert(ignore_permissions=True).name
+	if value is not None:
+		frappe.db.set_value("POS Settings", name, "enable_pos_queue", value)
+	return frappe.db.get_value("POS Settings", name, "enable_pos_queue")
+
+
 class TestQueueAPI(FrappeTestCase):
 	def setUp(self):
 		profile = frappe.db.get_value(
@@ -17,12 +29,10 @@ class TestQueueAPI(FrappeTestCase):
 			self.skipTest("no POS Profile on this site")
 		self.profile = profile.name
 		self.company = profile.company
-		self._original_enabled = frappe.db.get_value(
-			"Company", self.company, "enable_pos_queue"
-		)
-		frappe.db.set_value("Company", self.company, "enable_pos_queue", 1)
+		self._original_enabled = _queue_toggle(self.profile)
+		_queue_toggle(self.profile, 1)
 		frappe.db.delete("POS Queue Counter", {"company": self.company})
-		self.other_company = None
+		self.other_profile = None
 
 	def tearDown(self):
 		# The API commits on purpose, so the counter rows and the enabled flag
@@ -31,21 +41,15 @@ class TestQueueAPI(FrappeTestCase):
 		# tearDown, so an uncommitted cleanup would itself be rolled back).
 		frappe.db.rollback()
 		frappe.db.delete("POS Queue Counter", {"company": self.company})
-		frappe.db.set_value(
-			"Company", self.company, "enable_pos_queue", self._original_enabled or 0
-		)
-		if self.other_company:
-			frappe.db.delete("POS Queue Counter", {"company": self.other_company})
-			frappe.db.set_value(
-				"Company",
-				self.other_company,
-				"enable_pos_queue",
-				self._other_original_enabled or 0,
-			)
+		_queue_toggle(self.profile, self._original_enabled or 0)
+		if self.other_profile:
+			other_company = frappe.db.get_value("POS Profile", self.other_profile, "company")
+			frappe.db.delete("POS Queue Counter", {"company": other_company})
+			_queue_toggle(self.other_profile, self._other_original_enabled or 0)
 		frappe.db.commit()
 
-	def test_disabled_company_gets_no_number(self):
-		frappe.db.set_value("Company", self.company, "enable_pos_queue", 0)
+	def test_disabled_profile_gets_no_number(self):
+		_queue_toggle(self.profile, 0)
 		out = get_next_queue_number(self.profile)
 		self.assertFalse(out["enabled"])
 		self.assertNotIn("queue_number", out)
@@ -71,11 +75,10 @@ class TestQueueAPI(FrappeTestCase):
 		)
 		if not other:
 			self.skipTest("site has no second POS Profile on another company")
+		self.other_profile = other.name
 		self.other_company = other.company
-		self._other_original_enabled = frappe.db.get_value(
-			"Company", other.company, "enable_pos_queue"
-		)
-		frappe.db.set_value("Company", other.company, "enable_pos_queue", 1)
+		self._other_original_enabled = _queue_toggle(other.name)
+		_queue_toggle(other.name, 1)
 		frappe.db.delete("POS Queue Counter", {"company": other.company})
 
 		a = get_next_queue_number(self.profile)
