@@ -501,7 +501,7 @@
   },
   {
    "default": "800",
-   "depends_on": "eval:doc.print_driver==='imin' and (doc.imin_print_copies||1)>1",
+   "depends_on": "eval:doc.print_driver==='imin' && (doc.imin_print_copies||1)>1",
    "description": "Pause between copies so the cashier can tear the first copy off (ms); configurable per POS Profile and overridable per-device (default 800)",
    "fieldname": "imin_copy_delay_ms",
    "fieldtype": "Int",
@@ -573,7 +573,7 @@
   },
   {
    "default": "800",
-   "depends_on": "eval:doc.print_driver==='imin' and (doc.imin_eod_print_copies||1)>1",
+   "depends_on": "eval:doc.print_driver==='imin' && (doc.imin_eod_print_copies||1)>1",
    "description": "Pause between EOD copies so the cashier can tear the first one off (ms); overridable per-device. 0–10000.",
    "fieldname": "imin_eod_copy_delay_ms",
    "fieldtype": "Int",
@@ -746,7 +746,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-06 00:00:00.000000",
+ "modified": "2026-09-07 08:10:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
