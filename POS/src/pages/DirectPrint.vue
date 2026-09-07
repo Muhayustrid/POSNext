@@ -18,6 +18,43 @@
 				</div>
 			</div>
 
+			<!-- EOD autoprint banner: shown only when opened with ?eod=<name> -->
+			<div
+				v-if="autoprint.status !== 'idle'"
+				:class="[
+					'mb-4 rounded-lg border px-4 py-3 text-sm',
+					autoprint.status === 'printing'
+						? 'border-blue-200 bg-blue-50 text-blue-800'
+						: autoprint.status === 'done'
+							? 'border-green-200 bg-green-50 text-green-800'
+							: 'border-red-200 bg-red-50 text-red-700',
+				]"
+			>
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<p class="flex items-center gap-2">
+						<span
+							v-if="autoprint.status === 'printing'"
+							class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-400 border-t-transparent"
+						></span>
+						{{
+							autoprint.status === "printing"
+								? __("Mencetak laporan EOD {0}...", [autoprint.name])
+								: autoprint.status === "done"
+									? __("Laporan EOD {0} terkirim ke printer.", [autoprint.name])
+									: __("Gagal mencetak EOD {0}: {1}", [autoprint.name, autoprint.error])
+						}}
+					</p>
+					<Button
+						v-if="autoprint.status === 'error'"
+						variant="ghost"
+						size="sm"
+						@click="autoprintEod(autoprint.name, autoprint.profile)"
+					>
+						{{ __("Coba Lagi") }}
+					</Button>
+				</div>
+			</div>
+
 			<!-- Status card -->
 			<div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
 				<div class="mb-3 flex items-center justify-between">
@@ -926,6 +963,7 @@
 <script setup>
 import { Badge, Button, Checkbox, Input, Select } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 
 import { useToast } from "@/composables/useToast"
 import { call } from "@/utils/apiWrapper"
@@ -951,9 +989,11 @@ import {
 import {
 	buildReceiptDocumentHTML,
 	effectiveReceiptDots,
+	silentPrintDoc,
 } from "@/utils/printInvoice"
 
 const { showSuccess, showError, showInfo } = useToast()
+const route = useRoute()
 
 // Compile-time constant injected by vite (define.__BUILD_VERSION__). It lives
 // in the executing bundle, so it dates the CODE actually running — a stale
@@ -1828,6 +1868,44 @@ watch(
 	},
 )
 
+// Desk entry point state: /pos/direct-print?eod=<name>[&profile=<p>] prints
+// one specific POS Closing Shift on load. The banner below the header shows
+// the result; a failed autoprint stays retryable there.
+const autoprint = ref({ status: "idle", name: "", profile: null, error: "" })
+
+async function autoprintEod(closingName, posProfile) {
+	autoprint.value = {
+		status: "printing",
+		name: closingName,
+		profile: posProfile,
+		error: "",
+	}
+	try {
+		await silentPrintDoc(
+			"POS Closing Shift",
+			closingName,
+			"POS Next EOD Report",
+			posProfile,
+			"eod",
+		)
+		autoprint.value = {
+			status: "done",
+			name: closingName,
+			profile: posProfile,
+			error: "",
+		}
+	} catch (e) {
+		autoprint.value = {
+			status: "error",
+			name: closingName,
+			profile: posProfile,
+			error: e?.message || String(e),
+		}
+	}
+	await fetchLogs()
+	await pollStatus()
+}
+
 onMounted(async () => {
 	readCfgIntoForm()
 	// Load the server print config before anything reads transport state.
@@ -1835,10 +1913,15 @@ onMounted(async () => {
 	// singleton config populated here; without it the chain is empty and no
 	// driver can be reached. The store call is idempotent — awaiting it closes
 	// the race with the non-blocking preload started in main.js.
+	// A `profile` query param (sent by Desk's EOD print button) pins the
+	// config to the closing shift's own POS Profile instead of the signed-in
+	// user's default.
+	const routeProfile =
+		typeof route.query.profile === "string" ? route.query.profile : null
 	try {
 		await bootstrap.loadInitialData()
 		const cfg = await initTransportFromServer(
-			bootstrap.getPreloadedPOSProfile()?.name || null,
+			routeProfile || bootstrap.getPreloadedPOSProfile()?.name || null,
 		)
 		configError.value = ""
 		// Load the iMin SDK before the first status poll whenever the chain can
@@ -1865,6 +1948,12 @@ onMounted(async () => {
 	// is no error path.
 	getSampleBundle()
 	getClosingBundle()
+	// Desk entry point: /pos/direct-print?eod=<POS Closing Shift name> auto-
+	// prints that closing report through the same transport and EOD knobs as
+	// the till's closing flow.
+	if (typeof route.query.eod === "string" && route.query.eod) {
+		autoprintEod(route.query.eod, routeProfile)
+	}
 })
 
 onUnmounted(() => {

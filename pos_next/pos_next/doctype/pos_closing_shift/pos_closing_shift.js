@@ -31,13 +31,15 @@ frappe.ui.form.on("POS Closing Shift", {
 		frm.add_custom_button(
 			__("Print EOD Report"),
 			() => {
-				frappe.utils.print(
-					frm.doctype,
-					frm.docname,
-					"POS Next EOD Report",
-					frm.doc.letter_head,
-					frm.doc.language || frappe.boot.lang
-				);
+				// Print through the POS app's transport (iMin / QZ / browser, with
+				// the EOD layout knobs from POS Settings) instead of the browser
+				// dialog: the page loads the print service, asks the device for
+				// access when needed, and prints automatically.
+				const params = new URLSearchParams({
+					eod: frm.docname,
+					profile: frm.doc.pos_profile || "",
+				});
+				window.open(`/pos/direct-print?${params}`, "_blank");
 			},
 			__("Print")
 		);
