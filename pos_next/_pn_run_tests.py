@@ -17,7 +17,7 @@ import unittest
 
 import frappe
 
-SITE = "erpnext16.localhost"
+SITE = "posnext.localhost"
 # frappe.init resolves sites/ relative to the cwd, so anchor at the bench root.
 # In the main checkout that is three levels up; in a worktree under
 # .worktrees/<name>/ the depth differs, so walk up until a sites/ dir appears.
