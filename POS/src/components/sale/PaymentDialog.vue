@@ -797,8 +797,11 @@
 									</button>
 								</div>
 							</div>
-								<!-- HQ confirmation code unlocks the additional discount -->
-								<div v-if="additionalDiscountLocked" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
+							<!-- HQ confirmation code unlocks the additional discount;
+							     shown only when this dialog actually has editable
+							     discount controls (item-level discounts are gated in
+							     EditItemDialog, whose code the store already holds) -->
+							<div v-if="settingsStore.allowAdditionalDiscount && additionalDiscountLocked" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
 									<label class="block text-xs font-medium text-orange-700 mb-1 text-start">
 										{{ __("Confirmation Code (HQ)") }}
 									</label>
@@ -3508,8 +3511,16 @@ async function completePayment() {
 	}
 
 	// Restricted discount: require (and validate) the HQ confirmation code before
-	// submitting. The server re-checks the code on save and submit.
-	if (restrictionCodeRequired.value && !restrictionStore.hasCode) {
+	// submitting — but only when this dialog has editable discount controls to
+	// unlock. Manual item/rate discounts are gated in EditItemDialog (the code
+	// then lives in the store), so with the additional-discount setting off any
+	// remaining "required" signal is an offer/coupon attribution gap, not a
+	// genuine manual discount. The server re-checks on save and submit either way.
+	if (
+		settingsStore.allowAdditionalDiscount &&
+		restrictionCodeRequired.value &&
+		!restrictionStore.hasCode
+	) {
 		restrictionStore.setCode(confirmationCode.value);
 		if (!restrictionStore.hasCode) {
 			showWarning(__("Confirmation code from head office is required for this discount"));
