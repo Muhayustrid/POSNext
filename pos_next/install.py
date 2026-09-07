@@ -163,10 +163,16 @@ CUSTOM_FIELDS = {
 	],
 	"Company": [
 		{
+			"fieldname": "pos_settings_section",
+			"label": "POS",
+			"fieldtype": "Section Break",
+			"insert_after": "default_bank_account",
+		},
+		{
 			"fieldname": "enable_pos_queue",
 			"label": "Enable POS Queue Number",
 			"fieldtype": "Check",
-			"insert_after": "default_bank_account",
+			"insert_after": "pos_settings_section",
 			"default": "0",
 			"translatable": 0,
 			"description": "Print a daily queue number on receipts from this outlet.",
