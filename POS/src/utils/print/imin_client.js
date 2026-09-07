@@ -208,6 +208,7 @@ export function createIminDriver(deps = {}) {
 				crewFontScale,
 				lineSpacing,
 				sideMarginDots,
+				topMarginDots,
 			} = r
 			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
@@ -216,9 +217,9 @@ export function createIminDriver(deps = {}) {
 
 			// lineSpacing is deliberately NOT per-copy: there is one vertical
 			// density for everything direct printed, receipt and slip alike. The
-			// side margin rides the same object for the same reason — it is a
-			// property of the paper, not of which sheet is on it — so the crew
-			// slip inherits it through the spread below.
+			// side/top margins ride the same object for the same reason — they
+			// are a property of the paper, not of which sheet is on it — so the
+			// crew slip inherits them through the spread below.
 			const renderOpts = {
 				paper,
 				customDots,
@@ -226,6 +227,7 @@ export function createIminDriver(deps = {}) {
 				fontScale,
 				lineSpacing,
 				sideMarginDots,
+				topMarginDots,
 			}
 			// The crew slip is gated purely by its own toggle, not by the copy
 			// count: crewSlipEnabled on means exactly one slip after ALL receipt

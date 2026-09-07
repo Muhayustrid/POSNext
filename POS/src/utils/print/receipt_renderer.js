@@ -6,7 +6,9 @@ import {
 	DEFAULT_LINE_SPACING,
 	DEFAULT_SIDE_MARGIN_DOTS,
 	DEFAULT_TAIL_DOTS,
+	DEFAULT_TOP_MARGIN_DOTS,
 	MAX_SIDE_MARGIN_DOTS,
+	MAX_TOP_MARGIN_DOTS,
 	clampInt,
 	receiptBaseCSS,
 	receiptFrameStyle,
@@ -143,6 +145,12 @@ export function composeReceiptFrame(html, opts = {}) {
 		MAX_SIDE_MARGIN_DOTS,
 		DEFAULT_SIDE_MARGIN_DOTS,
 	)
+	const topMarginDots = clampInt(
+		opts.topMarginDots,
+		0,
+		MAX_TOP_MARGIN_DOTS,
+		DEFAULT_TOP_MARGIN_DOTS,
+	)
 	const tail = opts.tailDots ?? DEFAULT_TAIL_DOTS
 	const tailHTML = tailSpacerHTML(tail)
 
@@ -166,9 +174,12 @@ export function composeReceiptFrame(html, opts = {}) {
 	// Authored directly in dots and deliberately NOT run through scaleCssLengths
 	// or the fontScale factor: the margin is a physical measurement of the paper
 	// (16 dots = 2 mm), not a typographic length that follows the text size.
+	// Top margin joins the override only when set (>0): pinning padding-top:0
+	// would strip the top padding the format asked for and change default output.
+	const topRule = topMarginDots > 0 ? `padding-top:${topMarginDots}px;` : ""
 	const scoped =
 		`${scopedCss}\n` +
-		`${FRAME_SCOPE}{padding-left:${sideMarginDots}px;padding-right:${sideMarginDots}px;}`
+		`${FRAME_SCOPE}{${topRule}padding-left:${sideMarginDots}px;padding-right:${sideMarginDots}px;}`
 
 	const host = document.createElement("div")
 	host.style.cssText =

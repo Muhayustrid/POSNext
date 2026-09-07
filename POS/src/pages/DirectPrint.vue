@@ -363,6 +363,26 @@
 							}}
 						</p>
 					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-top-margin">
+							{{ __("Top margin (dots)") }}
+						</label>
+						<Input
+							id="direct-print-top-margin"
+							v-model="topMarginDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('0')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Blank space above the receipt content, in dots (dots = mm×8, e.g. 16≈2mm). 0 keeps the format's own top padding. Bottom spacing is the tail spacer above. 0–128.",
+								)
+							}}
+						</p>
+					</div>
 				</div>
 
 				<!-- What the NEXT receipt print will actually use (device over server) -->
@@ -376,7 +396,7 @@
 					<p>
 						{{
 							__(
-								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots · Crew {10}",
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots · Top margin {10} dots · Crew {11}",
 								[
 									String(effectiveCfg.paper),
 									String(effectiveCfg.dots),
@@ -388,6 +408,7 @@
 									String(effectiveCfg.crewFontScale),
 									String(effectiveCfg.lineSpacing),
 									String(effectiveCfg.sideMarginDots),
+									String(effectiveCfg.topMarginDots),
 									effectiveCfg.crewSlipEnabled ? "On" : "Off",
 								],
 							)
@@ -638,6 +659,22 @@
 							{{ __("Blank space on the left and right of every line, in dots. 0–64.") }}
 						</p>
 					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-eod-top-margin">
+							{{ __("EOD top margin (dots)") }}
+						</label>
+						<Input
+							id="direct-print-eod-top-margin"
+							v-model="eodTopMarginDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('0')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{ __("Blank space above the closing report content, in dots. 0 keeps the format's own top padding. 0–128.") }}
+						</p>
+					</div>
 				</div>
 
 				<!-- What the NEXT closing print will actually use -->
@@ -651,7 +688,7 @@
 					<p>
 						{{
 							__(
-								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Line spacing {7}% · Side margin {8} dots",
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Line spacing {7}% · Side margin {8} dots · Top margin {9} dots",
 								[
 									String(effectiveEodCfg.paper),
 									String(effectiveEodCfg.dots),
@@ -662,6 +699,7 @@
 									String(effectiveEodCfg.fontScale),
 									String(effectiveEodCfg.lineSpacing),
 									String(effectiveEodCfg.sideMarginDots),
+									String(effectiveEodCfg.topMarginDots),
 								],
 							)
 						}}
@@ -977,6 +1015,7 @@ const fontScaleText = ref("100")
 const crewFontScaleText = ref("100")
 const lineSpacingText = ref("100")
 const sideMarginDotsText = ref("16")
+const topMarginDotsText = ref("0")
 const customDotsText = ref("384")
 
 // Closing / EOD lane knobs. Same text-field convention: empty means "use the
@@ -987,6 +1026,7 @@ const eodTailDotsText = ref(String(DEFAULT_TAIL_DOTS))
 const eodFontScaleText = ref("100")
 const eodLineSpacingText = ref("100")
 const eodSideMarginDotsText = ref("16")
+const eodTopMarginDotsText = ref("0")
 
 function readDeviceIntoForm(stored) {
 	cfg.host = typeof stored.host === "string" ? stored.host : ""
@@ -1025,6 +1065,9 @@ function readReceiptIntoForm(stored) {
 	const sm = stored.sideMarginDots
 	sideMarginDotsText.value =
 		sm === undefined || sm === "" || sm === null ? "16" : String(sm)
+	const tm = stored.topMarginDots
+	topMarginDotsText.value =
+		tm === undefined || tm === "" || tm === null ? "0" : String(tm)
 	crewSlipChoice.value =
 		stored.crewSlipEnabled === true
 			? "1"
@@ -1058,6 +1101,9 @@ function readEodIntoForm(stored) {
 	const sm = stored.eodSideMarginDots
 	eodSideMarginDotsText.value =
 		sm === undefined || sm === "" || sm === null ? "16" : String(sm)
+	const tm = stored.eodTopMarginDots
+	eodTopMarginDotsText.value =
+		tm === undefined || tm === "" || tm === null ? "0" : String(tm)
 }
 
 function readCfgIntoForm() {
@@ -1217,6 +1263,15 @@ function onSaveReceiptConfig() {
 				dflt: 16,
 			},
 		)
+		const topMarginDots = parseNumericField(
+			"Top margin",
+			topMarginDotsText.value,
+			{
+				min: 0,
+				max: 128,
+				dflt: 0,
+			},
+		)
 		saveDeviceConfig({
 			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
 			copyDelayMs,
@@ -1226,6 +1281,7 @@ function onSaveReceiptConfig() {
 			crewFontScale,
 			lineSpacing,
 			sideMarginDots,
+			topMarginDots,
 			crewSlipEnabled:
 				crewSlipChoice.value === "1"
 					? true
@@ -1301,6 +1357,15 @@ function onSaveEodConfig() {
 				dflt: 16,
 			},
 		)
+		const eodTopMarginDots = parseNumericField(
+			"EOD top margin",
+			eodTopMarginDotsText.value,
+			{
+				min: 0,
+				max: 128,
+				dflt: 0,
+			},
+		)
 		saveDeviceConfig({
 			eodCopies: Math.max(1, Math.min(Number(cfg.eodCopies) || 1, 5)),
 			eodCopyDelayMs,
@@ -1309,6 +1374,7 @@ function onSaveEodConfig() {
 			eodFontScale,
 			eodLineSpacing,
 			eodSideMarginDots,
+			eodTopMarginDots,
 		})
 		showSuccess(__("Closing layout saved. It will apply on the next print."))
 		refreshEffectiveConfig()
@@ -1525,6 +1591,7 @@ function serverConfigFromTransport() {
 			crewFontScale: c.crew_font_scale,
 			lineSpacing: c.line_spacing,
 			sideMarginDots: c.side_margin,
+			topMarginDots: c.top_margin,
 			eodCopies: c.eod_copies,
 			eodCopyDelayMs: c.eod_copy_delay_ms,
 			eodFeedDots: c.eod_feed_dots,
@@ -1532,6 +1599,7 @@ function serverConfigFromTransport() {
 			eodFontScale: c.eod_font_scale,
 			eodLineSpacing: c.eod_line_spacing,
 			eodSideMarginDots: c.eod_side_margin,
+			eodTopMarginDots: c.eod_top_margin,
 		}
 	} catch {
 		return {}

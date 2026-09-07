@@ -353,6 +353,32 @@ describe("scopeReceiptCSS line-height (the lineSpacing knob)", () => {
 	})
 })
 
+describe("resolvePrintConfig topMarginDots (blank space above content)", () => {
+	it("defaults to 0 — the format's own top padding survives untouched", () => {
+		expect(resolvePrintConfig({}, {}).topMarginDots).toBe(0)
+	})
+
+	it("device wins over server; eod lane reads its own key", () => {
+		expect(
+			resolvePrintConfig({ topMarginDots: 16 }, { topMarginDots: 8 })
+				.topMarginDots,
+		).toBe(16)
+		expect(
+			resolvePrintConfig({}, { topMarginDots: 8 }, { kind: "eod" }).topMarginDots,
+		).toBe(0)
+		expect(
+			resolvePrintConfig({}, { eodTopMarginDots: 24 }, { kind: "eod" })
+				.topMarginDots,
+		).toBe(24)
+	})
+
+	it("clamps to the 0..128 dot band", () => {
+		expect(resolvePrintConfig({ topMarginDots: 999 }, {}).topMarginDots).toBe(
+			128,
+		)
+	})
+})
+
 describe("resolvePrintConfig sideMarginDots (left/right print margin)", () => {
 	it("defaults to 16 dots (2 mm) — narrower than the ~40 the templates ship", () => {
 		expect(DEFAULT_SIDE_MARGIN_DOTS).toBe(16)

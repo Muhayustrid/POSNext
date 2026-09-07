@@ -226,6 +226,7 @@ describe("createIminDriver", () => {
 				fontScale: 100,
 				lineSpacing: 100,
 				sideMarginDots: 16,
+				topMarginDots: 0,
 			})
 			expect(res.paper).toBe("80mm")
 		})
@@ -282,6 +283,7 @@ describe("createIminDriver", () => {
 				fontScale: 100,
 				lineSpacing: 100,
 				sideMarginDots: 16,
+				topMarginDots: 0,
 			})
 			expect(res.paper).toBe("custom")
 		})

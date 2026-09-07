@@ -25,6 +25,7 @@ PRINT_CONFIG_FIELDS = (
 	"imin_crew_slip_enabled",
 	"imin_line_spacing",
 	"imin_side_margin",
+	"imin_top_margin",
 	"imin_eod_print_copies",
 	"imin_eod_copy_delay_ms",
 	"imin_eod_feed_dots",
@@ -32,6 +33,7 @@ PRINT_CONFIG_FIELDS = (
 	"imin_eod_font_scale",
 	"imin_eod_line_spacing",
 	"imin_eod_side_margin",
+	"imin_eod_top_margin",
 	"print_fallback_enabled",
 )
 
@@ -44,6 +46,7 @@ MAX_TAIL_DOTS = 200
 MIN_LINE_SPACING = 50
 MAX_LINE_SPACING = 150
 MAX_SIDE_MARGIN_DOTS = 64
+MAX_TOP_MARGIN_DOTS = 128
 
 
 @frappe.whitelist()
@@ -179,6 +182,13 @@ def get_print_config(pos_profile):
 		side_margin = 16
 	side_margin = max(0, min(side_margin, MAX_SIDE_MARGIN_DOTS))
 
+	try:
+		top_margin = getattr(settings, "imin_top_margin", None)
+		top_margin = 0 if top_margin is None else int(top_margin)
+	except (TypeError, ValueError):
+		top_margin = 0
+	top_margin = max(0, min(top_margin, MAX_TOP_MARGIN_DOTS))
+
 	# The Closing/EOD lane is a separate print job, so it gets its own knobs at
 	# the same defaults and clamp bands as the sales receipt. Device overrides
 	# (eodCopies/eodCopyDelayMs/...) land in POS Settings as imin_eod_*.
@@ -232,6 +242,13 @@ def get_print_config(pos_profile):
 		eod_side_margin = 16
 	eod_side_margin = max(0, min(eod_side_margin, MAX_SIDE_MARGIN_DOTS))
 
+	try:
+		eod_top_margin = getattr(settings, "imin_eod_top_margin", None)
+		eod_top_margin = 0 if eod_top_margin is None else int(eod_top_margin)
+	except (TypeError, ValueError):
+		eod_top_margin = 0
+	eod_top_margin = max(0, min(eod_top_margin, MAX_TOP_MARGIN_DOTS))
+
 	return {
 		"pos_profile": resolved_profile,
 		"driver": getattr(settings, "print_driver", None) or "browser",
@@ -247,6 +264,7 @@ def get_print_config(pos_profile):
 		"crew_slip_enabled": bool(getattr(settings, "imin_crew_slip_enabled", None)),
 		"line_spacing": line_spacing,
 		"side_margin": side_margin,
+		"top_margin": top_margin,
 		"eod_copies": eod_copies,
 		"eod_copy_delay_ms": eod_delay,
 		"eod_feed_dots": eod_feed,
@@ -254,6 +272,7 @@ def get_print_config(pos_profile):
 		"eod_font_scale": eod_font_scale,
 		"eod_line_spacing": eod_line_spacing,
 		"eod_side_margin": eod_side_margin,
+		"eod_top_margin": eod_top_margin,
 		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
 	}
 

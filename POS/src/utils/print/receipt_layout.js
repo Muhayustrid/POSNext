@@ -297,6 +297,12 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		MAX_SIDE_MARGIN_DOTS,
 		DEFAULT_SIDE_MARGIN_DOTS,
 	)
+	const topMarginDots = clampInt(
+		pick("topMarginDots"),
+		0,
+		MAX_TOP_MARGIN_DOTS,
+		DEFAULT_TOP_MARGIN_DOTS,
+	)
 
 	const dots = dotsForPaper(paper, customDots)
 
@@ -313,6 +319,7 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		crewSlipEnabled,
 		lineSpacing,
 		sideMarginDots,
+		topMarginDots,
 		dots,
 	}
 }
@@ -376,6 +383,14 @@ const MAX_LINE_SPACING = 150
  */
 export const DEFAULT_SIDE_MARGIN_DOTS = 16
 export const MAX_SIDE_MARGIN_DOTS = 64
+
+/**
+ * Blank space ABOVE the receipt content, in printer dots (8 dots = 1 mm).
+ * 0 keeps whatever top padding the receipt format's own CSS asked for —
+ * pinning 0 unconditionally would strip that and change today's output.
+ */
+export const DEFAULT_TOP_MARGIN_DOTS = 0
+export const MAX_TOP_MARGIN_DOTS = 128
 
 /**
  * Parse one numeric settings field for saving.
