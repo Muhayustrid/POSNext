@@ -139,7 +139,7 @@ export function receiptStylesFor(dots) {
 	}
 	.receipt { width: 100%; }
 	.header { text-align: center; margin-bottom: 8px; border-bottom: 2px dashed #000; padding-bottom: 4px; }
-	.queue-number { text-align: center; margin-bottom: 20px; border-bottom: 2px dashed #000; padding-bottom: 4px; }
+	.queue-number { text-align: center; margin-bottom: 20px; }
 	.queue-label { font-size: 11px; }
 	.queue-value { font-size: 26px; font-weight: bold; }
 	.company-name { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
@@ -303,6 +303,12 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		MAX_TOP_MARGIN_DOTS,
 		DEFAULT_TOP_MARGIN_DOTS,
 	)
+	const queueGapDots = clampInt(
+		pick("queueGapDots"),
+		0,
+		MAX_QUEUE_GAP_DOTS,
+		DEFAULT_QUEUE_GAP_DOTS,
+	)
 
 	const dots = dotsForPaper(paper, customDots)
 
@@ -320,6 +326,7 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		lineSpacing,
 		sideMarginDots,
 		topMarginDots,
+		queueGapDots,
 		dots,
 	}
 }
@@ -391,6 +398,15 @@ export const MAX_SIDE_MARGIN_DOTS = 64
  */
 export const DEFAULT_TOP_MARGIN_DOTS = 0
 export const MAX_TOP_MARGIN_DOTS = 128
+
+/**
+ * Gap between the queue number block and the content below it, in printer
+ * dots (8 dots = 1 mm) — one knob for BOTH the customer receipt and the crew
+ * slip, so the number sits the same on every sheet. Pinned by a renderer
+ * override, so it is real dots and immune to fontScale.
+ */
+export const DEFAULT_QUEUE_GAP_DOTS = 40
+export const MAX_QUEUE_GAP_DOTS = 128
 
 /**
  * Parse one numeric settings field for saving.

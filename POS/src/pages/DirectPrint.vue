@@ -383,6 +383,26 @@
 							}}
 						</p>
 					</div>
+
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-queue-gap">
+							{{ __("Queue number gap (dots)") }}
+						</label>
+						<Input
+							id="direct-print-queue-gap"
+							v-model="queueGapDotsText"
+							type="text"
+							inputmode="numeric"
+							:placeholder="__('40')"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Gap between the queue number and the content below it, in dots (e.g. 40≈5mm). Applies to the customer receipt and the crew slip alike. 0–128.",
+								)
+							}}
+						</p>
+					</div>
 				</div>
 
 				<!-- What the NEXT receipt print will actually use (device over server) -->
@@ -396,7 +416,7 @@
 					<p>
 						{{
 							__(
-								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots · Top margin {10} dots · Crew {11}",
+								"Paper {0} ({1} dots) · Copies {2} · Delay {3} ms · Advance {4} dots · Tail {5} dots · Font {6}% · Crew font {7}% · Line spacing {8}% · Side margin {9} dots · Top margin {10} dots · Queue gap {11} dots · Crew {12}",
 								[
 									String(effectiveCfg.paper),
 									String(effectiveCfg.dots),
@@ -409,6 +429,7 @@
 									String(effectiveCfg.lineSpacing),
 									String(effectiveCfg.sideMarginDots),
 									String(effectiveCfg.topMarginDots),
+									String(effectiveCfg.queueGapDots),
 									effectiveCfg.crewSlipEnabled ? "On" : "Off",
 								],
 							)
@@ -1016,6 +1037,7 @@ const crewFontScaleText = ref("100")
 const lineSpacingText = ref("100")
 const sideMarginDotsText = ref("16")
 const topMarginDotsText = ref("0")
+const queueGapDotsText = ref("40")
 const customDotsText = ref("384")
 
 // Closing / EOD lane knobs. Same text-field convention: empty means "use the
@@ -1068,6 +1090,9 @@ function readReceiptIntoForm(stored) {
 	const tm = stored.topMarginDots
 	topMarginDotsText.value =
 		tm === undefined || tm === "" || tm === null ? "0" : String(tm)
+	const qg = stored.queueGapDots
+	queueGapDotsText.value =
+		qg === undefined || qg === "" || qg === null ? "40" : String(qg)
 	crewSlipChoice.value =
 		stored.crewSlipEnabled === true
 			? "1"
@@ -1272,6 +1297,15 @@ function onSaveReceiptConfig() {
 				dflt: 0,
 			},
 		)
+		const queueGapDots = parseNumericField(
+			"Queue number gap",
+			queueGapDotsText.value,
+			{
+				min: 0,
+				max: 128,
+				dflt: 40,
+			},
+		)
 		saveDeviceConfig({
 			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
 			copyDelayMs,
@@ -1282,6 +1316,7 @@ function onSaveReceiptConfig() {
 			lineSpacing,
 			sideMarginDots,
 			topMarginDots,
+			queueGapDots,
 			crewSlipEnabled:
 				crewSlipChoice.value === "1"
 					? true
@@ -1592,6 +1627,7 @@ function serverConfigFromTransport() {
 			lineSpacing: c.line_spacing,
 			sideMarginDots: c.side_margin,
 			topMarginDots: c.top_margin,
+			queueGapDots: c.queue_gap,
 			eodCopies: c.eod_copies,
 			eodCopyDelayMs: c.eod_copy_delay_ms,
 			eodFeedDots: c.eod_feed_dots,

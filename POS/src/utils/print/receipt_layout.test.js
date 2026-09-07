@@ -379,6 +379,23 @@ describe("resolvePrintConfig topMarginDots (blank space above content)", () => {
 	})
 })
 
+describe("resolvePrintConfig queueGapDots (queue number to content)", () => {
+	it("defaults to 40 dots (5 mm), one value for receipt and crew slip", () => {
+		expect(resolvePrintConfig({}, {}).queueGapDots).toBe(40)
+	})
+
+	it("device wins over server", () => {
+		expect(
+			resolvePrintConfig({ queueGapDots: 8 }, { queueGapDots: 64 }).queueGapDots,
+		).toBe(8)
+		expect(resolvePrintConfig({}, { queueGapDots: 64 }).queueGapDots).toBe(64)
+	})
+
+	it("clamps to the 0..128 dot band", () => {
+		expect(resolvePrintConfig({ queueGapDots: 999 }, {}).queueGapDots).toBe(128)
+	})
+})
+
 describe("resolvePrintConfig sideMarginDots (left/right print margin)", () => {
 	it("defaults to 16 dots (2 mm) — narrower than the ~40 the templates ship", () => {
 		expect(DEFAULT_SIDE_MARGIN_DOTS).toBe(16)

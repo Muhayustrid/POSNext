@@ -209,6 +209,7 @@ export function createIminDriver(deps = {}) {
 				lineSpacing,
 				sideMarginDots,
 				topMarginDots,
+				queueGapDots,
 			} = r
 			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
 
@@ -228,6 +229,7 @@ export function createIminDriver(deps = {}) {
 				lineSpacing,
 				sideMarginDots,
 				topMarginDots,
+				queueGapDots,
 			}
 			// The crew slip is gated purely by its own toggle, not by the copy
 			// count: crewSlipEnabled on means exactly one slip after ALL receipt

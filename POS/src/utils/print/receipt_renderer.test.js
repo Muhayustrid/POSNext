@@ -192,7 +192,12 @@ describe("composeReceiptFrame (DPI translation + scoping)", () => {
 			expect(scopedCss).toContain(rule)
 			// Same specificity, so being appended last is the whole mechanism.
 			expect(scopedCss.indexOf(rule)).toBe(scopedCss.lastIndexOf(rule))
-			expect(scopedCss.trimEnd().endsWith(rule)).toBe(true)
+			// The queue-gap rule follows the frame rule; both append last together.
+			expect(
+				scopedCss
+					.trimEnd()
+					.endsWith(rule + "\n.pn-receipt-frame .queue-number,.pn-receipt-frame .slip-queue{margin-bottom:40px;}"),
+			).toBe(true)
 		})
 
 		it("beats a template @media print body padding too", () => {
@@ -203,7 +208,7 @@ describe("composeReceiptFrame (DPI translation + scoping)", () => {
 			expect(
 				scopedCss
 					.trimEnd()
-					.endsWith(".pn-receipt-frame{padding-left:0px;padding-right:0px;}"),
+					.endsWith(".pn-receipt-frame{padding-left:0px;padding-right:0px;}\n.pn-receipt-frame .queue-number,.pn-receipt-frame .slip-queue{margin-bottom:40px;}"),
 			).toBe(true)
 		})
 
@@ -214,7 +219,7 @@ describe("composeReceiptFrame (DPI translation + scoping)", () => {
 			expect(
 				scopedCss
 					.trimEnd()
-					.endsWith(".pn-receipt-frame{padding-left:16px;padding-right:16px;}"),
+					.endsWith(".pn-receipt-frame{padding-left:16px;padding-right:16px;}\n.pn-receipt-frame .queue-number,.pn-receipt-frame .slip-queue{margin-bottom:40px;}"),
 			).toBe(true)
 		})
 
@@ -244,7 +249,7 @@ describe("composeReceiptFrame (DPI translation + scoping)", () => {
 			expect(
 				scopedCss
 					.trimEnd()
-					.endsWith(".pn-receipt-frame{padding-left:16px;padding-right:16px;}"),
+					.endsWith(".pn-receipt-frame{padding-left:16px;padding-right:16px;}\n.pn-receipt-frame .queue-number,.pn-receipt-frame .slip-queue{margin-bottom:40px;}"),
 			).toBe(true)
 		})
 
@@ -259,7 +264,7 @@ describe("composeReceiptFrame (DPI translation + scoping)", () => {
 			expect(
 				scopedCss
 					.trimEnd()
-					.endsWith(".pn-receipt-frame{padding-left:8px;padding-right:8px;}"),
+					.endsWith(".pn-receipt-frame{padding-left:8px;padding-right:8px;}\n.pn-receipt-frame .queue-number,.pn-receipt-frame .slip-queue{margin-bottom:40px;}"),
 			).toBe(true)
 		})
 	})

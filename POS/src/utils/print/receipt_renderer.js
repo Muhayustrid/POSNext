@@ -4,9 +4,11 @@ import { dotsForPaper } from "./paper"
 import {
 	DEFAULT_FONT_SCALE,
 	DEFAULT_LINE_SPACING,
+	DEFAULT_QUEUE_GAP_DOTS,
 	DEFAULT_SIDE_MARGIN_DOTS,
 	DEFAULT_TAIL_DOTS,
 	DEFAULT_TOP_MARGIN_DOTS,
+	MAX_QUEUE_GAP_DOTS,
 	MAX_SIDE_MARGIN_DOTS,
 	MAX_TOP_MARGIN_DOTS,
 	clampInt,
@@ -151,6 +153,12 @@ export function composeReceiptFrame(html, opts = {}) {
 		MAX_TOP_MARGIN_DOTS,
 		DEFAULT_TOP_MARGIN_DOTS,
 	)
+	const queueGapDots = clampInt(
+		opts.queueGapDots,
+		0,
+		MAX_QUEUE_GAP_DOTS,
+		DEFAULT_QUEUE_GAP_DOTS,
+	)
 	const tail = opts.tailDots ?? DEFAULT_TAIL_DOTS
 	const tailHTML = tailSpacerHTML(tail)
 
@@ -177,9 +185,14 @@ export function composeReceiptFrame(html, opts = {}) {
 	// Top margin joins the override only when set (>0): pinning padding-top:0
 	// would strip the top padding the format asked for and change default output.
 	const topRule = topMarginDots > 0 ? `padding-top:${topMarginDots}px;` : ""
+	// The queue gap rides the same override: one margin-bottom for the
+	// customer receipt's .queue-number AND the crew slip's .slip-queue, so the
+	// number sits identically on both sheets. Same specificity, later document
+	// order — it wins over whatever the templates authored.
 	const scoped =
 		`${scopedCss}\n` +
-		`${FRAME_SCOPE}{${topRule}padding-left:${sideMarginDots}px;padding-right:${sideMarginDots}px;}`
+		`${FRAME_SCOPE}{${topRule}padding-left:${sideMarginDots}px;padding-right:${sideMarginDots}px;}\n` +
+		`${FRAME_SCOPE} .queue-number,${FRAME_SCOPE} .slip-queue{margin-bottom:${queueGapDots}px;}`
 
 	const host = document.createElement("div")
 	host.style.cssText =

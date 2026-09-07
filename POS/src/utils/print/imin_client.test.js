@@ -227,6 +227,7 @@ describe("createIminDriver", () => {
 				lineSpacing: 100,
 				sideMarginDots: 16,
 				topMarginDots: 0,
+				queueGapDots: 40,
 			})
 			expect(res.paper).toBe("80mm")
 		})
@@ -284,6 +285,7 @@ describe("createIminDriver", () => {
 				lineSpacing: 100,
 				sideMarginDots: 16,
 				topMarginDots: 0,
+				queueGapDots: 40,
 			})
 			expect(res.paper).toBe("custom")
 		})

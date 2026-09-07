@@ -77,6 +77,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						lineSpacing: current.line_spacing,
 						sideMarginDots: current.side_margin,
 						topMarginDots: current.top_margin,
+						queueGapDots: current.queue_gap,
 						// Closing/EOD lane: the driver resolves these against the eod*
 						// device keys instead of the receipt ones.
 						eodCopies: current.eod_copies,
@@ -212,6 +213,7 @@ export async function initTransportFromServer(posProfile) {
 		line_spacing: cfg.line_spacing,
 		side_margin: cfg.side_margin,
 		top_margin: cfg.top_margin,
+		queue_gap: cfg.queue_gap,
 		// Stored verbatim (snake_case, exactly as the API returns); printHTML
 		// maps them camelCase per print.
 		eod_copies: cfg.eod_copies,

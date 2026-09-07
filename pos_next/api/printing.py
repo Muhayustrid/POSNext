@@ -26,6 +26,7 @@ PRINT_CONFIG_FIELDS = (
 	"imin_line_spacing",
 	"imin_side_margin",
 	"imin_top_margin",
+	"imin_queue_gap",
 	"imin_eod_print_copies",
 	"imin_eod_copy_delay_ms",
 	"imin_eod_feed_dots",
@@ -47,6 +48,7 @@ MIN_LINE_SPACING = 50
 MAX_LINE_SPACING = 150
 MAX_SIDE_MARGIN_DOTS = 64
 MAX_TOP_MARGIN_DOTS = 128
+MAX_QUEUE_GAP_DOTS = 128
 
 
 @frappe.whitelist()
@@ -189,6 +191,13 @@ def get_print_config(pos_profile):
 		top_margin = 0
 	top_margin = max(0, min(top_margin, MAX_TOP_MARGIN_DOTS))
 
+	try:
+		queue_gap = getattr(settings, "imin_queue_gap", None)
+		queue_gap = 40 if queue_gap is None else int(queue_gap)
+	except (TypeError, ValueError):
+		queue_gap = 40
+	queue_gap = max(0, min(queue_gap, MAX_QUEUE_GAP_DOTS))
+
 	# The Closing/EOD lane is a separate print job, so it gets its own knobs at
 	# the same defaults and clamp bands as the sales receipt. Device overrides
 	# (eodCopies/eodCopyDelayMs/...) land in POS Settings as imin_eod_*.
@@ -265,6 +274,7 @@ def get_print_config(pos_profile):
 		"line_spacing": line_spacing,
 		"side_margin": side_margin,
 		"top_margin": top_margin,
+		"queue_gap": queue_gap,
 		"eod_copies": eod_copies,
 		"eod_copy_delay_ms": eod_delay,
 		"eod_feed_dots": eod_feed,
