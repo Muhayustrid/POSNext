@@ -26,6 +26,7 @@
   "allow_credit_sale",
   "allow_customer_credit_payment",
   "allow_return",
+  "require_refund_code",
   "allow_partial_payment",
   "use_exact_amount",
   "enable_sales_persons",
@@ -255,6 +256,14 @@
    "fieldname": "allow_return",
    "fieldtype": "Check",
    "label": "Allow Return"
+  },
+  {
+   "default": "1",
+   "description": "Refunds require a POS Discount Confirmation Code from head office (managed under Offers & Coupons)",
+   "fieldname": "require_refund_code",
+   "fieldtype": "Check",
+   "insert_after": "allow_return",
+   "label": "Require Code for Refund"
   },
   {
    "default": "0",
@@ -781,7 +790,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-07 13:05:00.000000",
+ "modified": "2026-09-07 13:10:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

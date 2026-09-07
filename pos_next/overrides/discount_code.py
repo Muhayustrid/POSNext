@@ -18,7 +18,8 @@ Enforcement points (doc_events on Sales Invoice):
               fields (used_count, last_used_*).
 
 The gate applies to POS invoices only (is_pos); back-office invoices are not
-restricted. Returns (is_return) never require a code.
+restricted. POS returns (is_return) are gated too — every refund needs a code,
+discounts or not (same code pool as discounts).
 
 Exemption: pre-approved discount channels need no code.
 - POS Offer promotions: an item whose discount is offer-attributed (its
@@ -215,9 +216,26 @@ def validate_code(code_value, company):
 # ==========================================================================
 
 
+def refund_code_required(pos_profile):
+	"""Refund gate toggle from POS Settings (per profile).
+
+	Missing setting row or value fails closed — the gate stays on until head
+	office explicitly turns it off.
+	"""
+	if not pos_profile:
+		return True
+	value = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "require_refund_code")
+	return True if value is None else bool(cint(value))
+
+
 def validate_invoice_discounts(doc, method=None):
 	"""Sales Invoice validate hook — the hard gate (draft save and submit)."""
-	if not doc.get("is_pos") or doc.get("is_return"):
+	if not doc.get("is_pos"):
+		return
+	if doc.get("is_return"):
+		# Refund gate — every return needs a code when the profile requires one.
+		if refund_code_required(doc.get("pos_profile")):
+			validate_code(doc.get("discount_confirmation_code"), doc.get("company"))
 		return
 	if not invoice_has_manual_discount(doc):
 		return
@@ -228,10 +246,17 @@ def validate_invoice_discounts(doc, method=None):
 def record_code_usage_on_submit(doc, method=None):
 	"""Sales Invoice on_submit hook — re-check the code under a row lock and
 	stamp the usage audit fields on it."""
-	if not doc.get("is_pos") or doc.get("is_return"):
+	if not doc.get("is_pos"):
 		return
 	code_value = (doc.get("discount_confirmation_code") or "").strip().upper()
-	if not code_value or not invoice_has_manual_discount(doc):
+	if not code_value:
+		return
+	# Returns audit whenever they carry a code and the profile's refund gate is
+	# on; sales only when the code was actually needed for a discount.
+	if doc.get("is_return"):
+		if not refund_code_required(doc.get("pos_profile")):
+			return
+	elif not invoice_has_manual_discount(doc):
 		return
 
 	code_name = validate_code(code_value, doc.get("company"))

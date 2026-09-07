@@ -15,18 +15,23 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from pos_next.overrides.discount_code import invoice_has_manual_discount, validate_code
+from pos_next.overrides.discount_code import (
+	invoice_has_manual_discount,
+	refund_code_required,
+	validate_code,
+)
 
 
 @frappe.whitelist(methods=["POST"])
-def get_status(company: str):
-	"""Discount gate state for a company — drives POS UI hints.
+def get_status(company: str = None, pos_profile: str = None):
+	"""Gate states for the POS frontend — UI hints only.
 
-	The gate is always on; the endpoint exists so the frontend has one stable
-	place to ask (and a future per-company toggle can land without client
-	changes).
+	`enabled`: the discount code gate (always on).
+	`refund_code_required`: whether returns need a code (POS Settings toggle
+	for the profile; fails closed). The server re-checks both on save/submit,
+	so a tampered client cannot bypass them.
 	"""
-	return {"enabled": True}
+	return {"enabled": True, "refund_code_required": refund_code_required(pos_profile)}
 
 
 @frappe.whitelist(methods=["POST"])

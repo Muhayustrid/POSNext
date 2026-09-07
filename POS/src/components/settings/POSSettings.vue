@@ -716,6 +716,15 @@
 												:description="__('Enable product returns')"
 											/>
 											<CheckboxField
+												v-model="settings.require_refund_code"
+												:label="__('Require Code for Refund')"
+												:description="
+													__(
+														'Refunds need a confirmation code from head office'
+													)
+												"
+											/>
+											<CheckboxField
 												v-model="settings.allow_write_off_change"
 												:label="__('Allow Write Off Change')"
 												:description="__('Write off small change amounts')"
@@ -1701,6 +1710,7 @@ const settings = ref({
 	disable_rounded_total: 1,
 	allow_credit_sale: 0,
 	allow_return: 0,
+	require_refund_code: 1,
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
 	silent_print: 0,

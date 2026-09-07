@@ -1049,6 +1049,43 @@
 						class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
 					></textarea>
 				</div>
+
+				<!-- HQ Confirmation Code (required to refund, per POS Settings) -->
+				<div v-if="refundCodeRequired && selectedItems.length > 0">
+					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
+						{{ __("Confirmation Code (HQ)") }}
+						<span class="text-red-500">*</span>
+					</label>
+					<div class="flex items-center gap-2">
+						<input
+							v-model="refundCode"
+							type="text"
+							:placeholder="__('Enter the code from head office')"
+							maxlength="8"
+							:disabled="refundCodeVerified"
+							:class="[
+								'flex-1 h-10 border rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:border-blue-500',
+								refundCodeVerified
+									? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+									: 'bg-white border-gray-300 focus:ring-orange-400',
+							]"
+							@input="refundCodeVerified = false"
+							@keyup.enter="verifyRefundCode"
+						/>
+						<Button
+							v-if="!refundCodeVerified"
+							variant="subtle"
+							@click="verifyRefundCode"
+							:loading="isVerifyingCode"
+						>
+							<FeatherIcon name="unlock" class="w-4 h-4" />
+						</Button>
+						<FeatherIcon v-else name="check-circle" class="w-6 h-6 text-emerald-600" />
+					</div>
+					<p v-if="refundCodeError" class="text-xs text-red-600 mt-1 text-start">
+						{{ refundCodeError }}
+					</p>
+				</div>
 			</div>
 		</template>
 		<template #actions>
@@ -1182,6 +1219,7 @@
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
 import { useToast } from "@/composables/useToast";
 import { getPaymentIcon } from "@/utils/payment";
+import { call } from "@/utils/apiWrapper";
 import {
 	DEFAULT_CURRENCY,
 	DEFAULT_LOCALE,
@@ -1238,6 +1276,17 @@ const submitError = ref("");
 const isSubmitting = ref(false);
 // When true, return amount is added to customer credit balance instead of cash refund
 const addToCustomerCredit = ref(false);
+
+// HQ confirmation code — refunds are gated like manual discounts. Local state
+// (not the discountRestriction store) so a refund code never leaks into the
+// next sale's checkout; the server re-validates on submit regardless.
+const refundCode = ref("");
+const refundCodeVerified = ref(false);
+const refundCodeError = ref("");
+const isVerifyingCode = ref(false);
+// Whether this profile's POS Settings still require the code. Starts true
+// (fail closed, matching the server) until get_status says otherwise.
+const refundCodeRequired = ref(true);
 
 // Autocomplete state
 const invoiceSearchInput = ref(null);
@@ -1474,6 +1523,9 @@ const createReturnResource = createResource({
 			})),
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,
+			// HQ confirmation code — required by the refund code gate
+			// (pos_next.overrides.discount_code) and stamped into the audit
+			discount_confirmation_code: refundCode.value.trim().toUpperCase(),
 			// Payment amounts are negative for refunds
 			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
 			// This negative outstanding becomes customer credit balance
@@ -1541,11 +1593,15 @@ onUnmounted(() => {
 // Watchers
 watch(
 	() => props.modelValue,
-	(val) => {
-		if (val) {
-			// If a preselected invoice is provided, skip showing the invoice list dialog
-			// and go directly to the Process Return modal
-			if (props.preselectedInvoice?.name) {
+		(val) => {
+			if (val) {
+				// Refresh the refund gate toggle for this profile (fail closed
+				// until the answer arrives).
+				refundCodeRequired.value = true;
+				fetchRefundGateStatus();
+				// If a preselected invoice is provided, skip showing the invoice list dialog
+				// and go directly to the Process Return modal
+				if (props.preselectedInvoice?.name) {
 				// Don't show the main dialog with invoice list - go directly to return modal
 				showDialog.value = false;
 				checkValidityAndOpenModal(props.preselectedInvoice.name, true);
@@ -1650,6 +1706,9 @@ const paymentSelectStyle = {
 const canCreateReturn = computed(() => {
 	const hasSelectedItems = selectedItems.value.length > 0;
 	if (!hasSelectedItems || !hasOpenShift.value) return false;
+	// A verified HQ code is required for every refund when the gate is on
+	// (server re-checks on submit)
+	if (refundCodeRequired.value && !refundCodeVerified.value) return false;
 	// Credit sale returns and "add to customer credit" returns don't need payment validation
 	if (isOriginalCreditSale.value || addToCustomerCredit.value) return true;
 
@@ -1934,6 +1993,56 @@ async function searchInvoiceDirectly() {
 	await checkValidityAndOpenModal(searchTerm, false);
 }
 
+/**
+ * Load this profile's refund gate toggle from POS Settings. Purely UI
+ * prompt-consistency — the server re-checks on submit and fails closed.
+ */
+async function fetchRefundGateStatus() {
+	try {
+		const result = await call("pos_next.api.discount_code.get_status", {
+			pos_profile: props.posProfile || "",
+		});
+		refundCodeRequired.value = result?.refund_code_required !== false;
+	} catch (error) {
+		refundCodeRequired.value = true;
+	}
+}
+
+/**
+ * Validate the HQ code value alone (no cart context — mirrors the discount
+ * locked-fields UX). Unlocks the Create Return button; the server re-validates
+ * on submit, so this is prompt-consistency only.
+ */
+async function verifyRefundCode() {
+	const value = refundCode.value.trim().toUpperCase();
+	refundCode.value = value;
+	if (!value) {
+		refundCodeVerified.value = false;
+		refundCodeError.value = __("Enter the confirmation code from head office");
+		return;
+	}
+
+	isVerifyingCode.value = true;
+	refundCodeError.value = "";
+	try {
+		const result = await call("pos_next.api.discount_code.check_code", {
+			code: value,
+			company: originalInvoice.value?.company || "",
+		});
+		if (result?.valid) {
+			refundCodeVerified.value = true;
+		} else {
+			refundCodeVerified.value = false;
+			refundCodeError.value = result?.message || __("Confirmation code is not valid");
+		}
+	} catch (error) {
+		refundCodeVerified.value = false;
+		refundCodeError.value = __("Could not validate the confirmation code. Please try again.");
+	} finally {
+		isVerifyingCode.value = false;
+	}
+}
+
 function closeReturnModal() {
 	returnModal.visible = false;
 	resetForm();
@@ -2058,9 +2167,15 @@ function resetForm() {
 	originalPaidAmount.value = 0;
 	originalOutstandingAmount.value = 0;
 
-	// Reset customer credit option
-	addToCustomerCredit.value = false;
-}
+		// Reset customer credit option
+		addToCustomerCredit.value = false;
+
+		// Reset HQ confirmation code gate
+		refundCode.value = "";
+		refundCodeVerified.value = false;
+		refundCodeError.value = "";
+		isVerifyingCode.value = false;
+	}
 
 // Date formatter instance (reused for performance)
 const dateFormatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, DATE_FORMAT_OPTIONS);

@@ -20,6 +20,7 @@ from pos_next.api.discount_code import check_code, get_status, validate_confirma
 from pos_next.overrides.discount_code import (
 	invoice_has_manual_discount,
 	record_code_usage_on_submit,
+	refund_code_required,
 	validate_code,
 	validate_invoice_discounts,
 )
@@ -68,6 +69,18 @@ def _code_row(**overrides):
 	}
 	row.update(overrides)
 	return frappe._dict(row)
+
+
+def _settings_then_code(setting_value, code_row=None):
+	"""db.get_value double: the POS Settings toggle lookup vs the code row
+	lookup — the refund gate reads the toggle before validating the code."""
+
+	def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
+		if doctype == "POS Settings":
+			return setting_value
+		return code_row
+
+	return lookup
 
 
 class TestValidateCode(unittest.TestCase):
@@ -434,12 +447,57 @@ class TestValidateInvoiceDiscounts(unittest.TestCase):
 			validate_invoice_discounts(FakeDoc(is_pos=0, items=[FakeItem(discount_percentage=10)]))
 			mock_db.get_value.assert_not_called()
 
-	def test_return_invoice_skipped(self):
+	def test_return_invoice_without_code_blocks(self):
+		# The refund gate (on by default): every POS return needs a code.
 		with DB_PATCH as mock_db:
-			validate_invoice_discounts(
-				FakeDoc(is_pos=1, is_return=1, items=[FakeItem(discount_percentage=10)])
+			mock_db.get_value.side_effect = _settings_then_code(None)
+			doc = FakeDoc(
+				is_pos=1,
+				is_return=1,
+				company="Company A",
+				items=[FakeItem(item_code="IT1", qty=-1)],
+				discount_confirmation_code="",
 			)
-			mock_db.get_value.assert_not_called()
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_invoice_discounts(doc, "validate")
+
+			self.assertIn("required", str(ctx.exception))
+
+	def test_return_invoice_with_valid_code_passes(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.side_effect = _settings_then_code(1, _code_row())
+			doc = FakeDoc(
+				is_pos=1,
+				is_return=1,
+				company="Company A",
+				items=[FakeItem(item_code="IT1", qty=-1)],
+				discount_confirmation_code="abcd2345",
+			)
+
+			validate_invoice_discounts(doc, "validate")  # must not raise
+
+			self.assertEqual(mock_db.get_value.call_args[0][1], {"code": "ABCD2345"})
+
+	def test_return_invoice_gate_disabled_by_setting_skips(self):
+		# Profile turned the refund gate off in POS Settings — no code needed.
+		with DB_PATCH as mock_db:
+			mock_db.get_value.side_effect = _settings_then_code(0)
+			doc = FakeDoc(
+				is_pos=1,
+				is_return=1,
+				pos_profile="Profile 1",
+				company="Company A",
+				items=[FakeItem(item_code="IT1", qty=-1)],
+				discount_confirmation_code="",
+			)
+
+			validate_invoice_discounts(doc, "validate")  # must not raise
+
+			code_lookups = [
+				call for call in mock_db.get_value.call_args_list if call[0][0] != "POS Settings"
+			]
+			self.assertEqual(code_lookups, [])
 
 	def test_undiscounted_invoice_skipped(self):
 		with DB_PATCH as mock_db:
@@ -487,6 +545,18 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 		return lookup
 
 	@staticmethod
+	def _return_code_lookup(validate_result=None, lock_result=None, setting_value=1):
+		"""Same as _code_lookup but answers the POS Settings toggle lookup too."""
+		def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
+			if doctype == "POS Settings":
+				return setting_value
+			if for_update:
+				return lock_result
+			return validate_result
+
+		return lookup
+
+	@staticmethod
 	def _lock_row(**overrides):
 		"""Locked re-read of the code row (for_update)."""
 		row = {
@@ -516,6 +586,56 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 		with DB_PATCH as mock_db:
 			doc = FakeDoc(is_pos=1, items=[FakeItem(item_code="IT1")], discount_confirmation_code="ABCD2345")
 			record_code_usage_on_submit(doc, "on_submit")
+			mock_db.set_value.assert_not_called()
+
+	def test_return_invoice_with_code_records_usage(self):
+		with (
+			DB_PATCH as mock_db,
+			SESSION_PATCH,
+			patch("pos_next.overrides.discount_code.now_datetime") as mock_now,
+		):
+			mock_now.return_value = "2026-09-06 10:00:00"
+			mock_db.get_value.side_effect = self._return_code_lookup(
+				validate_result=_code_row(),
+				lock_result=self._lock_row(used_count=3),
+			)
+			doc = FakeDoc(
+				is_pos=1,
+				is_return=1,
+				name="ACC-SINV-0006",
+				company="Company A",
+				items=[FakeItem(item_code="IT1", qty=-1)],
+				discount_confirmation_code="ABCD2345",
+			)
+
+			record_code_usage_on_submit(doc, "on_submit")
+
+			# The refund carries no manual discount, but the refund gate audits
+			# the code usage exactly like a discount.
+			mock_db.set_value.assert_called_once()
+			values = mock_db.set_value.call_args[0][2]
+			self.assertEqual(values["used_count"], 4)
+			self.assertEqual(values["last_used_in_invoice"], "ACC-SINV-0006")
+
+	def test_return_invoice_records_nothing_when_gate_disabled(self):
+		with DB_PATCH as mock_db, SESSION_PATCH:
+			mock_db.get_value.side_effect = self._return_code_lookup(
+				validate_result=_code_row(),
+				lock_result=self._lock_row(used_count=3),
+				setting_value=0,
+			)
+			doc = FakeDoc(
+				is_pos=1,
+				is_return=1,
+				pos_profile="Profile 1",
+				name="ACC-SINV-0007",
+				company="Company A",
+				items=[FakeItem(item_code="IT1", qty=-1)],
+				discount_confirmation_code="ABCD2345",
+			)
+
+			record_code_usage_on_submit(doc, "on_submit")
+
 			mock_db.set_value.assert_not_called()
 
 	def test_submit_increments_usage_audit(self):
@@ -639,9 +759,40 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 			mock_db.set_value.assert_called_once()
 
 
+class TestRefundCodeRequired(unittest.TestCase):
+	"""Per-profile toggle from POS Settings; missing data fails closed."""
+
+	def test_no_profile_fails_closed(self):
+		with DB_PATCH as mock_db:
+			self.assertTrue(refund_code_required(None))
+			self.assertTrue(refund_code_required(""))
+			mock_db.get_value.assert_not_called()
+
+	def test_missing_setting_row_fails_closed(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.return_value = None
+			self.assertTrue(refund_code_required("Profile 1"))
+
+	def test_disabled_setting_is_open(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.return_value = 0
+			self.assertFalse(refund_code_required("Profile 1"))
+
+	def test_enabled_setting_is_closed(self):
+		with DB_PATCH as mock_db:
+			mock_db.get_value.return_value = 1
+			self.assertTrue(refund_code_required("Profile 1"))
+
+
 class TestGetStatusAPI(unittest.TestCase):
-	def test_gate_is_always_enabled(self):
-		self.assertEqual(get_status(company="Company A"), {"enabled": True})
+	@patch("pos_next.api.discount_code.refund_code_required")
+	def test_gate_is_always_enabled_and_reports_refund_toggle(self, mock_refund):
+		mock_refund.return_value = False
+
+		result = get_status(company="Company A", pos_profile="Profile 1")
+
+		self.assertEqual(result, {"enabled": True, "refund_code_required": False})
+		mock_refund.assert_called_once_with("Profile 1")
 
 
 class TestCheckCodeAPI(unittest.TestCase):
