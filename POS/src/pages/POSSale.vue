@@ -1135,6 +1135,7 @@ import { usePermissions } from "@/composables/usePermissions";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
+import { formatCurrencyNumber } from "@/utils/currency";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
@@ -2596,7 +2597,7 @@ function switchToDesk() {
 }
 
 function formatCurrency(amount) {
-	return Number.parseFloat(amount || 0).toFixed(2);
+	return formatCurrencyNumber(Number.parseFloat(amount || 0));
 }
 
 async function confirmLogout() {

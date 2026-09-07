@@ -14,6 +14,7 @@ import {
 	receiptStylesFor,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
+import { formatCurrencyNumber } from "./currency"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 export { receiptStylesFor }
 
@@ -26,7 +27,7 @@ const DEFAULT_PRINT_FORMAT = "POS Next Receipt"
 // ============================================================================
 
 function formatCurrency(amount) {
-	return Number.parseFloat(amount || 0).toFixed(2)
+	return formatCurrencyNumber(Number.parseFloat(amount || 0))
 }
 
 /**

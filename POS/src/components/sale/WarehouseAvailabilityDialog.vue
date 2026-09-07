@@ -855,6 +855,7 @@
 import { ref, computed, watch, nextTick } from "vue";
 import { call, Dialog } from "frappe-ui";
 import { __ } from "@/utils/translation";
+import { formatCurrencyNumber } from "@/utils/currency";
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -1349,8 +1350,8 @@ function highlightMatch(text, query) {
 function formatPrice(price) {
 	if (!price) return "";
 	const num = Number(price);
-	if (isNaN(num)) return "";
-	return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+	if (Number.isNaN(num)) return "";
+	return formatCurrencyNumber(num);
 }
 </script>
 
