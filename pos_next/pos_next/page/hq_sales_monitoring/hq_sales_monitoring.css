@@ -1,0 +1,170 @@
+/* HQ Sales Monitoring - desk page styles */
+
+.hq-monitor {
+	font-size: 13px;
+	padding-bottom: 32px;
+}
+
+.hq-scope {
+	margin: 4px 0 12px;
+	color: #4c5259;
+}
+
+.hq-kpis {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.hq-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.hq-card {
+	background: #fff;
+	border: 1px solid #e2e6e9;
+	border-radius: 10px;
+	padding: 14px 16px;
+	margin-bottom: 12px;
+}
+
+.hq-grid .hq-card,
+.hq-kpis .hq-kpi {
+	margin-bottom: 0;
+}
+
+.hq-card--table {
+	overflow-x: auto;
+}
+
+.hq-card-title {
+	font-weight: 600;
+	font-size: 13px;
+	margin-bottom: 10px;
+	color: #16181a;
+}
+
+.hq-kpi-label {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: #6b7280;
+	margin-bottom: 4px;
+}
+
+.hq-kpi-value {
+	font-size: 20px;
+	font-weight: 600;
+	color: #16181a;
+	line-height: 1.2;
+	word-break: break-word;
+}
+
+.hq-kpi-sub,
+.hq-extra {
+	font-size: 11px;
+	color: #6b7280;
+	margin-top: 4px;
+}
+
+.hq-muted {
+	color: #8d99a6;
+}
+
+.hq-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.hq-table th,
+.hq-table td {
+	padding: 6px 8px;
+	border-bottom: 1px solid #f1f3f5;
+	text-align: left;
+	vertical-align: top;
+}
+
+.hq-table thead th {
+	font-size: 11px;
+	color: #6b7280;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+}
+
+.hq-num {
+	text-align: right !important;
+	white-space: nowrap;
+}
+
+.hq-pager {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 10px;
+}
+
+.hq-footer {
+	margin-top: 8px;
+	font-size: 11px;
+}
+
+.hq-hour-chart {
+	margin-top: 10px;
+}
+
+/* Phone */
+@media screen and (max-width: 768px) {
+	.hq-kpis {
+		grid-template-columns: repeat(2, 1fr);
+	}
+
+	.hq-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.hq-kpi-value {
+		font-size: 16px;
+	}
+
+	.hq-scope {
+		font-size: 12px;
+	}
+}
+
+@media screen and (max-width: 480px) {
+	.hq-kpis {
+		grid-template-columns: 1fr;
+	}
+
+	.hq-card {
+		padding: 12px;
+	}
+}
+
+/* Print: strip the desk chrome, keep the report */
+@media print {
+	.no-print,
+	.page-head,
+	.sidebar-toggle-placeholder,
+	#page-hq-sales-monitoring .page-head,
+	.layout-side-section,
+	.standard-sidebar,
+	.navbar {
+		display: none !important;
+	}
+
+	.layout-main-section {
+		width: 100% !important;
+		border: none !important;
+	}
+
+	.hq-card {
+		break-inside: avoid;
+		page-break-inside: avoid;
+		border-color: #ccc;
+	}
+}
