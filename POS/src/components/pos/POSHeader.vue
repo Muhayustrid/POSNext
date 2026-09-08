@@ -1,6 +1,19 @@
 <template>
 	<div class="bg-white shadow-sm sticky top-0 z-[200]">
 		<div class="flex py-2 sm:py-3">
+			<!-- Hamburger - Mobile/Tablet Only (< lg), opens management drawer -->
+			<button
+				ref="navTriggerRef"
+				type="button"
+				class="lg:hidden ms-2 p-2 self-center rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 transition-colors flex-shrink-0 touch-manipulation"
+				:aria-label="__('Open menu')"
+				aria-controls="management-drawer"
+				:aria-expanded="showNavDrawer ? 'true' : 'false'"
+				@click="openNavDrawer"
+			>
+				<FeatherIcon name="menu" class="w-5 h-5" />
+			</button>
+
 			<!-- POS Icon - Aligned with Management Sidebar (64px) -->
 			<div class="w-16 flex-shrink-0 flex items-center justify-center">
 				<button
@@ -383,6 +396,14 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- Management Drawer - Mobile/Tablet Only (< lg) -->
+		<ManagementDrawer
+			v-if="showNavDrawer"
+			:show-production="showProduction"
+			@navigate="(itemId) => emit('nav-click', itemId)"
+			@close="closeNavDrawer"
+		/>
 	</div>
 </template>
 
@@ -391,8 +412,10 @@ import ActionButton from "@/components/common/ActionButton.vue";
 import StatusBadge from "@/components/common/StatusBadge.vue";
 import UserMenu from "@/components/common/UserMenu.vue";
 import LanguageSwitcher from "@/components/common/LanguageSwitcher.vue";
+import ManagementDrawer from "@/components/pos/ManagementDrawer.vue";
+import { FeatherIcon } from "frappe-ui";
 import { DEFAULT_LOCALE } from "@/utils/currency";
-import { ref } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { version } from "../../../package.json";
 
 const showCacheTooltip = ref(false);
@@ -403,6 +426,7 @@ const emit = defineEmits([
 	"printer-click",
 	"refresh-click",
 	"menu-click",
+	"nav-click",
 	"logout",
 	"menu-opened",
 	"menu-closed",
@@ -488,7 +512,40 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	showProduction: {
+		type: Boolean,
+		default: false,
+	},
 });
+
+// Mobile/tablet management drawer (< lg breakpoint)
+const showNavDrawer = ref(false);
+const navTriggerRef = ref(null);
+
+function openNavDrawer() {
+	// Never open over an already-open (possibly mandatory) dialog.
+	if (props.isAnyDialogOpen) return;
+	showNavDrawer.value = true;
+}
+
+function closeNavDrawer() {
+	if (!showNavDrawer.value) return;
+	showNavDrawer.value = false;
+	// Restore focus to the trigger, unless it was removed by the breakpoint.
+	nextTick(() => {
+		if (navTriggerRef.value?.isConnected) {
+			navTriggerRef.value.focus();
+		}
+	});
+}
+
+// A mandatory dialog taking over must never sit behind the drawer.
+watch(
+	() => props.isAnyDialogOpen,
+	(isOpen) => {
+		if (isOpen) showNavDrawer.value = false;
+	},
+);
 
 // Cache status helpers
 function getCacheIconColor() {

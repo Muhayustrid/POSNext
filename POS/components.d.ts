@@ -31,6 +31,7 @@ declare module 'vue' {
     LanguageSwitcher: typeof import('./src/components/common/LanguageSwitcher.vue')['default']
     LazyImage: typeof import('./src/components/common/LazyImage.vue')['default']
     LoadingSpinner: typeof import('./src/components/common/LoadingSpinner.vue')['default']
+    ManagementDrawer: typeof import('./src/components/pos/ManagementDrawer.vue')['default']
     ManagementSlider: typeof import('./src/components/pos/ManagementSlider.vue')['default']
     NumberField: typeof import('./src/components/settings/NumberField.vue')['default']
     OffersDialog: typeof import('./src/components/sale/OffersDialog.vue')['default']
