@@ -28,13 +28,13 @@
    "unique": 1
   },
   {
-   "description": "Company / outlet these POS Profiles belong to (e.g. a child outlet). Every member profile must share it.",
+   "description": "Retired: a Shift Group is company-neutral and may hold profiles from multiple companies. Kept only so existing records keep their value.",
    "fieldname": "company",
    "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Company",
-   "options": "Company",
-   "reqd": 1
+   "hidden": 1,
+   "label": "Company (retired)",
+   "no_copy": 1,
+   "options": "Company"
   },
   {
    "fieldname": "column_break_name",
@@ -101,7 +101,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-07 14:00:00.000000",
+ "modified": "2026-09-08 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Profile Group",

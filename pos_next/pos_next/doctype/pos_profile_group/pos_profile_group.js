@@ -1,13 +1,5 @@
-// Shift Group form: keep member picks in-company and block duplicate rows
-// server validates the same rules on save.
-frappe.ui.form.on("POS Profile Group", {
-	setup(frm) {
-		frm.set_query("pos_profile", "profiles", () => ({
-			filters: { company: frm.doc.company },
-		}));
-	},
-});
-
+// Shift Group form: block duplicate member rows.
+// Server validates the same rule on save.
 frappe.ui.form.on("POS Profile Group Member", {
 	pos_profile(frm, cdt, cdn) {
 		const row = locals[cdt][cdn];

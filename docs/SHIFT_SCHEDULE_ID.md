@@ -3,28 +3,36 @@
 Versi ringkas Bahasa Indonesia dari [SHIFT_SCHEDULE.md](SHIFT_SCHEDULE.md).
 Jam shift diatur sekali per **Grup Shift** (Shift Group) lalu otomatis
 diterapkan ke semua Profil POS anggotanya; pengaturan per profil tetap bisa
-dipakai. Profil yang sudah ada tidak diubah massal — nilainya tetap seperti
-sebelumnya.
+dipakai. Grup bersifat **lintas perusahaan** — satu grup boleh berisi profil
+dari beberapa perusahaan (mis. profil kantor pusat PT induk dan profil
+gerai-gerai cabangnya dalam satu grup yang sama). Profil yang sudah ada tidak
+diubah massal — nilainya tetap seperti sebelumnya.
 
 ## 1. Pengaturan oleh HQ (Desk → POSNext → Shift Group)
 
 | Field | Arti |
 |---|---|
 | Shift Group | Nama grup (mis. "Pagi 05:00-12:00"). |
-| Company | Gerai/perusahaan pemilik grup (mis. anak perusahaan grup). Semua profil anggota wajib satu perusahaan — profil lintas perusahaan ditolak saat disimpan. |
 | Enable Shift Schedule | Saklar utama yang diterapkan ke anggota. Bawaan: aktif. |
 | Shift Start Time / Shift End Time | Jam shift sesuai **zona waktu server** (contoh 05:00 → 12:00). Jam akhir lebih awal dari jam mulai berarti melewati tengah malam (contoh 21:00 → 05:00). Wajib diisi saat aktif — grup aktif tanpa jam valid ditolak saat disimpan. |
 | Schedule Warning Minutes | Kasir anggota mendapat peringatan sesuai menit sebelum shift berakhir. 0 = tanpa peringatan. |
 | Enforce Closing After Schedule | Aktif = jadwal bersifat **wajib** untuk anggota (penjualan ditolak setelah jam berakhir). Nonaktif = hanya peringatan. |
-| POS Profiles (Members) | Daftar profil anggota (pilihan otomatis disaring per company). Satu profil hanya boleh di satu grup — memindahkan profil dari grup lain harus dilakukan dari grup lamanya dulu, tidak bisa diam-diam. |
+| POS Profiles (Members) | Daftar profil anggota — **boleh lintas perusahaan** (mis. profil PT induk dan profil gerai cabangnya dalam satu grup). Kolom **Company** di tiap baris terisi otomatis dari profil (baca-saja) agar HQ tetap tahu perusahaan tiap gerai. Satu profil hanya boleh di satu grup — memindahkan profil dari grup lain harus dilakukan dari grup lamanya dulu, tidak bisa diam-diam. |
+
+Kolom "Company (retired)" pada grup yang dibuat sebelum fitur lintas
+perusahaan tidak dipakai lagi — biarkan saja, datanya tetap utuh.
 
 **Menyimpan grup otomatis menyinkronkan semua anggota**: setiap profil
 anggota menerima nilai aktif/jam/peringatan/wajib-tutup dari grup (profil
-masih bisa diedit manual sampai grup disimpan lagi). **Menghapus** profil
-dari daftar hanya melepas tautannya — profil **mempertahankan jam shift
-terakhir yang tersinkron** (tidak ada kehilangan diam-diam). Shift yang
-sedang berjalan tidak terpengaruh — jadwalnya sudah menggumpal (snapshot)
-saat shift dibuka, perubahan grup berlaku untuk shift berikutnya.
+masih bisa diedit manual sampai grup disimpan lagi). Menyimpan grup
+**membutuhkan akses tulis ke setiap profil yang berubah — termasuk profil
+yang dihapus dari daftar**; jika satu profil tidak bisa ditulis (mis. milik
+perusahaan di luar wewenang Anda), seluruh penyimpanan dibatalkan — tidak
+ada anggota yang tersinkron setengahnya. **Menghapus** profil dari daftar
+hanya melepas tautannya — profil **mempertahankan jam shift terakhir yang
+tersinkron** (tidak ada kehilangan diam-diam). Shift yang sedang berjalan
+tidak terpengaruh — jadwalnya sudah menggumpal (snapshot) saat shift
+dibuka, perubahan grup berlaku untuk shift berikutnya.
 
 ### Per profil (Desk → POS Next → POS Profile)
 

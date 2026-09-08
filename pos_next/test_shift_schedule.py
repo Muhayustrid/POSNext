@@ -24,7 +24,6 @@ from pos_next.shift_schedule import (
 	freeze_schedule_snapshot,
 	get_shift_gate,
 	resolve_window,
-	validate_group_company,
 	validate_group_membership,
 	validate_invoice,
 	validate_profile_schedule,
@@ -121,7 +120,7 @@ class TestScheduleValidation(unittest.TestCase):
 
 class TestApplyScheduleSnapshot(unittest.TestCase):
 	def _apply(self, schedule, now, group="no-group"):
-		# group: "no-group" = field empty, None = group doc missing, str = company
+		# group: "no-group" = field empty, None = group doc missing, str = existing group name
 		opening = Mock()
 		opening.pos_profile = "Profile 1"
 		# pre-set tampered values: apply must overwrite all of them
@@ -175,17 +174,14 @@ class TestApplyScheduleSnapshot(unittest.TestCase):
 		opening = self._apply({**WINDOW, "pos_schedule_enforce_closing": 0}, _dt(2026, 9, 7, 23, 0))
 		self.assertIsNone(opening.pos_schedule_deadline)
 
-	def test_group_company_mismatch_rejected_even_when_schedule_enabled(self):
-		with self.assertRaises(frappe.exceptions.ValidationError):
-			self._apply(WINDOW, _dt(2026, 9, 7, 12, 0), group="HQ Parent")
-
-	def test_group_company_mismatch_rejected_when_schedule_disabled(self):
-		with self.assertRaises(frappe.exceptions.ValidationError):
-			self._apply({**WINDOW, "pos_schedule_enabled": 0}, _dt(2026, 9, 7, 12, 0), group="HQ Parent")
-
-	def test_group_company_match_passes(self):
-		opening = self._apply(WINDOW, _dt(2026, 9, 7, 12, 0), group="Outlet")
+	def test_cross_company_group_link_accepted(self):
+		# groups are company-neutral: any existing group may be linked
+		opening = self._apply(WINDOW, _dt(2026, 9, 7, 12, 0), group="HQ Parent")
 		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 9, 7, 22, 0))
+
+	def test_cross_company_group_link_accepted_when_schedule_disabled(self):
+		opening = self._apply({**WINDOW, "pos_schedule_enabled": 0}, _dt(2026, 9, 7, 12, 0), group="HQ Parent")
+		self.assertIsNone(opening.pos_schedule_deadline)
 
 	def test_missing_group_rejected(self):
 		with self.assertRaises(frappe.exceptions.ValidationError):
@@ -565,7 +561,7 @@ class TestExtendDeadline(unittest.TestCase):
 class TestProfileGroupHooks(unittest.TestCase):
 	def test_profile_save_validates_group_and_schedule(self):
 		doc = Mock()
-		doc.get = lambda field: {"pos_profile_group": "Group A", "company": "Outlet"}.get(field)
+		doc.get = lambda field: {"pos_profile_group": "Group A"}.get(field)
 		group_check = Mock()
 		membership_check = Mock()
 		sched_check = Mock()
@@ -575,26 +571,9 @@ class TestProfileGroupHooks(unittest.TestCase):
 			patch("pos_next.shift_schedule.validate_schedule_values", sched_check),
 		):
 			validate_profile_schedule(doc)
-		group_check.assert_called_once_with("Group A", "Outlet")
+		group_check.assert_called_once_with("Group A")
 		membership_check.assert_called_once_with(doc)
 		sched_check.assert_called_once_with(doc)
-
-	def test_group_move_rejected_when_members_out_of_company(self):
-		doc = Mock()
-		doc.name = "Group A"
-		doc.company = "HQ"
-		with patch("pos_next.shift_schedule.frappe.get_all", return_value=["Outlet Profile"]):
-			with patch("pos_next.shift_schedule.frappe.throw", side_effect=_throw):
-				with self.assertRaises(RuntimeError):
-					validate_group_company(doc)
-
-	def test_group_move_allowed_when_all_members_in_company(self):
-		doc = Mock()
-		doc.name = "Group A"
-		doc.company = "Outlet"
-		with patch("pos_next.shift_schedule.frappe.get_all", return_value=[]):
-			# must not raise
-			validate_group_company(doc)
 
 
 class TestGroupMembershipAuthority(unittest.TestCase):

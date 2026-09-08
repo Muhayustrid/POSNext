@@ -33,19 +33,17 @@ SCHEDULE_FIELDS = (
 GATE_TITLE = _("Shift Schedule")
 
 
-def validate_group_link(group, company):
-	"""Company-scoped grouping only: a profile's group must share its company."""
+def validate_group_link(group):
+	"""A profile's linked group must exist.
+
+	Groups are company-neutral schedule templates: any profile may follow any
+	group, whatever its company.
+	"""
 	if not group:
 		return
-	group_company = frappe.db.get_value("POS Profile Group", group, "company")
-	if group_company is None:
+	if frappe.db.get_value("POS Profile Group", group) is None:
 		frappe.throw(
 			_("POS Profile Group {0} does not exist").format(group),
-			title=GATE_TITLE,
-		)
-	if group_company != company:
-		frappe.throw(
-			_("POS Profile Group {0} belongs to company {1}, not {2}").format(group, group_company, company),
 			title=GATE_TITLE,
 		)
 
@@ -55,15 +53,15 @@ def get_effective_schedule(pos_profile):
 
 	The Shift Group (POS Profile Group doctype) pushes its hours onto member
 	profiles at group-save time, so the profile row stays the single source
-	of truth read at shift open. The link must share the profile's company.
+	of truth read at shift open.
 	"""
 	values = frappe.db.get_value(
-		"POS Profile", pos_profile, ("name", *SCHEDULE_FIELDS, "company", "pos_profile_group"), as_dict=True
+		"POS Profile", pos_profile, ("name", *SCHEDULE_FIELDS, "pos_profile_group"), as_dict=True
 	)
 	if not values:
 		frappe.throw(_("POS Profile {0} does not exist").format(pos_profile))
 
-	validate_group_link(values.pos_profile_group, values.company)
+	validate_group_link(values.pos_profile_group)
 	validate_schedule_values(values)
 	return values
 
@@ -318,27 +316,10 @@ def validate_group_membership(doc):
 
 def validate_profile_schedule(doc, method=None):
 	"""doc_events validate hook on POS Profile: validate the schedule settings
-	and the profile-group company at save time, not only when a shift opens."""
-	validate_group_link(doc.get("pos_profile_group"), doc.get("company"))
+	and the profile-group link at save time, not only when a shift opens."""
+	validate_group_link(doc.get("pos_profile_group"))
 	validate_group_membership(doc)
 	validate_schedule_values(doc)
-
-
-def validate_group_company(doc, method=None):
-	"""doc_events validate hook on POS Profile Group: keep members in-company."""
-	mismatched = frappe.get_all(
-		"POS Profile",
-		filters={"pos_profile_group": doc.name, "company": ("!=", doc.company)},
-		pluck="name",
-		limit_page_length=5,
-	)
-	if mismatched:
-		frappe.throw(
-			_("Cannot move group {0} to company {1}: {2} belong to another company").format(
-				doc.name, doc.company, ", ".join(mismatched)
-			),
-			title=GATE_TITLE,
-		)
 
 
 @frappe.whitelist()

@@ -185,7 +185,6 @@ doc_events = {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
 		"validate": "pos_next.shift_schedule.validate_profile_schedule",
 	},
-	"POS Profile Group": {"validate": "pos_next.shift_schedule.validate_group_company"},
 	"Promotional Scheme": {
 		"validate": [
 			"pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",

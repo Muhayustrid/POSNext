@@ -9,26 +9,32 @@ profiles keep whatever was configured before — nothing is mass-enabled.
 
 ### Shift Group (Desk → POSNext → Shift Group, doctype `POS Profile Group`)
 
-One group per outlet shift pattern: a name, the company/outlet (e.g. a PT
-Juri child outlet), the shift hours, and the member POS Profiles.
+One schedule template for any set of outlets: a name, the shift hours, and
+the member POS Profiles. Groups are **company-neutral** — members may span
+companies (e.g. a PT parent's HQ profile and its child outlets in one group).
 
 | Field | Meaning |
 |---|---|
 | Shift Group | Group name (also the document name). |
-| Company | Every member profile must belong to this company — cross-company members are rejected on save. |
 | Enable Shift Schedule | Master switch pushed to members. On by default. |
 | Shift Start Time / Shift End Time | Shift hours in the **site timezone**. An end earlier than the start runs past midnight (e.g. 05:00 → 12:00, or 21:00 → 05:00). Required while enabled — a group (or profile) saved enabled without valid times is rejected. |
 | Schedule Warning Minutes | Members' cashiers get a toast this many minutes before the end. 0 = no warning. |
 | Enforce Closing After Schedule | When on, the schedule deadline is **hard** for members (see below). When off, advisory only. |
-| POS Profiles (Members) | The profiles that follow these hours, filtered to the group's company in the picker. A profile can only be in one group — adding a member of another group is rejected (remove it there first). |
+| POS Profiles (Members) | The profiles that follow these hours — across companies. Each row shows the profile's Company (fetched, read-only). A profile can only be in one group — adding a member of another group is rejected (remove it there first). |
+
+The legacy "Company (retired)" column on pre-existing groups is unused —
+leave it as is; existing records keep their old value.
 
 **Saving the group syncs every member**: each member profile gets the group's
 enabled/time/warning/enforce values (a profile can still be edited
-afterwards, until the next group save). **Removing** a profile from the list
-only unlinks it — it **keeps its last synced hours** (no silent loss); re-add
-it or edit its profile to change them. Groups are saved in one transaction:
-any failure (e.g. another group still holding a profile) aborts the whole
-save.
+afterwards, until the next group save). Saving requires **write access to
+every changed profile — including removed ones**; if one profile cannot be
+written (e.g. it belongs to a company outside your user permissions), the
+whole save is aborted — no member is left half-synced. **Removing** a profile
+from the list only unlinks it — it **keeps its last synced hours** (no silent
+loss); re-add it or edit its profile to change them. Groups are saved in one
+transaction: any failure (e.g. another group still holding a profile) aborts
+the whole save.
 
 **Open shifts are never moved**: the schedule is snapshotted onto the POS
 Opening Shift at open time, so group edits only apply from the next session.

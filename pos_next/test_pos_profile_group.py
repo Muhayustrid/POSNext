@@ -29,13 +29,13 @@ MODULE = "pos_next.pos_next.doctype.pos_profile_group.pos_profile_group"
 
 def _group(**overrides):
 	profiles = overrides.pop("profiles", [])
+	# no company field on the doc: groups are company-neutral
 	doc = POSProfileGroup(
 		frappe._dict(
 			{
 				"doctype": "POS Profile Group",
 				"name": "Group A",
 				"group_name": "Group A",
-				"company": "Outlet",
 				**GROUP,
 				**overrides,
 			}
@@ -51,11 +51,15 @@ def _row(profile):
 	return frappe._dict({"pos_profile": profile})
 
 
-def _member_lookup(company="Outlet", group=None):
-	"""db.get_value side effect: member table lookups return (company, group)."""
-	return lambda doctype, name, fields=None, as_dict=False, **kw: (
-		(company, group) if fields == ("company", "pos_profile_group") else None
-	)
+def _member_lookup(companies, group=None):
+	"""db.get_value side effect: profile name -> (company, current group)."""
+
+	def lookup(doctype, name, fields=None, as_dict=False, **kw):
+		if fields == ("company", "pos_profile_group"):
+			return companies.get(name), group
+		return None
+
+	return lookup
 
 
 class TestGroupValidation(unittest.TestCase):
@@ -66,28 +70,21 @@ class TestGroupValidation(unittest.TestCase):
 	def test_disabled_group_skips_time_validation(self):
 		_group(pos_schedule_enabled=0, pos_schedule_start=None).validate()
 
-	def test_group_with_members_in_company_passes(self):
-		doc = _group(profiles=[_row("Profile 1")])
-		with patch(f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup()):
+	def test_members_of_different_companies_accepted(self):
+		doc = _group(profiles=[_row("Outlet Profile"), _row("HQ Profile")])
+		lookup = _member_lookup({"Outlet Profile": "Outlet", "HQ Profile": "HQ Parent"})
+		with patch(f"{MODULE}.frappe.db.get_value", side_effect=lookup):
 			doc.validate()
 
 	def test_duplicate_member_rejected(self):
 		doc = _group(profiles=[_row("Profile 1"), _row("Profile 1")])
-		with patch(f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup()):
+		with patch(f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup({"Profile 1": "Outlet"})):
 			with self.assertRaises(frappe.exceptions.ValidationError):
 				doc.validate()
 
 	def test_missing_profile_rejected(self):
 		doc = _group(profiles=[_row("Ghost Profile")])
-		with patch(f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup(company=None)):
-			with self.assertRaises(frappe.exceptions.ValidationError):
-				doc.validate()
-
-	def test_cross_company_member_rejected(self):
-		doc = _group(profiles=[_row("Outlet Profile")])
-		with patch(
-			f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup(company="HQ Parent")
-		):
+		with patch(f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup({})):
 			with self.assertRaises(frappe.exceptions.ValidationError):
 				doc.validate()
 
@@ -95,29 +92,33 @@ class TestGroupValidation(unittest.TestCase):
 		# a profile of another group must be removed there first — never
 		# silently moved by adding it to a second group
 		doc = _group(profiles=[_row("Profile 1")])
-		with patch(f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup(group="Group B")):
+		with patch(
+			f"{MODULE}.frappe.db.get_value", side_effect=_member_lookup({"Profile 1": "Outlet"}, group="Group B")
+		):
 			with self.assertRaises(frappe.exceptions.ValidationError):
 				doc.validate()
 
 
 class TestGroupSync(unittest.TestCase):
-	def _run_sync(self, profiles, linked, stored):
-		"""Sync a group and return (get_doc mock, set_value mock)."""
+	def _run_sync(self, profiles, linked, stored, allowed=True):
+		"""Sync a group and return (get_doc mock, set_value mock, allowed mock)."""
 		doc = _group(profiles=[_row(p) for p in profiles])
 		get_doc = Mock()
 		set_value = Mock()
+		allowed_mock = Mock(return_value=allowed)
 		with (
 			patch(f"{MODULE}.frappe.get_all", return_value=list(linked)),
 			patch(f"{MODULE}.frappe.db.get_value", return_value=stored),
 			patch(f"{MODULE}.frappe.get_doc", get_doc),
 			patch(f"{MODULE}.frappe.db.set_value", set_value),
+			patch(f"{MODULE}.frappe.has_permission", allowed_mock),
 		):
 			doc.sync_members()
-		return get_doc, set_value
+		return get_doc, set_value, allowed_mock
 
 	def test_new_member_gets_schedule_and_link(self):
 		stored = frappe._dict({"pos_profile_group": None, **{k: None for k in GROUP}})
-		get_doc, set_value = self._run_sync(["Profile 1"], linked=[], stored=stored)
+		get_doc, set_value, _ = self._run_sync(["Profile 1"], linked=[], stored=stored)
 		set_value.assert_not_called()
 		profile = get_doc.return_value
 		profile.update.assert_called_once_with(GROUP)
@@ -125,18 +126,60 @@ class TestGroupSync(unittest.TestCase):
 		profile.save.assert_called_once()
 
 	def test_in_sync_member_not_resaved(self):
-		get_doc, _ = self._run_sync(["Profile 1"], linked=["Profile 1"], stored=SYNCED)
+		get_doc, _, _ = self._run_sync(["Profile 1"], linked=["Profile 1"], stored=SYNCED)
 		get_doc.assert_not_called()
 
 	def test_changed_time_resyncs_member(self):
 		stored = frappe._dict({**SYNCED, "pos_schedule_start": "09:00:00"})
-		get_doc, _ = self._run_sync(["Profile 1"], linked=["Profile 1"], stored=stored)
+		get_doc, _, _ = self._run_sync(["Profile 1"], linked=["Profile 1"], stored=stored)
 		get_doc.return_value.save.assert_called_once()
 
 	def test_removed_member_unlinked_schedule_preserved(self):
 		# removal only clears the link — the profile keeps its last synced hours
-		_, set_value = self._run_sync([], linked=["Profile 1"], stored=SYNCED)
+		_, set_value, allowed = self._run_sync([], linked=["Profile 1"], stored=SYNCED)
 		set_value.assert_called_once_with("POS Profile", "Profile 1", "pos_profile_group", "")
+		allowed.assert_called_once_with("POS Profile", "write", doc="Profile 1")
+
+	def test_cross_company_members_both_synced(self):
+		fresh = frappe._dict({"pos_profile_group": None, **{k: None for k in GROUP}})
+		doc = _group(profiles=[_row("Outlet Profile"), _row("HQ Profile")])
+		mocks = {}
+
+		def get_doc_mock(doctype, name):
+			mocks[name] = Mock()
+			return mocks[name]
+
+		with (
+			patch(f"{MODULE}.frappe.get_all", return_value=[]),
+			patch(f"{MODULE}.frappe.db.get_value", return_value=fresh),
+			patch(f"{MODULE}.frappe.get_doc", side_effect=get_doc_mock),
+			patch(f"{MODULE}.frappe.db.set_value", Mock()),
+			patch(f"{MODULE}.frappe.has_permission", Mock(return_value=True)),
+		):
+			doc.sync_members()
+		self.assertEqual(sorted(mocks), ["HQ Profile", "Outlet Profile"])
+		for profile in mocks.values():
+			profile.update.assert_called_once_with(GROUP)
+			profile.save.assert_called_once()
+
+	def test_unwritable_removed_member_aborts_before_any_write(self):
+		# db.set_value bypasses permissions, so write access to every removed
+		# profile is verified up front: one denied company aborts the whole
+		# save before a single write — including the members that were allowed
+		doc = _group(profiles=[_row("Kept Profile")])
+		get_doc = Mock()
+		set_value = Mock()
+		with (
+			patch(f"{MODULE}.frappe.get_all", return_value=["Removed Profile"]),
+			patch(f"{MODULE}.frappe.db.get_value", return_value=SYNCED),
+			patch(f"{MODULE}.frappe.get_doc", get_doc),
+			patch(f"{MODULE}.frappe.db.set_value", set_value),
+			patch(f"{MODULE}.frappe.has_permission", Mock(return_value=False)),
+		):
+			with self.assertRaises(frappe.exceptions.ValidationError):
+				doc.sync_members()
+		set_value.assert_not_called()
+		get_doc.assert_not_called()
 
 	def test_mixed_membership_reconciled(self):
 		kept = frappe._dict(SYNCED)
@@ -153,6 +196,7 @@ class TestGroupSync(unittest.TestCase):
 			patch(f"{MODULE}.frappe.db.get_value", side_effect=get_value),
 			patch(f"{MODULE}.frappe.get_doc", get_doc),
 			patch(f"{MODULE}.frappe.db.set_value", set_value),
+			patch(f"{MODULE}.frappe.has_permission", Mock(return_value=True)),
 		):
 			doc.sync_members()
 
@@ -171,6 +215,36 @@ class TestNewProfileDefaults(unittest.TestCase):
 		self.assertEqual(fields["pos_profile_group"]["label"], "Shift Group")
 		# read-only mirror: membership is edited on the Shift Group only
 		self.assertTrue(fields["pos_profile_group"]["read_only"])
+
+
+class TestMultiCompanyDocTypeMeta(unittest.TestCase):
+	def _fields(self, doctype):
+		import json
+		from pathlib import Path
+
+		import pos_next.pos_next
+
+		path = (
+			Path(pos_next.pos_next.__file__).parent
+			/ "doctype"
+			/ doctype.replace(" ", "_").lower()
+			/ f"{doctype.replace(' ', '_').lower()}.json"
+		)
+		fields = {f["fieldname"]: f for f in json.loads(path.read_text())["fields"]}
+		return fields
+
+	def test_member_rows_show_fetched_company(self):
+		fields = self._fields("POS Profile Group Member")
+		self.assertEqual(fields["company"]["fetch_from"], "pos_profile.company")
+		self.assertTrue(fields["company"]["read_only"])
+		self.assertTrue(fields["company"]["in_list_view"])
+
+	def test_group_company_field_retired_not_required(self):
+		# hidden + optional: the column stays for existing records (no
+		# destructive migration) but new groups never need a company
+		fields = self._fields("POS Profile Group")
+		self.assertNotIn("reqd", fields["company"])
+		self.assertEqual(fields["company"]["hidden"], 1)
 
 
 class TestCreateProfileScheduleParams(unittest.TestCase):
