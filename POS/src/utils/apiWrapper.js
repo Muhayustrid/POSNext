@@ -22,3 +22,16 @@ export async function call(method, params) {
 		throw error;
 	}
 }
+
+/**
+ * Extract the human-readable, server-translated message from a frappe-ui
+ * resource error. The Error object stringifies as
+ * "Error: <method> <ValidationError>" which is useless to cashiers; the real
+ * message (already passed through frappe's `_()` in the user's language)
+ * lives on `error.messages`.
+ */
+export function serverErrorMessage(error, fallback = "Something went wrong. Please try again.") {
+	const messages = Array.isArray(error?.messages) ? error.messages.filter(Boolean) : [];
+	if (messages.length) return messages.join(" ");
+	return fallback;
+}

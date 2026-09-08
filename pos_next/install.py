@@ -136,6 +136,62 @@ CUSTOM_FIELDS = {
 			"description": "Internal: JSON list of Pricing Rules applied to this item row. Lets the discount code gate exempt offer-driven discounts from the HQ code requirement.",
 		},
 	],
+	"POS Profile": [
+		{
+			"fieldname": "pos_profile_group",
+			"label": "Shift Group",
+			"fieldtype": "Link",
+			"options": "POS Profile Group",
+			"insert_after": "company",
+			# read-only mirror: membership is authoritative on the Shift
+			# Group's Members table (enforced by validate_group_membership)
+			"read_only": 1,
+			"description": "Shift Group this profile belongs to (set from the group's Members table). Saving the group pushes its shift hours to every member profile.",
+		},
+		{
+			"fieldname": "pos_schedule_enabled",
+			"label": "Enable Shift Schedule",
+			"fieldtype": "Check",
+			"insert_after": "pos_profile_group",
+			# string, not int: Custom Field.default is a Data column and Frappe's
+			# version-diff formatter chokes on ints during migrate
+			"default": "1",
+			"description": "Restrict this POS Profile to configured shift hours (site timezone). On by default for new profiles — set times or assign a Shift Group.",
+		},
+		{
+			"fieldname": "pos_schedule_start",
+			"label": "Shift Start Time",
+			"fieldtype": "Time",
+			"insert_after": "pos_schedule_enabled",
+			"depends_on": "pos_schedule_enabled",
+		},
+		{
+			"fieldname": "pos_schedule_end",
+			"label": "Shift End Time",
+			"fieldtype": "Time",
+			"insert_after": "pos_schedule_start",
+			"depends_on": "pos_schedule_enabled",
+			"description": "An end time earlier than the start time runs past midnight.",
+		},
+		{
+			"fieldname": "pos_schedule_warning_minutes",
+			"label": "Schedule Warning Minutes",
+			"fieldtype": "Int",
+			"insert_after": "pos_schedule_end",
+			"default": 0,
+			"depends_on": "pos_schedule_enabled",
+			"description": "Minutes before the schedule ends to warn the cashier. 0 disables the warning.",
+		},
+		{
+			"fieldname": "pos_schedule_enforce_closing",
+			"label": "Enforce Closing After Schedule",
+			"fieldtype": "Check",
+			"insert_after": "pos_schedule_warning_minutes",
+			"default": 0,
+			"depends_on": "pos_schedule_enabled",
+			"description": "When enabled, sales, payments and refunds are blocked after the schedule ends; only closing the shift is allowed.",
+		},
+	],
 	"Promotional Scheme": [
 		{
 			"fieldname": "pos_offer",

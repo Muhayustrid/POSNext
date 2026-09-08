@@ -1101,6 +1101,7 @@ import { getInvoiceStatusColor } from "@/utils/invoice";
 import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { useFormatters } from "@/composables/useFormatters";
 import { useToast } from "@/composables/useToast";
+import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
 import { Button, call, LoadingIndicator } from "frappe-ui";
 import { computed, onMounted, ref, watch } from "vue";
 import { isOffline } from "@/utils/offline/offlineState";
@@ -1469,6 +1470,16 @@ async function selectInvoiceForPayment(invoice) {
 
 async function handlePaymentCompleted(paymentData) {
 	if (!selectedInvoice.value) return;
+
+	// Shift schedule: payments are blocked once a mandatory deadline has passed
+	if (scheduleBlockingNow()) {
+		showError(
+			__(
+				"Shift schedule has ended. Payments are no longer accepted — please close the shift."
+			)
+		);
+		return;
+	}
 
 	try {
 		await call("pos_next.api.partial_payments.add_payment_to_partial_invoice", {

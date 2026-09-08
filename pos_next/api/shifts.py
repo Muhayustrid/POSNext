@@ -140,6 +140,8 @@ def create_opening_shift(pos_profile, company, balance_details):
 	data["pos_opening_shift"] = new_pos_opening.as_dict()
 	data["pos_profile"] = frappe.get_doc("POS Profile", pos_profile)
 	data["company"] = frappe.get_doc("Company", company)
+	# Server timestamp so the frontend can anchor the schedule deadline clock
+	data["server_now"] = str(get_datetime())
 
 	return data
 

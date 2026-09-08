@@ -72,6 +72,31 @@ vi.mock("../stores/posShift", async () => {
 	}
 })
 
+// The dialog blocks closing over unsynced offline invoices / in-flight submits.
+// Mock both stores so the test env never touches the offline worker.
+vi.mock("../stores/posSync", async () => {
+	const { defineStore } = await import("pinia")
+	const { computed, ref } = await import("vue")
+	const pendingInvoicesCount = ref(0)
+	return {
+		usePOSSyncStore: defineStore("posSync", () => ({
+			pendingInvoicesCount,
+			hasPendingInvoices: computed(() => pendingInvoicesCount.value > 0),
+			updatePendingCount: vi.fn().mockResolvedValue(undefined),
+		})),
+	}
+})
+
+vi.mock("../stores/posCart", async () => {
+	const { defineStore } = await import("pinia")
+	const { ref } = await import("vue")
+	return {
+		usePOSCartStore: defineStore("posCart", () => ({
+			isSubmitting: ref(false),
+		})),
+	}
+})
+
 vi.mock("../utils/printEod", () => ({ printEODReport }))
 
 // Provide a trivial global translation helper the way printEod.test does.

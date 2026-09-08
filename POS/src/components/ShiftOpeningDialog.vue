@@ -57,7 +57,7 @@
 					</div>
 
 					<div v-if="profilesResource.error" class="rounded-md bg-red-50 p-4">
-						<p class="text-sm text-red-800">{{ profilesResource.error }}</p>
+						<p class="text-sm text-red-800">{{ serverErrorMessage(profilesResource.error) }}</p>
 					</div>
 				</div>
 
@@ -119,11 +119,11 @@
 					</div>
 
 					<div v-if="dialogDataResource.error" class="rounded-md bg-red-50 p-4">
-						<p class="text-sm text-red-800">{{ dialogDataResource.error }}</p>
+						<p class="text-sm text-red-800">{{ serverErrorMessage(dialogDataResource.error) }}</p>
 					</div>
 
 					<div v-if="createShiftResource.error" class="rounded-md bg-red-50 p-4">
-						<p class="text-sm text-red-800">{{ createShiftResource.error }}</p>
+						<p class="text-sm text-red-800">{{ serverErrorMessage(createShiftResource.error) }}</p>
 					</div>
 				</div>
 
@@ -252,6 +252,7 @@ import { createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useShift } from "../composables/useShift";
 import { useFormatters } from "../composables/useFormatters";
+import { serverErrorMessage } from "../utils/apiWrapper";
 import ShiftClosingDialog from "./ShiftClosingDialog.vue";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
 

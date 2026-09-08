@@ -1152,6 +1152,8 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
+import { scheduleBlockingNow, scheduleEnforcedNow } from "@/composables/useShiftSchedule";
+import { isScheduleBlocking } from "@/utils/shiftSchedule";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
@@ -1627,6 +1629,74 @@ watch(
 		uiStore.showDraftDialog = false;
 		uiStore.showHistoryDialog = false;
 		uiStore.showReturnDialog = false;
+	}
+);
+
+// Shift schedule: warning toast before the deadline, forced closing after it.
+// Already-open payment/return dialogs are never torn down — a submission in
+// flight must settle (the guard in handlePaymentCompleted / handleCreateReturn
+// refuses only NEW attempts, and the server gate decides by its own clock).
+// The forced closing dialog waits for the in-flight submit to settle before
+// opening, so it can never race an accepted transaction with a closing whose
+// expected amounts were loaded before that transaction landed.
+let scheduleWarned = false;
+let pendingForceClose = false;
+
+function forceScheduleClose() {
+	if (!offlineStore.isOffline) {
+		uiStore.showOpenShiftDialog = false;
+		uiStore.showCloseShiftDialog = true;
+	} else {
+		showWarning(
+			__(
+				"Shift schedule has ended. You are offline — reconnect to close the shift."
+			)
+		);
+	}
+}
+
+watch(
+	() => shiftStore.scheduleStatus,
+	(status) => {
+		if (!status?.enabled) {
+			scheduleWarned = false;
+			pendingForceClose = false;
+			return;
+		}
+
+		if (status.warning && !status.expired) {
+			if (!scheduleWarned) {
+				scheduleWarned = true;
+				showWarning(
+					__(
+						"Shift schedule ends in {0} minute(s). Please complete sales and prepare to close the shift.",
+						[status.minutesLeft]
+					)
+				);
+			}
+			return;
+		}
+
+		scheduleWarned = false;
+
+		if (!isScheduleBlocking(status)) return;
+
+		if (cartStore.isSubmitting) {
+			pendingForceClose = true;
+			return;
+		}
+		pendingForceClose = false;
+		forceScheduleClose();
+	}
+);
+
+watch(
+	() => cartStore.isSubmitting,
+	(submitting) => {
+		if (!submitting && pendingForceClose) {
+			pendingForceClose = false;
+			forceScheduleClose();
+		}
 	}
 );
 
@@ -2167,6 +2237,32 @@ async function handleErrorRetry() {
 
 async function handlePaymentCompleted(paymentData) {
 	try {
+		// Shift schedule: refuse checkouts (online and offline queue) after a
+		// mandatory deadline. Already queued offline invoices are preserved.
+		if (scheduleBlockingNow()) {
+			uiStore.showPaymentDialog = false;
+			showWarning(
+				__(
+					"Shift schedule has ended. Please close the shift — new sales are no longer accepted."
+				)
+			);
+			return;
+		}
+
+		// Mandatory schedule, still open: offline checkout is disabled
+		// proactively (fail-closed). An invoice queued offline could sync
+		// after the deadline and then be rejected forever; offline stores on
+		// enforced schedules must sell online so the server clock decides.
+		if (offlineStore.isOffline && scheduleEnforcedNow()) {
+			uiStore.showPaymentDialog = false;
+			showWarning(
+				__(
+					"Mandatory shift schedule is active — offline checkout is unavailable. Reconnect to complete this sale."
+				)
+			);
+			return;
+		}
+
 		const customerValue = cartStore.customer?.name || cartStore.customer;
 		if (!customerValue && !shiftStore.profileCustomer) {
 			showWarning(__("Please select a customer before proceeding"));

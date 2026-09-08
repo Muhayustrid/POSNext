@@ -1,0 +1,138 @@
+{
+ "actions": [],
+ "autoname": "field:group_name",
+ "creation": "2026-09-07 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "group_name",
+  "company",
+  "column_break_name",
+  "section_break_schedule",
+  "pos_schedule_enabled",
+  "column_break_schedule",
+  "pos_schedule_start",
+  "pos_schedule_end",
+  "pos_schedule_warning_minutes",
+  "pos_schedule_enforce_closing",
+  "section_break_members",
+  "profiles"
+ ],
+ "fields": [
+  {
+   "fieldname": "group_name",
+   "fieldtype": "Data",
+   "label": "Shift Group",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Company / outlet these POS Profiles belong to (e.g. a child outlet). Every member profile must share it.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_name",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_schedule",
+   "fieldtype": "Section Break",
+   "label": "Shift Schedule"
+  },
+  {
+   "description": "Saving the group pushes these shift hours to every member POS Profile (site timezone).",
+   "fieldname": "pos_schedule_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Shift Schedule",
+   "default": 1
+  },
+  {
+   "fieldname": "column_break_schedule",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pos_schedule_start",
+   "fieldtype": "Time",
+   "label": "Shift Start Time",
+   "depends_on": "pos_schedule_enabled"
+  },
+  {
+   "fieldname": "pos_schedule_end",
+   "fieldtype": "Time",
+   "label": "Shift End Time",
+   "depends_on": "pos_schedule_enabled",
+   "description": "An end time earlier than the start time runs past midnight."
+  },
+  {
+   "fieldname": "pos_schedule_warning_minutes",
+   "fieldtype": "Int",
+   "label": "Schedule Warning Minutes",
+   "depends_on": "pos_schedule_enabled",
+   "default": 0,
+   "description": "Minutes before the schedule ends to warn the cashier. 0 disables the warning."
+  },
+  {
+   "fieldname": "pos_schedule_enforce_closing",
+   "fieldtype": "Check",
+   "label": "Enforce Closing After Schedule",
+   "depends_on": "pos_schedule_enabled",
+   "default": 0,
+   "description": "When enabled, sales, payments and refunds are blocked after the schedule ends; only closing the shift is allowed."
+  },
+  {
+   "fieldname": "section_break_members",
+   "fieldtype": "Section Break",
+   "label": "Members"
+  },
+  {
+   "description": "POS Profiles that follow this group's shift hours. Saving the group syncs every member; a profile removed from the list keeps its last synced hours but leaves the group.",
+   "fieldname": "profiles",
+   "fieldtype": "Table",
+   "label": "POS Profiles",
+   "options": "POS Profile Group Member",
+   "reqd": 0
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-07 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Profile Group",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

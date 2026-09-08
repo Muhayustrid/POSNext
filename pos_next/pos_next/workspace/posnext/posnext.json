@@ -1,6 +1,6 @@
 {
  "charts": [],
- "content": "[{\"id\":\"cDBfxZcI12\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"id\":\"EuDVjJUKSQ\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Start POS\",\"col\":3}},{\"id\":\"uXQ4aBaRfk\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Item\",\"col\":3}},{\"id\":\"jEFYB2fX3t\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Settings\",\"col\":3}},{\"id\":\"RoWvjX8Ocp\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Profile\",\"col\":3}},{\"id\":\"p4KrSYzInK\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Opening Shift\",\"col\":3}},{\"id\":\"VO-VLNdx_2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Closing Shift\",\"col\":3}},{\"id\":\"OYrA05uyCG\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Offer\",\"col\":3}},{\"id\":\"FUd4_fFBgH\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Coupon\",\"col\":3}},{\"id\":\"pn_pg_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Price Group\",\"col\":3}},{\"id\":\"pn_pkg_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Package\",\"col\":3}},{\"id\":\"pn_production_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Production\",\"col\":3}},{\"id\":\"pn_dcode_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Discount Code\",\"col\":3}},{\"id\":\"pn_refund_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Refund Code\",\"col\":3}},{\"id\":\"pn_queue_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Queue Counter\",\"col\":3}},{\"id\":\"spacer1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"header2\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Reports &amp; Configuration</b></span>\",\"col\":12}},{\"id\":\"reports_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":4}},{\"id\":\"pos_card\",\"type\":\"card\",\"data\":{\"card_name\":\"POS\",\"col\":4}},{\"id\":\"config_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Configuration\",\"col\":4}},{\"id\":\"shift_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Shift Management\",\"col\":4}},{\"id\":\"offers_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Offers & Coupons\",\"col\":4}},{\"id\":\"items_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Items\",\"col\":4}},{\"id\":\"pricing_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Pricing\",\"col\":4}},{\"id\":\"production_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Production\",\"col\":4}},{\"id\":\"queue_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Queue\",\"col\":4}}]",
+ "content": "[{\"id\":\"cDBfxZcI12\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"id\":\"EuDVjJUKSQ\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Start POS\",\"col\":3}},{\"id\":\"uXQ4aBaRfk\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Item\",\"col\":3}},{\"id\":\"jEFYB2fX3t\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Settings\",\"col\":3}},{\"id\":\"RoWvjX8Ocp\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Profile\",\"col\":3}},{\"id\":\"pn_shiftgroup_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Shift Group\",\"col\":3}},{\"id\":\"p4KrSYzInK\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Opening Shift\",\"col\":3}},{\"id\":\"VO-VLNdx_2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Closing Shift\",\"col\":3}},{\"id\":\"OYrA05uyCG\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Offer\",\"col\":3}},{\"id\":\"FUd4_fFBgH\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Coupon\",\"col\":3}},{\"id\":\"pn_pg_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Price Group\",\"col\":3}},{\"id\":\"pn_pkg_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Package\",\"col\":3}},{\"id\":\"pn_production_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Production\",\"col\":3}},{\"id\":\"pn_dcode_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pos Discount Code\",\"col\":3}},{\"id\":\"pn_refund_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Refund Code\",\"col\":3}},{\"id\":\"pn_queue_shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Queue Counter\",\"col\":3}},{\"id\":\"spacer1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"header2\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Reports &amp; Configuration</b></span>\",\"col\":12}},{\"id\":\"reports_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":4}},{\"id\":\"pos_card\",\"type\":\"card\",\"data\":{\"card_name\":\"POS\",\"col\":4}},{\"id\":\"config_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Configuration\",\"col\":4}},{\"id\":\"shift_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Shift Management\",\"col\":4}},{\"id\":\"offers_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Offers & Coupons\",\"col\":4}},{\"id\":\"items_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Items\",\"col\":4}},{\"id\":\"pricing_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Pricing\",\"col\":4}},{\"id\":\"production_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Production\",\"col\":4}},{\"id\":\"queue_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Queue\",\"col\":4}}]",
  "creation": "2026-01-27 21:23:15.819052",
  "custom_blocks": [],
  "docstatus": 0,
@@ -96,6 +96,16 @@
    "label": "POS Profile",
    "link_count": 0,
    "link_to": "POS Profile",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Shift Group",
+   "link_count": 0,
+   "link_to": "POS Profile Group",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -265,7 +275,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-07 13:00:00.000000",
+ "modified": "2026-09-07 14:30:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
@@ -304,6 +314,14 @@
    "doc_view": "List",
    "label": "Pos Profile",
    "link_to": "POS Profile",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Shift Group",
+   "link_to": "POS Profile Group",
    "stats_filter": "[]",
    "type": "DocType"
   },

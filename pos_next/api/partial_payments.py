@@ -736,9 +736,14 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 	"""
 	import json
 
+	from pos_next.shift_schedule import assert_invoice_sales_allowed
+
 	# Input validation
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
+
+	# Shift schedule: no payments after a mandatory schedule deadline
+	assert_invoice_sales_allowed(invoice_name)
 
 	# Parse payments if string, otherwise use as-is
 	if isinstance(payments, str):

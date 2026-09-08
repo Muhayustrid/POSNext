@@ -1218,6 +1218,7 @@
 <script setup>
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
 import { useToast } from "@/composables/useToast";
+import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
 import { getPaymentIcon } from "@/utils/payment";
 import { call } from "@/utils/apiWrapper";
 import {
@@ -2108,6 +2109,16 @@ async function handleCreateReturn() {
 	if (!canCreateReturn.value || isSubmitting.value) return;
 	if (!hasOpenShift.value) {
 		const message = __("Open a shift before creating a return invoice.");
+		submitError.value = message;
+		openErrorDialog(message);
+		return;
+	}
+
+	// Shift schedule: refunds are blocked once a mandatory deadline has passed
+	if (scheduleBlockingNow()) {
+		const message = __(
+			"Shift schedule has ended. Refunds are no longer accepted — please close the shift."
+		);
 		submitError.value = message;
 		openErrorDialog(message);
 		return;
