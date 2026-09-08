@@ -1,53 +1,52 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { flushPromises, mount } from "@vue/test-utils"
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
 
 // Route createResource submits by API url so tests can resolve/reject per resource.
-const resourceHandlers = vi.hoisted(() => ({ map: {} }))
+const resourceHandlers = vi.hoisted(() => ({ map: {} }));
 
 vi.mock("frappe-ui", async () => {
-	const { defineComponent, h } = await import("vue")
+	const { defineComponent, h } = await import("vue");
 	// Render-function stubs: the app builds with the runtime-only Vue build
 	// (no template compiler), so stubs must not use the `template` option.
 	const Dialog = defineComponent({
 		name: "DialogStub",
 		props: ["modelValue", "options"],
 		setup(_, { slots }) {
-			return () => slots["body-content"]?.()
+			return () => slots["body-content"]?.();
 		},
-	})
+	});
 	// Button renders a real <button> root so @click listeners fall through.
 	const Button = defineComponent({
 		name: "ButtonStub",
 		props: ["loading", "disabled", "variant"],
 		setup(_, { slots }) {
-			return () => h("button", slots.default?.())
+			return () => h("button", slots.default?.());
 		},
-	})
+	});
 	return {
 		Dialog,
 		Button,
 		createResource: (opts) => ({
 			submit: (params) => resourceHandlers.map[opts.url]?.(params, opts),
 		}),
-	}
-})
+	};
+});
 
 // Provide a trivial global translation helper the way ShiftClosingDialog.test does.
 globalThis.__ = (message, replacements = []) => {
-	if (!Array.isArray(replacements) || !replacements.length) return message
-	let out = message
-	for (const [i, v] of replacements.entries())
-		out = out.split(`{${i}}`).join(String(v))
-	return out
-}
+	if (!Array.isArray(replacements) || !replacements.length) return message;
+	let out = message;
+	for (const [i, v] of replacements.entries()) out = out.split(`{${i}}`).join(String(v));
+	return out;
+};
 
-import ProductionDialog from "./ProductionDialog.vue"
+import ProductionDialog from "./ProductionDialog.vue";
 
-const RECIPES_URL = "pos_next.api.production.get_production_recipes"
-const CREATE_URL = "pos_next.api.production.create_production"
+const RECIPES_URL = "pos_next.api.production.get_production_recipes";
+const CREATE_URL = "pos_next.api.production.create_production";
 
 const RECIPES = [
 	{
@@ -82,10 +81,10 @@ const RECIPES = [
 			},
 		],
 	},
-]
+];
 
 function respond(url, handler) {
-	resourceHandlers.map[url] = handler
+	resourceHandlers.map[url] = handler;
 }
 
 /** Mount closed, then open via props so the modelValue watch fires loadRecipes. */
@@ -101,24 +100,24 @@ async function mountOpenDialog() {
 			// The app installs __() as a global property; the template needs it.
 			config: { globalProperties: { __: globalThis.__ } },
 		},
-	})
-	await wrapper.setProps({ modelValue: true })
-	await flushPromises()
-	return wrapper
+	});
+	await wrapper.setProps({ modelValue: true });
+	await flushPromises();
+	return wrapper;
 }
 
 function findButton(wrapper, text) {
-	return wrapper.findAll("button").find((b) => b.text().includes(text))
+	return wrapper.findAll("button").find((b) => b.text().includes(text));
 }
 
 async function selectFirstRecipe(wrapper) {
-	await findButton(wrapper, "Iced Latte").trigger("click")
-	await flushPromises()
+	await findButton(wrapper, "Iced Latte").trigger("click");
+	await flushPromises();
 }
 
 describe("ProductionDialog", () => {
 	beforeEach(() => {
-		resourceHandlers.map = {}
+		resourceHandlers.map = {};
 		respond(RECIPES_URL, (_params, opts) =>
 			opts.onSuccess({
 				pos_profile: "POS-1",
@@ -126,69 +125,74 @@ describe("ProductionDialog", () => {
 				warehouse: "WH",
 				recipes: RECIPES,
 			}),
-		)
-	})
+		);
+	});
 
 	it("shows the loading placeholder while recipes are being fetched", async () => {
-		respond(RECIPES_URL, () => new Promise(() => {})) // never resolves
-		const wrapper = await mountOpenDialog()
-		expect(wrapper.text()).toContain("Loading recipes")
-	})
+		respond(RECIPES_URL, () => new Promise(() => {})); // never resolves
+		const wrapper = await mountOpenDialog();
+		expect(wrapper.text()).toContain("Loading recipes");
+	});
 
 	it("lists recipes with material availability after load", async () => {
-		const wrapper = await mountOpenDialog()
-		expect(wrapper.text()).toContain("Iced Latte")
-		expect(wrapper.text()).toContain("makes 2 × Iced Latte")
-		expect(wrapper.text()).toContain("Materials available")
-	})
+		const wrapper = await mountOpenDialog();
+		expect(wrapper.text()).toContain("Iced Latte");
+		expect(wrapper.text()).toContain("makes 2 × Iced Latte");
+		expect(wrapper.text()).toContain("Materials available");
+	});
 
 	it("selects a recipe and rescales material rows when output qty changes", async () => {
-		const wrapper = await mountOpenDialog()
-		await selectFirstRecipe(wrapper)
+		const wrapper = await mountOpenDialog();
+		await selectFirstRecipe(wrapper);
 
-		expect(wrapper.text()).toContain("Output per run: 2 × Iced Latte")
-		const qtyInputs = wrapper.findAll('input[type="number"]')
-		// first number input is the output qty; the rest are material rows
-		expect(qtyInputs).toHaveLength(3)
-		expect(qtyInputs[1].element.value).toBe("1") // MILK: 1 × (2/2)
-		expect(qtyInputs[2].element.value).toBe("0.5") // SYRUP: 0.5 × (2/2)
+		expect(wrapper.text()).toContain("Output per run: 2 × Iced Latte");
+		// only the output qty is editable; materials render as readonly text
+		const qtyInputs = wrapper.findAll('input[type="number"]');
+		expect(qtyInputs).toHaveLength(1);
+		expect(wrapper.text()).toContain("1 Litre"); // MILK: 1 × (2/2)
+		expect(wrapper.text()).toContain("0.5 Litre"); // SYRUP: 0.5 × (2/2)
 		// FIFO pick: first batch with enough stock for the base run
-		expect(wrapper.find("select").element.value).toBe("B-OLD")
+		expect(wrapper.text()).toContain("B-OLD (1)");
 
-		await qtyInputs[0].setValue("4")
-		await flushPromises()
-		const rescaled = wrapper.findAll('input[type="number"]')
-		expect(rescaled[1].element.value).toBe("2") // MILK: 1 × (4/2)
-		expect(rescaled[2].element.value).toBe("1") // SYRUP: 0.5 × (4/2)
-	})
+		await qtyInputs[0].setValue("4");
+		await flushPromises();
+		expect(wrapper.text()).toContain("2 Litre"); // MILK: 1 × (4/2)
+		expect(wrapper.text()).toContain("1 Litre"); // SYRUP: 0.5 × (4/2)
+	});
 
-	it("submits recipe, scaled items and batch picks, then emits production-created and closes", async () => {
-		let payload
+	it("locks the detail view: no change-recipe, no add material, no editable material qty", async () => {
+		const wrapper = await mountOpenDialog();
+		await selectFirstRecipe(wrapper);
+
+		expect(findButton(wrapper, "Change recipe")).toBeUndefined();
+		expect(wrapper.text()).not.toContain("Add material");
+		// a single editable input (output qty) plus the cancel/submit buttons
+		expect(wrapper.findAll("input")).toHaveLength(1);
+		expect(wrapper.findAll("select")).toHaveLength(0);
+	});
+
+	it("submits only recipe, qty and profile, then emits production-created and closes", async () => {
+		let payload;
 		respond(CREATE_URL, (params, opts) => {
-			payload = params
+			payload = params;
 			opts.onSuccess({
 				stock_entry: "STE-0001",
 				production_log: "PLOG-0001",
 				production_item: "ICED-LATTE",
 				qty: 2,
-			})
-		})
+			});
+		});
 
-		const wrapper = await mountOpenDialog()
-		await selectFirstRecipe(wrapper)
-		await findButton(wrapper, "Process Production").trigger("click")
-		await flushPromises()
+		const wrapper = await mountOpenDialog();
+		await selectFirstRecipe(wrapper);
+		await findButton(wrapper, "Process Production").trigger("click");
+		await flushPromises();
 
 		expect(payload).toEqual({
 			recipe: "RECIPE-0001",
 			qty: 2,
-			items: [
-				{ item_code: "MILK", qty: 1 },
-				{ item_code: "SYRUP", qty: 0.5 },
-			],
 			pos_profile: "POS-1",
-			batches: { SYRUP: "B-OLD" },
-		})
+		});
 		expect(wrapper.emitted("production-created")).toContainEqual([
 			{
 				stock_entry: "STE-0001",
@@ -196,21 +200,21 @@ describe("ProductionDialog", () => {
 				production_item: "ICED-LATTE",
 				qty: 2,
 			},
-		])
-		expect(wrapper.emitted("update:modelValue")).toContainEqual([false])
-	})
+		]);
+		expect(wrapper.emitted("update:modelValue")).toContainEqual([false]);
+	});
 
 	it("surfaces backend errors and keeps the dialog open", async () => {
 		respond(CREATE_URL, (_params, opts) =>
 			opts.onError({ messages: ["Insufficient stock for Syrup"] }),
-		)
+		);
 
-		const wrapper = await mountOpenDialog()
-		await selectFirstRecipe(wrapper)
-		await findButton(wrapper, "Process Production").trigger("click")
-		await flushPromises()
+		const wrapper = await mountOpenDialog();
+		await selectFirstRecipe(wrapper);
+		await findButton(wrapper, "Process Production").trigger("click");
+		await flushPromises();
 
-		expect(wrapper.text()).toContain("Insufficient stock for Syrup")
-		expect(wrapper.emitted("update:modelValue")).not.toContainEqual([false])
-	})
-})
+		expect(wrapper.text()).toContain("Insufficient stock for Syrup");
+		expect(wrapper.emitted("update:modelValue")).not.toContainEqual([false]);
+	});
+});

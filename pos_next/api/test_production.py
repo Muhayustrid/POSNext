@@ -9,16 +9,26 @@ from frappe import ValidationError
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, getdate
 
-from pos_next.api.production import create_production, get_production_recipes
+from pos_next.api.production import (
+	_uom_whole_field,
+	create_production,
+	get_production_recipes,
+)
 
 
 class TestProductionDoctypes(FrappeTestCase):
 	def test_doctypes_and_key_fields_exist(self):
 		for doctype, fields in [
-			("POS Production Recipe", ["recipe_name", "production_item", "output_qty", "disabled", "items", "companies"]),
+			(
+				"POS Production Recipe",
+				["recipe_name", "production_item", "output_qty", "disabled", "items", "companies"],
+			),
 			("POS Production Recipe Item", ["item_code", "qty"]),
 			("POS Production Recipe Company", ["company", "enabled"]),
-			("POS Production Log", ["recipe", "production_item", "qty", "items_used", "stock_entry", "pos_profile", "company"]),
+			(
+				"POS Production Log",
+				["recipe", "production_item", "qty", "items_used", "stock_entry", "pos_profile", "company"],
+			),
 		]:
 			meta = frappe.get_meta(doctype)
 			for fieldname in fields:
@@ -56,9 +66,7 @@ class TestGetProductionRecipes(FrappeTestCase):
 			)
 		self.fg = _make_test_item()
 		self.mat = _make_test_item()
-		self.other_company = frappe.db.get_value(
-			"Company", {"name": ["!=", self.company]}, "name"
-		)
+		self.other_company = frappe.db.get_value("Company", {"name": ["!=", self.company]}, "name")
 		if not self.other_company:
 			self.skipTest("only one company on this site")
 
@@ -155,9 +163,7 @@ class TestGetProductionRecipes(FrappeTestCase):
 		row = recipe["items"][0]
 		self.assertTrue(row["has_batch_no"])
 		self.assertEqual(row["available_qty"], 8)
-		self.assertEqual(
-			[b["batch_no"] for b in row["batches"]], [dated.name, undated.name]
-		)
+		self.assertEqual([b["batch_no"] for b in row["batches"]], [dated.name, undated.name])
 		self.assertEqual(row["batches"][0]["expiry_date"], expiry)
 
 
@@ -208,9 +214,7 @@ class TestCreateProduction(FrappeTestCase):
 
 	def _bin_qty(self, item_code):
 		return flt(
-			frappe.db.get_value(
-				"Bin", {"item_code": item_code, "warehouse": self.warehouse}, "actual_qty"
-			)
+			frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": self.warehouse}, "actual_qty")
 		)
 
 	def test_happy_path_moves_stock_and_creates_log(self):
@@ -218,10 +222,9 @@ class TestCreateProduction(FrappeTestCase):
 		result = create_production(
 			recipe=self.recipe.name,
 			qty=3,
-			items=json.dumps([{"item_code": self.mat, "qty": 6}]),
 			pos_profile=self.pos_profile,
 		)
-		# material consumed, finished goods produced
+		# materials derived from the recipe: 3 runs x 2 = 6 consumed, 3 produced
 		self.assertEqual(self._bin_qty(self.mat), 4)
 		self.assertEqual(self._bin_qty(self.fg), 3)
 
@@ -238,6 +241,57 @@ class TestCreateProduction(FrappeTestCase):
 		self.assertEqual(flt(log.qty), 3)
 		used = json.loads(log.items_used)
 		self.assertEqual(used[0]["item_code"], self.mat)
+		self.assertEqual(flt(used[0]["qty"]), 6)
+
+	def test_fractional_qty_scales_partially(self):
+		if not frappe.db.exists("UOM", "Litre"):
+			self.skipTest("no Litre UOM on this site")
+		if frappe.db.get_value("UOM", "Litre", _uom_whole_field()):
+			self.skipTest("Litre UOM requires whole quantities")
+		fg = _make_test_item(stock_uom="Litre")
+		mat = _make_test_item(stock_uom="Litre")
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"FR {uuid.uuid4().hex[:6]}",
+				"production_item": fg,
+				"output_qty": 4,
+				"items": [{"item_code": mat, "qty": 2}],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+		_seed_stock(mat, self.warehouse, 10)
+		result = create_production(recipe=doc.name, qty=1, pos_profile=self.pos_profile)
+		# factor 1/4: half a run of material, quarter of the recipe output
+		self.assertEqual(self._bin_qty(mat), 9.5)
+		self.assertEqual(self._bin_qty(fg), 1)
+
+		se = frappe.get_doc("Stock Entry", result["stock_entry"])
+		self.assertEqual(flt(next(d for d in se.items if d.is_finished_item).qty), 1)
+
+	def test_client_item_overrides_are_ignored(self):
+		_seed_stock(self.mat, self.warehouse, 10)
+		# stale/tampered client payload: wrong material qty must not reach the stock entry
+		create_production(
+			recipe=self.recipe.name,
+			qty=2,
+			items=json.dumps([{"item_code": self.mat, "qty": 0.1}]),
+			pos_profile=self.pos_profile,
+		)
+		self.assertEqual(self._bin_qty(self.mat), 6)  # derived: 2 runs x 2
+		self.assertEqual(self._bin_qty(self.fg), 2)
+
+	def test_whole_uom_rejects_fractional_qty(self):
+		if not frappe.db.exists("UOM", "Nos"):
+			self.skipTest("no Nos UOM on this site")
+		frappe.db.set_value("UOM", "Nos", _uom_whole_field(), 1)
+		_seed_stock(self.mat, self.warehouse, 10)
+		with self.assertRaises(ValidationError) as ctx:
+			create_production(recipe=self.recipe.name, qty=1.5, pos_profile=self.pos_profile)
+		self.assertIn("whole", str(ctx.exception))
+		self.assertEqual(
+			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
+		)
 
 	def test_insufficient_stock_rejected_before_entry(self):
 		_seed_stock(self.mat, self.warehouse, 1)
@@ -245,7 +299,6 @@ class TestCreateProduction(FrappeTestCase):
 			create_production(
 				recipe=self.recipe.name,
 				qty=1,
-				items=json.dumps([{"item_code": self.mat, "qty": 5}]),
 				pos_profile=self.pos_profile,
 			)
 		self.assertIn(self.mat, str(ctx.exception))
@@ -259,36 +312,53 @@ class TestCreateProduction(FrappeTestCase):
 		_seed_stock(self.mat, self.warehouse, 10)
 		frappe.db.set_value("Item", self.mat, "disabled", 1)
 		with self.assertRaises(ValidationError) as ctx:
-			create_production(
-				recipe=self.recipe.name,
-				qty=1,
-				items=json.dumps([{"item_code": self.mat, "qty": 2}]),
-				pos_profile=self.pos_profile,
-			)
+			create_production(recipe=self.recipe.name, qty=1, pos_profile=self.pos_profile)
 		self.assertIn(self.mat, str(ctx.exception))
 		self.assertEqual(
 			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
 		)
 
-	def test_batch_of_other_item_rejected(self):
-		other_item = _make_test_item(has_batch_no=1)
-		foreign_batch = frappe.get_doc(
-			{"doctype": "Batch", "batch_id": f"B-{uuid.uuid4().hex[:8]}", "item": other_item}
-		).insert(ignore_permissions=True)
+	def test_batch_material_auto_picks_fifo_and_ignores_client_batches(self):
+		mat_b = _make_test_item(has_batch_no=1)
+		older = frappe.new_doc("Batch")
+		older.batch_id = f"B-OLD-{uuid.uuid4().hex[:6]}"
+		older.item = mat_b
+		older.expiry_date = add_days(getdate(), 30)
+		older.insert(ignore_permissions=True)
+		other_batched = _make_test_item(has_batch_no=1)
+		foreign = frappe.new_doc("Batch")
+		foreign.batch_id = f"B-FGN-{uuid.uuid4().hex[:6]}"
+		foreign.item = other_batched
+		foreign.insert(ignore_permissions=True)
+		_seed_stock(mat_b, self.warehouse, 5, batch_no=older.name)
 		_seed_stock(self.mat, self.warehouse, 10)
-		frappe.db.set_value("Item", self.mat, "has_batch_no", 1)
-		with self.assertRaises(ValidationError) as ctx:
-			create_production(
-				recipe=self.recipe.name,
-				qty=1,
-				items=json.dumps([{"item_code": self.mat, "qty": 2}]),
-				pos_profile=self.pos_profile,
-				batches=json.dumps({self.mat: foreign_batch.name}),
-			)
-		self.assertIn(foreign_batch.name, str(ctx.exception))
-		self.assertEqual(
-			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
+
+		recipe = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"BP {uuid.uuid4().hex[:6]}",
+				"production_item": self.fg,
+				"output_qty": 1,
+				"items": [
+					{"item_code": self.mat, "qty": 1},
+					{"item_code": mat_b, "qty": 1},
+				],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+
+		# legacy params point at a foreign batch; server must still FIFO-pick
+		result = create_production(
+			recipe=recipe.name,
+			qty=1,
+			items=json.dumps([{"item_code": self.mat, "qty": 99}]),
+			pos_profile=self.pos_profile,
+			batches=json.dumps({mat_b: foreign.name}),
 		)
+		se = frappe.get_doc("Stock Entry", result["stock_entry"])
+		row = next(d for d in se.items if d.item_code == mat_b)
+		self.assertEqual(row.batch_no, older.name)
+		self.assertEqual(flt(frappe.db.get_value("Batch", older.name, "batch_qty")), 4)
 
 	def test_recipe_of_other_company_rejected(self):
 		other = frappe.db.get_value("Company", {"name": ["!=", self.company]}, "name")
@@ -308,45 +378,15 @@ class TestCreateProduction(FrappeTestCase):
 			create_production(
 				recipe=frappe.get_all("POS Production Recipe", limit=1, order_by="creation desc")[0].name,
 				qty=1,
-				items=json.dumps([{"item_code": self.mat, "qty": 1}]),
 				pos_profile=self.pos_profile,
 			)
 
-	def test_batch_material_consumes_chosen_batch(self):
-		mat_b = _make_test_item(has_batch_no=1)
-		batch = frappe.new_doc("Batch")
-		batch.batch_id = f"B-{uuid.uuid4().hex[:8]}"
-		batch.item = mat_b
-		batch.insert(ignore_permissions=True)
-		_seed_stock(mat_b, self.warehouse, 4, batch_no=batch.name)
-		_seed_stock(self.mat, self.warehouse, 4)
-
-		result = create_production(
-			recipe=self.recipe.name,
-			qty=2,
-			items=json.dumps(
-				[
-					{"item_code": self.mat, "qty": 2},
-					{"item_code": mat_b, "qty": 3},
-				]
-			),
-			pos_profile=self.pos_profile,
-			batches=json.dumps({mat_b: batch.name}),
-		)
-		se = frappe.get_doc("Stock Entry", result["stock_entry"])
-		row = next(d for d in se.items if d.item_code == mat_b)
-		self.assertTrue(row.serial_and_batch_bundle or row.batch_no)
-		self.assertEqual(flt(frappe.db.get_value("Batch", batch.name, "batch_qty")), 1)
-
 	def test_finished_good_with_batch_gets_new_batch(self):
-		frappe.db.set_value("Item", self.fg, "has_batch_no", 1)
+		fg = frappe.get_doc("Item", self.fg)
+		fg.has_batch_no = 1
+		fg.save(ignore_permissions=True)  # document save invalidates Item cache
 		_seed_stock(self.mat, self.warehouse, 10)
-		result = create_production(
-			recipe=self.recipe.name,
-			qty=2,
-			items=json.dumps([{"item_code": self.mat, "qty": 4}]),
-			pos_profile=self.pos_profile,
-		)
+		result = create_production(recipe=self.recipe.name, qty=2, pos_profile=self.pos_profile)
 		se = frappe.get_doc("Stock Entry", result["stock_entry"])
 		fg_row = next(d for d in se.items if d.is_finished_item)
 		self.assertTrue(fg_row.serial_and_batch_bundle or fg_row.batch_no)
