@@ -9,9 +9,30 @@ from frappe.utils import cint
 
 
 class POSOpeningShift(Document):
+	def before_insert(self):
+		# Freeze the schedule + deadline from the POS Profile at open time;
+		# later profile edits must not move an open shift's deadline.
+		from pos_next.shift_schedule import apply_schedule_snapshot
+
+		apply_schedule_snapshot(self)
+
 	def validate(self):
+		# Any save of an existing shift (incl. the closing link) discards
+		# client edits to the snapshot — the deadline can only be changed by
+		# an admin via frappe.db.set_value.
+		from pos_next.shift_schedule import freeze_schedule_snapshot
+
+		freeze_schedule_snapshot(self)
 		self.validate_pos_profile_and_cashier()
 		self.set_status()
+
+	def before_submit(self):
+		# Re-resolve authoritatively at the moment the shift goes live: a
+		# draft held past the enforced hours cannot be submitted, and any
+		# tampered schedule fields are overwritten from the profile.
+		from pos_next.shift_schedule import apply_schedule_snapshot
+
+		apply_schedule_snapshot(self)
 
 	def validate_pos_profile_and_cashier(self):
 		if self.company != frappe.db.get_value("POS Profile", self.pos_profile, "company"):

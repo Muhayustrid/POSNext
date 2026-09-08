@@ -1,5 +1,6 @@
 import { createResource } from "frappe-ui";
 import { computed, ref } from "vue";
+import { parseServerDatetime } from "@/utils/shiftSchedule";
 
 export const shiftState = ref({
 	pos_opening_shift: null,
@@ -10,7 +11,26 @@ export const shiftState = ref({
 	_initialElapsedMs: 0,
 	/** Local timestamp (Date.now()) when shift data was received */
 	_receivedAt: 0,
+	/** Server clock (ms, parsed from server_now) at the moment of receipt */
+	_serverNowMs: 0,
 });
+
+function applyShiftData(data, initialElapsedMs = 0) {
+	shiftState.value = {
+		pos_opening_shift: data.pos_opening_shift,
+		pos_profile: data.pos_profile,
+		company: data.company,
+		isOpen: true,
+		_initialElapsedMs: initialElapsedMs,
+		_receivedAt: Date.now(),
+		_serverNowMs: parseServerDatetime(data.server_now) || 0,
+	};
+	// Store in localStorage for offline support
+	localStorage.setItem(
+		"pos_shift_data",
+		JSON.stringify({ ...data, _initialElapsedMs: initialElapsedMs, _receivedAt: Date.now() })
+	);
+}
 
 export function useShift() {
 	// Check for existing open shift
@@ -29,23 +49,7 @@ export function useShift() {
 					).getTime();
 					initialElapsedMs = Math.max(0, serverNow - shiftStart);
 				}
-				shiftState.value = {
-					pos_opening_shift: data.pos_opening_shift,
-					pos_profile: data.pos_profile,
-					company: data.company,
-					isOpen: true,
-					_initialElapsedMs: initialElapsedMs,
-					_receivedAt: Date.now(),
-				};
-				// Store in localStorage for offline support
-				localStorage.setItem(
-					"pos_shift_data",
-					JSON.stringify({
-						...data,
-						_initialElapsedMs: initialElapsedMs,
-						_receivedAt: Date.now(),
-					})
-				);
+				applyShiftData(data, initialElapsedMs);
 			} else {
 				shiftState.value = {
 					pos_opening_shift: null,
@@ -54,6 +58,7 @@ export function useShift() {
 					isOpen: false,
 					_initialElapsedMs: 0,
 					_receivedAt: 0,
+					_serverNowMs: 0,
 				};
 				localStorage.removeItem("pos_shift_data");
 			}
@@ -72,6 +77,7 @@ export function useShift() {
 						isOpen: true,
 						_initialElapsedMs: data._initialElapsedMs || 0,
 						_receivedAt: data._receivedAt || Date.now(),
+						_serverNowMs: parseServerDatetime(data.server_now) || 0,
 					};
 				} catch (e) {
 					console.error("Error parsing cached shift data:", e);
@@ -97,23 +103,7 @@ export function useShift() {
 			};
 		},
 		onSuccess(data) {
-			shiftState.value = {
-				pos_opening_shift: data.pos_opening_shift,
-				pos_profile: data.pos_profile,
-				company: data.company,
-				isOpen: true,
-				_initialElapsedMs: 0,
-				_receivedAt: Date.now(),
-			};
-			// Store in localStorage
-			localStorage.setItem(
-				"pos_shift_data",
-				JSON.stringify({
-					...data,
-					_initialElapsedMs: 0,
-					_receivedAt: Date.now(),
-				})
-			);
+			applyShiftData(data);
 		},
 		onError(error) {
 			console.error("Error creating opening shift:", error);
@@ -143,6 +133,7 @@ export function useShift() {
 				isOpen: false,
 				_initialElapsedMs: 0,
 				_receivedAt: 0,
+				_serverNowMs: 0,
 			};
 			localStorage.removeItem("pos_shift_data");
 		},

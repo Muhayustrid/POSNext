@@ -163,6 +163,7 @@ doc_events = {
 			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
 			"pos_next.overrides.discount_code.validate_invoice_discounts",
 			"pos_next.overrides.pos_offer_usage.validate_invoice_offers",
+			"pos_next.shift_schedule.validate_invoice",
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
@@ -180,7 +181,10 @@ doc_events = {
 		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
-	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
+	"POS Profile": {
+		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
+		"validate": "pos_next.shift_schedule.validate_profile_schedule",
+	},
 	"Promotional Scheme": {
 		"validate": [
 			"pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
@@ -199,7 +203,12 @@ doc_events = {
 	"Sales Order": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"Quotation": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"Delivery Note": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
-	"POS Invoice": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
+	"POS Invoice": {
+		"validate": [
+			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
+			"pos_next.shift_schedule.validate_invoice",
+		]
+	},
 }
 
 # Scheduled Tasks

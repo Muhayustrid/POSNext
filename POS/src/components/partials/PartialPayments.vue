@@ -345,6 +345,7 @@ import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
+import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
 import { Button, call } from "frappe-ui";
 import { onMounted, ref, watch } from "vue";
 
@@ -447,6 +448,16 @@ async function handlePaymentCompleted(paymentData) {
 
 	if (!selectedInvoice.value) {
 		console.warn("[PartialPayments] No invoice selected");
+		return;
+	}
+
+	// Shift schedule: payments are blocked once a mandatory deadline has passed
+	if (scheduleBlockingNow()) {
+		showError(
+			__(
+				"Shift schedule has ended. Payments are no longer accepted — please close the shift."
+			)
+		);
 		return;
 	}
 

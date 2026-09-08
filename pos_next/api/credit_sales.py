@@ -247,11 +247,16 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 	"""
 	import json
 
+	from pos_next.shift_schedule import assert_invoice_sales_allowed
+
 	if isinstance(customer_credit_dict, str):
 		customer_credit_dict = json.loads(customer_credit_dict)
 
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
+
+	# Shift schedule: no payments after a mandatory schedule deadline
+	assert_invoice_sales_allowed(invoice_name)
 
 	if not customer_credit_dict:
 		return []

@@ -1,5 +1,6 @@
 import { useShift, shiftState } from "@/composables/useShift";
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency";
+import { computeScheduleStatus } from "@/utils/shiftSchedule";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
@@ -11,6 +12,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const currentTime = ref("");
 	const shiftDuration = ref("");
 	const shiftTimerPaused = ref(false);
+	const scheduleStatus = ref(null);
 
 	// Computed
 	const profileName = computed(() => currentProfile.value?.name);
@@ -61,6 +63,22 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		}
 	}
 
+	/**
+	 * Re-evaluate the shift schedule (runs on the 1s timer). Drives the
+	 * warning toast and forced-closing dialog in POSSale.
+	 */
+	function updateScheduleStatus() {
+		const state = shiftState.value;
+		scheduleStatus.value =
+			state.isOpen && state.pos_opening_shift
+				? computeScheduleStatus(state.pos_opening_shift, {
+						serverNowMs: state._serverNowMs,
+						receivedAtMs: state._receivedAt,
+						localNowMs: Date.now(),
+					})
+				: null;
+	}
+
 	function updateCurrentTime() {
 		const now = new Date();
 		currentTime.value = now.toLocaleTimeString(DEFAULT_LOCALE, { hour12: false });
@@ -70,11 +88,13 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		// Update both immediately
 		updateCurrentTime();
 		updateShiftDuration();
+		updateScheduleStatus();
 
 		// Then update every second
 		const intervalId = setInterval(() => {
 			updateCurrentTime();
 			updateShiftDuration();
+			updateScheduleStatus();
 		}, 1000);
 
 		return intervalId;
@@ -82,6 +102,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 
 	async function checkShift() {
 		await checkOpeningShift.fetch();
+		updateScheduleStatus();
 		return hasOpenShift.value;
 	}
 
@@ -93,6 +114,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		currentTime,
 		shiftDuration,
 		shiftTimerPaused,
+		scheduleStatus,
 
 		// Computed
 		profileName,

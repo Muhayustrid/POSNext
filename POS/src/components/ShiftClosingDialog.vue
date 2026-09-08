@@ -925,7 +925,7 @@
 						v-if="!canSubmit && closingData && !showSuccessReport"
 						class="text-xs md:text-sm text-yellow-600 font-medium text-center sm:text-end"
 					>
-						{{ __("Please enter all closing amounts") }}
+						{{ syncStore.hasPendingInvoices ? syncBlockMessage : __("Please enter all closing amounts") }}
 					</div>
 
 					<!-- Success message (shown in report view) -->
@@ -972,13 +972,15 @@
 
 <script setup>
 import { Button, Dialog, FeatherIcon, Input } from "frappe-ui"
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { storeToRefs } from "pinia"
 import { useShift, shiftState } from "../composables/useShift"
 import { useFormatters } from "../composables/useFormatters"
 import { useToast } from "../composables/useToast"
 import { usePOSSettingsStore } from "../stores/posSettings"
 import { usePOSShiftStore } from "../stores/posShift"
+import { usePOSSyncStore } from "../stores/posSync"
+import { usePOSCartStore } from "../stores/posCart"
 import { printEODReport } from "../utils/printEod"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
 
@@ -1009,6 +1011,18 @@ const posSettingsStore = usePOSSettingsStore()
 const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 
 const shiftStore = usePOSShiftStore()
+const syncStore = usePOSSyncStore()
+const cartStore = usePOSCartStore()
+
+// Closing must not race transactions that have not landed on the server yet:
+// pending offline invoices are missing from the expected amounts, and an
+// in-flight submit could land right after the closing. Both block the close.
+const syncBlockMessage = computed(() =>
+	__(
+		"{0} invoice(s) are still pending sync — sync them before closing so the shift totals are complete.",
+		[syncStore.pendingInvoicesCount]
+	)
+)
 
 const closingData = ref(null)
 const closingDataResource = getClosingShiftData
@@ -1035,6 +1049,8 @@ watch(open, async (isOpen) => {
 
 		// Refresh POS settings to get latest hideExpectedAmount value
 		await posSettingsStore.reloadSettings()
+		// Re-count unsynced offline invoices — closing is blocked while > 0
+		syncStore.updatePendingCount()
 		loadClosingData()
 	} else {
 		// Resume the shift duration counter
@@ -1053,6 +1069,18 @@ onBeforeUnmount(() => {
 	if (_idleWarningTimer) {
 		clearTimeout(_idleWarningTimer)
 		_idleWarningTimer = null
+	}
+})
+
+// Shift-schedule enforcement can force the dialog open before this component
+// mounts (the expiry watcher fires while the sale page is still loading). In
+// that case watch(open) never transitions, so load the closing data here.
+onMounted(() => {
+	if (open.value && props.openingShift) {
+		shiftStore.shiftTimerPaused = true
+		posSettingsStore.reloadSettings()
+		syncStore.updatePendingCount()
+		loadClosingData()
 	}
 })
 
@@ -1110,6 +1138,9 @@ function updateClosingAmount(payment, value) {
 const canSubmit = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation)
 		return false
+
+	// Never close over unsynced invoices or an in-flight submission
+	if (syncStore.hasPendingInvoices || cartStore.isSubmitting) return false
 
 	// Check if all closing amounts have been manually entered
 	return closingData.value.payment_reconciliation.every(

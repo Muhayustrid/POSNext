@@ -20,6 +20,15 @@
   "user",
   "opening_balance_details_section",
   "balance_details",
+  "shift_schedule_snapshot_section",
+  "pos_schedule_enabled",
+  "pos_schedule_start",
+  "column_break_schedule",
+  "pos_schedule_end",
+  "pos_schedule_deadline",
+  "column_break_schedule_2",
+  "pos_schedule_warning_minutes",
+  "pos_schedule_enforce_closing",
   "section_break_9",
   "amended_from"
  ],
@@ -107,6 +116,61 @@
    "reqd": 1
   },
   {
+   "fieldname": "shift_schedule_snapshot_section",
+   "fieldtype": "Section Break",
+   "label": "Shift Schedule (Snapshot)",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "pos_schedule_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Shift Schedule",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pos_schedule_start",
+   "fieldtype": "Time",
+   "label": "Shift Start Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_schedule",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pos_schedule_end",
+   "fieldtype": "Time",
+   "label": "Shift End Time",
+   "read_only": 1
+  },
+  {
+   "description": "Computed from the schedule at open time (site timezone). Sales are blocked after this moment when mandatory closing is enabled.",
+   "fieldname": "pos_schedule_deadline",
+   "fieldtype": "Datetime",
+   "label": "Schedule Deadline",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_schedule_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "pos_schedule_warning_minutes",
+   "fieldtype": "Int",
+   "label": "Schedule Warning Minutes",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "When enabled, sales, payments and refunds are blocked after the deadline; only closing the shift is allowed.",
+   "fieldname": "pos_schedule_enforce_closing",
+   "fieldtype": "Check",
+   "label": "Enforce Closing After Schedule",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_break_9",
    "fieldtype": "Section Break",
    "read_only": 1
@@ -130,7 +194,7 @@
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-03 15:54:10.799263",
+ "modified": "2026-09-07 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Opening Shift",
