@@ -8,13 +8,16 @@
 		>
 			<!-- Main Container -->
 			<div class="fixed inset-0 flex items-center justify-center p-4 md:p-6">
+			<!-- Inline dvh overrides the vh class where supported; older
+			     browsers drop the invalid declaration and keep 90vh. -->
+			<div
+				class="w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col"
+				style="max-height: 90dvh"
+			>
+				<!-- Header -->
 				<div
-					class="w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col"
+					class="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-4 sm:py-5 border-b bg-gradient-to-r from-blue-50 to-indigo-50"
 				>
-					<!-- Header -->
-					<div
-						class="flex items-center justify-between px-6 py-5 border-b bg-gradient-to-r from-blue-50 to-indigo-50"
-					>
 						<div class="flex items-center gap-3">
 							<div class="p-2 bg-blue-100 rounded-lg">
 								<svg
@@ -59,7 +62,7 @@
 								</p>
 							</div>
 						</div>
-						<div class="flex items-center gap-2">
+						<div class="flex flex-wrap items-center gap-2">
 							<Button
 								@click="loadSettings"
 								:loading="loading"

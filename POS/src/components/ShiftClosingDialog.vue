@@ -1,7 +1,7 @@
 <template>
 	<Dialog v-model="open" :options="{ title: __('Close POS Shift'), size: '4xl' }">
 		<template #body-content>
-			<div class="flex flex-col gap-3 md:gap-6">
+			<div class="pos-dialog-bound flex flex-col gap-3 md:gap-6">
 				<div v-if="closingDataResource.loading" class="text-center py-8 md:py-12">
 					<div
 						class="inline-block animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-b-4 border-blue-600"

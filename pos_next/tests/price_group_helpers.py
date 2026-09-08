@@ -326,6 +326,9 @@ def make_test_pos_profile(suffix: str, company: str, warehouse: str, *, payments
 			"expense_account": expense_account,
 			"cost_center": write_off_cc,
 			"write_off_limit": 1.0,
+			# custom field defaults to enabled=1 with no times, which fails
+			# shift_schedule validation on a fresh database
+			"pos_schedule_enabled": 0,
 		}
 	)
 	doc.insert(ignore_permissions=True)

@@ -1,7 +1,65 @@
 <template>
-	<Dialog v-model="show" :options="{ title: __('Invoice History'), size: '5xl' }">
-		<template #body-content>
-			<div class="flex flex-col gap-4">
+	<Dialog v-model="show" :options="{ title: __('Invoice History'), size: '6xl' }">
+		<template #body>
+			<!-- Constrained dialog: fixed header + tabs, scrollable body, minimal footer -->
+			<div class="flex flex-col max-h-[calc(100dvh-6rem)] text-start">
+				<!-- Compact fixed header: title, close, tabs -->
+				<div class="shrink-0 border-b border-gray-200 px-4 pt-4 sm:px-5" data-test="dialog-header">
+					<div class="flex items-center justify-between gap-3">
+						<DialogTitle class="text-lg font-semibold leading-6 text-gray-900">
+							{{ __("Invoice History") }}
+						</DialogTitle>
+						<Button
+							variant="ghost"
+							@click="show = false"
+							:aria-label="__('Close')"
+							:title="__('Close')"
+						>
+							<svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+							</svg>
+						</Button>
+					</div>
+					<!-- Tabs Navigation -->
+					<div class="mt-3 flex w-fit p-1 bg-gray-100 rounded-lg" role="tablist" :aria-label="__('History Sections')">
+						<button
+							@click="activeTab = 'summary'"
+							role="tab"
+							:aria-selected="activeTab === 'summary'"
+							:class="[
+								'px-3 md:px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200',
+								activeTab === 'summary'
+									? 'bg-white text-gray-900 shadow-sm'
+									: 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50',
+							]"
+						>
+							{{ __("Session Summary") }}
+						</button>
+						<button
+							@click="activeTab = 'transactions'"
+							role="tab"
+							:aria-selected="activeTab === 'transactions'"
+							:class="[
+								'px-3 md:px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200',
+								activeTab === 'transactions'
+									? 'bg-white text-gray-900 shadow-sm'
+									: 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50',
+							]"
+						>
+							{{ __("Transactions") }}
+						</button>
+					</div>
+				</div>
+
+				<!-- Scrollable body -->
+				<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5" data-test="dialog-body">
+					<!-- Current Session Summary -->
+					<SessionSummary
+						v-if="activeTab === 'summary'"
+						:opening-shift="posOpeningShift"
+					/>
+
+					<template v-if="activeTab === 'transactions'">
 				<!-- Filters -->
 				<div class="flex items-center gap-2">
 					<div class="flex-1">
@@ -149,12 +207,19 @@
 						{{ __('Load More') }}
 					</Button>
 				</div>
+				</template>
+				</div>
+
+				<!-- Minimal footer -->
+				<div
+					class="flex shrink-0 items-center justify-end border-t border-gray-200 px-4 py-2.5 sm:px-5"
+					data-test="dialog-footer"
+				>
+					<Button variant="subtle" @click="show = false">
+						{{ __("Close") }}
+					</Button>
+				</div>
 			</div>
-		</template>
-		<template #actions>
-			<Button variant="subtle" @click="show = false">
-				{{ __("Close") }}
-			</Button>
 		</template>
 	</Dialog>
 
@@ -172,15 +237,21 @@
 <script setup>
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import {
+	DEFAULT_CURRENCY,
+	DEFAULT_LOCALE,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
+import { DialogTitle } from "reka-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
+import SessionSummary from "./SessionSummary.vue"
 
-const { showError } = useToast();
-const { formatDate, formatTime } = useFormatters();
+const { showError } = useToast()
+const { formatDate, formatTime } = useFormatters()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -190,10 +261,10 @@ const props = defineProps({
 		type: String,
 		default: DEFAULT_CURRENCY,
 	},
-});
+})
 
 function formatCurrency(amount) {
-	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
 
 const emit = defineEmits([
@@ -202,9 +273,10 @@ const emit = defineEmits([
 	"view-invoice",
 	"print-invoice",
 	"return-created",
-]);
+])
 
 const show = ref(props.modelValue)
+const activeTab = ref(props.posOpeningShift ? "summary" : "transactions")
 const invoices = ref([])
 const searchTerm = ref("")
 const page = ref(0)
@@ -212,8 +284,8 @@ const pageSize = 20
 const hasMore = ref(true)
 
 // Return dialog state
-const showReturnDialog = ref(false);
-const selectedInvoiceForReturn = ref(null);
+const showReturnDialog = ref(false)
+const selectedInvoiceForReturn = ref(null)
 
 // Track if we're loading more (appending) vs fresh load (replacing)
 const isLoadingMore = ref(false)
@@ -256,13 +328,15 @@ const invoicesResource = createResource({
 		showError(__("Failed to load invoices"))
 		isLoadingMore.value = false
 	},
-});
+})
 
 watch(
 	() => props.modelValue,
 	(val) => {
 		show.value = val
 		if (val && props.posProfile) {
+			// Default to the session summary when there is an active shift
+			activeTab.value = props.posOpeningShift ? "summary" : "transactions"
 			loadInvoices()
 		}
 	},
@@ -330,11 +404,11 @@ function onSearchInput() {
 }
 
 function viewInvoice(invoice) {
-	emit("view-invoice", invoice);
+	emit("view-invoice", invoice)
 }
 
 function printInvoice(invoice) {
-	emit("print-invoice", invoice);
+	emit("print-invoice", invoice)
 }
 
 function canCreateReturn(invoice) {
@@ -342,12 +416,16 @@ function canCreateReturn(invoice) {
 	// 1. Invoice is submitted (docstatus === 1)
 	// 2. Not already a return invoice
 	// 3. Status is not "Credit Note Issued" (already has a return)
-	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== 'Credit Note Issued'
+	return (
+		invoice.docstatus === 1 &&
+		!invoice.is_return &&
+		invoice.status !== "Credit Note Issued"
+	)
 }
 
 function openReturnModal(invoice) {
-	selectedInvoiceForReturn.value = invoice;
-	showReturnDialog.value = true;
+	selectedInvoiceForReturn.value = invoice
+	showReturnDialog.value = true
 }
 
 function handleReturnCreated(returnInvoice) {
@@ -358,9 +436,9 @@ function handleReturnCreated(returnInvoice) {
 }
 
 function formatDateTime(date, time) {
-	const dateStr = formatDate(date);
-	const timeStr = formatTime(time);
-	return [dateStr, timeStr].filter(Boolean).join(" ");
+	const dateStr = formatDate(date)
+	const timeStr = formatTime(time)
+	return [dateStr, timeStr].filter(Boolean).join(" ")
 }
 
 function formatPaymentModes(invoice) {
