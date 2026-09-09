@@ -1105,7 +1105,7 @@
 									v-if="item.package_instance"
 									type="button"
 									@click.stop="$emit('remove-package', item.package_instance)"
-									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
+									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-1 -m-1 touch-manipulation active:scale-90"
 									:aria-label="__('Remove {0}', [item.item_name])"
 									:title="__('Remove package')"
 								>
@@ -1127,7 +1127,7 @@
 									v-else-if="!item.is_free_item"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
-									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
+									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-1 -m-1 touch-manipulation active:scale-90"
 									:aria-label="__('Remove {0}', [item.item_name])"
 									:title="__('Remove item')"
 								>
@@ -1147,8 +1147,10 @@
 								</button>
 							</div>
 
-							<!-- Single Row: Quantity Counter, UOM, Price & Total -->
-							<div class="flex items-center justify-between gap-1.5">
+							<!-- Single Row: Quantity Counter, UOM, Price & Total.
+							     Wraps instead of clipping on narrow phones; the
+							     total stays right-aligned via ms-auto. -->
+							<div class="flex flex-wrap items-center gap-1.5">
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
 									<!-- For free items, show static quantity badge -->
@@ -1250,7 +1252,7 @@
 											inputmode="decimal"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-16 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
+												'w-12 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
 												item.is_resolved_barcode
 													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
 													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500',
@@ -1395,7 +1397,7 @@
 								</div>
 
 								<!-- Item Total -->
-								<div class="text-end flex-shrink-0">
+								<div class="ms-auto text-end flex-shrink-0">
 									<div
 										class="text-xs sm:text-sm font-bold text-blue-600 leading-none"
 									>

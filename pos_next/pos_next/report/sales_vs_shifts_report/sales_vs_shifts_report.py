@@ -80,6 +80,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, time_diff_in_hours
 
+from pos_next.hq_scope import apply_company_scope
+
 
 def execute(filters=None):
 	filters = filters or {}
@@ -697,7 +699,9 @@ def fetch_shifts_with_invoices(filters):
 
 def build_conditions(filters):
 	"""Build SQL WHERE conditions"""
-	conditions = []
+	# Company first: explicit filter plus the user's User Permission scope.
+	# A forged company (outside the scope) raises before any SQL runs.
+	conditions = apply_company_scope(filters, "pcs")
 
 	if filters.get("from_date"):
 		conditions.append("DATE(pcs.period_start_date) >= %(from_date)s")
@@ -1136,12 +1140,9 @@ def get_chart(data):
 # =============================================================================
 
 
-@frappe.whitelist()
-def get_hourly_breakdown(filters):
-	"""Get hourly sales breakdown"""
-	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
-
-	conditions = []
+def _si_conditions(filters):
+	"""Scoped WHERE conditions for Sales Invoice based chart endpoints."""
+	conditions = apply_company_scope(filters, "si")
 	if filters.get("from_date"):
 		conditions.append("si.posting_date >= %(from_date)s")
 	if filters.get("to_date"):
@@ -1150,7 +1151,15 @@ def get_hourly_breakdown(filters):
 		conditions.append("si.pos_profile = %(pos_profile)s")
 	if filters.get("cashier"):
 		conditions.append("si.owner = %(cashier)s")
+	return conditions
 
+
+@frappe.whitelist()
+def get_hourly_breakdown(filters):
+	"""Get hourly sales breakdown"""
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
+
+	conditions = _si_conditions(filters)
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
 	return frappe.db.sql(
@@ -1175,16 +1184,7 @@ def get_payment_method_breakdown(filters):
 	"""Get payment method breakdown"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
-	conditions = []
-	if filters.get("from_date"):
-		conditions.append("si.posting_date >= %(from_date)s")
-	if filters.get("to_date"):
-		conditions.append("si.posting_date <= %(to_date)s")
-	if filters.get("pos_profile"):
-		conditions.append("si.pos_profile = %(pos_profile)s")
-	if filters.get("cashier"):
-		conditions.append("si.owner = %(cashier)s")
-
+	conditions = _si_conditions(filters)
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
 	return frappe.db.sql(
@@ -1210,16 +1210,7 @@ def get_daily_trend(filters):
 	"""Get daily sales trend"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
-	conditions = []
-	if filters.get("from_date"):
-		conditions.append("si.posting_date >= %(from_date)s")
-	if filters.get("to_date"):
-		conditions.append("si.posting_date <= %(to_date)s")
-	if filters.get("pos_profile"):
-		conditions.append("si.pos_profile = %(pos_profile)s")
-	if filters.get("cashier"):
-		conditions.append("si.owner = %(cashier)s")
-
+	conditions = _si_conditions(filters)
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
 	return frappe.db.sql(

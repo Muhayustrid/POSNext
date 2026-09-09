@@ -5,7 +5,7 @@
 			<button
 				ref="navTriggerRef"
 				type="button"
-				class="lg:hidden ms-2 p-2 self-center rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 transition-colors flex-shrink-0 touch-manipulation"
+				class="lg:hidden ms-1 h-11 w-11 self-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 transition-colors flex-shrink-0 touch-manipulation inline-flex items-center"
 				:aria-label="__('Open menu')"
 				aria-controls="management-drawer"
 				:aria-expanded="showNavDrawer ? 'true' : 'false'"
@@ -90,13 +90,13 @@
 
 				<!-- Right Side: Controls -->
 				<div class="flex items-center gap-0.5 sm:gap-1 md:gap-2 flex-shrink-0">
-					<!-- WiFi/Offline Status -->
-					<button
-						@click="$emit('sync-click')"
-						:class="[
-							'p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative group touch-manipulation',
-							isSyncing ? 'animate-pulse' : '',
-						]"
+				<!-- WiFi/Offline Status -->
+				<button
+					@click="$emit('sync-click')"
+					:class="[
+						'pos-icon-btn p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative group touch-manipulation',
+						isSyncing ? 'animate-pulse' : '',
+					]"
 						:title="
 							isOffline
 								? __('Offline ({0} pending)', [pendingInvoicesCount])
@@ -143,7 +143,7 @@
 						<button
 							@click="showCacheTooltip = !showCacheTooltip"
 							@blur="handleBlur"
-							class="p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative touch-manipulation"
+							class="pos-icon-btn p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative touch-manipulation"
 							:aria-label="getCacheAriaLabel()"
 						>
 							<svg
@@ -360,7 +360,7 @@
 						:title="isRefreshing ? __('Refreshing...') : __('Refresh')"
 						@click="$emit('refresh-click')"
 						:class="[
-							'touch-manipulation p-1 sm:p-2',
+							'pos-icon-btn touch-manipulation p-1 sm:p-2',
 							isRefreshing ? 'animate-spin' : '',
 						]"
 						:aria-label="

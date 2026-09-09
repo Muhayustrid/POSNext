@@ -51,6 +51,7 @@ declare module 'vue' {
     SelectField: typeof import('./src/components/settings/SelectField.vue')['default']
     SelectInput: typeof import('./src/components/common/SelectInput.vue')['default']
     SessionLockScreen: typeof import('./src/components/common/SessionLockScreen.vue')['default']
+    SessionSummary: typeof import('./src/components/sale/SessionSummary.vue')['default']
     SettingsSection: typeof import('./src/components/settings/SettingsSection.vue')['default']
     ShiftClosingDialog: typeof import('./src/components/ShiftClosingDialog.vue')['default']
     ShiftHistoryDialog: typeof import('./src/components/sale/ShiftHistoryDialog.vue')['default']

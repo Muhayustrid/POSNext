@@ -165,3 +165,55 @@ button.active\:scale-95:active,
 		transform: scale(0.98);
 	}
 }
+
+/* ─── Responsive shells (small screens) ─────────────────────────────────── */
+
+/* App root: dynamic viewport height so browser toolbars/keyboard don't hide
+   the cart footer on phones. vh fallback for older browsers. */
+.pos-app-shell {
+	height: 100vh;
+	max-height: 100vh;
+}
+
+/* Main content area between header and viewport bottom (same formula as the
+   inline style it replaces, but dvh-aware). */
+.pos-content-shell {
+	max-height: calc(100vh - 60px - var(--header-height, 60px));
+}
+
+@supports (height: 100dvh) {
+	.pos-app-shell {
+		height: 100dvh;
+		max-height: 100dvh;
+	}
+	.pos-content-shell {
+		max-height: calc(100dvh - 60px - var(--header-height, 60px));
+	}
+}
+
+/* Bound a dialog body on phones/tablets so its footer stays reachable:
+   one scroll region inside the dialog instead of the whole overlay scrolling.
+   Desktop (>= lg) keeps the previous grow-as-needed overlay scroll. */
+.pos-dialog-bound {
+	max-height: calc(100vh - 15rem);
+	max-height: calc(100dvh - 15rem);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	-webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 1024px) {
+	.pos-dialog-bound {
+		max-height: none;
+		overflow: visible;
+	}
+}
+
+/* Comfortable touch targets for secondary header icon buttons on
+   touch-sized screens (primary controls get explicit h-11 w-11). */
+@media (max-width: 1023.98px) {
+	.pos-icon-btn {
+		min-width: 36px;
+		min-height: 36px;
+	}
+}

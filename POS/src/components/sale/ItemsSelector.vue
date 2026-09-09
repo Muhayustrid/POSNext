@@ -107,7 +107,7 @@
 						<button
 							@click="toggleBarcodeScanner"
 							:class="[
-								'p-1 sm:p-1.5 rounded transition-[background-color] duration-75 touch-manipulation',
+								'h-8 w-8 inline-flex items-center justify-center rounded transition-[background-color] duration-75 touch-manipulation',
 								scannerEnabled
 									? 'bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-700'
 									: 'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
@@ -140,7 +140,7 @@
 						<button
 							@click="toggleAutoAdd"
 							:class="[
-								'p-1 sm:p-1.5 rounded transition-[background-color] duration-75 flex items-center gap-0.5 text-[9px] sm:text-xs font-medium px-1 sm:px-2 touch-manipulation',
+								'h-8 inline-flex items-center rounded transition-[background-color] duration-75 flex items-center gap-0.5 text-[9px] sm:text-xs font-medium px-1 sm:px-2 touch-manipulation',
 								autoAddEnabled
 									? 'bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-700'
 									: 'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
@@ -451,9 +451,10 @@
 							{{ Math.floor(item.actual_qty ?? item.stock_qty ?? 0) }}
 						</div>
 
-						<!-- Item Image -->
+						<!-- Item Image (height capped below lg so phone/tablet cards
+						     stay compact and more items fit on screen) -->
 						<div
-							class="relative aspect-square bg-gray-100 rounded-md mb-1.5 sm:mb-2 overflow-hidden"
+							class="relative aspect-square max-h-44 lg:max-h-none bg-gray-100 rounded-md mb-1.5 sm:mb-2 overflow-hidden"
 						>
 							<!-- Image with conditional blur on hover -->
 							<div

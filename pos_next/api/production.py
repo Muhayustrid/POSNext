@@ -2,12 +2,13 @@
 # For license information, please see license.txt
 
 import json
+import math
 from uuid import uuid4
 
 import frappe
+from erpnext.stock.doctype.batch.batch import get_batch_qty
 from frappe import ValidationError, _
 from frappe.utils import flt, getdate
-from erpnext.stock.doctype.batch.batch import get_batch_qty
 
 
 def _resolve_profile(pos_profile):
@@ -131,23 +132,38 @@ def _batch_list(item_code, warehouse):
 	return out
 
 
-def _parse_items(items):
-	if isinstance(items, str):
-		items = json.loads(items)
-	return [
-		{"item_code": d["item_code"], "qty": flt(d.get("qty"))}
-		for d in items
-		if d.get("item_code")
-	]
+def _uom_whole_field():
+	"""ERPNext v15 names the UOM flag must_be_whole; v16 must_be_whole_number."""
+	return (
+		"must_be_whole_number"
+		if frappe.get_meta("UOM").has_field("must_be_whole_number")
+		else "must_be_whole"
+	)
+
+
+def _pick_batch(item_code, warehouse, qty):
+	"""FIFO: batches sorted by expiry; first batch that covers qty wins."""
+	batches = _batch_list(item_code, warehouse)
+	for b in batches:
+		if b["qty"] >= qty:
+			return b["batch_no"]
+	total = sum(b["qty"] for b in batches)
+	frappe.throw(_("Material {0} is short by {1} in {2}").format(item_code, qty - total, warehouse))
 
 
 @frappe.whitelist()
-def create_production(recipe, qty, items, pos_profile, batches=None):
-	"""Consume materials and produce the recipe's item in one Manufacture Stock Entry."""
+def create_production(recipe, qty, pos_profile, items=None, batches=None):
+	"""Consume materials and produce the recipe's item in one Manufacture Stock Entry.
+
+	Materials and batches always derive server-side from the trusted recipe and
+	available stock, scaled to the requested output quantity. The legacy
+	items/batches params are accepted (stale cached POS clients still send them)
+	but intentionally ignored — clients cannot override BOM quantities.
+	"""
 	try:
 		company, warehouse = _resolve_profile(pos_profile)
 		qty = flt(qty)
-		if qty <= 0:
+		if qty <= 0 or not math.isfinite(qty):
 			frappe.throw(_("Production quantity must be greater than zero"))
 
 		recipe_doc = frappe.get_doc("POS Production Recipe", recipe)
@@ -157,15 +173,27 @@ def create_production(recipe, qty, items, pos_profile, batches=None):
 			frappe.throw(
 				_("Recipe {0} is not available for company {1}").format(recipe_doc.recipe_name, company)
 			)
+		if not recipe_doc.items:
+			frappe.throw(_("Recipe {0} has no materials").format(recipe_doc.recipe_name))
+		recipe_qty = flt(recipe_doc.output_qty)
+		if recipe_qty <= 0:
+			frappe.throw(_("Recipe {0} has no output quantity").format(recipe_doc.recipe_name))
 
-		materials = _parse_items(items)
-		if not materials:
-			frappe.throw(_("At least one material is required"))
-		batches = json.loads(batches) if isinstance(batches, str) else (batches or {})
+		# ---- derive materials from the trusted recipe, scaled to requested output ----
+		factor = qty / recipe_qty
+		materials = [
+			{"item_code": row.item_code, "qty": flt(flt(row.qty) * factor, 9)} for row in recipe_doc.items
+		]
 
 		flags = _item_flags([m["item_code"] for m in materials] + [recipe_doc.production_item])
 
-		# ---- pre-flight stock validation (trust boundary: client data is untrusted) ----
+		fg_info = flags.get(recipe_doc.production_item)
+		if fg_info and fg_info.disabled:
+			frappe.throw(_("Item {0} is disabled").format(recipe_doc.production_item))
+		if fg_info and frappe.db.get_value("UOM", fg_info.stock_uom, _uom_whole_field()) and qty != int(qty):
+			frappe.throw(_("Quantity must be a whole number for UOM {0}").format(fg_info.stock_uom))
+
+		# ---- pre-flight stock validation (trust boundary: recipe rows are trusted, stock is not) ----
 		merged = {}
 		for m in materials:
 			if m["qty"] <= 0:
@@ -184,19 +212,7 @@ def create_production(recipe, qty, items, pos_profile, batches=None):
 			if info.disabled:
 				frappe.throw(_("Item {0} is disabled").format(m["item_code"]))
 			if info.has_batch_no:
-				batch_no = batches.get(m["item_code"])
-				if not batch_no:
-					frappe.throw(_("Batch is required for material {0}").format(m["item_code"]))
-				batch_qty = flt(
-					frappe.db.get_value("Batch", {"name": batch_no, "item": m["item_code"]}, "batch_qty")
-				)
-				if batch_qty < m["qty"]:
-					frappe.throw(
-						_("Material {0} batch {1} has only {2}, need {3}").format(
-							m["item_code"], batch_no, batch_qty, m["qty"]
-						)
-					)
-				m["batch_no"] = batch_no
+				m["batch_no"] = _pick_batch(m["item_code"], warehouse, m["qty"])
 			else:
 				available = _stock_qty(m["item_code"], warehouse)
 				if available < m["qty"]:
@@ -205,10 +221,6 @@ def create_production(recipe, qty, items, pos_profile, batches=None):
 							m["item_code"], m["qty"] - available, warehouse
 						)
 					)
-
-		fg_info = flags.get(recipe_doc.production_item)
-		if fg_info and fg_info.disabled:
-			frappe.throw(_("Item {0} is disabled").format(recipe_doc.production_item))
 
 		# ---- build the Manufacture Stock Entry ----
 		se = frappe.new_doc("Stock Entry")
