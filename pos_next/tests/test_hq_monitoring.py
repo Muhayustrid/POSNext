@@ -226,11 +226,14 @@ class TestHQMonitoring(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 
 	@classmethod
-	def _make_invoice(cls, company, profile, cash_mode, rows, paid, is_return=False, currency=None):
+	def _make_invoice(cls, company, profile, cash_mode, rows, paid, is_return=False, currency=None, posting_date=None):
 		inv = frappe.new_doc("Sales Invoice")
 		inv.company = company
 		inv.customer = cls.customer
 		inv.is_pos = 1
+		if posting_date:
+			inv.set_posting_time = 1
+			inv.posting_date = posting_date
 		if currency:
 			# non-site-currency company: keep document currency on the company's
 			# own currency (price list would otherwise pull the site default)
@@ -334,10 +337,225 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertIn(self.currency_b, net)
 		self.assertEqual(net[self.currency_b], 100.0)
 		self.assertEqual(len(data["scope"]["currency_map"]), len(data["scope"]["companies"]))
-		# outlet rows carry their own currency
-		outlets = {o["pos_profile"]: o for o in data["outlet_ranking"]}
-		self.assertEqual(outlets[self.profile_b]["currency"], self.currency_b)
-		self.assertEqual(outlets[self.profile_b]["orders"], 1)
+		# outlet rows are company-level and carry their own currency
+		outlets = {o["company"]: o for o in data["outlet_ranking"]}
+		self.assertEqual(outlets[self.company_b]["currency"], self.currency_b)
+		self.assertEqual(outlets[self.company_b]["orders"], 1)
+		# POS profiles stay nested under their company (nothing hidden)
+		profile_b = next(
+			p for p in outlets[self.company_b]["profiles"] if p["pos_profile"] == self.profile_b
+		)
+		self.assertEqual(profile_b["orders"], 1)
+
+	def test_outlet_ranking_is_company_level(self):
+		data = self._payload()  # company A scope
+		rows = data["outlet_ranking"]
+		self.assertEqual([r["company"] for r in rows], [self.company_a])
+		row = rows[0]
+		self.assertEqual(row["currency"], self.currency_a)
+		self.assertEqual(row["orders"], 3)
+		self.assertEqual(row["share_pct"], 100.0)  # share inside one currency
+		self.assertEqual([p["pos_profile"] for p in row["profiles"]], [self.profile_a])
+
+	def test_category_top_positive_only_labeled_currency(self):
+		data = self._payload()
+		ct = data["category_top"]
+		self.assertTrue(ct["rows"], "fixture has positive-sales groups")
+		self.assertEqual(ct["currency"], self.currency_a)
+		self.assertIn("net revenue", ct["method"])  # chosen method is labeled
+		groups = {r["item_group"] for r in ct["rows"]}
+		self.assertIn(frappe.db.get_value("Item", self.item_x, "item_group"), groups)
+		for r in ct["rows"]:
+			self.assertGreater(r["net_amount"], 0)  # donut segments positive-only
+			self.assertGreater(r["share_pct"], 0)
+
+	# ------------------------------------------------------------------
+	# per-category "top items" cards (category_a / category_b)
+	# ------------------------------------------------------------------
+
+	def _groups(self):
+		return (
+			frappe.db.get_value("Item", self.item_x, "item_group"),
+			frappe.db.get_value("Item", self.item_y, "item_group"),
+		)
+
+	def test_category_product_cards_isolated_with_shares(self):
+		group_x, group_y = self._groups()
+		data = self._payload(category_a=group_x, category_b=group_y)
+		a = data["category_products"]["a"]
+		b = data["category_products"]["b"]
+
+		# isolation: each card holds only items of its own category
+		self.assertEqual(a["category"], group_x)
+		self.assertEqual({r["item_code"] for r in a["items"]}, {self.pkg_parent, self.item_x})
+		self.assertEqual(b["category"], group_y)
+		self.assertEqual([r["item_code"] for r in b["items"]], [self.item_y])
+
+		# full-dataset aggregation over the category: pkg 3000 + x 1000 (2 sold,
+		# 1 returned); shares are of the WHOLE category, "other" is the remainder
+		self.assertEqual(a["category_total"], 4000.0)
+		self.assertEqual([r["net_amount"] for r in a["items"]], [3000.0, 1000.0])
+		self.assertEqual([r["share_pct"] for r in a["items"]], [75.0, 25.0])
+		self.assertEqual(a["other_net"], 0.0)
+		self.assertEqual(a["items_with_sales"], 2)
+		self.assertEqual(a["currency"], self.currency_a)
+		self.assertEqual(b["category_total"], 500.0)
+		self.assertEqual(b["items"][0]["share_pct"], 100.0)
+
+		# package components never appear (bundle revenue stays on the parent;
+		# the SQL filter drops them entirely, so nothing non-positive remains)
+		self.assertNotIn(self.pkg_component, {r["item_code"] for r in a["items"]})
+		self.assertEqual(a["excluded_nonpositive"], 0)
+
+	def test_category_product_cards_include_descendants(self):
+		group_x, _ = self._groups()
+		parent = self._make_group("_Test HQ Parent Group", 1)
+		child = self._make_group("_Test HQ Child Group", 0, parent)
+		code = make_test_item("HQMON CHILD")
+		frappe.db.set_value("Item", code, "item_group", child)
+		name = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": code, "qty": 1, "rate": 700}],
+			paid=700,
+		)
+		try:
+			data = self._payload(category_a=parent, category_b=group_x)
+			a = data["category_products"]["a"]
+			self.assertIn(code, {r["item_code"] for r in a["items"]})
+			self.assertEqual(a["category_total"], 700.0)  # only the child sells
+			# sibling branch untouched by the parent subtree
+			b = data["category_products"]["b"]
+			self.assertNotIn(code, {r["item_code"] for r in b["items"]})
+		finally:
+			frappe.get_doc("Sales Invoice", name).cancel()
+
+	def test_category_product_cards_currency_isolated(self):
+		from pos_next.api.hq_monitoring import _category_products
+
+		group_x, _ = self._groups()
+		out = _category_products(
+			[self.company_a, self.company_b],
+			None,
+			frappe.utils.nowdate(),
+			frappe.utils.nowdate(),
+			None,
+			{self.company_a: self.currency_a, self.company_b: self.currency_b},
+			self.currency_a,
+			{"a": group_x, "b": None},
+		)
+		# company B sells item_x in another currency: listed, never merged in
+		self.assertEqual(out["a"]["category_total"], 4000.0)
+		self.assertEqual(out["a"]["excluded_currencies"], [self.currency_b])
+		self.assertEqual(out["b"]["category"], None)
+		self.assertEqual(out["b"]["items"], [])
+
+	def test_category_product_cards_invalid_and_insufficient_data(self):
+		group_x, group_y = self._groups()
+		# stale stored category: flagged, not raised, so the page can recover
+		data = self._payload(category_a="_Test HQ Missing Group", category_b=group_y)
+		a = data["category_products"]["a"]
+		self.assertTrue(a["invalid"])
+		self.assertEqual(a["items"], [])
+		self.assertFalse(data["category_products"]["b"]["invalid"])
+
+		# category chosen but no sales in the selected range: empty, zero, N/A
+		yesterday = frappe.utils.add_days(frappe.utils.nowdate(), -1)
+		data = self._payload(from_date=yesterday, to_date=yesterday, category_a=group_x)
+		a = data["category_products"]["a"]
+		self.assertFalse(a["invalid"])
+		self.assertEqual(a["items"], [])
+		self.assertEqual(a["category_total"], 0.0)
+		self.assertIsNone(a["other_share_pct"])
+
+	def test_category_cards_independent_of_global_ranking_filter(self):
+		group_x, group_y = self._groups()
+		# the Product Ranking category filter must not touch the cards...
+		data = self._payload(category=group_y, category_a=group_x, category_b=group_y)
+		self.assertEqual({r["item_code"] for r in data["product_ranking"]["rows"]}, {self.item_y})
+		a = data["category_products"]["a"]
+		self.assertEqual({r["item_code"] for r in a["items"]}, {self.pkg_parent, self.item_x})
+		# ...and item_groups for the card selects always come back
+		self.assertIn(group_x, data["item_groups"])
+		self.assertIn(group_y, data["item_groups"])
+
+	@classmethod
+	def _make_group(cls, name, is_group, parent=None):
+		if frappe.db.exists("Item Group", name):
+			return name
+		if parent is None:
+			parent = (
+				"All Item Groups"
+				if frappe.db.exists("Item Group", "All Item Groups")
+				else frappe.db.get_value("Item Group", {"is_group": 1}, "name")
+			)
+		doc = frappe.get_doc(
+			{
+				"doctype": "Item Group",
+				"item_group_name": name,
+				"is_group": is_group,
+				"parent_item_group": parent,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc.name
+
+	def test_daily_compares_same_weekday_last_week(self):
+		# An invoice posted exactly 7 days back is the ONLY sales in the
+		# last-week comparator window: it must drive "Growth vs LW" while the
+		# selected day (today) keeps the class fixtures only.
+		last_week = frappe.utils.add_days(frappe.utils.nowdate(), -7)
+		name = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 400}],
+			paid=400,
+			posting_date=last_week,
+		)
+		try:
+			data = self._payload()
+			d = data["daily"]
+			self.assertEqual(d["last_week_same"]["date"], last_week)
+			# selected-day result: today's class fixtures, not the backdated one
+			self.assertEqual(d["totals"]["orders"], 3)
+			self.assertEqual(d["totals"]["net_tax_incl"]["by_currency"][self.currency_a], 4500.0)
+			# comparator window holds exactly the backdated invoice
+			self.assertEqual(d["last_week_same"]["orders"], 1)
+			self.assertEqual(d["last_week_same"]["net_tax_incl"]["by_currency"][self.currency_a], 400.0)
+			self.assertEqual(
+				d["growth_vs_last_week_pct"][self.currency_a], round((4500 - 400) / 400 * 100, 2)
+			)
+		finally:
+			# Cancel so the shared class fixture stays exact for sibling tests.
+			frappe.get_doc("Sales Invoice", name).cancel()
+
+	def test_range_metrics_follow_selected_range(self):
+		# An invoice posted yesterday: the selected range (yesterday..today)
+		# must include it while the daily section (today only) must not.
+		yesterday = frappe.utils.add_days(frappe.utils.nowdate(), -1)
+		name = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 250}],
+			paid=250,
+			posting_date=yesterday,
+		)
+		try:
+			data = self._payload(from_date=yesterday, to_date=yesterday)
+			self.assertEqual(data["scope"]["from_date"], yesterday)
+			r = data["range"]
+			self.assertEqual(r["orders"], 1)
+			self.assertEqual(r["net_tax_incl"]["by_currency"][self.currency_a], 250.0)
+			self.assertEqual(r["apc"]["by_currency"][self.currency_a], 250.0)
+			# daily section stays on its own window (to_date), not the range
+			# (here to_date == yesterday, so the daily result IS the range day)
+			self.assertEqual(data["daily"]["totals"]["orders"], 1)
+		finally:
+			# Cancel so the shared class fixture stays exact for sibling tests.
+			frappe.get_doc("Sales Invoice", name).cancel()
 
 	def test_targets_available_and_achievement(self):
 		data = self._payload()
@@ -351,6 +569,9 @@ class TestHQMonitoring(IntegrationTestCase):
 		dim = data["windows"]["days_in_month"]
 		self.assertEqual(t["daily_target_sales"][self.currency_a], round(100000 / dim, 2))
 		self.assertEqual(t["apc_target"][self.currency_a], 10000.0)
+		# TC projection = MTD orders / days elapsed x days in month
+		elapsed = data["windows"]["days_elapsed"]
+		self.assertEqual(t["projected_orders"], round(3 / elapsed * dim))
 
 	def test_targets_missing_marked_unavailable(self):
 		# drop company A's target: aggregate over A scope must go N/A, not partial

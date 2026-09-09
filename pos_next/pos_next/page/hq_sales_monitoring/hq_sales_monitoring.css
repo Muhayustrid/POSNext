@@ -1,27 +1,87 @@
-/* HQ Sales Monitoring - desk page styles */
+/* HQ Sales Monitoring — desk page styles.
+   Hierarchy mirrors the legacy HQ report: full-width monitoring tables,
+   compact stat row, 2x2 hero, 2x2 chart grid, side-by-side rankings. */
+
+#page-hq-sales-monitoring .page-form,
+.hq-monitor {
+	max-width: 1600px;
+	margin-left: auto;
+	margin-right: auto;
+	padding-left: 20px;
+	padding-right: 20px;
+}
 
 .hq-monitor {
 	font-size: 13px;
 	padding-bottom: 32px;
 }
 
+/* Filters wrap (never overflow the page); comfortable touch targets. */
+#page-hq-sales-monitoring .page-form {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 10px;
+	padding-bottom: 4px;
+}
+
+#page-hq-sales-monitoring .page-form > .frappe-control {
+	flex: 0 1 170px;
+	min-width: 140px;
+	max-width: 240px;
+}
+
 .hq-scope {
-	margin: 4px 0 12px;
-	color: #4c5259;
+	margin: 2px 0 10px;
+	font-size: 12px;
+	color: #57606a;
 }
 
-.hq-kpis {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-	gap: 12px;
-	margin-bottom: 12px;
+.hq-section-title {
+	font-size: 15px;
+	font-weight: 600;
+	margin: 14px 0 8px;
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	flex-wrap: wrap;
 }
 
-.hq-grid {
+.hq-section-title:first-of-type {
+	margin-top: 4px;
+}
+
+.hq-period {
+	font-size: 11.5px;
+	font-weight: 400;
+	color: #6b7280;
+}
+
+/* Full-width monitoring tables, compact stat cards, 2x2 hero + chart grid. */
+.hq-minis {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	grid-template-columns: repeat(4, minmax(0, 1fr));
 	gap: 12px;
-	margin-bottom: 12px;
+	margin-bottom: 4px;
+}
+
+.hq-hero {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	margin-bottom: 4px;
+	/* Cards keep their natural height: the tall Peak Hour chart must not
+	   stretch the Avg per Transaction card into a half-empty box. */
+	align-items: start;
+}
+
+.hq-charts,
+.hq-rankings {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	margin-bottom: 4px;
+	align-items: start;
 }
 
 .hq-card {
@@ -30,15 +90,14 @@
 	border-radius: 10px;
 	padding: 14px 16px;
 	margin-bottom: 12px;
+	min-width: 0;
 }
 
-.hq-grid .hq-card,
-.hq-kpis .hq-kpi {
+.hq-minis .hq-card,
+.hq-hero .hq-card,
+.hq-charts .hq-card,
+.hq-rankings .hq-card {
 	margin-bottom: 0;
-}
-
-.hq-card--table {
-	overflow-x: auto;
 }
 
 .hq-card-title {
@@ -46,38 +105,37 @@
 	font-size: 13px;
 	margin-bottom: 10px;
 	color: #16181a;
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	flex-wrap: wrap;
 }
 
-.hq-kpi-label {
-	font-size: 10px;
-	text-transform: uppercase;
-	letter-spacing: 0.5px;
-	color: #6b7280;
-	margin-bottom: 4px;
+.hq-card--table,
+.hq-table-scroll {
+	overflow-x: auto;
 }
 
-.hq-kpi-value {
-	font-size: 20px;
-	font-weight: 600;
-	color: #16181a;
-	line-height: 1.2;
-	word-break: break-word;
+/* Contained scroll: the wrapper never grows the page horizontally. */
+.hq-table-scroll {
+	max-width: 100%;
+	-webkit-overflow-scrolling: touch;
 }
 
-.hq-kpi-sub,
-.hq-extra {
-	font-size: 11px;
-	color: #6b7280;
-	margin-top: 4px;
-}
-
-.hq-muted {
-	color: #8d99a6;
+/* Monitoring matrices keep the row label visible while numbers scroll. */
+.hq-table--matrix th[scope="row"],
+.hq-table--matrix thead tr:first-child th:first-child {
+	position: sticky;
+	left: 0;
+	background: #fff;
+	z-index: 1;
+	text-align: left;
 }
 
 .hq-table {
 	width: 100%;
 	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
 }
 
 .hq-table th,
@@ -93,11 +151,267 @@
 	color: #6b7280;
 	text-transform: uppercase;
 	letter-spacing: 0.3px;
+	white-space: nowrap;
+}
+
+.hq-table--matrix thead tr:first-child th {
+	border-bottom: none;
+	padding-bottom: 0;
+}
+
+.hq-table--matrix thead tr:nth-child(2) th {
+	padding-top: 2px;
+}
+
+.hq-table--matrix tbody th[scope="row"] {
+	font-weight: 600;
+	white-space: nowrap;
+	border-right: 1px solid #f1f3f5;
+}
+
+.hq-table--matrix .hq-group {
+	text-align: center;
+	border-left: 1px solid #f1f3f5;
+	text-transform: none;
+	font-size: 12px;
+	color: #16181a;
+	font-weight: 600;
+}
+
+.hq-table--matrix .hq-group + th {
+	border-left: 1px solid #f1f3f5;
 }
 
 .hq-num {
 	text-align: right !important;
 	white-space: nowrap;
+}
+
+/* Compact stat cards */
+.hq-kpi-label {
+	font-size: 11.5px;
+	color: #6b7280;
+	margin-bottom: 4px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.hq-kpi-value {
+	font-size: 20px;
+	font-weight: 600;
+	color: #16181a;
+	line-height: 1.25;
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Subtle neutral-blue accent on the headline card only. */
+.hq-kpi--primary {
+	background: #f6f9fd;
+	border-color: #d8e4f2;
+}
+
+.hq-kpi-sub,
+.hq-extra {
+	font-size: 11px;
+	color: #6b7280;
+	margin-top: 4px;
+}
+
+.hq-muted {
+	color: #8d99a6;
+}
+
+.hq-money {
+	white-space: nowrap;
+}
+
+.hq-empty {
+	margin: 12px 0;
+}
+
+/* Tax toggle on the Total Sales card */
+.hq-toggle {
+	border: 1px solid #d0d7de;
+	background: #fff;
+	border-radius: 999px;
+	font-size: 10.5px;
+	padding: 1px 8px;
+	color: #2490ef;
+	cursor: pointer;
+}
+
+.hq-toggle:hover {
+	background: #f0f6ff;
+}
+
+.hq-toggle:focus-visible {
+	outline: 2px solid #2490ef;
+	outline-offset: 1px;
+}
+
+/* Donut + accessible value legend */
+.hq-donut {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.hq-donut-chart {
+	flex: 1 1 200px;
+	min-width: 180px;
+}
+
+.hq-legend {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	flex: 1 1 220px;
+	min-width: 200px;
+}
+
+.hq-legend li {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 0;
+	border-bottom: 1px dashed #f1f3f5;
+}
+
+.hq-dot {
+	flex: 0 0 10px;
+	width: 10px;
+	height: 10px;
+	border-radius: 3px;
+	align-self: center;
+}
+
+/* Legend labels wrap instead of truncating: a category the user cannot read
+   is worse than a taller row (the old built-in legend truncated too). */
+.hq-legend-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.hq-legend-value {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-legend-pct {
+	flex: 0 0 52px;
+	text-align: right;
+	color: #6b7280;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Secondary quantity in a legend row (Top Selling <category> cards). */
+.hq-legend-sub {
+	color: #8d99a6;
+	font-size: 11px;
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+/* Neutral empty state: dashed ring, no fake arcs, reason centered. */
+.hq-donut-empty {
+	flex: 1 1 200px;
+	width: 190px;
+	max-width: 100%;
+	height: 190px;
+	border: 2px dashed #d9dfe5;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	padding: 24px;
+	margin: 0 auto;
+	color: #8d99a6;
+	font-size: 12px;
+}
+
+.hq-item-code {
+	font-size: 11px;
+	color: #8d99a6;
+	margin-top: 2px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.hq-rank-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 8px;
+	flex-wrap: wrap;
+}
+
+.hq-select {
+	border: 1px solid #d0d7de;
+	border-radius: 6px;
+	padding: 6px 10px;
+	font-size: 12.5px;
+	max-width: 240px;
+	background: #fff;
+	min-height: 36px;
+}
+
+/* Inline in a card title ("Top Selling <select>"): shrinks with the card,
+   wraps under the title on narrow screens. Same height as every select. */
+.hq-select--inline {
+	max-width: 100%;
+	flex: 0 1 220px;
+	min-width: 140px;
+	margin: 0;
+	font-weight: 400;
+}
+
+.hq-select:focus-visible {
+	outline: 2px solid #2490ef;
+	outline-offset: 1px;
+}
+
+/* Touch targets: comfortable on coarse pointers (44px per HIG). */
+@media (pointer: coarse) {
+	.hq-select,
+	.hq-toggle,
+	.btn-xs {
+		min-height: 44px;
+	}
+}
+
+/* Peak Hour card: window selects sit inline above the chart. */
+.hq-hour-controls {
+	display: flex;
+	align-items: end;
+	gap: 10px;
+	flex-wrap: wrap;
+	margin-top: 8px;
+}
+
+.hq-ctl {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 11px;
+	color: #6b7280;
+}
+
+.hq-ctl .hq-select {
+	max-width: 110px;
 }
 
 .hq-pager {
@@ -107,41 +421,81 @@
 	margin-top: 10px;
 }
 
+.hq-notes {
+	font-size: 12px;
+	color: #57606a;
+}
+
+.hq-notes summary {
+	cursor: pointer;
+	font-weight: 600;
+	font-size: 13px;
+	color: #16181a;
+}
+
+.hq-notes .hq-kpi-sub {
+	margin-top: 6px;
+}
+
 .hq-footer {
 	margin-top: 8px;
 	font-size: 11px;
 }
 
-.hq-hour-chart {
+/* Horizontal scroll keeps every bar mapped to a readable HH:00 axis on
+   narrow screens. The chart's min-width is set proportionally to the number
+   of visible bins (40px per bin, JS-side): a short window like 05–18 fits the
+   card without scrolling, all 24 hours keep the calibrated full axis and
+   scroll locally below that. */
+.hq-hour-scroll {
 	margin-top: 10px;
+	overflow-x: auto;
 }
 
-/* Phone */
-@media screen and (max-width: 768px) {
-	.hq-kpis {
-		grid-template-columns: repeat(2, 1fr);
+/* Mid width: hero/minis drop to 2 columns, pairs stack. */
+@media screen and (max-width: 1280px) {
+	.hq-minis {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.hq-grid {
+	.hq-charts,
+	.hq-rankings {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media screen and (max-width: 768px) {
+	.hq-hero {
 		grid-template-columns: 1fr;
 	}
 
 	.hq-kpi-value {
 		font-size: 16px;
 	}
-
-	.hq-scope {
-		font-size: 12px;
-	}
 }
 
+/* Phone: everything single column, donut above legend, category rows wrap. */
 @media screen and (max-width: 480px) {
-	.hq-kpis {
+	.hq-minis {
 		grid-template-columns: 1fr;
 	}
 
 	.hq-card {
 		padding: 12px;
+	}
+
+	#page-hq-sales-monitoring .page-form > .frappe-control {
+		flex: 1 1 45%;
+		min-width: 150px;
+	}
+
+	.hq-donut {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.hq-donut-chart {
+		min-width: 0;
 	}
 }
 

@@ -28,62 +28,150 @@ Halaman Desk untuk memantau penjualan seluruh outlet POS dari sisi head office.
 
 ## Panel dan Rumus
 
-### Monthly Monitoring (MTD, bulan dari tanggal "To Date")
+Tata letak mengikuti laporan HQ lama: tabel **Monthly Monitoring** (lebar
+penuh) → tabel **Daily Monitoring** (lebar penuh) → 4 kartu ringkas →
+hero 2×2 (Total Sales, Total Transactions, Avg per Transaction, Peak Hour) →
+grid grafik 2×2 (dua kartu **Top Selling [dropdown kategori]** berisi donat
+produk + legenda nilai, lalu donat **Top Selling Categories** dan
+**Top Outlets**) → **Product Ranking** dan
+**Outlet Ranking** berdampingan → catatan "Currency & basis notes" →
+catatan sumber data.
 
-| Metrik | Rumus |
+### Dua periode yang berbeda (dilabel eksplisit)
+
+- **MTD** (month-to-date bulan dari "To Date"): tabel Monthly Monitoring,
+  turnover, dan target. MTD **tidak** bergeser walau rentang dippersempit.
+- **Rentang terpilih** (`from_date .. to_date`): hero cards, Peak Hour,
+  ranking produk/outlet, dan donat. Preset: Today, Yesterday, Last 7 Days,
+  This Month, Custom (API menerima tanggal hasil preset apa adanya).
+- Hari ini dipotong pada jam server saat itu; hari lampau hari penuh.
+
+### Monthly Monitoring (MTD) — baris Sales / TC / APC
+
+| Kolom | Rumus |
 | --- | --- |
-| Sales (MTD, net incl. tax) | `SUM(base_grand_total)` bertanda (retur mengurangi) |
-| TC (Transactions) | jumlah faktur non-retur |
-| APC | Sales MTD ÷ TC (per mata uang) |
-| Achievement % | Sales MTD ÷ Target Sales × 100 |
-| Surplus / Deficit | Sales MTD − Target Sales |
-| Monthly Projection | Sales MTD ÷ hari-berjalan × hari-dalam-bulan |
-| Projected Achievement | Projection ÷ Target Sales |
+| Target | POS Monthly Target (sales per mata uang; TC bebas mata uang) |
+| MTD | `SUM(base_grand_total)` bertanda (retur mengurangi); TC = faktur non-retur; APC = MTD ÷ TC |
+| Achievement % | MTD ÷ Target × 100 |
+| Over / (Deficit) | MTD − Target |
+| Monthlyized (proyeksi nilai) | Sales & TC: MTD ÷ hari-berjalan × hari-dalam-bulan. **APC tidak diekstrapolasi** — proyeksinya = APC MTD (rata-rata) |
+| Projected Ach. % | Proyeksi ÷ Target |
+| Projected Surplus | Proyeksi − Target |
 
 Catatan target:
 
-- Proyeksi memakai **hari berjalan** (hari ini ikut dihitung), tidak menghitung
-  hari masa depan; APC tidak diekstrapolasi secara terpisah.
-- Target transaksi (TC) bebas mata uang; target penjualan mengikuti mata uang
-  default perusahaan.
 - Target harian **bukan** angka yang diset terpisah — adalah target bulanan
   dibagi jumlah hari dalam bulan (pro-rata) dan ditampilkan dengan label itu.
 - Jika ada satu saja perusahaan dalam lingkup yang belum punya target pada
-  bulan tersebut, achievement ditampilkan **tidak tersedia (N/A)** — bukan
-  angka parsial yang menyesatkan.
+  bulan tersebut, seluruh kolom target ditampilkan **N/A** — bukan angka
+  parsial atau nol rekaan.
 
-### Daily Monitoring
+### Daily Monitoring — hari terpilih vs hari yang sama minggu lalu
 
-- Hari yang dipilih (default hari ini). Bila hari ini: cutoff pada jam server
-  saat itu; bila hari lampau: satu hari penuh.
-- Pembanding: *prior weekday* (hari kerja sebelumnya, Sabtu/Minggu dilewati) dan
-  *hari yang sama minggu lalu* (−7 hari). Untuk "hari ini" kedua pembanding
-  dipotong pada jam yang sama (same elapsed cutoff); untuk hari lampau keduanya
-  hari penuh.
-- Growth = (nilai − pembanding) ÷ pembanding × 100. Jika pembanding 0,
-  growth **N/A** — tidak pernah dianggap 0%.
+- Header bergrup (mengikuti laporan HQ lama): [tanggal terpilih: Daily
+  Target, Result, Ach. %] vs [**hari yang sama minggu lalu** (−7 hari):
+  Result, Growth vs LW]. Pembanding dipotong pada jam yang sama (same
+  elapsed cutoff) ketika hari terpilih adalah hari ini.
+- Pertumbuhan vs *prior weekday* (hari kerja sebelumnya, Sabtu/Minggu
+  dilewati) tetap tersedia sebagai baris catatan sekunder di bawah tabel.
+- Daily target = target bulanan pro-rata (sales ÷ hari; TC ÷ hari; APC =
+  daily sales target ÷ daily TC target).
+- Growth = (nilai − pembanding) ÷ pembanding × 100; pembanding 0 → **N/A**,
+  tidak pernah dianggap 0%.
 
-### Turnover Bulan Ini
+### Kartu ringkas
 
-- Net turnover MTD, perubahan vs periode pembanding (bulan lalu dengan jumlah
-  hari berjalan yang sama, hari penuh karena bulan lalu sudah selesai).
-- Refunds (nilai absolut retur + jumlah faktur retur), net pre-tax
-  (`base_net_total`), pajak & biaya (`base_total_taxes_and_charges`), keduanya
-  bertanda sehingga retur sudah mengurangi.
+Turnover MTD (+ perubahan vs bulan lalu dengan hari berjalan setara),
+Outlet terbesar (share %, dalam satu mata uang), **Outlet dengan transaksi
+terbanyak**, dan Produk favorit (qty tertinggi bertanda, komponen paket
+dikecualikan).
 
-### Highlight, Jam, dan Ranking
+### Hero 2×2 (rentang terpilih)
 
-- Outlet terbesar, outlet dengan transaksi terbanyak, produk favorit (qty
-  tertinggi bertanda, komponen paket dikecualikan).
-- Jam sibuk / 3 jam tertinggi / 3 jam terendah (hanya jam dengan order) +
-  grafik batang memakai `frappe.Chart` bawaan Desk (tanpa library baru).
-- Product Ranking (MTD): paginasi (10 baris/halaman, maks 50), filter kategori
-  Item Group — kategori yang dipilih otomatis mencakup sub-group (pohon
-  Item Group), bukan hardcoded Food/Beverage/Retail. Share % dihitung terhadap
-  total net sales lingkup filter yang sedang aktif. Urutan stabil: net desc,
-  qty desc, kode item.
-- Outlet Ranking (MTD): net sales per mata uang, TC, avg ticket, share % terhadap
-  total satu mata uang.
+- **Total Sales**: net incl. tax ↔ pre-tax (tombol toggle pada kartu);
+  pajak & biaya serta refunds terlihat di sub-teks.
+- **Total Transactions**: jumlah faktur non-retur. **Pax selalu N/A** —
+  tidak ada field sumber pax, tidak direka.
+- **Avg per Transaction**: net incl. tax ÷ orders, per mata uang.
+- **Peak Hour**: grafik batang pesanan per jam dengan label `HH:00` eksplisit
+  (jam tanpa penjualan = batang nol; sumbu tidak pernah "…").
+
+#### Filter jam Peak Hour (hanya kartu ini)
+
+- Dua pilihan **From / To** di kartu mengatur jendela jam: **From inklusif,
+  To eksklusif** — 05:00–18:00 berarti bin 05:00 sampai 17:00–18:00.
+- **Overnight didukung**: To ≤ From berarti lewat tengah malam
+  (22:00–06:00 = bin 22,23,0,1,2,3,4,5). Hari penuh = 00:00–24:00
+  (24:00 = tengah malam berikutnya).
+- **From = To ditolak** (jendela kosong) — muncul peringatan, pilihan
+  dikembalikan ke nilai semula.
+- Grafik dan label Peak (nilai uang + jumlah order terukur) dihitung ulang
+  hanya dari jam yang terlihat; **metrik halaman lain tidak berubah**.
+- Lebar minimum grafik proporsional terhadap jumlah bin (40px/bin), jadi
+  jendela pendek pas di kartu tanpa scroll; jendela penuh tetap terbaca
+  (scroll lokal bila perlu).
+- Preferensi disimpan **per user** lewat mekanisme bawaan Frappe
+  (`frappe.model.utils.user_settings`, tabel `__UserSettings`, kunci
+  `HQ Sales Monitoring` → `hq_dashboard`): otomatis dipulihkan saat refresh
+  atau login berikutnya. Yang disimpan hanya angka jam dan nama Item Group —
+  tanpa nilai sensitif. Default kunjungan pertama: 00:00–24:00.
+
+### Kartu "Top Selling [kategori]" (dua slot, saling bebas)
+
+- Dua kartu serupa donat, masing-masing dengan dropdown **Item Group** sendiri
+  di baris judul (`Top Selling <dropdown>`; pilihan berisi semua Item Group
+  yang ada). Slot internal bernama `a`/`b` dan **tidak pernah tampil ke
+  pengguna** — hanya label aksesibel ("First/Second category"). Grup terpilih
+  **termasuk sub-group** (pohon `lft/rgt`).
+- Isi kartu: **donat 5 item teratas** dalam kategori itu berdasarkan net
+  revenue pre-tax + satu busur **"Other"** bila sisa kategori bernilai
+  positif; legenda nilai milik halaman memuat nama, qty sekunder, nilai,
+  dan **share % terhadap SELURUH kategori** — persis data yang digambar
+  (dihitung ulang dari nilai yang sama, `categoryDonutRows`). Subtotal
+  kategori tercantum eksplisit.
+- Metode sama dengan donat kategori: **positif saja** (item net ≤ 0
+  dilaporkan di catatan, tidak digambar — tidak ada busur/arc
+  negatif) dan **satu mata uang** (perusahaan ber-mata-uang lain dicantumkan,
+  tidak pernah dijumlahkan).
+- Belum memilih kategori / kategori tidak ada lagi / tanpa penjualan
+  positif → **placeholder cincin putus-putus netral** dengan penjelasan
+  singkat (tanpa busur palsu); dropdown selalu terlihat.
+- Query agregat berjalan di atas **dataset penuh** kategori (GROUP BY
+  item_code, bukan Product Ranking yang terpaginasi); tepat **satu query per
+  kartu terisi (maks dua)** — tanpa N+1. Kategori yang sudah tidak ada
+  dilaporkan (`invalid`), lalu dibersihkan dari preferensi dan kartu kembali
+  ke "pilih kategori".
+- Kedua kartu **independen**: memilih kategori di kartu A tidak memengaruhi
+  kartu B maupun filter kategori global Product Ranking (dan sebaliknya —
+  filter kategori global hanya berlaku pada Product Ranking).
+- Preferensi kategori A/B disimpan bersama filter jam pada preferensi user
+  yang sama (lihat di atas) dan divalidasi ulang setiap load.
+
+### Donat (metode diberi label)
+
+- **Top Selling Categories**: 5 grup item teratas berdasarkan **net revenue
+  pre-tax, positif saja** — grup dengan net ≤ 0 (dominasi retur) dilaporkan
+  sebagai dikecualikan, tidak digambar. Mata uang = mata uang default
+  lingkup; perusahaan ber-mata-uang lain dicantumkan sebagai dikecualikan
+  (tidak pernah dijumlahkan lintas mata uang). Grup diambil dari data
+  aktual (dinamis), bukan Food/Beverage/Rental paksaan. Legenda nilai adalah
+  daftar aksesibel milik halaman (legenda bawaan frappe-charts dimatikan via
+  `showLegend: false` agar tidak dobel/terpotong).
+- **Top Outlets**: 5 perusahaan teratas, net incl. tax positif, satu mata
+  uang. Legenda di samping donat memuat nilai + persentase (tidak bergantung
+  warna saja).
+
+### Ranking (rentang terpilih)
+
+- **Product Ranking**: paginasi (10/halaman, maks 50), filter kategori
+  Item Group di kartu (pilihan mencakup sub-group; **filter ini hanya
+  berlaku pada Product Ranking**, tidak pada kartu Top Selling [kategori]),
+  Export CSV. Share % terhadap total net sales lingkup filter aktif.
+  Urutan stabil: net desc, qty desc, kode item.
+- **Outlet Ranking**: **outlet = perusahaan** (bukan POS Profile; profil POS
+  dicantumkan di bawah nama perusahaan agar tidak ada angka tersembunyi).
+  Kolom: net sales per mata uang, TC, avg ticket, share % terhadap total satu
+  mata uang. Export CSV.
 
 ### Bagian yang Sengaja Tidak Dikarang
 
@@ -95,12 +183,15 @@ Catatan target:
 
 ## Filter & Waktu
 
+- **Time Range preset**: Today (default), Yesterday, Last 7 Days, This Month,
+  Custom (dengan input tanggal). Preset menghitung `from_date`/`to_date` di
+  klien dan mengirimkannya apa adanya — bagian MTD tetap month-to-date di
+  server (tidak ada label periode yang bohong).
 - Company (semua yang terlihat user, atau satu perusahaan), termasuk opsi
   **Include Subsidiaries** (menambahkan perusahaan anak lewat pohon Company;
   anak di luar izin user tetap dikecualikan).
 - Rentang tanggal maksimum **366 hari**; tanggal di masa depan dipotong ke
   hari ini. Semua waktu memakai zona waktu server.
-- Perintah "MTD hari ini" dipotong pada jam server saat ini.
 
 ## Perizinan
 
@@ -126,13 +217,20 @@ Catatan target:
 
 ## Uji & Verifikasi Lokal
 
-- Backend: `pos_next/tests/test_hq_monitoring.py` — 15 test (metrik, retur,
+- Backend: `pos_next/tests/test_hq_monitoring.py` — 24 test (metrik, retur,
   komponen paket, urutan & tie ranking, paginasi, filter kategori, mata uang
-  campuran, target tersedia/hilang, penolakan tanpa peran, perusahaan palsu,
+  campuran, ranking outlet level perusahaan, donat kategori positif-saja,
+  kartu Top Selling per kategori: isolasi A/B + share kategori penuh,
+  sub-group, isolasi mata uang, kategori invalid/tanpa data, kemandirian
+  dari filter kategori global, rentang terpilih vs MTD, target
+  tersedia/hilang + proyeksi TC, penolakan tanpa peran, perusahaan palsu,
   lingkup non-pemilik, filter company report, validasi doctype).
   Jalankan di dalam container:
   `./env/bin/python apps/pos_next/pos_next/_pn_run_tests.py pos_next.tests.test_hq_monitoring`
-- Helper JS murni: `node pos_next/tests/js/hq_monitoring_utils.test.cjs`.
+- Helper JS murni: `node pos_next/tests/js/hq_monitoring_utils.test.cjs`
+  (12 grup: format, hour bins, **jendela jam** valid/overnight/batas 24/
+  From=To ditolak, **recompute peak** dalam jendela, lebar grafik
+  proporsional, **sanitasi preferensi** termasuk storage korup).
 - Print/Export: tombol **Print** (CSS khusus cetak) dan **Export CSV**
   (ranking produk + outlet).
 

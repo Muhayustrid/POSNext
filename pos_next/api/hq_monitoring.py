@@ -20,6 +20,10 @@ All metrics come from the same POS sales dataset:
 - Package components (``Sales Invoice Item.pos_package_role = 'Package Item'``)
   are excluded from item qty/amount so bundle revenue is not double counted.
 - Quantities are signed: returns contribute negative qty.
+- Two optional "top items within category" cards (``category_a``/``category_b``):
+  one grouped query each over the full Item Group tree (sub-groups included),
+  positive net revenue only, share % against the whole category. They are
+  independent of the Product Ranking ``category`` filter and of each other.
 - Sales channel: Sales Invoice has no real channel field, so the section is
   reported as unavailable rather than invented (no fake "Take Away", no
   orders == pax claim; no pax source exists either).
@@ -32,6 +36,13 @@ Permissions:
 
 Time: server timezone. Today's windows are cut at the current server time;
 historical days are full days.
+
+Period semantics (labeled explicitly in the UI):
+- Monthly monitoring / turnover / targets: month-to-date of ``to_date``
+  (``from_date`` is deliberately ignored there — MTD never shifts).
+- Daily monitoring: ``to_date`` vs its prior weekday (same elapsed cutoff).
+- Hero cards, peak hours, rankings and donuts: the selected range
+  ``from_date .. to_date`` (cutoff at "now" when ``to_date`` is today).
 """
 
 from datetime import timedelta
@@ -130,6 +141,8 @@ def get_sales_monitoring(
 	to_date=None,
 	include_descendants=0,
 	category=None,
+	category_a=None,
+	category_b=None,
 	product_page=1,
 	page_size=10,
 ):
@@ -156,12 +169,18 @@ def get_sales_monitoring(
 	default_ccy = currency_map.get(default_company)
 	profiles = scope["profiles"]
 
-	# Every section reuses the same MTD window + scope (no N+1 per row).
+	# Every section reuses one of two windows + scope (no N+1 per row).
 	mtd_where, mtd_params = _si_window_where(
 		scope["companies"], profiles, window["month_start"], to_date, window["mtd_cutoff"]
 	)
 	mtd_rows = _totals_rows(mtd_where, mtd_params)
 	monthly = _metrics_from_totals(mtd_rows, currency_map, default_ccy)
+
+	# Selected range (hero cards, hours, rankings, donuts) — MTD above stays
+	# fixed to the month even when the user narrows the range.
+	range_where, range_params = _si_window_where(
+		scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"]
+	)
 
 	result = {
 		"scope": {
@@ -174,12 +193,30 @@ def get_sales_monitoring(
 		},
 		"windows": window,
 		"monthly": monthly,
+		"range": {
+			**_metrics_for_window(scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"], currency_map, default_ccy),
+			"cut_at": window["mtd_cutoff"].strftime("%H:%M") if window["mtd_cutoff"] else None,
+		},
 		"turnover": _turnover_section(scope, currency_map, default_ccy, window, mtd_rows),
 		"daily": _daily_section(scope, currency_map, default_ccy, window),
-		"hours": _hours_section(mtd_where, mtd_params),
-		"favorite_product": _favorite_product(mtd_where, mtd_params),
-		"product_ranking": _product_ranking(mtd_where, mtd_params, category, product_page, page_size),
-		"outlet_ranking": _outlet_ranking(mtd_where, mtd_params, profiles, currency_map),
+		"hours": _hours_section(range_where, range_params),
+		"favorite_product": _favorite_product(range_where, range_params),
+		"product_ranking": _product_ranking(range_where, range_params, category, product_page, page_size),
+		"outlet_ranking": _outlet_ranking(range_where, range_params, currency_map),
+		"item_groups": _item_group_names(),
+		"category_products": _category_products(
+			scope["companies"],
+			profiles,
+			from_date,
+			to_date,
+			window["mtd_cutoff"],
+			currency_map,
+			default_ccy,
+			{"a": _clean_category(category_a), "b": _clean_category(category_b)},
+		),
+		"category_top": _category_top(
+			scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"], currency_map, default_ccy
+		),
 		"channels": {
 			"available": False,
 			"notice": _(
@@ -581,28 +618,160 @@ def _item_group_and_descendants(group):
 	)
 
 
-def _outlet_ranking(where, params, profiles, currency_map):
-	bind = dict(params)
-	profile_where = ""
-	if profiles is not None:
-		profile_where = " AND si.pos_profile IN %(profiles)s"
+def _item_group_names():
+	"""All existing Item Groups (tree order) for the per-card category selects."""
+	return frappe.get_all("Item Group", pluck="name", order_by="lft")
+
+
+def _clean_category(value):
+	"""Accept only a plain group name; junk (lists, blanks) becomes 'not chosen'."""
+	if not isinstance(value, str):
+		return None
+	return value.strip() or None
+
+
+def _empty_category_card(category=None, invalid=False, currency=None, excluded_currencies=None):
+	return {
+		"category": category,
+		"invalid": invalid,
+		"currency": currency,
+		"method": _("net revenue, pre-tax, positive only, sub-groups included"),
+		"items": [],
+		"other_net": 0.0,
+		"other_share_pct": None,
+		"category_total": 0.0,
+		"items_with_sales": 0,
+		"excluded_nonpositive": 0,
+		"excluded_currencies": excluded_currencies or [],
+	}
+
+
+def _category_products(companies, profiles, start, end, cutoff, currency_map, default_ccy, categories):
+	"""Datasets for the two independent "top items within a category" cards.
+
+	Each card is one grouped query over the FULL category (incl. sub-groups) —
+	never the paginated Product Ranking — and slots "a"/"b" stay independent:
+	choosing one never influences the other or the global ranking filter.
+	Exactly one query per chosen category (max two, no N+1). Same currency rule
+	as ``_category_top``: only companies whose base currency is the scope
+	default are aggregated; others are listed, never merged. Negative/zero-net
+	items are reported as excluded so shares are computed over positive
+	revenue only (donut/bar values can never go negative).
+	"""
+	ccy_companies = [c for c in companies if currency_map.get(c) == default_ccy]
+	other_ccy = sorted({currency_map.get(c) for c in companies if currency_map.get(c) != default_ccy} - {None})
+
+	def card_for(category):
+		if not category:
+			return _empty_category_card(currency=default_ccy, excluded_currencies=other_ccy)
+		if not ccy_companies:
+			return _empty_category_card(
+				category=category, currency=default_ccy, excluded_currencies=other_ccy
+			)
+		try:
+			groups = _item_group_and_descendants(category)
+		except frappe.DoesNotExistError:
+			# stale stored preference: reported, not raised, so the page can
+			# clear it and fall back without breaking the whole payload
+			return _empty_category_card(
+				category=category, invalid=True, currency=default_ccy, excluded_currencies=other_ccy
+			)
+		where, params = _si_window_where(ccy_companies, profiles, start, end, cutoff)
+		params["item_groups"] = groups
+		rows = frappe.db.sql(
+			f"""
+			SELECT
+				sii.item_code,
+				MAX(sii.item_name) AS item_name,
+				SUM(sii.qty) AS qty,
+				SUM(sii.base_net_amount) AS net_amount
+			{_item_from(where)}
+			  AND sii.item_group IN %(item_groups)s
+			GROUP BY sii.item_code
+			""",
+			params,
+			as_dict=True,
+		)
+		positive = [r for r in rows if flt(r.net_amount) > 0]
+		positive.sort(key=lambda r: (-flt(r.net_amount), -flt(r.qty), r.item_code))
+		total = sum(flt(r.net_amount) for r in positive)
+		top = positive[:5]
+		other = total - sum(flt(r.net_amount) for r in top)
+		card = _empty_category_card(category=category, currency=default_ccy, excluded_currencies=other_ccy)
+		card.update(
+			{
+				"items": [
+					{
+						"item_code": r.item_code,
+						"item_name": r.item_name,
+						"qty": flt(r.qty),
+						"net_amount": flt(r.net_amount),
+						"share_pct": ratio(r.net_amount, total),
+					}
+					for r in top
+				],
+				"other_net": flt(other),
+				"other_share_pct": ratio(other, total),
+				"category_total": flt(total),
+				"items_with_sales": len(positive),
+				"excluded_nonpositive": len(rows) - len(positive),
+			}
+		)
+		return card
+
+	return {slot: card_for(category) for slot, category in categories.items()}
+
+
+def _outlet_ranking(where, params, currency_map):
+	"""Outlet = Company (the store a customer knows), not the POS Profile.
+
+	Profiles are POS registers; HQ reports rank companies and keep the profile
+	breakdown nested so no number is hidden. Share % is computed inside one
+	currency only — companies in other currencies are ordered but never summed
+	with them.
+	"""
 	rows = frappe.db.sql(
 		f"""
 		SELECT
 			si.company,
-			si.pos_profile,
 			SUM(CASE WHEN si.is_return = 0 THEN si.base_grand_total ELSE 0 END) AS gross,
 			SUM(si.base_grand_total) AS net_tax_incl,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
 		FROM `tabSales Invoice` si
-		WHERE {where}{profile_where}
-		GROUP BY si.company, si.pos_profile
+		WHERE {where}
+		GROUP BY si.company
 		ORDER BY net_tax_incl DESC
 		LIMIT 200
 		""",
-		bind,
+		params,
 		as_dict=True,
 	)
+	# One extra grouped query for the whole profile breakdown (never per-row).
+	profile_rows = frappe.db.sql(
+		f"""
+		SELECT
+			si.company,
+			si.pos_profile,
+			SUM(si.base_grand_total) AS net_tax_incl,
+			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
+		FROM `tabSales Invoice` si
+		WHERE {where}
+		GROUP BY si.company, si.pos_profile
+		ORDER BY net_tax_incl DESC
+		""",
+		params,
+		as_dict=True,
+	)
+	profiles_by_company = {}
+	for p in profile_rows:
+		profiles_by_company.setdefault(p.company, []).append(
+			{
+				"pos_profile": p.pos_profile,
+				"net_tax_incl": flt(p.net_tax_incl),
+				"orders": int(p.orders),
+			}
+		)
+
 	currency_totals = {}
 	for r in rows:
 		ccy = currency_map.get(r.company)
@@ -615,16 +784,68 @@ def _outlet_ranking(where, params, profiles, currency_map):
 		out.append(
 			{
 				"company": r.company,
-				"pos_profile": r.pos_profile,
 				"currency": ccy,
 				"gross": flt(r.gross),
 				"net_tax_incl": flt(r.net_tax_incl),
 				"orders": int(r.orders),
 				"apc": flt(flt(r.gross) / r.orders) if r.orders else None,
 				"share_pct": ratio(r.net_tax_incl, currency_totals.get(ccy)),
+				"profiles": profiles_by_company.get(r.company, []),
 			}
 		)
 	return out
+
+
+def _category_top(companies, profiles, start, end, cutoff, currency_map, default_ccy):
+	"""Top 5 item groups for the category donut.
+
+	Donut segments must never mix currencies or go negative, so the aggregate
+	runs only over companies whose base currency is the scope default and
+	keeps positive-net groups only (a return-heavy group with net <= 0 is
+	reported, not drawn). Method is labeled in the payload.
+	"""
+	ccy_companies = [c for c in companies if currency_map.get(c) == default_ccy]
+	other_ccy = sorted({currency_map.get(c) for c in companies if currency_map.get(c) != default_ccy} - {None})
+	if not ccy_companies:
+		return {
+			"currency": default_ccy,
+			"method": _("net revenue, pre-tax, positive only"),
+			"rows": [],
+			"groups_with_sales": 0,
+			"excluded_nonpositive": 0,
+			"excluded_currencies": other_ccy,
+		}
+	where, params = _si_window_where(ccy_companies, profiles, start, end, cutoff)
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			sii.item_group AS item_group,
+			SUM(sii.qty) AS qty,
+			SUM(sii.base_net_amount) AS net_amount
+		{_item_from(where)}
+		GROUP BY sii.item_group
+		ORDER BY net_amount DESC
+		""",
+		params,
+		as_dict=True,
+	)
+	positive = [r for r in rows if flt(r.net_amount) > 0]
+	return {
+		"currency": default_ccy,
+		"method": _("net revenue, pre-tax, positive only"),
+		"rows": [
+			{
+				"item_group": r.item_group or _("Ungrouped"),
+				"qty": flt(r.qty),
+				"net_amount": flt(r.net_amount),
+				"share_pct": ratio(r.net_amount, sum(flt(x.net_amount) for x in positive)),
+			}
+			for r in positive[:5]
+		],
+		"groups_with_sales": len(positive),
+		"excluded_nonpositive": len(rows) - len(positive),
+		"excluded_currencies": other_ccy,
+	}
 
 
 # ---------------------------------------------------------------------------
@@ -674,6 +895,9 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly):
 				"projected_surplus": round(projected - target, 2),
 			}
 
+	if window["days_elapsed"]:
+		projected_orders = round(monthly["orders"] / window["days_elapsed"] * days_in_month)
+
 	return {
 		"available": True,
 		"month_start": month_start,
@@ -695,6 +919,16 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly):
 		"projection_note": _(
 			"Projection = MTD actual / days elapsed x days in month; days elapsed counts today."
 		),
+		"projected_orders": projected_orders if window["days_elapsed"] else None,
+		"projected_achievement_transactions_pct": (
+			ratio(projected_orders, tx_target) if window["days_elapsed"] else None
+		),
+		"projected_surplus_orders": (
+			projected_orders - tx_target if window["days_elapsed"] and tx_target else None
+		),
+		"apc_projection_note": _(
+			"APC is an average, so its projection equals the MTD figure (never day-extrapolated)."
+		),
 	}
 
 
@@ -702,13 +936,18 @@ def _empty_payload(scope, notice):
 	return {
 		"scope": scope,
 		"notice": notice,
+		"windows": {},
 		"monthly": {},
+		"range": {},
 		"turnover": {},
 		"daily": {},
 		"hours": {"rows": [], "peak": None, "top": [], "lowest": []},
 		"favorite_product": None,
 		"product_ranking": {"rows": [], "total": 0, "page": 1, "page_size": 10, "categories": []},
 		"outlet_ranking": [],
+		"item_groups": [],
+		"category_products": {"a": {}, "b": {}},
+		"category_top": {"rows": [], "currency": None, "groups_with_sales": 0},
 		"highlights": {},
 		"channels": {"available": False},
 		"pax": {"available": False},
