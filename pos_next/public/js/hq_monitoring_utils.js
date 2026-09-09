@@ -13,6 +13,26 @@
 		root.hqMonitorUtils = api;
 	}
 })(typeof self !== "undefined" ? self : this, function () {
+	/**
+	 * Injectable number-formatting adapter (set by the page from Frappe's
+	 * authoritative formatters: site System Settings number format, per-currency
+	 * format when use_number_format_from_currency is set, configured
+	 * currency/float precision). Shape: { money(v, currency) -> digits only,
+	 * percent(v, digits) -> digits only, count(v) -> grouped number }.
+	 * Absent adapter -> the en-US fallbacks below, so node tests stay pure.
+	 */
+	let numberAdapter = null;
+
+	function setNumberAdapter(adapter) {
+		numberAdapter = adapter && typeof adapter === "object" ? adapter : null;
+	}
+
+	function escapeText(value) {
+		return String(value).replace(/[&<>"']/g, (ch) => (
+			{ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+		));
+	}
+
 	function safeDiv(part, whole) {
 		whole = Number(whole);
 		if (!whole) return null;
@@ -34,13 +54,33 @@
 
 	function fmtPct(value, digits) {
 		if (value === null || value === undefined || isNaN(value)) return "N/A";
-		return Number(value).toFixed(digits == null ? 1 : digits) + "%";
+		const d = digits == null ? 1 : digits;
+		if (numberAdapter && typeof numberAdapter.percent === "function") {
+			return numberAdapter.percent(Number(value), d) + "%";
+		}
+		return Number(value).toFixed(d) + "%";
+	}
+
+	/** Counts / qty through the adapter; raw string fallback keeps tests pure. */
+	function fmtCount(value) {
+		if (value === null || value === undefined || isNaN(Number(value))) return "N/A";
+		if (numberAdapter && typeof numberAdapter.count === "function") {
+			return numberAdapter.count(Number(value));
+		}
+		return String(value);
 	}
 
 	function fmtMoney(value, currency) {
 		const n = Number(value || 0);
-		const ccy = currency || "";
-		const formatted = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+		const ccy = currency ? escapeText(currency) : "";
+		let formatted;
+		if (numberAdapter && typeof numberAdapter.money === "function") {
+			// adapter receives the raw (unescaped) currency so Frappe can look up
+			// its number format; the minus stays on this side, before the code.
+			formatted = numberAdapter.money(Math.abs(n), currency);
+		} else {
+			formatted = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+		}
 		const sign = n < 0 ? "-" : "";
 		return ccy ? sign + ccy + " " + formatted : sign + formatted;
 	}
@@ -213,6 +253,8 @@
 		growthPct: growthPct,
 		fmtPct: fmtPct,
 		fmtMoney: fmtMoney,
+		fmtCount: fmtCount,
+		setNumberAdapter: setNumberAdapter,
 		hourLabel: hourLabel,
 		hourBins24: hourBins24,
 		hourRangeLabel: hourRangeLabel,

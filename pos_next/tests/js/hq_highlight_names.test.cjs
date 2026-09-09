@@ -14,7 +14,7 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
 const renderer = vm.runInNewContext(`({${method}})`, {
 	__: (value) => value,
 	frappe: { utils: { escape_html: escapeHtml } },
-	HQ_UTILS: { fmtMoney: (value) => String(value) },
+	HQ_UTILS: { fmtMoney: (value) => String(value), fmtCount: (value) => String(value) },
 });
 renderer._metric_text = () => 'IDR 100';
 renderer._pct_cell = () => 'N/A';

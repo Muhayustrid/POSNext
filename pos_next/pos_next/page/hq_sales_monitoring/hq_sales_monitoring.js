@@ -6,6 +6,28 @@
 // The include registers the UMD module on the global scope.
 const HQ_UTILS = hqMonitorUtils;
 
+// Route every number on this page through Frappe's authoritative formatters:
+// the site's System Settings number format (per-currency format when
+// use_number_format_from_currency is set), configured currency_precision for
+// money (honours "0"), and float precision / integer trim via the standard
+// Float formatter for counts and qty. Without this the utils fall back to
+// en-US (node-test fallback only).
+if (typeof format_number === "function" && typeof get_number_format === "function") {
+	HQ_UTILS.setNumberAdapter({
+		// format_currency() minus the symbol: the page shows the ISO code and
+		// keeps currencies isolated. Same default-precision logic as
+		// format_currency(): configured currency_precision, else the precision
+		// carried by the number format itself.
+		money: (value, currency) =>
+			format_number(value, get_number_format(currency), frappe.boot.sysdefaults.currency_precision || null),
+		percent: (value, digits) => format_number(value, null, digits),
+		// frappe.form.formatters.Float with no docfield: configured
+		// float_precision + "1.000000 shows as 1" trim; only_value skips the
+		// right-align wrapper div.
+		count: (value) => frappe.form.formatters.Float(value, {}, { only_value: true }),
+	});
+}
+
 // One palette for every chart on the page; legend dots reuse it by index.
 const HQ_PALETTE = ["#2490ef", "#2e7d54", "#e8590c", "#7048c9", "#d6336c", "#94a3b8"];
 
@@ -399,7 +421,7 @@ class HQSalesMonitor {
 		return this._map_cell(map, default_ccy, (v, ccy, sg) => {
 			if (v === null || v === undefined) return "N/A";
 			const n = Number(v);
-			return (sg && n > 0 ? "+" : "") + n.toFixed(1) + "%";
+			return (sg && n > 0 ? "+" : "") + HQ_UTILS.fmtPct(n, 1);
 		}, signed);
 	}
 
@@ -480,7 +502,7 @@ class HQSalesMonitor {
 	_signed_pct(value) {
 		if (value === null || value === undefined) return this._na();
 		const n = Number(value);
-		return `<span class="hq-money">${n > 0 ? "+" : ""}${n.toFixed(1)}%</span>`;
+		return `<span class="hq-money">${n > 0 ? "+" : ""}${HQ_UTILS.fmtPct(n, 1)}</span>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -585,7 +607,7 @@ class HQSalesMonitor {
 			cards.push(`<div class="hq-card hq-mini">
 				<div class="hq-kpi-label">${__("Outlet with Most Transactions")}</div>
 				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(h.most_transactions_outlet.company)}</div>
-				<div class="hq-kpi-sub">${h.most_transactions_outlet.orders} ${__("orders")}</div>
+				<div class="hq-kpi-sub">${HQ_UTILS.fmtCount(h.most_transactions_outlet.orders)} ${__("orders")}</div>
 			</div>`);
 		} else {
 			cards.push(`<div class="hq-card hq-mini"><div class="hq-kpi-label">${__("Outlet with Most Transactions")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
@@ -595,7 +617,7 @@ class HQSalesMonitor {
 			cards.push(`<div class="hq-card hq-mini">
 				<div class="hq-kpi-label">${__("Favorite Product")}</div>
 				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(fav.item_name)}</div>
-				<div class="hq-kpi-sub">${fav.qty} ${__("qty")} · ${frappe.utils.escape_html(fav.item_group || "")}</div>
+				<div class="hq-kpi-sub">${HQ_UTILS.fmtCount(fav.qty)} ${__("qty")} · ${frappe.utils.escape_html(fav.item_group || "")}</div>
 			</div>`);
 		} else {
 			cards.push(`<div class="hq-card hq-mini"><div class="hq-kpi-label">${__("Favorite Product")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
@@ -623,8 +645,8 @@ class HQSalesMonitor {
 		const r = s.range || {};
 		return `<div class="hq-card hq-kpi">
 			<div class="hq-kpi-label">${__("Total Transactions")}</div>
-			<div class="hq-kpi-value">${r.orders ?? 0}</div>
-			<div class="hq-kpi-sub">${__("Refund invoices")}: ${r.refund_orders ?? 0}
+			<div class="hq-kpi-value">${HQ_UTILS.fmtCount(r.orders ?? 0)}</div>
+			<div class="hq-kpi-sub">${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)}
 				· <span class="hq-muted">${__("Pax")}: ${__("N/A")} (${__("no source field on POS invoices")})</span></div>
 		</div>`;
 	}
@@ -651,7 +673,7 @@ class HQSalesMonitor {
 		const stats = HQ_UTILS.windowStats(bins);
 		const ccy = s.scope.default_currency;
 		const peak = stats.peak
-			? `${__("Peak")} <b>${HQ_UTILS.hourLabel(stats.peak.hour)}</b> (<span class="hq-money">${HQ_UTILS.fmtMoney(stats.peak.net_sales, ccy)}</span>, ${stats.peak.orders} ${__("orders")})`
+			? `${__("Peak")} <b>${HQ_UTILS.hourLabel(stats.peak.hour)}</b> (<span class="hq-money">${HQ_UTILS.fmtMoney(stats.peak.net_sales, ccy)}</span>, ${HQ_UTILS.fmtCount(stats.peak.orders)} ${__("orders")})`
 			: __("No data");
 		const hourOpts = (from, to, sel) =>
 			Array.from({ length: to - from + 1 }, (_, i) => {
@@ -734,7 +756,7 @@ class HQSalesMonitor {
 				(r, i) => `<li><span class="hq-dot" style="background:${HQ_PALETTE[i % HQ_PALETTE.length]}"></span>
 				<span class="hq-legend-label">${frappe.utils.escape_html(String(r[labelKey]))}${
 					subKey && Number(r[subKey]) > 0
-						? ` <span class="hq-legend-sub">${r[subKey]} ${__("qty")}</span>`
+						? ` <span class="hq-legend-sub">${HQ_UTILS.fmtCount(r[subKey])} ${__("qty")}</span>`
 						: ""
 				}</span>
 				<span class="hq-legend-value hq-money">${HQ_UTILS.fmtMoney(r[key], ccy)}</span>
@@ -830,7 +852,7 @@ class HQSalesMonitor {
 				<td>${frappe.utils.escape_html(r.item_name)}
 					${r.item_code ? `<div class="hq-item-code">${frappe.utils.escape_html(r.item_code)}</div>` : ""}</td>
 				<td>${frappe.utils.escape_html(r.item_group || "")}</td>
-				<td class="hq-num">${r.qty}</td>
+				<td class="hq-num">${HQ_UTILS.fmtCount(r.qty)}</td>
 				<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_amount, "")}</span></td>
 				<td class="hq-num">${HQ_UTILS.fmtPct(r.share_pct)}</td>
 			</tr>`
@@ -848,7 +870,7 @@ class HQSalesMonitor {
 		const pages = Math.ceil(pr.total / pr.page_size);
 		return `<div class="hq-pager">
 			<button class="btn btn-xs btn-default" ${pr.page <= 1 ? "disabled" : ""} data-hq-page="prev">${__("Previous")}</button>
-			<span>${pr.page} / ${pages} (${pr.total} ${__("items")})</span>
+			<span>${pr.page} / ${pages} (${HQ_UTILS.fmtCount(pr.total)} ${__("items")})</span>
 			<button class="btn btn-xs btn-default" ${pr.page >= pages ? "disabled" : ""} data-hq-page="next">${__("Next")}</button>
 		</div>`;
 	}
@@ -861,10 +883,10 @@ class HQSalesMonitor {
 				<td>${frappe.utils.escape_html(r.company)}
 					${(r.profiles || []).length ? `<div class="hq-item-code">${r.profiles
 						.slice(0, 3)
-						.map((p) => `${frappe.utils.escape_html(p.pos_profile)} (${p.orders})`)
+						.map((p) => `${frappe.utils.escape_html(p.pos_profile)} (${HQ_UTILS.fmtCount(p.orders)})`)
 						.join(" · ")}${r.profiles.length > 3 ? ` +${r.profiles.length - 3}` : ""}</div>` : ""}</td>
 				<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span></td>
-				<td class="hq-num">${r.orders}</td>
+				<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
 				<td class="hq-num">${r.apc === null ? "N/A" : `<span class="hq-money">${HQ_UTILS.fmtMoney(r.apc, r.currency)}</span>`}</td>
 				<td class="hq-num">${HQ_UTILS.fmtPct(r.share_pct)}</td>
 			</tr>`
@@ -1110,13 +1132,17 @@ class HQSalesMonitor {
 		}
 		if (!kind) sections.push("");
 		if (!kind || kind === "outlets") {
+			// CSV stays machine-readable: raw ungrouped numbers ("." decimal),
+			// never the localized display strings. Per-row currency gets its own
+			// column instead of being baked into the amount.
 			sections.push(
 				HQ_UTILS.toCsv(
-					[__("Outlet (Company)"), __("POS Profiles"), __("Net Sales"), __("Transactions"), __("Avg Ticket"), __("Share %")],
+					[__("Outlet (Company)"), __("POS Profiles"), __("Currency"), __("Net Sales"), __("Transactions"), __("Avg Ticket"), __("Share %")],
 					(s.outlet_ranking || []).map((r) => [
 						r.company,
 						(r.profiles || []).map((p) => p.pos_profile).join("; "),
-						HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency),
+						r.currency,
+						r.net_tax_incl,
 						r.orders,
 						r.apc,
 						r.share_pct,
