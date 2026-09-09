@@ -221,4 +221,112 @@ assert.strictEqual(fallback.length, 1);
 assert.strictEqual(fallback[0].item_name, "C");
 assert.strictEqual(fallback[0].share_pct, 100);
 
-console.log("hq_monitoring_utils: 13 groups OK");
+// Frappe number-format adapter: the page injects Frappe's authoritative
+// formatters (site System Settings number format, configured currency/float
+// precision). Node can't load frappe's bundle, so these tests use a behaviour
+// port of window.format_number (frappe/public/js/frappe/utils/number_format.js)
+// and of the Integer-trim branch of frappe.form.formatters.Float — flt()
+// pre-round (Banker's Rounding legacy), toFixed at `decimals`, site
+// group/decimal separators, decimals defaulting to the precision carried by
+// the number format string. Outputs verified against the real frappe source.
+function frappeFormatNumber(value, format, decimals) {
+	const formats = {
+		"#,###.##": { dec: ".", grp: "," }, // e.g. US
+		"#.###,##": { dec: ",", grp: "." }, // e.g. Indonesia
+		"# ###.##": { dec: ".", grp: " " }, // alternate grouping
+		"#.###": { dec: "", grp: "." }, // zero-decimal format
+	};
+	const info = formats[format] || formats["#,###.##"];
+	if (decimals == null) decimals = info.dec === "" ? 0 : format.split(info.dec).slice(1)[0].length;
+	// flt(v, decimals) pre-round, Banker's Rounding (legacy)
+	const neg = value < 0;
+	const m = Math.pow(10, decimals);
+	const n = +(decimals ? Math.abs(value) * m : Math.abs(value)).toFixed(8);
+	const i = Math.floor(n);
+	const f = n - i;
+	let r = !decimals && f === 0.5 ? (i % 2 === 0 ? i : i + 1) : Math.round(n);
+	r = decimals ? r / m : r;
+	const [intPart, decPart] = r.toFixed(decimals).split(".");
+	const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, "\u0000").split("\u0000").join(info.grp);
+	return (neg ? "-" : "") + grouped + (decPart && info.dec ? info.dec + decPart : "");
+}
+
+function makeAdapter(numberFormat, currencyPrecision, floatPrecision) {
+	const seenCurrencies = [];
+	return {
+		seenCurrencies,
+		// mirrors the page wiring: currency_precision || null (falls back to the
+		// format's own precision); raw (unescaped) currency passed through for
+		// Frappe's per-currency number-format lookup.
+		money: (v, ccy) => {
+			seenCurrencies.push(ccy);
+			return frappeFormatNumber(v, numberFormat, currencyPrecision || null);
+		},
+		percent: (v, d) => frappeFormatNumber(v, numberFormat, d),
+		// mirrors frappe.form.formatters.Float: integer values trim to 0
+		// decimals ("1.000000 shows as 1"), fractional values use the
+		// configured float precision (unset -> ERPNext default 3).
+		count: (v) => {
+			const parts = String(v).split(".");
+			const isInt = parts.length < 2 || Number(parts[1]) === 0;
+			const decimals = isInt ? 0 : cint(floatPrecision) || 3;
+			return frappeFormatNumber(v, numberFormat, decimals);
+		},
+	};
+}
+
+function cint(v) {
+	const n = parseInt(v, 10);
+	return isNaN(n) ? 0 : n;
+}
+
+// Indonesia: "#.###,##" number format, currency_precision "0" (IDR-style)
+let adapter = makeAdapter("#.###,##", "0", "3");
+u.setNumberAdapter(adapter);
+assert.strictEqual(u.fmtMoney(1234567.89, "IDR"), "IDR 1.234.568"); // zero precision honoured
+assert.strictEqual(u.fmtMoney(-1500, "IDR"), "-IDR 1.500"); // minus before the code
+assert.strictEqual(u.fmtMoney(null, "IDR"), "IDR 0");
+assert.strictEqual(u.fmtPct(12.34), "12,3%");
+assert.strictEqual(u.fmtPct(-12.34), "-12,3%");
+assert.strictEqual(u.fmtCount(12500), "12.500");
+assert.strictEqual(u.fmtCount(0), "0");
+assert.strictEqual(u.fmtCount(3.5), "3,500"); // Float formatter: unset->3 decimals
+assert.strictEqual(u.fmtCount(null), "N/A");
+assert.deepStrictEqual(adapter.seenCurrencies, ["IDR", "IDR", "IDR"]); // raw ccy reaches adapter
+
+// US: "#,###.##", currency_precision 2, float_precision 2
+u.setNumberAdapter(makeAdapter("#,###.##", "2", "2"));
+assert.strictEqual(u.fmtMoney(1234567.89, "USD"), "USD 1,234,567.89");
+assert.strictEqual(u.fmtPct(12.34), "12.3%");
+assert.strictEqual(u.fmtCount(12500), "12,500");
+assert.strictEqual(u.fmtCount(3.5), "3.50"); // float_precision 2 pads decimals
+assert.strictEqual(u.fmtCount(-4200), "-4,200");
+
+// Alternate grouping "# ###.##" and default precision taken from the format
+u.setNumberAdapter(makeAdapter("# ###.##", null));
+assert.strictEqual(u.fmtMoney(1234567.891, "CHF"), "CHF 1 234 567.89");
+u.setNumberAdapter(makeAdapter("#.###,##", null));
+assert.strictEqual(u.fmtMoney(1234.5, "EUR"), "EUR 1.234,50"); // format precision = 2
+u.setNumberAdapter(makeAdapter("#.###", null));
+assert.strictEqual(u.fmtMoney(1234.5, "XYZ"), "XYZ 1.234"); // zero-decimal format; 0.5 tie rounds to even (verified vs real frappe)
+
+// Currency code is escaped before it reaches the HTML template, but the raw
+// code still reaches the adapter (Frappe needs it for the format lookup)
+u.setNumberAdapter(makeAdapter("#,###.##", "2"));
+const evil = '<img src=x onerror="alert(1)">';
+const evilOut = u.fmtMoney(5, evil);
+assert.ok(!evilOut.includes("<img"), "raw tag must not survive fmtMoney");
+assert.ok(evilOut.includes("&lt;img"), "currency code must be escaped");
+// escape holds in the pure fallback path too (no adapter set)
+u.setNumberAdapter(null);
+assert.ok(!u.fmtMoney(5, evil).includes("<img"));
+
+// Reset -> pure en-US fallback behaviour (node-test path) is untouched
+u.setNumberAdapter(null);
+assert.strictEqual(u.fmtMoney(-1500, "IDR"), "-IDR 1,500");
+assert.strictEqual(u.fmtPct(12.34), "12.3%");
+assert.strictEqual(u.fmtCount(12500), "12500");
+u.setNumberAdapter(undefined); // junk adapter arg -> back to fallback
+assert.strictEqual(u.fmtMoney(7, "IDR"), "IDR 7");
+
+console.log("hq_monitoring_utils: 14 groups OK");
