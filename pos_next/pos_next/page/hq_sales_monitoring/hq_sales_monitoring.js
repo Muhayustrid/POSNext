@@ -574,7 +574,7 @@ class HQSalesMonitor {
 		if (h.biggest_outlet) {
 			cards.push(`<div class="hq-card hq-mini">
 				<div class="hq-kpi-label">${__("Biggest Outlet (share)")}</div>
-				<div class="hq-kpi-value hq-truncate">${frappe.utils.escape_html(h.biggest_outlet.company)}</div>
+				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(h.biggest_outlet.company)}</div>
 				<div class="hq-kpi-sub">${this._signed_pct(h.biggest_outlet.share_pct)} · <span class="hq-money">${HQ_UTILS.fmtMoney(h.biggest_outlet.net_tax_incl, h.biggest_outlet.currency)}</span></div>
 			</div>`);
 		} else {
@@ -584,7 +584,7 @@ class HQSalesMonitor {
 		if (h.most_transactions_outlet) {
 			cards.push(`<div class="hq-card hq-mini">
 				<div class="hq-kpi-label">${__("Outlet with Most Transactions")}</div>
-				<div class="hq-kpi-value hq-truncate">${frappe.utils.escape_html(h.most_transactions_outlet.company)}</div>
+				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(h.most_transactions_outlet.company)}</div>
 				<div class="hq-kpi-sub">${h.most_transactions_outlet.orders} ${__("orders")}</div>
 			</div>`);
 		} else {
@@ -594,7 +594,7 @@ class HQSalesMonitor {
 		if (fav) {
 			cards.push(`<div class="hq-card hq-mini">
 				<div class="hq-kpi-label">${__("Favorite Product")}</div>
-				<div class="hq-kpi-value hq-truncate">${frappe.utils.escape_html(fav.item_name)}</div>
+				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(fav.item_name)}</div>
 				<div class="hq-kpi-sub">${fav.qty} ${__("qty")} · ${frappe.utils.escape_html(fav.item_group || "")}</div>
 			</div>`);
 		} else {
