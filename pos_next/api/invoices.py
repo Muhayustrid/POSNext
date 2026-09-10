@@ -12,6 +12,8 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
+from pos_next.invoice_type import POS_INVOICE, get_pos_invoice_doctype
+
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
 # ==========================================
@@ -349,6 +351,9 @@ def _strip_server_managed_fields(payload):
 		return payload
 
 	cleaned = dict(payload)
+	# The target doctype is resolved server-side (_resolve_target_doctype);
+	# a client-supplied doctype guess must never reach document creation.
+	cleaned.pop("doctype", None)
 	# Packed Items are regenerated from Product Bundle definitions during save.
 	# Accepting client-side packed rows can reintroduce duplicates on re-save.
 	cleaned.pop("packed_items", None)
@@ -370,9 +375,16 @@ def _strip_server_managed_fields(payload):
 			{k: v for k, v in item.items() if k != "pos_offer_item_rules"}
 			if isinstance(item, dict)
 			else item
-			for item in items
-		]
+		for item in items
+	]
 	return cleaned
+
+
+def _resolve_target_doctype(payload_doctype):
+	"""Sales Order drafts pass through; invoice doctypes are server-resolved."""
+	if payload_doctype == "Sales Order":
+		return "Sales Order"
+	return get_pos_invoice_doctype()
 
 
 def get_payment_account(mode_of_payment, company):
@@ -791,10 +803,13 @@ def update_invoice(data):
 		# verifies nothing here, the consumers (quota enforcement, discount
 		# code gate) re-verify every claimed rule before it grants anything.
 		relayed_offer_rules = data.get("pos_relayed_offer_rules") if isinstance(data, dict) else None
+		# Read before the strip below: the client's doctype must not reach
+		# document creation; only its Sales Order-vs-invoice intent survives.
+		payload_doctype = data.get("doctype") if isinstance(data, dict) else None
 		data = _strip_server_managed_fields(data)
 
 		pos_profile = data.get("pos_profile")
-		doctype = data.get("doctype", "Sales Invoice")
+		doctype = _resolve_target_doctype(payload_doctype)
 
 		# Ensure the document type is set
 		data.setdefault("doctype", doctype)
@@ -838,7 +853,8 @@ def update_invoice(data):
 
 		company = invoice_doc.get("company") or (pos_profile_doc.company if pos_profile_doc else None)
 
-		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
+		# both invoice doctypes carry payment rows; Sales Order does not
+		if company and invoice_doc.get("payments") and doctype != "Sales Order":
 			_set_payment_accounts(invoice_doc.payments, company)
 
 		# Validate return items if this is a return invoice
@@ -979,7 +995,11 @@ def update_invoice(data):
 			else:
 				item.pos_offer_item_rules = ""
 
-		if doctype == "Sales Invoice":
+		# offer stashes are POS Invoice/Sales Invoice custom fields (Tasks 2/3);
+		# on POS Invoice pos_applied_one_time_rules is not a column — the
+		# assignment is a harmless in-memory value, only pos_applied_offer_rules
+		# persists there
+		if doctype != "Sales Order":
 			one_time_applied = (
 				frappe.get_all(
 					"Pricing Rule",
@@ -1010,8 +1030,8 @@ def update_invoice(data):
 				json.dumps(sorted(applied_rule_names_seen)) if applied_rule_names_seen else ""
 			)
 
-		# Set invoice flags BEFORE calculations
-		if doctype == "Sales Invoice":
+		# Set invoice flags BEFORE calculations (POS Invoice and Sales Invoice)
+		if doctype != "Sales Order":
 			invoice_doc.is_pos = 1
 			invoice_doc.update_stock = 1
 			if pos_profile_doc and pos_profile_doc.warehouse:
@@ -1067,10 +1087,9 @@ def update_invoice(data):
 		# Set accounts for payment methods before saving
 		_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-		# For return invoices, ensure payments are negative
+		# For return invoices, ensure payments are negative (both doctypes)
 		if invoice_doc.get("is_return"):
-			# Return handling is primarily for Sales Invoice
-			if doctype == "Sales Invoice" and invoice_doc.get("payments"):
+			if doctype != "Sales Order" and invoice_doc.get("payments"):
 				for payment in invoice_doc.payments:
 					payment.amount = -abs(payment.amount)
 					if payment.base_amount:
@@ -1392,7 +1411,9 @@ def submit_invoice(invoice=None, data=None):
 	invoice = _strip_server_managed_fields(invoice)
 
 	pos_profile = invoice.get("pos_profile")
-	doctype = invoice.get("doctype", "Sales Invoice")
+	# after _strip_server_managed_fields the client's doctype guess is gone:
+	# the target invoice doctype always comes from the site switch
+	doctype = _resolve_target_doctype(invoice.get("doctype"))
 
 	# Normalize pricing_rules before processing
 	standardize_pricing_rules(invoice.get("items"))
@@ -1424,6 +1445,19 @@ def submit_invoice(invoice=None, data=None):
 	invoice_submitted = False
 
 	try:
+		# POS Invoice mode has no credit lane: ERPNext's own full-payment
+		# validation would reject a paymentless POS Invoice with a cryptic
+		# message — fail early with a clear one, before any draft is created.
+		if doctype == POS_INVOICE and (
+			cint(invoice.get("pos_next_credit_sale"))
+			or cint(invoice.get("pos_next_redeemed_customer_credit"))
+			or flt(invoice.get("partially_paid") or 0)
+		):
+			frappe.throw(
+				_("Credit sales and partial payments are not supported in POS Invoice mode. "
+				"Switch Invoice Type to Sales Invoice to use them.")
+			)
+
 		invoice_name = invoice.get("name")
 
 		# Get or create invoice
@@ -1463,8 +1497,8 @@ def submit_invoice(invoice=None, data=None):
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
 
-		# Ensure update_stock is set for Sales Invoice
-		if doctype == "Sales Invoice":
+		# Ensure update_stock is set (POS Invoice and Sales Invoice)
+		if doctype != "Sales Order":
 			invoice_doc.update_stock = 1
 
 		# For return invoices, set update_outstanding_for_self = 0
@@ -1490,8 +1524,8 @@ def submit_invoice(invoice=None, data=None):
 					f"Failed to set branch from POS Profile {pos_profile}: {e}", "POS Profile Branch"
 				)
 
-		# Set accounts for all payment methods before saving
-		if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
+		# Set accounts for all payment methods before saving (both doctypes)
+		if doctype != "Sales Order" and hasattr(invoice_doc, "payments"):
 			_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
 		# Handle sales team (multiple sales persons)
@@ -1531,7 +1565,7 @@ def submit_invoice(invoice=None, data=None):
 
 		# Handle write-off amount if provided
 		write_off_amount = flt(data.get("write_off_amount") or invoice.get("write_off_amount") or 0)
-		if write_off_amount > 0 and doctype == "Sales Invoice":
+		if write_off_amount > 0 and doctype != "Sales Order":
 			# Get write-off account and cost center from POS Profile
 			if pos_profile:
 				try:
@@ -2014,7 +2048,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 # ==========================================
 
 
-def _filter_fully_returned(invoices):
+def _filter_fully_returned(invoices, doctype="Sales Invoice"):
 	"""Remove invoices where all items have already been returned.
 
 	Uses two targeted queries instead of a 4-table LEFT JOIN to avoid
@@ -2029,7 +2063,7 @@ def _filter_fully_returned(invoices):
 	invoice_names = [inv["name"] for inv in invoices]
 
 	# Original qty per invoice
-	si_item = frappe.qb.DocType("Sales Invoice Item")
+	si_item = frappe.qb.DocType(f"{doctype} Item")
 	orig_rows = (
 		frappe.qb.from_(si_item)
 		.select(si_item.parent, Sum(si_item.qty).as_("total_original_qty"))
@@ -2039,8 +2073,8 @@ def _filter_fully_returned(invoices):
 	orig_map = {r["parent"]: flt(r["total_original_qty"]) for r in orig_rows}
 
 	# Returned qty per original invoice
-	ret_si = frappe.qb.DocType("Sales Invoice")
-	ret_item = frappe.qb.DocType("Sales Invoice Item")
+	ret_si = frappe.qb.DocType(doctype)
+	ret_item = frappe.qb.DocType(f"{doctype} Item")
 	ret_rows = (
 		frappe.qb.from_(ret_si)
 		.inner_join(ret_item)
@@ -2071,6 +2105,10 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	"""
 	from frappe.utils import add_days, today
 
+	# returns listings are doctype-aware: they read the doctype new POS
+	# transactions are created in
+	doctype = get_pos_invoice_doctype()
+
 	# Check return validity days from POS Settings
 	return_validity_days = 0
 	if pos_profile:
@@ -2078,7 +2116,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 			frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "return_validity_days") or 0
 		)
 
-	si = frappe.qb.DocType("Sales Invoice")
+	si = frappe.qb.DocType(doctype)
 
 	# Over-fetch to compensate for fully-returned invoices removed in step 2
 	fetch_limit = cint(limit) * 2
@@ -2108,7 +2146,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	candidates = query.run(as_dict=True)
 
 	# Step 2: filter out fully-returned invoices, then trim to requested limit
-	return _filter_fully_returned(candidates)[: cint(limit)]
+	return _filter_fully_returned(candidates, doctype=doctype)[: cint(limit)]
 
 
 @frappe.whitelist()
@@ -2134,7 +2172,8 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	# frappe.db.escape() returns a quoted string for raw SQL — not usable with
 	# frappe.qb's .like() which parameterizes internally. Manual escaping needed.
 	search_term = cstr(search_term).strip().replace("%", r"\%").replace("_", r"\_")
-	si = frappe.qb.DocType("Sales Invoice")
+	doctype = get_pos_invoice_doctype()
+	si = frappe.qb.DocType(doctype)
 
 	# Step 1: find matching invoices (lightweight, no JOINs)
 	candidates = (
@@ -2157,7 +2196,7 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	).run(as_dict=True)
 
 	# Step 2: filter out fully-returned invoices
-	return _filter_fully_returned(candidates)
+	return _filter_fully_returned(candidates, doctype=doctype)
 
 
 @frappe.whitelist()
@@ -2171,8 +2210,10 @@ def check_invoice_return_validity(invoice_name):
 	"""
 	from frappe.utils import date_diff, formatdate, getdate
 
+	doctype = get_pos_invoice_doctype()
+
 	# Fetch only the fields needed for validation
-	si = frappe.qb.DocType("Sales Invoice")
+	si = frappe.qb.DocType(doctype)
 	invoice_data = (
 		frappe.qb.from_(si).select(si.pos_profile, si.posting_date).where(si.name == invoice_name)
 	).run(as_dict=True)
@@ -2222,8 +2263,10 @@ def get_invoice_for_return(invoice_name):
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
 
+	doctype = get_pos_invoice_doctype()
+
 	# Validate invoice exists and get fields needed for return period check
-	si = frappe.qb.DocType("Sales Invoice")
+	si = frappe.qb.DocType(doctype)
 	invoice_check = (
 		frappe.qb.from_(si).select(si.pos_profile, si.posting_date).where(si.name == invoice_name)
 	).run(as_dict=True)
@@ -2253,26 +2296,29 @@ def get_invoice_for_return(invoice_name):
 				)
 
 	# Aggregate quantities already returned from previous return invoices.
-	# Uses COALESCE to match by sales_invoice_item (row ID) first, then item_code as fallback.
-	ret_si = frappe.qb.DocType("Sales Invoice")
-	ret_item = frappe.qb.DocType("Sales Invoice Item")
+	# Uses COALESCE to match by the row-link field (row ID) first, then
+	# item_code as fallback. The row-link field is doctype-specific:
+	# Sales Invoice Item.sales_invoice_item vs POS Invoice Item.pos_invoice_item.
+	row_link = "sales_invoice_item" if doctype == "Sales Invoice" else "pos_invoice_item"
+	ret_si = frappe.qb.DocType(doctype)
+	ret_item = frappe.qb.DocType(f"{doctype} Item")
 
 	returned_qty_results = (
 		frappe.qb.from_(ret_si)
 		.inner_join(ret_item)
 		.on(ret_item.parent == ret_si.name)
 		.select(
-			Coalesce(ret_item.sales_invoice_item, ret_item.item_code).as_("key_field"),
+			Coalesce(getattr(ret_item, row_link), ret_item.item_code).as_("key_field"),
 			Sum(Abs(ret_item.qty)).as_("returned_qty"),
 		)
 		.where((ret_si.return_against == invoice_name) & (ret_si.docstatus == 1) & (ret_si.is_return == 1))
-		.groupby(Coalesce(ret_item.sales_invoice_item, ret_item.item_code))
+		.groupby(Coalesce(getattr(ret_item, row_link), ret_item.item_code))
 	).run(as_dict=True)
 
 	returned_qty = {row["key_field"]: flt(row["returned_qty"]) for row in returned_qty_results}
 
 	# Get the full invoice document (needed for complete response)
-	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+	invoice = frappe.get_doc(doctype, invoice_name)
 	invoice_dict = invoice.as_dict()
 
 	# Calculate remaining quantities

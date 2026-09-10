@@ -26,7 +26,9 @@ class TestStripServerManagedFields(unittest.TestCase):
 		self.assertNotIn("pos_applied_offer_rules", cleaned)
 		self.assertNotIn("pos_applied_one_time_rules", cleaned)
 		self.assertEqual("CUST-1", cleaned["customer"])
-		self.assertEqual("Sales Invoice", cleaned["doctype"])
+		# doctype is resolved server-side (_resolve_target_doctype) since the
+		# POS Invoice switch (Task 5) — a client guess must not survive
+		self.assertNotIn("doctype", cleaned)
 
 	def test_strips_per_item_offer_attribution(self):
 		# pos_offer_item_rules is recomputed server-side from the applied
