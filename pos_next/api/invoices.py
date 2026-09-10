@@ -1160,6 +1160,25 @@ def _is_pending_expired(modified_time):
 	return age_minutes > PENDING_TIMEOUT_MINUTES
 
 
+def _sync_invoice_field(doctype):
+	"""Offline Invoice Sync column that holds the invoice name for a doctype."""
+	return "pos_invoice" if doctype == POS_INVOICE else "sales_invoice"
+
+
+def _sync_existing_invoice(sync):
+	"""Resolve the invoice an Offline Invoice Sync record points to.
+
+	Sync records written in Sales Invoice mode fill `sales_invoice`, those
+	written in POS Invoice mode fill `pos_invoice` — try both columns and
+	return (doctype, name) for a live submitted invoice, else None.
+	"""
+	for doctype, column in (("Sales Invoice", "sales_invoice"), (POS_INVOICE, "pos_invoice")):
+		name = sync.get(column)
+		if name and frappe.db.get_value(doctype, name, "docstatus") == 1:
+			return doctype, name
+	return None
+
+
 def _reuse_sync_record(sync_record_name):
 	"""Reset an existing sync record to Pending status for retry."""
 	sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name)
@@ -1198,7 +1217,7 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 	existing_sync = frappe.db.get_value(
 		"Offline Invoice Sync",
 		{"offline_id": offline_id},
-		["name", "sales_invoice", "status", "modified"],
+		["name", "sales_invoice", "pos_invoice", "status", "modified"],
 		as_dict=True,
 		for_update=True,
 	)
@@ -1224,26 +1243,27 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 		if sync_status == "Failed":
 			return _reuse_sync_record(sync_record_name)
 
-		# Handle Synced status - verify invoice still valid
-		if sync_status == "Synced" and existing_sync.sales_invoice:
-			if frappe.db.exists("Sales Invoice", existing_sync.sales_invoice):
-				existing_invoice = frappe.get_doc("Sales Invoice", existing_sync.sales_invoice)
-				if existing_invoice.docstatus == 1:
-					return {
-						"already_synced": True,
-						"invoice_data": {
-							"name": existing_invoice.name,
-							"status": existing_invoice.docstatus,
-							"grand_total": existing_invoice.grand_total,
-							"total": existing_invoice.total,
-							"net_total": existing_invoice.net_total,
-							"outstanding_amount": getattr(existing_invoice, "outstanding_amount", 0),
-							"paid_amount": getattr(existing_invoice, "paid_amount", 0),
-							"change_amount": getattr(existing_invoice, "change_amount", 0),
-							"duplicate_prevented": True,
-							"offline_id": offline_id,
-						},
-					}
+		# Handle Synced status - verify invoice still valid (either column)
+		if sync_status == "Synced":
+			resolved = _sync_existing_invoice(existing_sync)
+			if resolved:
+				doctype, name = resolved
+				existing_invoice = frappe.get_doc(doctype, name)
+				return {
+					"already_synced": True,
+					"invoice_data": {
+						"name": existing_invoice.name,
+						"status": existing_invoice.docstatus,
+						"grand_total": existing_invoice.grand_total,
+						"total": existing_invoice.total,
+						"net_total": existing_invoice.net_total,
+						"outstanding_amount": getattr(existing_invoice, "outstanding_amount", 0),
+						"paid_amount": getattr(existing_invoice, "paid_amount", 0),
+						"change_amount": getattr(existing_invoice, "change_amount", 0),
+						"duplicate_prevented": True,
+						"offline_id": offline_id,
+					},
+				}
 
 			# Synced record points to deleted/invalid invoice - allow retry
 			return _reuse_sync_record(sync_record_name)
@@ -1273,20 +1293,21 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 		return _ensure_offline_uniqueness(offline_id, pos_profile, customer)
 
 
-def _complete_offline_sync(sync_record_name, invoice_name):
+def _complete_offline_sync(sync_record_name, invoice_name, doctype):
 	"""
 	Mark an offline sync record as completed after successful invoice submission.
 
 	Args:
 	    sync_record_name: Name of the Offline Invoice Sync record
-	    invoice_name: Name of the submitted Sales Invoice
+	    invoice_name: Name of the submitted invoice
+	    doctype: Doctype the invoice was created in ("Sales Invoice" / "POS Invoice")
 	"""
 	if not sync_record_name:
 		return
 
 	try:
 		sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name)
-		sync_doc.sales_invoice = invoice_name
+		setattr(sync_doc, _sync_invoice_field(doctype), invoice_name)
 		sync_doc.status = "Synced"
 		sync_doc.synced_at = frappe.utils.now_datetime()
 		sync_doc.flags.ignore_permissions = True
@@ -1350,17 +1371,16 @@ def check_offline_invoice_synced(offline_id):
 	if not result or not isinstance(result, dict):
 		return {"synced": False, "sales_invoice": None}
 
-	# Additionally verify the sales invoice still exists and is submitted
-	if result.get("synced") and result.get("sales_invoice"):
-		if frappe.db.exists("Sales Invoice", result["sales_invoice"]):
-			docstatus = frappe.db.get_value("Sales Invoice", result["sales_invoice"], "docstatus")
-			if docstatus == 1:  # Submitted
-				return result
+	# Verify the invoice still exists and is submitted, whichever column holds it
+	resolved = _sync_existing_invoice(result)
+	if result.get("synced") and resolved:
+		# 'sales_invoice' is the long-standing response key the frontend reads;
+		# it carries whichever invoice exists (Sales Invoice or POS Invoice)
+		result["sales_invoice"] = resolved[1]
+		return result
 
-		# Invoice was deleted or not submitted, clear the sync record
-		return {"synced": False, "sales_invoice": None}
-
-	return result
+	# Invoice was deleted or not submitted, clear the sync record
+	return {"synced": False, "sales_invoice": None}
 
 
 @frappe.whitelist()
@@ -1451,6 +1471,7 @@ def submit_invoice(invoice=None, data=None):
 		if doctype == POS_INVOICE and (
 			cint(invoice.get("pos_next_credit_sale"))
 			or cint(invoice.get("pos_next_redeemed_customer_credit"))
+			or cint(invoice.get("is_credit_sale"))
 			or flt(invoice.get("partially_paid") or 0)
 		):
 			frappe.throw(
@@ -1688,7 +1709,7 @@ def submit_invoice(invoice=None, data=None):
 					)
 		# Complete the offline sync record
 		if sync_record_name:
-			_complete_offline_sync(sync_record_name, invoice_doc.name)
+			_complete_offline_sync(sync_record_name, invoice_doc.name, invoice_doc.doctype)
 
 		# Handle credit redemption after successful submission
 		if redeemed_customer_credit and customer_credit_dict:
@@ -1984,7 +2005,7 @@ def get_draft_invoices(pos_opening_shift, doctype="Sales Invoice"):
 @frappe.whitelist()
 def delete_invoice(invoice):
 	"""Delete draft invoice."""
-	doctype = "Sales Invoice"
+	doctype = get_pos_invoice_doctype()
 
 	if not frappe.db.exists(doctype, invoice):
 		frappe.throw(_("Invoice {0} does not exist").format(invoice))
@@ -2005,7 +2026,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	"""
 	from datetime import datetime, timedelta
 
-	doctype = "Sales Invoice"
+	doctype = get_pos_invoice_doctype()
 	cutoff_time = datetime.now() - timedelta(hours=int(max_age_hours))
 
 	filters = {
@@ -2550,12 +2571,17 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	        - _original_invoice: Reference data from original invoice (payments, amounts)
 	        - Each item includes original_qty, already_returned, and remaining_qty
 	"""
-	from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
 
+	doctype = get_pos_invoice_doctype()
+	if doctype == POS_INVOICE:
+		from erpnext.accounts.doctype.pos_invoice.pos_invoice import make_sales_return
+	else:
+		from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
+
 	# Validate invoice and get fields needed for return period check
-	si = frappe.qb.DocType("Sales Invoice")
+	si = frappe.qb.DocType(doctype)
 	invoice_check = (
 		frappe.qb.from_(si)
 		.select(
@@ -2620,19 +2646,22 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	return_doc.pos_profile = invoice_info.pos_profile
 
 	# Aggregate quantities already returned from previous return invoices
-	ret_si = frappe.qb.DocType("Sales Invoice")
-	ret_item = frappe.qb.DocType("Sales Invoice Item")
+	ret_si = frappe.qb.DocType(doctype)
+	ret_item = frappe.qb.DocType(f"{doctype} Item")
+	# the child-row link field is doctype-specific (POS Invoice Item has
+	# pos_invoice_item, Sales Invoice Item has sales_invoice_item)
+	row_name_field = "pos_invoice_item" if doctype == POS_INVOICE else "sales_invoice_item"
 
 	returned_qty_results = (
 		frappe.qb.from_(ret_si)
 		.inner_join(ret_item)
 		.on(ret_item.parent == ret_si.name)
 		.select(
-			Coalesce(ret_item.sales_invoice_item, ret_item.item_code).as_("key_field"),
+			Coalesce(getattr(ret_item, row_name_field), ret_item.item_code).as_("key_field"),
 			Sum(Abs(ret_item.qty)).as_("returned_qty"),
 		)
 		.where((ret_si.return_against == invoice_name) & (ret_si.docstatus == 1) & (ret_si.is_return == 1))
-		.groupby(Coalesce(ret_item.sales_invoice_item, ret_item.item_code))
+		.groupby(Coalesce(getattr(ret_item, row_name_field), ret_item.item_code))
 	).run(as_dict=True)
 
 	returned_qty_map = {row["key_field"]: flt(row["returned_qty"]) for row in returned_qty_results}
@@ -2697,7 +2726,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 
 	def process_return_item(item):
 		"""Process single item for return, returns None if not returnable."""
-		item_ref = item.get("sales_invoice_item") or item.get("item_code")
+		item_ref = item.get(row_name_field) or item.get("item_code")
 		original_qty = abs(flt(item.get("qty", 0)))
 		remaining_qty = original_qty - returned_qty_map.get(item_ref, 0)
 

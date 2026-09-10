@@ -15,7 +15,12 @@ from unittest import mock
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from pos_next.api.invoices import get_returnable_invoices, submit_invoice
+from pos_next.api.invoices import (
+	_sync_existing_invoice,
+	check_offline_invoice_synced,
+	get_returnable_invoices,
+	submit_invoice,
+)
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
 
 # Schedule-safe profile: inserting a POS Opening Shift can never throw for
@@ -142,6 +147,8 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 				"POS Opening Shift", self.shift.name, "docstatus", 2, update_modified=False
 			)
 			frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
+		for offline_id in getattr(self, "_sync_rows", []):
+			frappe.db.delete("Offline Invoice Sync", {"offline_id": offline_id})
 		_set_invoice_type(SALES_INVOICE)
 		frappe.db.commit()
 
@@ -187,3 +194,39 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		invoices = get_returnable_invoices(limit=50, pos_profile=self.profile.name)
 		names = [row.get("name") for row in invoices]
 		self.assertIn(name, names)
+
+	def test_offline_dedup_cross_doctype(self):
+		# replaying the same offline payload twice must yield ONE POS Invoice,
+		# with the sync record's pos_invoice column set (not sales_invoice)
+		offline_id = "pos_offline_test_xmode1"
+		self._sync_rows = [offline_id]
+		frappe.db.delete("Offline Invoice Sync", {"offline_id": offline_id})
+		payload = self._payload(offline_id=offline_id)
+		first = submit_invoice(invoice=payload)
+		frappe.db.commit()
+		second = submit_invoice(invoice=payload)  # replay must return the same invoice
+		self.assertEqual(first.get("name"), second.get("name"))
+		sync = frappe.db.get_value(
+			"Offline Invoice Sync",
+			{"offline_id": offline_id},
+			["pos_invoice", "sales_invoice"],
+			as_dict=1,
+		)
+		self.assertEqual(sync.pos_invoice, first.get("name"))
+		self.assertFalse(sync.sales_invoice)
+		# pre-sync check returns whichever column holds the invoice
+		result = check_offline_invoice_synced(offline_id)
+		self.assertTrue(result.get("synced"))
+		self.assertEqual(result.get("sales_invoice"), first.get("name"))
+
+	def test_sync_existing_invoice_tries_both_columns(self):
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+		# a Sales-Invoice-column pointer at a POS Invoice name must NOT resolve
+		# (the name lives in the POS Invoice table); the pos_invoice column must
+		self.assertIsNone(_sync_existing_invoice({"sales_invoice": name, "pos_invoice": None}))
+		self.assertEqual(
+			_sync_existing_invoice({"sales_invoice": None, "pos_invoice": name}),
+			(POS_INVOICE, name),
+		)
