@@ -199,7 +199,9 @@ const checkDuplicateError = (error) => {
 
 	if (!isDuplicate) return { isDuplicate: false, invoiceName: null };
 
-	const match = errorMessage.match(/Sales Invoice: (\S+)/);
+	// Server raises the duplicate under whichever doctype it created the
+	// invoice ("Sales Invoice" or "POS Invoice" in POS Invoice mode).
+	const match = errorMessage.match(/(?:Sales Invoice|POS Invoice): (\S+)/);
 	return { isDuplicate: true, invoiceName: match?.[1] || null };
 };
 

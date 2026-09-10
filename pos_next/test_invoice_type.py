@@ -217,3 +217,16 @@ class TestPOSInvoiceCustomFields(FrappeTestCase):
 				self.assertTrue(
 					frappe.db.has_column(dt, f["fieldname"]), f"{dt}.{f['fieldname']} missing"
 				)
+
+
+class TestBootstrapInvoiceType(FrappeTestCase):
+	def test_bootstrap_exposes_invoice_type(self):
+		# authenticated context is unavailable in unit runner; test the helper path
+		from pos_next.api.bootstrap import _get_pos_settings
+
+		profile_name = frappe.db.get_value("POS Profile", [["disabled", "=", 0]])
+		if not profile_name:
+			self.skipTest("no enabled POS Profile")
+		profile = frappe.get_cached_doc("POS Profile", profile_name)
+		settings = _get_pos_settings(profile)
+		self.assertIn(settings["invoice_type"], ("Sales Invoice", "POS Invoice"))

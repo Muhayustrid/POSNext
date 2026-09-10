@@ -605,6 +605,7 @@ export async function silentPrintInvoice(
 	invoiceName,
 	printFormat = null,
 	posProfile = null,
+	doctype = null,
 ) {
 	if (isLocalOnlyInvoiceName(invoiceName)) {
 		const doc = await hydrateLocalOnlyInvoice({ name: invoiceName })
@@ -616,11 +617,12 @@ export async function silentPrintInvoice(
 		)
 	}
 	const format = printFormat || DEFAULT_PRINT_FORMAT
+	const resolvedDoctype = doctype || "Sales Invoice"
 
 	await ensureTransportInitialized(posProfile)
 
 	const [htmlResult, docResult] = await Promise.allSettled([
-		fetchServerPrintHTML("Sales Invoice", invoiceName, format),
+		fetchServerPrintHTML(resolvedDoctype, invoiceName, format),
 		call("pos_next.api.invoices.get_invoice", { invoice_name: invoiceName }),
 	])
 	if (htmlResult.status === "rejected") throw htmlResult.reason
@@ -637,7 +639,7 @@ export async function silentPrintInvoice(
 			? buildCrewSlipHTML(invoiceDoc, { dots: effectiveReceiptDots() })
 			: null,
 		logContext: {
-			reference_doctype: "Sales Invoice",
+			reference_doctype: resolvedDoctype,
 			reference_name: invoiceName,
 			pos_profile: posProfile,
 		},
@@ -664,7 +666,7 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
 		// the doc we already hold. The driver drops it for single copies.
 		crewHTML: buildCrewSlipHTML(invoiceData, { dots }),
 		logContext: {
-			reference_doctype: "Sales Invoice",
+			reference_doctype: invoiceData?.doctype || "Sales Invoice",
 			reference_name: invoiceData?.name,
 			pos_profile: invoiceData?.pos_profile || null,
 		},
@@ -709,6 +711,7 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 			invoiceName,
 			printFormat,
 			invoiceData?.pos_profile || null,
+			invoiceData?.doctype || null,
 		)
 		return { method: "silent", success: true }
 	} catch (err) {

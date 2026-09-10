@@ -1594,13 +1594,13 @@
 							:class="['flex-shrink-0', isSmallMobile ? 'space-y-1' : 'space-y-1.5']"
 						>
 							<!-- Two buttons side by side when both needed -->
-							<div
-								v-if="
-									lastSelectedMethod &&
-									remainingAmount > 0 &&
-									allowCreditSale &&
-									paymentEntries.length === 0
-								"
+								<div
+									v-if="
+										lastSelectedMethod &&
+										remainingAmount > 0 &&
+										creditSaleEnabled &&
+										paymentEntries.length === 0
+									"
 								class="grid grid-cols-2"
 								:class="isSmallMobile ? 'gap-1' : 'gap-1.5'"
 							>
@@ -1932,7 +1932,7 @@
 					>
 						<!-- Pay on Account Button (if credit sales enabled) -->
 						<button
-							v-if="allowCreditSale"
+							v-if="creditSaleEnabled"
 							@click="addCreditAccountPayment"
 							:disabled="paymentEntries.length > 0 || isSubmitting"
 							:class="[
@@ -2727,8 +2727,9 @@ async function loadPaymentMethods() {
 		} else {
 			// Load from server when online
 			await paymentMethodsResource.fetch();
-			// Receivable accounts for "Pay on Receivable Account" (online only)
-			receivableAccountsResource.fetch();
+			// Receivable accounts for "Pay on Receivable Account" (online only,
+			// and only where credit sale applies)
+			if (creditSaleEnabled.value) receivableAccountsResource.fetch();
 		}
 	} catch (error) {
 		log.error("Error loading payment methods:", error);
@@ -2745,12 +2746,21 @@ const totalPaid = computed(() => {
 	return roundCurrency(sum);
 });
 
+// POS Invoice mode has no credit-sale / receivable paths (server rejects them)
+const isPosInvoiceMode = computed(() => settingsStore.isPosInvoiceMode);
+
 // Customer credit payment is enabled if either:
 // - allowCreditSale is enabled (allows going into debt AND using credit)
 // - allowCustomerCreditPayment is enabled (only allows using positive credit)
+// Never in POS Invoice mode — credit-sale/receivable paths don't exist there.
 const customerCreditEnabled = computed(() => {
-	return props.allowCreditSale || props.allowCustomerCreditPayment;
+	return (
+		(props.allowCreditSale || props.allowCustomerCreditPayment) && !isPosInvoiceMode.value
+	);
 });
+
+// Credit sale specifically (going into debt via a receivable account)
+const creditSaleEnabled = computed(() => props.allowCreditSale && !isPosInvoiceMode.value);
 
 const totalAvailableCredit = computed(() => {
 	// Use net_balance: negative means customer has credit, positive means they owe
@@ -2971,7 +2981,7 @@ const canComplete = computed(() => {
 	}
 
 	// "Pay on Receivable Account": the chosen account holds the unpaid balance
-	if (selectedReceivableAccount.value && props.allowCreditSale) {
+	if (selectedReceivableAccount.value && creditSaleEnabled.value) {
 		return totalPaid.value <= roundCurrency(props.grandTotal) + 0.01;
 	}
 
@@ -3059,7 +3069,8 @@ watch(
 watch(
 	() => [props.customer, props.company, props.allowCreditSale, props.allowCustomerCreditPayment],
 	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
-		const creditEnabled = allowCreditSale || allowCustomerCreditPayment;
+		const creditEnabled =
+			(allowCreditSale || allowCustomerCreditPayment) && !isPosInvoiceMode.value;
 		if (creditEnabled && customer && company) {
 			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer);
 			customerBalanceResource.fetch();
@@ -3085,7 +3096,7 @@ watch(show, (newVal) => {
 		// empty and break "Apply Customer Credit" with an allocation error.
 		// customerBalance is also refetched so the displayed balance reflects
 		// any redemptions made by other cashiers since the last open.
-		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment;
+		const creditEnabled = customerCreditEnabled.value;
 		if (creditEnabled && props.customer && props.company) {
 			customerBalanceResource.fetch();
 			customerCreditResource.fetch();
