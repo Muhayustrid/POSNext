@@ -1164,6 +1164,9 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 		bundles_map[comp["bundle_code"]].append(comp)
 
 	# Calculate availability for each bundle in each warehouse
+	# Intraday reservation: unconsolidated POS Invoices hold stock (hoisted —
+	# one query per warehouse, not one per warehouse×bundle×component)
+	deductions = {wh: get_unconsolidated_posi_qty(component_codes, wh) for wh in warehouse_names}
 	for wh_name in warehouse_names:
 		resolved_whs = warehouse_resolution_map[wh_name]
 
@@ -1180,10 +1183,7 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 				# Sum stock across all resolved warehouses (for group warehouse support)
 				total_available = sum(component_stock_map[component_code].get(wh, 0) for wh in resolved_whs)
 
-				# Intraday reservation: unconsolidated POS Invoices hold stock
-				total_available -= get_unconsolidated_posi_qty([component_code], wh_name).get(
-					component_code, 0
-				)
+				total_available -= deductions[wh_name].get(component_code, 0)
 
 				# Calculate how many bundles this component can supply
 				possible = int(total_available / required_qty) if required_qty > 0 else 0
