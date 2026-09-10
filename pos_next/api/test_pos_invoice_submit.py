@@ -230,3 +230,43 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			_sync_existing_invoice({"sales_invoice": None, "pos_invoice": name}),
 			(POS_INVOICE, name),
 		)
+
+	def test_effective_stock_blocks_oversell(self):
+		from pos_next.api.invoices import validate_cart_items
+		from pos_next.api.items import get_item_stock
+
+		def _bin_qty():
+			return frappe.utils.flt(
+				frappe.db.get_value(
+					"Bin", {"item_code": self.item, "warehouse": self.profile.warehouse}, "actual_qty"
+				)
+				or 0
+			)
+
+		# submit one invoice consuming ALL stocked qty (5 from _make_stock, plus
+		# any residual on this shared site so effective stock lands at exactly 0)
+		qty = int(_bin_qty())
+		payload = {
+			"pos_profile": self.profile.name, "posa_pos_opening_shift": self.shift.name,
+			"customer": self.customer,
+			"items": [{"item_code": self.item, "qty": qty, "rate": 100,
+			           "warehouse": self.profile.warehouse}],
+			"payments": [{"mode_of_payment": self.mode[0], "amount": 100 * qty}],
+		}
+		result = submit_invoice(invoice=payload)
+		self._created.append(result.get("name"))
+		frappe.db.commit()
+
+		# Bin still shows the full qty (no SLE until consolidation)…
+		bin_after = _bin_qty()
+		self.assertEqual(bin_after, qty)
+		# …but the items API reports the effective (deducted) qty …
+		stock = get_item_stock(self.item, self.profile.warehouse)
+		self.assertEqual(stock["stock_qty"], 0)
+		# …and cart validation rejects another unit (real signature returns the
+		# error list instead of raising).
+		errors = validate_cart_items(
+			[{"item_code": self.item, "qty": 1, "warehouse": self.profile.warehouse}],
+			pos_profile=self.profile.name,
+		)
+		self.assertTrue(errors)

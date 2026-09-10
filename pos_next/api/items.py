@@ -13,6 +13,8 @@ from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull
 from frappe.utils import flt, getdate, nowdate
 
+from pos_next.invoice_type import get_unconsolidated_posi_qty
+
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
 	"item_name",
@@ -116,7 +118,9 @@ def get_stock_availability(item_code, warehouse):
 		.run(as_dict=True)
 	)
 
-	return flt(result[0].actual_qty) if result and result[0].actual_qty else 0.0
+	available = flt(result[0].actual_qty) if result and result[0].actual_qty else 0.0
+	# intraday reservation: unconsolidated POS Invoices hold stock (no SLE yet)
+	return available - get_unconsolidated_posi_qty([item_code], warehouse).get(item_code, 0)
 
 
 def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=None):
@@ -492,7 +496,9 @@ def get_item_stock(item_code, warehouse):
 			or {}
 		)
 
-		stock_qty = flt(bin_data.get("actual_qty", 0))
+		stock_qty = flt(bin_data.get("actual_qty", 0)) - get_unconsolidated_posi_qty(
+			[item_code], warehouse
+		).get(item_code, 0)
 		reserved_qty = flt(bin_data.get("reserved_qty", 0))
 
 		return {
@@ -649,6 +655,10 @@ def get_item_variants(template_item, pos_profile):
 				.run(as_dict=True)
 			)
 			stock_map = {s["item_code"]: s["actual_qty"] for s in stocks}
+			for code, held in get_unconsolidated_posi_qty(
+				variant_codes, pos_profile_doc.warehouse
+			).items():
+				stock_map[code] = flt(stock_map.get(code, 0)) - held
 
 		# Enrich each variant with attributes, price, stock, and UOMs
 		for variant in variants:
@@ -1020,6 +1030,11 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 	# Components not in map are treated as having 0 stock
 	component_stock_map = {row["item_code"]: flt(row["available_qty"]) for row in component_stock}
 
+	# Intraday reservation: unconsolidated POS Invoices hold component stock too
+	for wh in warehouses:
+		for code, held in get_unconsolidated_posi_qty(component_codes, wh).items():
+			component_stock_map[code] = component_stock_map.get(code, 0) - held
+
 	# ===========================================================================
 	# STEP 5: Calculate Bundle Availability (Limited by Most Constrained Component)
 	# ===========================================================================
@@ -1164,6 +1179,11 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 
 				# Sum stock across all resolved warehouses (for group warehouse support)
 				total_available = sum(component_stock_map[component_code].get(wh, 0) for wh in resolved_whs)
+
+				# Intraday reservation: unconsolidated POS Invoices hold stock
+				total_available -= get_unconsolidated_posi_qty([component_code], wh_name).get(
+					component_code, 0
+				)
 
 				# Calculate how many bundles this component can supply
 				possible = int(total_available / required_qty) if required_qty > 0 else 0
@@ -1352,6 +1372,10 @@ def get_items(
 					.run(as_dict=True)
 				)
 				stock_map = {s["item_code"]: s["actual_qty"] for s in stocks}
+				for code, held in get_unconsolidated_posi_qty(
+					stock_items, pos_profile_doc.warehouse
+				).items():
+					stock_map[code] = flt(stock_map.get(code, 0)) - held
 
 		# ===================================================================
 		# PRODUCT BUNDLE AVAILABILITY: Calculate bundle stock (bulk optimized)
@@ -1543,8 +1567,19 @@ def get_items(
 		# The SQL-level filter exempts non-stock items (is_stock_item=0) since they
 		# have no Bin rows. Bundles are non-stock items whose availability is computed
 		# from component stock. Filter them out here if they have 0 availability.
-		if hide_unavailable and bundle_availability_map:
-			items = [item for item in items if not item.get("is_bundle") or item.get("actual_qty", 0) > 0]
+		# Stock items too: the SQL sees raw Bin qty, which the unconsolidated-POS-
+		# Invoice deduction may drive to <= 0 (no-op while the deduction is empty).
+		if hide_unavailable:
+			items = [
+				item
+				for item in items
+				if (not item.get("is_bundle") or item.get("actual_qty", 0) > 0)
+				and (
+					not item.get("is_stock_item")
+					or item.get("has_variants")
+					or item.get("actual_qty", 0) > 0
+				)
+			]
 
 		return items
 	except Exception as e:
@@ -1668,6 +1703,8 @@ def get_items_bulk(
 				.run(as_dict=True)
 			)
 			stock_map = {s.item_code: flt(s.qty) for s in stock_data}
+			for code, held in get_unconsolidated_posi_qty(item_codes, warehouse).items():
+				stock_map[code] = stock_map.get(code, 0) - held
 
 		# Bundle availability
 		bundle_availability_map = {}
@@ -1722,9 +1759,19 @@ def get_items_bulk(
 			if item.get("variant_of") and item_code in attributes_map:
 				item["attributes"] = attributes_map[item_code]
 
-		# Post-filter: hide unavailable bundles
-		if hide_unavailable and bundle_availability_map:
-			items = [item for item in items if not item.get("is_bundle") or item.get("actual_qty", 0) > 0]
+		# Post-filter: hide unavailable bundles and stock items whose effective
+		# qty (Bin minus unconsolidated POS Invoices) dropped to <= 0.
+		if hide_unavailable:
+			items = [
+				item
+				for item in items
+				if (not item.get("is_bundle") or item.get("actual_qty", 0) > 0)
+				and (
+					not item.get("is_stock_item")
+					or item.get("has_variants")
+					or item.get("actual_qty", 0) > 0
+				)
+			]
 
 		return items
 	except Exception as e:
@@ -1985,6 +2032,9 @@ def get_stock_quantities(item_codes, warehouse):
 		# Create a lookup for items that have stock entries
 		item_stock_map = {row["item_code"]: row for row in stock_rows}
 
+		# Intraday reservation: subtract unconsolidated POS Invoice qty
+		unconsolidated = get_unconsolidated_posi_qty(normalized_codes, warehouse)
+
 		# Get bundle availability for non-stock items (bulk optimized)
 		bundle_availability_map = _calculate_bundle_availability_bulk(normalized_codes, warehouse)
 
@@ -2001,6 +2051,7 @@ def get_stock_quantities(item_codes, warehouse):
 				row = item_stock_map.get(item_code)
 				actual_qty = flt(row["actual_qty"]) if row else 0.0
 				reserved_qty = flt(row["reserved_qty"]) if row else 0.0
+				actual_qty -= unconsolidated.get(item_code, 0)
 
 			result.append(
 				{
@@ -2192,11 +2243,22 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 			else:
 				query = query.groupby(bin_tbl.warehouse)
 
+			# unconsolidated POS Invoice deductions, resolved per warehouse on demand
+			deduction_cache = {}
+
+			def _deduction(wh, item_code=None):
+				if wh not in deduction_cache:
+					deduction_cache[wh] = get_unconsolidated_posi_qty(regular_items, wh)
+				held = deduction_cache[wh]
+				if item_code:
+					return held.get(item_code, 0)
+				return sum(held.values())  # single-item mode aggregates variants too
+
 			for stock in query.run(as_dict=True):
 				result.append(
 					_build_stock_entry(
 						stock.warehouse,
-						stock.actual_qty,
+						flt(stock.actual_qty) - _deduction(stock.warehouse, stock.get("item_code")),
 						stock.reserved_qty,
 						warehouse_map,
 						stock.get("item_code") if include_item_code else None,
@@ -2301,6 +2363,10 @@ def get_product_bundle_availability(item_code, warehouse):
 		)
 
 		component_stock_map = {row["item_code"]: flt(row["available_qty"]) for row in stock_data}
+
+		# Intraday reservation: unconsolidated POS Invoices hold component stock
+		for code, held in get_unconsolidated_posi_qty(component_codes, warehouse).items():
+			component_stock_map[code] = component_stock_map.get(code, 0) - held
 
 		# Build component details with limiting indicator
 		component_details = []
