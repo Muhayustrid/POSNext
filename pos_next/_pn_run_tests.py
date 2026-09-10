@@ -70,7 +70,12 @@ def main(module_names, sync=False):
 		print(__doc__, file=sys.stderr)
 		return 2
 
-	os.chdir(BENCH_ROOT)
+	os.chdir(os.path.join(BENCH_ROOT, "sites"))
+	# frappe resolves relative asset paths (e.g. assets/assets.json in
+	# get_assets_json) against the cwd; real frappe processes (bench, wsgi)
+	# always run with cwd = sites/, so mirror that here or email/asset
+	# rendering during ERPNext's import-time test bootstrap crashes with
+	# AttributeError: 'NoneType' object has no attribute 'get'.
 
 	script_dir = os.path.dirname(os.path.abspath(__file__))
 	sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != script_dir]

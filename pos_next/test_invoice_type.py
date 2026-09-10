@@ -112,6 +112,98 @@ class TestInvoiceType(FrappeTestCase):
 			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
 
 
+class TestCustomPOSInvoice(FrappeTestCase):
+	def setUp(self):
+		# same schedule-safe filter as test_switch_rejected_with_open_shift: a
+		# profile whose schedule never blocks shift insert at the current time
+		self.profile = frappe.db.get_value(
+			"POS Profile",
+			[
+				["disabled", "=", 0],
+				["pos_schedule_enforce_closing", "=", 0],
+				["pos_schedule_end", "is", "set"],
+			],
+			["name", "company", "warehouse"],
+			as_dict=True,
+		)
+		if not self.profile:
+			self.skipTest("no POS Profile")
+
+	def _opening_shift(self):
+		# balance_details is mandatory: one row with a real mode_of_payment
+		# from the profile's POS Payment Method list
+		self.mode_of_payment = frappe.db.get_value(
+			"POS Payment Method",
+			{"parent": self.profile.name, "parenttype": "POS Profile"},
+			"mode_of_payment",
+		)
+		if not self.mode_of_payment:
+			self.skipTest("POS Profile has no Payment Method")
+		return frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": self.profile.name,
+				"company": self.profile.company,
+				"user": "Administrator",
+				"posting_date": frappe.utils.nowdate(),
+				"period_start_date": frappe.utils.now_datetime(),
+				"balance_details": [{"mode_of_payment": self.mode_of_payment, "amount": 0}],
+			}
+		).insert(ignore_permissions=True)
+
+	def test_pos_next_shift_replaces_opening_entry_requirement(self):
+		# a REAL item: link validation runs before validate(), so a
+		# nonexistent item would abort before the opening-entry gate and the
+		# test would pass vacuously
+		item = frappe.get_all(
+			"Item",
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			pluck="name",
+			limit=1,
+		)
+		if not item:
+			self.skipTest("no sales item")
+		shift = self._opening_shift()
+		# a concurrent writer (dev server on this shared site) can bump
+		# `modified` right after insert; refresh before submit so the
+		# timestamp check does not flake (same as test_switch_rejected_with_open_shift)
+		shift.reload()
+		shift.submit()
+		try:
+			doc = frappe.new_doc("POS Invoice")
+			doc.update(
+				{
+					"customer": frappe.get_all("Customer", pluck="name", limit=1)[0],
+					"is_pos": 1,
+					"update_stock": 1,
+					"pos_profile": self.profile.name,
+					"company": self.profile.company,
+					"set_warehouse": self.profile.warehouse,
+					"posa_pos_opening_shift": shift.name,
+					"currency": frappe.db.get_value(
+						"Company", self.profile.company, "default_currency"
+					),
+				}
+			)
+			doc.append("items", {"item_code": item[0], "qty": 1, "rate": 1})
+			doc.append("payments", {"mode_of_payment": self.mode_of_payment, "amount": 1})
+			# Opening-entry gate must NOT fire: either insert succeeds or it
+			# raises for an unrelated reason
+			try:
+				doc.insert()
+			except Exception as err:
+				self.assertNotIn("POS Opening Entry", str(err))
+			else:
+				frappe.delete_doc("POS Invoice", doc.name, force=1)
+		finally:
+			# shift.cancel() is not staleness-proof (same as
+			# test_switch_rejected_with_open_shift): on_submit's db.set_value
+			# bumps `modified`, leaving the in-memory doc outdated. Flip
+			# docstatus at the DB level and force-delete instead.
+			frappe.db.set_value("POS Opening Shift", shift.name, "docstatus", 2, update_modified=False)
+			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
+
+
 class TestPOSInvoiceCustomFields(FrappeTestCase):
 	def test_columns_exist(self):
 		from pos_next.install import CUSTOM_FIELDS, after_migrate

@@ -8,8 +8,10 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
+from erpnext.accounts.doctype.pos_invoice.pos_invoice import POSInvoice
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from frappe import _
 from frappe.utils import cint, flt
 
 
@@ -279,3 +281,28 @@ class CustomSalesInvoice(SalesInvoice):
 
 			for pi in to_remove:
 				self.remove(pi)
+
+
+class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
+	"""POS Invoice lifecycle (ERPNext) + POS Next customizations.
+
+	MRO: CustomPOSInvoice -> CustomSalesInvoice -> POSInvoice -> SalesInvoice.
+	ERPNext's POS Invoice validate/on_submit win over SalesInvoice's; POS Next's
+	update_packing_list / use_serial_batch_fields handling is inherited.
+	"""
+
+	def validate_pos_opening_entry(self):
+		from pos_next.invoice_type import is_pos_next_owned
+
+		if is_pos_next_owned(self):
+			status = frappe.db.get_value(
+				"POS Opening Shift", self.posa_pos_opening_shift, "status"
+			)
+			if status != "Open":
+				frappe.throw(
+					_("POS Opening Shift {0} is not open.").format(
+						frappe.bold(self.posa_pos_opening_shift)
+					)
+				)
+			return
+		super().validate_pos_opening_entry()
