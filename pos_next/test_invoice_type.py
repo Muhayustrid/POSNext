@@ -25,7 +25,14 @@ def _no_blockers():
 
 
 def _set_invoice_type(value):
-	doc = frappe.get_doc("POS Next Invoice Settings", "POS Next Invoice Settings")
+	"""Flip the global switch stored on the POS Settings rows."""
+	name = frappe.db.get_value("POS Settings", {}, "name")
+	if name:
+		doc = frappe.get_doc("POS Settings", name)
+	else:
+		doc = frappe.new_doc("POS Settings")
+		doc.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
+		doc.enabled = 1
 	doc.invoice_type = value
 	doc.save(ignore_permissions=True)
 
@@ -46,8 +53,6 @@ class TestInvoiceType(FrappeTestCase):
 			del frappe.local._pos_next_invoice_doctype
 		except AttributeError:
 			pass  # not cached yet (`in frappe.local` is unreliable on v16)
-		# frappe.db.get_single_value caches per connection
-		frappe.db.value_cache.pop("POS Next Invoice Settings", None)
 
 	def test_defaults_to_sales_invoice(self):
 		self.assertEqual(get_pos_invoice_doctype(), SALES_INVOICE)

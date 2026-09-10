@@ -121,7 +121,7 @@
   },
   {
    "default": "Sales Invoice",
-   "description": "Compatibility field for ERPNext v16 POS code paths (e.g. POS Opening Entry cancellation reads get_single_value('POS Settings', 'invoice_type')). POS Next always creates Sales Invoices.",
+   "description": "Global for all profiles: the document type the POS screen creates (Sales Invoice or POS Invoice). Changing it applies to every profile. Blocked while shifts are open or offline invoices are pending sync.",
    "fieldname": "invoice_type",
    "fieldtype": "Select",
    "label": "Invoice Type Created via POS Screen",

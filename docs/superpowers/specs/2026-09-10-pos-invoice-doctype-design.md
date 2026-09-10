@@ -70,6 +70,13 @@ Other facts:
 
 ### 1. Global setting & switch gate
 
+> **Revision (2026-09-10, owner request):** storage moved from the dedicated single
+> DocType `POS Next Invoice Settings` to the **existing `invoice_type` dropdown on
+> POS Settings** (formerly a non-functional compat field). The value remains
+> global: every POS Settings row always holds the same value — the POS Settings
+> controller gates the switch on save and syncs all other rows. The dedicated
+> single DocType was dropped. `get_pos_invoice_doctype()` semantics are unchanged.
+
 New **single** DocType `POS Next Invoice Settings`:
 
 - `invoice_type` — Select `Sales Invoice\nPOS Invoice`, default `Sales Invoice`.

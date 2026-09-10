@@ -26,14 +26,19 @@ def _set_invoice_type(value):
 	"""Flip the site switch. The switch guard (open shifts / pending syncs) is
 	mock-neutralised: this shared dev site holds real open shifts."""
 	with mock.patch("frappe.db.count", return_value=0):
-		doc = frappe.get_doc("POS Next Invoice Settings", "POS Next Invoice Settings")
+		name = frappe.db.get_value("POS Settings", {}, "name")
+		if name:
+			doc = frappe.get_doc("POS Settings", name)
+		else:
+			doc = frappe.new_doc("POS Settings")
+			doc.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
+			doc.enabled = 1
 		doc.invoice_type = value
 		doc.save(ignore_permissions=True)
 	try:
 		del frappe.local._pos_next_invoice_doctype
 	except AttributeError:
 		pass  # not cached yet (`in frappe.local` is unreliable on v16)
-	frappe.db.value_cache.pop("POS Next Invoice Settings", None)
 
 
 class POSInvoiceModeMixin:

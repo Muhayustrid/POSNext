@@ -5,19 +5,50 @@ from frappe.utils import flt
 
 SALES_INVOICE = "Sales Invoice"
 POS_INVOICE = "POS Invoice"
-_SINGLE = "POS Next Invoice Settings"
+_VALID_TYPES = (SALES_INVOICE, POS_INVOICE)
 
 
 def get_pos_invoice_doctype():
-	"""The doctype new POS transactions are created in (request-cached)."""
+	"""The doctype new POS transactions are created in (request-cached).
+
+	Stored on the POS Settings rows — one global value shared by every row;
+	the POS Settings controller keeps all rows in sync on save, so reading
+	any row yields the site-wide choice.
+	"""
 	cached = getattr(frappe.local, "_pos_next_invoice_doctype", None)
 	if cached:
 		return cached
-	value = frappe.db.get_single_value(_SINGLE, "invoice_type") or SALES_INVOICE
-	if value not in (SALES_INVOICE, POS_INVOICE):
+	# NOTE: filters={} (any row) — filters=None would be a name lookup of None.
+	value = frappe.db.get_value("POS Settings", {}, "invoice_type") or SALES_INVOICE
+	if value not in _VALID_TYPES:
 		value = SALES_INVOICE
 	frappe.local._pos_next_invoice_doctype = value
 	return value
+
+
+def validate_invoice_type_change(doc):
+	"""POS Settings validate hook: gate the global invoice-type switch."""
+	from frappe import _
+
+	before = doc.get_doc_before_save()
+	if not before or before.get("invoice_type") == doc.invoice_type:
+		return
+	if doc.invoice_type not in _VALID_TYPES:
+		frappe.throw(_("Invoice Type must be Sales Invoice or POS Invoice."))
+	open_shifts = frappe.db.count("POS Opening Shift", {"docstatus": 1, "status": "Open"})
+	if open_shifts:
+		frappe.throw(
+			_("Invoice Type cannot be changed while {0} POS Opening Shift(s) are open.").format(
+				frappe.bold(open_shifts)
+			)
+		)
+	pending = frappe.db.count("Offline Invoice Sync", {"status": "Pending"})
+	if pending:
+		frappe.throw(
+			_("Invoice Type cannot be changed while {0} offline invoice(s) are pending sync.").format(
+				frappe.bold(pending)
+			)
+		)
 
 
 def get_sales_report_doctypes():
