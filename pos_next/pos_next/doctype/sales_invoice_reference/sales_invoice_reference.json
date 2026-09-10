@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "sales_invoice",
+  "pos_invoice",
   "posting_date",
   "column_break_3",
   "customer",
@@ -21,6 +22,12 @@
    "label": "Sales Invoice",
    "options": "Sales Invoice",
    "reqd": 1
+  },
+  {
+   "fieldname": "pos_invoice",
+   "fieldtype": "Link",
+   "label": "POS Invoice",
+   "options": "POS Invoice"
   },
   {
    "fetch_from": "pos_invoice.posting_date",

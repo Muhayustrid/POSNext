@@ -110,3 +110,18 @@ class TestInvoiceType(FrappeTestCase):
 			# docstatus at the DB level and force-delete instead.
 			frappe.db.set_value("POS Opening Shift", shift.name, "docstatus", 2, update_modified=False)
 			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
+
+
+class TestPOSInvoiceCustomFields(FrappeTestCase):
+	def test_columns_exist(self):
+		from pos_next.install import CUSTOM_FIELDS, after_migrate
+
+		after_migrate()  # idempotent
+		for dt, fields in CUSTOM_FIELDS.items():
+			if dt not in ("POS Invoice", "POS Invoice Item", "Sales Invoice Reference",
+			              "Offline Invoice Sync"):
+				continue
+			for f in fields:
+				self.assertTrue(
+					frappe.db.has_column(dt, f["fieldname"]), f"{dt}.{f['fieldname']} missing"
+				)
