@@ -8,7 +8,16 @@ Scope: Global invoice doctype switch — create `POS Invoice` (ERPNext v16) inst
 
 Every POS Next transaction today creates a `Sales Invoice` (`is_pos=1`, `update_stock=1`). The POS invoices therefore mix into the same list as non-POS Sales Invoices. ERPNext v16 ships a dedicated `POS Invoice` doctype (a `SalesInvoice` subclass with its own table and list) that keeps POS traffic separated and consolidates into Sales Invoices for accounting at shift close.
 
-The bench runs ERPNext v16.33 (`version-16` branch). Partial groundwork already exists in POS Next:
+The bench runs ERPNext v16.33 (`version-16` branch). **The site already has POS Invoice documents produced by ERPNext's built-in POS** (which the product owner actively used before/beside POS Next). The POS Invoice awareness already present in POS Next is the owner's own coexistence patching, not groundwork for this feature:
+
+- Closing-shift consolidation handling, `POS Invoice Merge Log` cancel/reopen logic, and `POS Invoice` branches in `pos_closing_print`.
+- `hooks.py` `"POS Invoice"` entry with two `validate` hooks.
+- `invoice_type` Select field on POS Next `POS Settings` — added as a **compat field only** (commit cc76198; its own description states "POS Next always creates Sales Invoices").
+- `invoices.py` accepts `data.get("doctype", "Sales Invoice")` in places, but nothing resolves or sends another doctype.
+
+This means the site has **two POS Invoice populations once this feature ships**: invoices owned by POS Next (`posa_pos_opening_shift` set) and invoices owned by the built-in POS (`pos_opening_entry` set, consolidated by ERPNext `POS Closing Entry`). The design must keep POS Next effects off built-in-POS invoices.
+
+What is missing: the switch itself, the full hook chain, a controller override, custom fields, offline dedup, returns, reports, and frontend awareness.
 
 - `invoice_type` Select field on POS Next `POS Settings` — added as a **compat field only** (commit cc76198; its own description states "POS Next always creates Sales Invoices").
 - `POS Closing Shift` already imports `consolidate_pos_invoices`, cancels `POS Invoice Merge Log` + consolidated Sales Invoices on reopen, and `_set/_clear_closing_entry_invoices` already handles both doctypes.
@@ -71,6 +80,9 @@ The per-profile `invoice_type` field on POS Next `POS Settings` stays as the com
 - `hooks.py` `"POS Invoice"` doc_events mirrors the full `"Sales Invoice"` chain:
   - `validate`: `sales_invoice_hooks.validate`, `validate_wallet_payment`, `validate_invoice_packages`, `apply_min_max_price_discounts`, `validate_invoice_discounts`, `validate_invoice_offers`, `shift_schedule.validate_invoice`.
   - `before_cancel`, `on_submit` (stock realtime, loyalty→wallet, one-time offer usage, discount-code usage, queue bump), `on_cancel` (stock realtime, release offer usage), `after_insert` (invoice-created realtime).
+  - **Ownership guard** — doc_events fire for every POS Invoice on the site, including those created by ERPNext's built-in POS. POS Next–specific effects (queue bump, offer usage ledger, one-time usage, discount-code usage, loyalty→wallet, wallet reversal, invoice-created realtime) run **only when `posa_pos_opening_shift` is set** (POS Next–owned). Exceptions:
+    - `pos_stock_update` realtime fires for **all** POS Invoices — POS Next terminals' stock caches should reflect built-in-POS sales too (today they go stale for those).
+    - Min/max pricing and shift-schedule validation are safe for any document and stay ungated.
   - Audit each hooked function for hardcoded `Sales Invoice` queries/links; make them `doc.doctype`-aware (expected: they take a doc and are already agnostic).
 - **Guard consolidated Sales Invoices**: hooks that fire on `Sales Invoice` (offer usage ledger, queue bump, one-time usage, wallet conversion) skip docs with `is_consolidated=1` — the underlying POS Invoice already recorded those effects at its own submit.
 - New override in `pos_next/overrides/sales_invoice.py` (or a sibling module):
@@ -93,6 +105,8 @@ The per-profile `invoice_type` field on POS Next `POS Settings` stays as the com
 
 - Helper `get_sales_report_doctypes()` (same module as §1): returns `["Sales Invoice"]` in legacy mode; `["POS Invoice", "Sales Invoice"]` in POS Invoice mode.
 - The 5 script reports, `hq_monitoring.get_sales_monitoring`, session summary, and cashier-related queries are updated to iterate the returned doctypes, with Sales Invoice queries **excluding `is_consolidated=1`** rows. Column sets are compatible because POS Invoice shares the Sales Invoice schema.
+- Built-in-POS sales stay represented exactly once in both modes: today they appear in reports as consolidated Sales Invoices; in POS Invoice mode they appear as their POS Invoice rows (real-time, before the built-in POS shift closes) while the consolidated SI is excluded. Totals are identical across the mode switch.
+- Shift-scoped reports (Sales vs Shifts, session summary) filter POS Next invoices by `posa_pos_opening_shift`; built-in-POS invoices never match and stay out of POS Next shift reporting, same as today.
 - `pos_closing_print` utilities already handle both doctypes — verified during implementation.
 
 ### 6. Frontend (POS/)
@@ -111,7 +125,8 @@ Extend the `_pn_run_tests.py` suite against `posnext.localhost`:
 3. Reports union: totals over `POS Invoice + legacy SI (non-consolidated)` match the sum of parts; no double counting.
 4. Offline dedup cross-mode: queue invoice in SI mode, switch mode (queue empty), sync → returns the original SI, no duplicate.
 5. Gate: switching `invoice_type` rejected with an open shift; credit sale rejected in POS Invoice mode.
-6. Regression: Sales Invoice mode — existing tests pass unchanged.
+6. **Coexistence**: a built-in-POS POS Invoice (no `posa_pos_opening_shift`) submitted alongside a POS Next one — POS Next effects skip it (no queue bump, no offer ledger, no wallet conversion), `pos_stock_update` fires for it, reports count it exactly once.
+7. Regression: Sales Invoice mode — existing tests pass unchanged.
 
 ## Risks & Open Items (resolved during implementation)
 
