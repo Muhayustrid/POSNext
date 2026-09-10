@@ -47,9 +47,22 @@ Decisions agreed with the product owner:
 
 ## ERPNext v16 Facts This Design Relies On
 
+**Verified live on `posnext.localhost` (spike, 2026-09-10):**
+
+- A POS Invoice **can be created and submitted** on this site with pos_next's existing `"POS Invoice"` hooks active (no crashes). Payment rows must be appended **before** `insert()`; `update_multi_mode_of_payments` never auto-fills amounts during validate.
+- On POS Invoice submit: **GL entries = 0 and Stock Ledger Entries = 0** (both verified). `POSInvoice.on_submit` overrides `SalesInvoice.on_submit` and never calls `update_stock_ledger()` / GL creation. Accounting and stock land on the **consolidated Sales Invoice**: `map_doc` copies `update_stock=1` from the POS Invoice to the consolidated SI, whose submit writes GL + SLE.
+- `validate_pos_opening_entry` (inherited from SalesInvoice) **requires exactly one open `POS Opening Entry`** for the `pos_profile` with `period_start_date == today`. Without one, POS Invoice creation throws. A stale open entry (older `period_start_date`) also blocks creation ("outdated"), and **cannot be cancelled while unconsolidated invoices reference it** — the site currently has such leftovers from earlier built-in-POS testing (32 POS Invoices, 8 merge logs, one stuck-open entry for OUTLET TRAINING).
+- pos_next's closing-shift builder sees **0 transactions** for POS Invoices (verified) — no linkage custom field exists on POS Invoice (only `custom_nama_customer`), and `consolidate_pos_invoices` is imported in `pos_closing_shift.py` but **never called**. The existing "POS Invoice support" in pos_next is cosmetic.
+
+**Design consequences (added after the spike):**
+
+- `CustomPOSInvoice` must override `validate_pos_opening_entry` to accept a POS Next `POS Opening Shift` (open) instead of demanding an ERPNext `POS Opening Entry`.
+- **Effective stock**: because SLEs lag until consolidation, server-side stock validation and the stock APIs must, in POS Invoice mode, compute *effective qty = Bin qty − sum of submitted-but-unconsolidated POS Invoice quantities* (per item+warehouse). Otherwise multi-terminal overselling becomes possible intraday.
+- Closing-shift submit must **actually call** `consolidate_pos_invoices` for the shift's POS Next POS Invoices (grouped per customer, returns as credit notes) — the import exists, the call does not.
+
+Other facts:
+
 - `POSInvoice(SalesInvoice)` — submittable, own table (`tabPOS Invoice`), child table `POS Invoice Item`; `payments` reuses `Sales Invoice Payment`.
-- `POSInvoice.validate` deliberately skips `SalesInvoice.validate` (leaner validation, `is_pos` mandatory, full-payment checks, own stock availability validation).
-- `POSInvoice.on_submit` makes **no GL entries**. Accounting lands on the consolidated Sales Invoice produced by `POS Invoice Merge Log` (`consolidate_pos_invoices`), which POS Closing Shift already invokes.
 - `POSInvoice.on_submit` auto-creates a consolidated **return** Sales Invoice only when `invoice_type_in_pos == "Sales Invoice"`. `invoice_type_in_pos` is read via `frappe.db.get_single_value("POS Settings", "invoice_type")`; because POS Next replaced `POS Settings` with a non-single doctype, that read returns `None`, so no auto-consolidation fires at submit — returns consolidate at shift close, which is what we want.
 - ERPNext blocks switching its own `POS Settings.invoice_type` while opening entries are open; we mirror this with POS Next's own shift doctype.
 
@@ -72,6 +85,7 @@ The per-profile `invoice_type` field on POS Next `POS Settings` stays as the com
 - `update_invoice`, `submit_invoice`, `get_invoices`, `get_draft_invoices`, `cleanup_old_drafts`, returnable/search/return-preparation functions, and `check_offline_invoice_synced` resolve the doctype via `get_pos_invoice_doctype()` instead of defaulting to `Sales Invoice`.
 - Client-sent `doctype` is stripped as a server-managed field; the server is authoritative.
 - `submit_invoice` in POS Invoice mode: build doc with `is_pos=1`, full payment rows, `update_stock=1`; credit-sale / redeem-credit / zero-payment paths raise a clear validation error before touching the doc.
+- **Effective stock (POS Invoice mode)**: server-side stock validation (`validate_cart_items`) and stock APIs compute *effective qty = Bin qty − submitted-but-unconsolidated POS Invoice qty* (per item+warehouse, POS Next–owned invoices), so intraday multi-terminal overselling stays blocked even though SLEs only appear at consolidation.
 - **Offline Invoice Sync**: add `pos_invoice` (Link → POS Invoice) beside `sales_invoice`. Dedup by `offline_id` looks up **either** column, so an invoice queued offline in one mode and synced after a mode switch still resolves to the original document (belt-and-braces beyond the switch gate).
 - `install.py` (`after_install`/`after_migrate`): idempotently add to `POS Invoice` the same custom fields POS Next adds to Sales Invoice today — `pos_queue_number`, `pos_queue_date`, `discount_confirmation_code`, `pos_applied_offer_rules`, `pos_offer_item_rules` (wherever they live today: header/child as applicable), and `posa_pos_opening_shift`. Shift-scoped queries (`get_shift_history`, session summary, closing data) filter on `posa_pos_opening_shift` of the resolved doctype.
 
@@ -93,11 +107,12 @@ The per-profile `invoice_type` field on POS Next `POS Settings` stays as the com
   ```
 
   C3 MRO gives: `CustomPOSInvoice → CustomSalesInvoice → POSInvoice → SalesInvoice`. POS Invoice's `validate`/`on_submit` lifecycle wins over SalesInvoice's; POS Next's `update_packing_list` (BOGO packed-item merge) and `use_serial_batch_fields` forcing are inherited. `make_pos_gl_entries` is never called on POS Invoice (GL happens on the consolidated SI, which already passes through `CustomSalesInvoice`). Register via `override_doctype_class: {"POS Invoice": ...}`.
+- **`validate_pos_opening_entry` override** in `CustomPOSInvoice`: when `posa_pos_opening_shift` is set, validate that the POS Next shift is open (and belongs to the same profile) instead of demanding an ERPNext `POS Opening Entry`; otherwise fall through to the inherited check.
 - The packed-item keying monkey-patch is audited to also cover `POS Invoice Item`.
 
 ### 4. Closing shift, wallet, returns
 
-- `get_closing_shift_data` / `submit_closing_shift`: in POS Invoice mode populate `pos_transactions.pos_invoice` (the child already has both columns; the read side already branches). Consolidation runs through the existing `consolidate_pos_invoices` import.
+- `get_closing_shift_data` / `submit_closing_shift`: in POS Invoice mode populate `pos_transactions.pos_invoice` (the child already has both columns; the read side already branches). **Closing-shift submit must call `consolidate_pos_invoices`** for the shift's POS Next POS Invoices (grouped per customer; returns via credit notes) — today the function is imported but never invoked (spike finding), so consolidation currently never happens. The consolidated SI (`is_consolidated=1`, `update_stock=1`) is where GL + SLE land.
 - Wallet: `pos_next/api/wallet.py` hardcodes `invoice_type: "Sales Invoice"` in the loyalty→wallet lookup — derive from `doc.doctype`. Wallet Transaction / reversal flows record the actual doctype and name; any Link-typed invoice reference gains a doctype-appropriate companion field or becomes doctype-aware (audited during implementation).
 - Returns: `get_returnable_invoices`, `get_invoice_for_return`, `prepare_return_invoice` operate on the resolved doctype. A POS Invoice return is itself a POS Invoice (`is_return=1`) and consolidates at close (`process_merging_into_credit_notes`). Refund-to-wallet and wallet reversal ride the POS Invoice `on_submit`/`on_cancel` hooks.
 
@@ -120,8 +135,8 @@ The per-profile `invoice_type` field on POS Next `POS Settings` stays as the com
 
 Extend the `_pn_run_tests.py` suite against `posnext.localhost`:
 
-1. POS Invoice mode end-to-end: submit invoice → hooks fire (queue number assigned, offer usage ledger row, wallet ledger), stock realtime event emitted.
-2. Close shift → consolidation produces one consolidated Sales Invoice per customer with `is_consolidated=1`; consolidated SI does **not** re-bump queue / duplicate offer usage.
+1. POS Invoice mode end-to-end: submit invoice → hooks fire (queue number assigned, offer usage ledger row, wallet ledger), `pos_stock_update` emitted, **GL entries = 0 and SLE = 0 at submit** (spike-verified baseline), and effective-stock validation rejects a second sale that would oversell the unconsolidated qty.
+2. Close shift → consolidation produces one consolidated Sales Invoice per customer with `is_consolidated=1` **carrying the GL and Stock Ledger entries**; consolidated SI does **not** re-bump queue / duplicate offer usage.
 3. Reports union: totals over `POS Invoice + legacy SI (non-consolidated)` match the sum of parts; no double counting.
 4. Offline dedup cross-mode: queue invoice in SI mode, switch mode (queue empty), sync → returns the original SI, no duplicate.
 5. Gate: switching `invoice_type` rejected with an open shift; credit sale rejected in POS Invoice mode.
