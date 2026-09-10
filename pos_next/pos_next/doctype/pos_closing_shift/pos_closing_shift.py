@@ -10,7 +10,9 @@ from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import
 )
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import cint, flt
+
+from pos_next.invoice_type import get_pos_invoice_doctype
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -80,6 +82,33 @@ class POSClosingShift(Document):
 		opening_entry.save()
 		# link invoices with this closing shift so ERPNext can block edits
 		self._set_closing_entry_invoices()
+		if self._has_pos_invoice_transactions():
+			self._consolidate_pos_invoices()
+
+	def _has_pos_invoice_transactions(self):
+		return any(d.get("pos_invoice") for d in self.pos_transactions)
+
+	def _consolidate_pos_invoices(self):
+		# no closing_entry: synchronous merge (merge log submits the
+		# consolidated Sales Invoice, which writes GL + SLE via update_stock)
+		invoices = []
+		for d in self.pos_transactions:
+			if not d.get("pos_invoice"):
+				continue
+			is_return, customer = frappe.db.get_value(
+				"POS Invoice", d.pos_invoice, ["is_return", "customer"]
+			)
+			invoices.append(
+				frappe._dict(
+					{
+						"pos_invoice": d.pos_invoice,
+						"is_return": cint(is_return),
+						# merge log groups by customer (validate_customer)
+						"customer": customer,
+					}
+				)
+			)
+		consolidate_pos_invoices(pos_invoices=invoices)
 
 	def on_cancel(self):
 		if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
@@ -350,9 +379,7 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
 	if not doctype:
-		pos_profile = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "pos_profile")
-		use_pos_invoice = False
-		doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
+		doctype = get_pos_invoice_doctype()
 	submit_printed_invoices(pos_opening_shift, doctype)
 	cond = " and ifnull(consolidated_invoice,'') = ''" if doctype == "POS Invoice" else ""
 	data = frappe.db.sql(
@@ -523,8 +550,8 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
 	opening_shift = json.loads(opening_shift)
-	doctype = "Sales Invoice"
-	invoice_field = "sales_invoice"
+	doctype = get_pos_invoice_doctype()
+	invoice_field = "pos_invoice" if doctype == "POS Invoice" else "sales_invoice"
 
 	submit_printed_invoices(opening_shift.get("name"), doctype)
 
@@ -639,14 +666,15 @@ def submit_closing_shift(closing_shift):
 
 
 def submit_printed_invoices(pos_opening_shift, doctype):
-	invoices_list = frappe.get_all(
-		doctype,
-		filters={
-			"posa_pos_opening_shift": pos_opening_shift,
-			"docstatus": 0,
-			"posa_is_printed": 1,
-		},
-	)
+	filters = {
+		"posa_pos_opening_shift": pos_opening_shift,
+		"docstatus": 0,
+	}
+	# posa_is_printed is a Sales Invoice custom field — POS Invoices carry no
+	# printed-draft state, so the sweep is a no-op in POS Invoice mode
+	if frappe.db.has_column(doctype, "posa_is_printed"):
+		filters["posa_is_printed"] = 1
+	invoices_list = frappe.get_all(doctype, filters=filters)
 	for invoice in invoices_list:
 		invoice_doc = frappe.get_doc(doctype, invoice.name)
 		invoice_doc.submit()
