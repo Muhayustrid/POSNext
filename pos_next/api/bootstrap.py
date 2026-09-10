@@ -207,6 +207,9 @@ def _get_pos_settings(pos_profile_doc):
 	Returns:
 		dict: POS Settings with derived values
 	"""
+	# Doctype new POS invoices are created in ("Sales Invoice"/"POS Invoice");
+	# resolved outside the try so the exception path also carries it.
+	invoice_type = get_pos_invoice_doctype()
 	try:
 		settings = (
 			frappe.db.get_value(
@@ -226,13 +229,14 @@ def _get_pos_settings(pos_profile_doc):
 		# Mirror the get_pos_settings feed so both agree; the UI treats a
 		# missing key as disabled.
 		settings["queue_enabled"] = bool(settings.get("enable_pos_queue"))
-		# Doctype new POS invoices are created in ("Sales Invoice"/"POS Invoice").
-		settings["invoice_type"] = get_pos_invoice_doctype()
+		settings["invoice_type"] = invoice_type
 
 		return settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")
-		return DEFAULT_POS_SETTINGS.copy()
+		settings = DEFAULT_POS_SETTINGS.copy()
+		settings["invoice_type"] = invoice_type
+		return settings
 
 
 def _get_payment_methods(pos_profile_name):

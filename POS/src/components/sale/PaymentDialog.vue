@@ -1594,13 +1594,13 @@
 							:class="['flex-shrink-0', isSmallMobile ? 'space-y-1' : 'space-y-1.5']"
 						>
 							<!-- Two buttons side by side when both needed -->
-								<div
-									v-if="
-										lastSelectedMethod &&
-										remainingAmount > 0 &&
-										creditSaleEnabled &&
-										paymentEntries.length === 0
-									"
+							<div
+								v-if="
+									lastSelectedMethod &&
+									remainingAmount > 0 &&
+									creditSaleEnabled &&
+									paymentEntries.length === 0
+								"
 								class="grid grid-cols-2"
 								:class="isSmallMobile ? 'gap-1' : 'gap-1.5'"
 							>

@@ -5,6 +5,8 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
+from pos_next.invoice_type import get_pos_invoice_doctype
+
 
 class POSSettings(Document):
 	def validate(self):
@@ -119,6 +121,11 @@ def get_pos_settings(pos_profile):
 	# Mirror the bootstrap preload feed so both feeds agree; the UI treats a
 	# missing key as disabled.
 	settings["queue_enabled"] = bool(settings.get("enable_pos_queue"))
+
+	# Mirror the bootstrap preload feed: doctype new POS invoices are created
+	# in ("Sales Invoice"/"POS Invoice"), so the non-bootstrap fallback feed
+	# shows the same mode.
+	settings["invoice_type"] = get_pos_invoice_doctype()
 
 	return settings
 
