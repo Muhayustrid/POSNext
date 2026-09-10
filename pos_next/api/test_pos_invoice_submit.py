@@ -270,3 +270,41 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			pos_profile=self.profile.name,
 		)
 		self.assertTrue(errors)
+
+	def test_history_lists_pos_invoice(self):
+		from pos_next.api.invoices import get_invoice, get_invoices
+
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+		self.assertTrue(name)
+		# same args the history dialog sends (InvoiceHistoryDialog makeParams)
+		rows = get_invoices(pos_profile=self.profile.name)
+		names = [r.get("name") for r in rows if isinstance(r, dict)]
+		self.assertIn(name, names)
+		row = next(r for r in rows if r.get("name") == name)
+		self.assertEqual(row.get("doctype"), "POS Invoice")
+
+		# cross-doctype fallback: fetch by name must also work for a legacy SI
+		legacy = frappe.get_all("Sales Invoice", {"docstatus": 1}, pluck="name", limit=1)
+		if legacy:
+			doc = get_invoice(legacy[0])
+			self.assertEqual(doc.get("doctype"), "Sales Invoice")
+
+	def test_draft_invoices_default_resolves_doctype(self):
+		from pos_next.api.invoices import get_draft_invoices
+
+		# no doctype passed (the HTTP shape) -> resolves to the mode doctype;
+		# neither doctype has a standard pos_opening_shift column, so the shift
+		# filter is dropped and the result tracks all drafts of that doctype
+		drafts = get_draft_invoices(self.shift.name)
+		self.assertEqual(
+			{d.name for d in drafts},
+			set(frappe.get_all("POS Invoice", filters={"docstatus": 0}, pluck="name")),
+		)
+		# explicit doctype callers keep their behavior
+		drafts = get_draft_invoices(self.shift.name, doctype="Sales Invoice")
+		self.assertEqual(
+			{d.name for d in drafts},
+			set(frappe.get_all("Sales Invoice", filters={"docstatus": 0}, pluck="name")),
+		)

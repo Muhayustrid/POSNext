@@ -1799,17 +1799,24 @@ def get_invoice(invoice_name):
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
 
-	if not frappe.db.exists("Sales Invoice", invoice_name):
-		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+	# Accept either doctype: resolve the mode doctype first, fall back to the
+	# other so invoices created before a mode switch stay viewable.
+	doctype = get_pos_invoice_doctype()
+	other = POS_INVOICE if doctype == DOCTYPE_SALES_INVOICE else DOCTYPE_SALES_INVOICE
+	if not frappe.db.exists(doctype, invoice_name):
+		if not frappe.db.exists(other, invoice_name):
+			frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+		doctype = other
 
 	# Check permissions
-	if not frappe.has_permission("Sales Invoice", "read", invoice_name):
+	if not frappe.has_permission(doctype, "read", invoice_name):
 		frappe.throw(_("You don't have permission to view this invoice"))
 
 	# Get invoice document
-	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+	invoice = frappe.get_doc(doctype, invoice_name)
 
 	invoice_dict = invoice.as_dict()
+	invoice_dict["doctype"] = doctype
 	# The receipts print the cashier's display name; owner is the login email.
 	invoice_dict["cashier_name"] = (
 		frappe.db.get_value("User", invoice.owner, "full_name") or invoice.owner
@@ -1841,9 +1848,12 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	limit = cint(limit) or 100
 	start = cint(start) or 0
 
+	# Serve whichever doctype the site is currently operating in
+	doctype = get_pos_invoice_doctype()
+
 	# Permission check
 	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
+	if not has_access and not frappe.has_permission(doctype, "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
 	# Clamp page size securely: minimum 1, maximum 100
@@ -1903,7 +1913,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			return_against,
 			pos_queue_number
 		FROM
-			`tabSales Invoice`
+			`tab{doctype}`
 		WHERE
 			{where_clause}
 		ORDER BY
@@ -1919,6 +1929,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	invoice_names = [invoice.name for invoice in invoices]
 	payments_by_invoice = {}
 	if invoice_names:
+		# ERPNext's POS Invoice reuses Sales Invoice Payment as its child doctype
 		payments = frappe.db.sql(
 			"""
 			SELECT
@@ -1947,9 +1958,10 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 	# Load items for each invoice for filtering purposes
 	for invoice in invoices:
+		invoice["doctype"] = doctype
 		invoice.payments = payments_by_invoice.get(invoice.name, [])
 		items = frappe.db.sql(
-			"""
+			f"""
 			SELECT
 				item_code,
 				item_name,
@@ -1957,7 +1969,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 				rate,
 				amount
 			FROM
-				`tabSales Invoice Item`
+				`tab{doctype} Item`
 			WHERE
 				parent = %(invoice_name)s
 			ORDER BY
@@ -1977,8 +1989,11 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 
 @frappe.whitelist()
-def get_draft_invoices(pos_opening_shift, doctype="Sales Invoice"):
+def get_draft_invoices(pos_opening_shift, doctype=None):
 	"""Get all draft invoices for a POS opening shift."""
+	# resolve at call time: a "Sales Invoice" default would be frozen at import
+	# and stale after a mode switch; explicit doctypes pass through untouched
+	doctype = doctype or get_pos_invoice_doctype()
 	filters = {
 		"docstatus": 0,
 	}
