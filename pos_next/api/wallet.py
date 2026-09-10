@@ -16,6 +16,8 @@ def validate_wallet_payment(doc, method=None):
 	Validate wallet payment on Sales Invoice.
 	Called during validate hook.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.is_pos:
 		return
 
@@ -43,6 +45,8 @@ def process_loyalty_to_wallet(doc, method=None):
 	Convert earned loyalty points to wallet balance after invoice submission.
 	Called during on_submit hook.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.is_pos or doc.is_return:
 		return
 

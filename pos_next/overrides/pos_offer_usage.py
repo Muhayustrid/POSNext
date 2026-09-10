@@ -169,6 +169,8 @@ def resolve_offers_from_rules(rule_names):
 
 def validate_invoice_offers(doc, method=None):
 	"""Sales Invoice validate hook — hard quota gate (draft save and submit)."""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.get("is_pos") or doc.get("is_return"):
 		return
 	rule_names = parse_applied_offer_rules(doc.get("pos_applied_offer_rules"))
@@ -183,6 +185,8 @@ def validate_invoice_offers(doc, method=None):
 
 def record_offer_usage_on_submit(doc, method=None):
 	"""Sales Invoice on_submit hook — consume quota (idempotent ledger rows)."""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.get("is_pos") or doc.get("is_return"):
 		return
 	rule_names = parse_applied_offer_rules(doc.get("pos_applied_offer_rules"))
@@ -216,4 +220,6 @@ def record_offer_usage_on_submit(doc, method=None):
 
 def release_offer_usage_on_cancel(doc, method=None):
 	"""Sales Invoice on_cancel hook — release the consumed quota."""
+	if doc.get("is_consolidated"):
+		return
 	frappe.db.delete(USAGE_DOCTYPE, {"sales_invoice": doc.get("name")})

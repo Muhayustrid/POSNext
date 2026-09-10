@@ -207,10 +207,11 @@ doc_events = {
 	"Quotation": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"Delivery Note": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"POS Invoice": {
-		"validate": [
-			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
-			"pos_next.shift_schedule.validate_invoice",
-		]
+		"validate": "pos_next.pos_invoice_events.validate",
+		"before_cancel": "pos_next.pos_invoice_events.before_cancel",
+		"on_submit": "pos_next.pos_invoice_events.on_submit",
+		"on_cancel": "pos_next.pos_invoice_events.on_cancel",
+		"after_insert": "pos_next.pos_invoice_events.after_insert",
 	},
 }
 

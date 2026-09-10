@@ -14,6 +14,8 @@ from frappe.utils import nowdate
 
 
 def bump_queue_counter(doc, method=None):
+	if doc.get("is_consolidated"):
+		return
 	number = doc.get("pos_queue_number")
 	company = doc.get("company")
 	if not number or not company:

@@ -110,6 +110,8 @@ def emit_invoice_created_event(doc, method=None):
 		doc: Sales Invoice document
 		method: Hook method name
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.is_pos:
 		return
 
