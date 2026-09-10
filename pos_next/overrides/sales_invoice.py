@@ -295,13 +295,24 @@ class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
 		from pos_next.invoice_type import is_pos_next_owned
 
 		if is_pos_next_owned(self):
-			status = frappe.db.get_value(
-				"POS Opening Shift", self.posa_pos_opening_shift, "status"
+			shift = frappe.db.get_value(
+				"POS Opening Shift",
+				self.posa_pos_opening_shift,
+				("name", "pos_profile", "status"),
+				as_dict=True,
 			)
-			if status != "Open":
+			if not shift or shift.status != "Open":
 				frappe.throw(
 					_("POS Opening Shift {0} is not open.").format(
 						frappe.bold(self.posa_pos_opening_shift)
+					)
+				)
+			if shift.pos_profile != self.pos_profile:
+				frappe.throw(
+					_("POS Opening Shift {0} belongs to POS Profile {1}, not {2}.").format(
+						frappe.bold(self.posa_pos_opening_shift),
+						frappe.bold(shift.pos_profile),
+						frappe.bold(self.pos_profile),
 					)
 				)
 			return

@@ -203,6 +203,58 @@ class TestCustomPOSInvoice(FrappeTestCase):
 			frappe.db.set_value("POS Opening Shift", shift.name, "docstatus", 2, update_modified=False)
 			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
 
+	def test_pos_next_shift_wrong_profile_rejected(self):
+		# a REAL item: link validation must not abort before the gate (see above)
+		item = frappe.get_all(
+			"Item",
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			pluck="name",
+			limit=1,
+		)
+		if not item:
+			self.skipTest("no sales item")
+		shift = self._opening_shift()
+		shift.reload()
+		shift.submit()
+		try:
+			# only one schedule-safe profile exists on this site, so the
+			# cross-profile case is staged at the DB level (raw set_value, no
+			# link validation): the shift row now claims a different profile
+			# than the invoice's pos_profile — exactly what a client passing
+			# another profile's shift name would produce
+			frappe.db.set_value(
+				"POS Opening Shift",
+				shift.name,
+				"pos_profile",
+				"_PN Wrong Profile",
+				update_modified=False,
+			)
+			doc = frappe.new_doc("POS Invoice")
+			doc.update(
+				{
+					"customer": frappe.get_all("Customer", pluck="name", limit=1)[0],
+					"is_pos": 1,
+					"update_stock": 1,
+					"pos_profile": self.profile.name,
+					"company": self.profile.company,
+					"set_warehouse": self.profile.warehouse,
+					"posa_pos_opening_shift": shift.name,
+					"currency": frappe.db.get_value(
+						"Company", self.profile.company, "default_currency"
+					),
+				}
+			)
+			doc.append("items", {"item_code": item[0], "qty": 1, "rate": 1})
+			doc.append("payments", {"mode_of_payment": self.mode_of_payment, "amount": 1})
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				doc.insert()
+			# the override's own clear error, not the generic "POS Opening Entry"
+			self.assertIn("belongs to POS Profile", str(ctx.exception))
+		finally:
+			# staleness-proof teardown (see above)
+			frappe.db.set_value("POS Opening Shift", shift.name, "docstatus", 2, update_modified=False)
+			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
+
 
 class TestPOSInvoiceCustomFields(FrappeTestCase):
 	def test_columns_exist(self):

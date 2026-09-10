@@ -220,7 +220,10 @@ class POSClosingShift(Document):
 
 	def delete_draft_invoices(self):
 		if frappe.get_value("POS Profile", self.pos_profile, "posa_allow_delete"):
-			doctype = "Sales Invoice"
+			doctype = get_pos_invoice_doctype()
+			# posa_is_printed exists only on Sales Invoice (see
+			# submit_printed_invoices) — POS Invoice drafts are always deletable
+			printed_cond = "posa_is_printed = 0 and " if doctype == "Sales Invoice" else ""
 			data = frappe.db.sql(
 				f"""
 		select
@@ -228,7 +231,7 @@ class POSClosingShift(Document):
 		from
 		    `tab{doctype}`
 		where
-		    docstatus = 0 and posa_is_printed = 0 and posa_pos_opening_shift = %s
+		    docstatus = 0 and {printed_cond}posa_pos_opening_shift = %s
 		""",
 				(self.pos_opening_shift),
 				as_dict=1,
@@ -408,8 +411,9 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
-	if not doctype:
-		doctype = get_pos_invoice_doctype()
+	# whitelist gate: client input is interpolated into the SQL table name —
+	# anything but the two invoice doctypes resolves to the site's mode
+	doctype = doctype if doctype in ("Sales Invoice", "POS Invoice") else get_pos_invoice_doctype()
 	submit_printed_invoices(pos_opening_shift, doctype)
 	cond = " and ifnull(consolidated_invoice,'') = ''" if doctype == "POS Invoice" else ""
 	data = frappe.db.sql(

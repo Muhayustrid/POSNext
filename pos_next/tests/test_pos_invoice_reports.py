@@ -14,10 +14,15 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt, today
 
 from pos_next.api.invoices import submit_invoice
+from pos_next.invoice_type import SALES_INVOICE
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
 )
-from pos_next.tests._posi_test_utils import POSInvoiceModeMixin
+from pos_next.tests._posi_test_utils import (
+	_PROFILE_FILTER,
+	POSInvoiceModeMixin,
+	_set_invoice_type,
+)
 
 
 class TestReportUnionCountsOnce(POSInvoiceModeMixin, FrappeTestCase):
@@ -141,3 +146,74 @@ class TestReportUnionCountsOnce(POSInvoiceModeMixin, FrappeTestCase):
 		closing_doc.insert(ignore_permissions=True)
 		self.closing = closing_doc
 		closing_doc.submit()
+
+
+class TestSIModeCountsConsolidated(FrappeTestCase):
+	"""Fix-wave regression: in pure Sales Invoice mode the report unions apply
+	NO is_consolidated exclusion — ERPNext built-in-POS consolidated invoices
+	must stay counted in HQ monitoring and all reports. (The exclusion's
+	anti-double-count behavior in POS Invoice mode is covered by
+	TestReportUnionCountsOnce.)"""
+
+	def setUp(self):
+		# deterministic on the shared site: default mode (guard mock-neutralised)
+		_set_invoice_type(SALES_INVOICE)
+
+	def test_si_mode_union_counts_consolidated(self):
+		from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
+
+		profile = frappe.db.get_value(
+			"POS Profile", _PROFILE_FILTER, ["name", "company"], as_dict=True
+		)
+		if not profile:
+			self.skipTest("no schedule-safe POS Profile")
+		item = frappe.get_all(
+			"Item", filters={"disabled": 0, "is_sales_item": 1}, pluck="name", limit=1
+		)
+		if not item:
+			self.skipTest("no sales item")
+		customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		if not customer:
+			self.skipTest("no non-internal customer")
+		mode = frappe.db.get_value(
+			"POS Payment Method",
+			{"parent": profile.name, "parenttype": "POS Profile"},
+			"mode_of_payment",
+		)
+		if not mode:
+			self.skipTest("profile has no payment methods")
+
+		si = frappe.get_doc(
+			{
+				"doctype": "Sales Invoice",
+				"company": profile.company,
+				"customer": customer,
+				"is_pos": 1,
+				"pos_profile": profile.name,
+				"posting_date": today(),
+				"items": [{"item_code": item[0], "qty": 1, "rate": 100}],
+				"payments": [{"mode_of_payment": mode, "amount": 100}],
+			}
+		)
+		si.flags.ignore_permissions = True
+		si.insert()
+		si.submit()
+		# legacy-style consolidated flag (ERPNext built-in-POS consolidation)
+		frappe.db.set_value("Sales Invoice", si.name, "is_consolidated", 1, update_modified=False)
+		try:
+			head_union = sales_invoice_union("si.name", "si.name = %(name)s")
+			item_union = sales_invoice_item_union("sii.qty", "si.name = %(name)s")
+			# pure SI mode: no exclusion anywhere in the generated SQL
+			self.assertNotIn("is_consolidated", head_union)
+			self.assertNotIn("is_consolidated", item_union)
+			# and the flagged row is still counted by both unions
+			self.assertEqual(
+				frappe.db.sql(f"select count(*) c from {head_union}", {"name": si.name})[0][0], 1
+			)
+			self.assertEqual(
+				flt(frappe.db.sql(f"select sum(sii.qty) q from {item_union}", {"name": si.name})[0][0]),
+				1.0,
+			)
+		finally:
+			frappe.db.set_value("Sales Invoice", si.name, "docstatus", 2, update_modified=False)
+			frappe.delete_doc("Sales Invoice", si.name, force=1, ignore_permissions=True)

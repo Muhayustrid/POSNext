@@ -308,3 +308,36 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			{d.name for d in drafts},
 			set(frappe.get_all("Sales Invoice", filters={"docstatus": 0}, pluck="name")),
 		)
+
+
+class TestSubmitInvoiceSalesOrderPayload(FrappeTestCase):
+	"""Fix-wave regression: submit_invoice must read the client's doctype
+	BEFORE _strip_server_managed_fields removes it — a "Sales Order" payload
+	(the InvoiceCart selectDocType flow) must resolve to the Sales Order draft
+	lookup, not to the site's invoice doctype."""
+
+	def test_sales_order_payload_looks_up_sales_order_draft(self):
+		seen = []
+
+		class _ShortCircuit(Exception):
+			pass
+
+		def _exists(doctype, name=None):
+			# first doctype consumption in submit_invoice is the draft lookup
+			seen.append((doctype, name))
+			raise _ShortCircuit()
+
+		payload = {
+			"doctype": "Sales Order",
+			"name": "SO-PN-TEST-NONEXISTENT",
+			"customer": "_Test Customer",
+			"items": [],
+		}
+		with mock.patch("frappe.db.exists", side_effect=_exists), mock.patch(
+			"frappe.log_error"
+		):
+			with self.assertRaises(_ShortCircuit):
+				submit_invoice(invoice=payload)
+
+		self.assertEqual(seen, [("Sales Order", "SO-PN-TEST-NONEXISTENT")])
+

@@ -31,21 +31,31 @@ def get_sales_report_doctypes():
 _SI_EXCLUSION = "IFNULL({prefix}.is_consolidated, 0) = 0"
 
 
+def _branch_where(dt, where, exclude_consolidated):
+	cond = where.format(dt=dt) if where else ""
+	# The is_consolidated exclusion is an anti-double-count against the POS
+	# Invoice branch — only meaningful (and only applied) when that branch is
+	# in the union. In pure Sales Invoice mode the WHERE is untouched, so
+	# ERPNext built-in-POS consolidated invoices stay visible.
+	if exclude_consolidated and dt == SALES_INVOICE:
+		cond += (" AND " if cond else "") + _SI_EXCLUSION.format(prefix="si")
+	return f" WHERE {cond}" if cond else ""
+
+
 def sales_invoice_union(columns, where=""):
 	"""SQL source for sales reporting: UNION ALL of ``get_sales_report_doctypes()``
 	projected to ``columns``, as derived table ``si``.
 
 	``where`` (optional, ``si.``-prefixed SQL; may use ``{dt}`` for the branch
-	doctype) is pushed into every branch so the union stays index-sized. The
-	Sales Invoice branch additionally drops ``is_consolidated`` rows — each
-	consolidated legacy SI represents POS Invoices that are already in the
-	union (anti double-count)."""
+	doctype) is pushed into every branch so the union stays index-sized. In
+	POS Invoice mode the Sales Invoice branch additionally drops
+	``is_consolidated`` rows — each consolidated legacy SI represents POS
+	Invoices that are already in the union (anti double-count)."""
+	doctypes = get_sales_report_doctypes()
+	exclude = POS_INVOICE in doctypes
 	parts = []
-	for dt in get_sales_report_doctypes():
-		cond = where.format(dt=dt) if where else ""
-		if dt == SALES_INVOICE:
-			cond += (" AND " if cond else "") + _SI_EXCLUSION.format(prefix="si")
-		cond = f" WHERE {cond}" if cond else ""
+	for dt in doctypes:
+		cond = _branch_where(dt, where, exclude)
 		parts.append(f"(SELECT {columns} FROM `tab{dt}` si{cond})")
 	return f"({' UNION ALL '.join(parts)}) si"
 
@@ -53,14 +63,14 @@ def sales_invoice_union(columns, where=""):
 def sales_invoice_item_union(columns, where=""):
 	"""sales_invoice_union for the per-doctype item child tables: each branch
 	is ``tab<dt> Item sii`` pre-joined to its invoice (``si``), so ``columns``
-	and ``where`` may reference both ``sii.`` and ``si.`` columns. Consolidated
-	legacy invoices are excluded together with their items."""
+	and ``where`` may reference both ``sii.`` and ``si.`` columns. In POS
+	Invoice mode consolidated legacy invoices are excluded together with their
+	items."""
+	doctypes = get_sales_report_doctypes()
+	exclude = POS_INVOICE in doctypes
 	parts = []
-	for dt in get_sales_report_doctypes():
-		cond = where.format(dt=dt) if where else ""
-		if dt == SALES_INVOICE:
-			cond += (" AND " if cond else "") + _SI_EXCLUSION.format(prefix="si")
-		cond = f" WHERE {cond}" if cond else ""
+	for dt in doctypes:
+		cond = _branch_where(dt, where, exclude)
 		parts.append(
 			f"(SELECT {columns} FROM `tab{dt} Item` sii "
 			f"INNER JOIN `tab{dt}` si ON si.name = sii.parent{cond})"

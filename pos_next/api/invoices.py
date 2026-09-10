@@ -1431,12 +1431,14 @@ def submit_invoice(invoice=None, data=None):
 	# Capture the relayed applied-rule list before stripping — it feeds the
 	# offer stash via update_invoice below, but must not reach the document.
 	relayed_offer_rules = invoice.get("pos_relayed_offer_rules")
+	# Read before the strip (same as update_invoice): the client's doctype
+	# must not reach the document, but its Sales Order-vs-invoice intent has
+	# to survive — a "Sales Order" payload must resolve to the SO draft path.
+	payload_doctype = invoice.get("doctype")
 	invoice = _strip_server_managed_fields(invoice)
 
 	pos_profile = invoice.get("pos_profile")
-	# after _strip_server_managed_fields the client's doctype guess is gone:
-	# the target invoice doctype always comes from the site switch
-	doctype = _resolve_target_doctype(invoice.get("doctype"))
+	doctype = _resolve_target_doctype(payload_doctype)
 
 	# Normalize pricing_rules before processing
 	standardize_pricing_rules(invoice.get("items"))

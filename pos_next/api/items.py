@@ -1201,6 +1201,32 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 	return dict(result)
 
 
+def _post_filter_unavailable(items):
+	"""hide_unavailable post-filter. Bundles with 0 component availability are
+	hidden in both modes. The zero-qty stock-item clause only applies in POS
+	Invoice mode: there the SQL's raw Bin qty can be driven to <= 0 by the
+	unconsolidated-POS-Invoice deduction; in Sales Invoice mode the Bin qty is
+	final and filtering on it would hide items the default grid always showed."""
+	from pos_next.invoice_type import POS_INVOICE, get_pos_invoice_doctype
+
+	if get_pos_invoice_doctype() != POS_INVOICE:
+		return [
+			item
+			for item in items
+			if not item.get("is_bundle") or item.get("actual_qty", 0) > 0
+		]
+	return [
+		item
+		for item in items
+		if (not item.get("is_bundle") or item.get("actual_qty", 0) > 0)
+		and (
+			not item.get("is_stock_item")
+			or item.get("has_variants")
+			or item.get("actual_qty", 0) > 0
+		)
+	]
+
+
 @frappe.whitelist()
 def get_items(
 	pos_profile,
@@ -1564,22 +1590,8 @@ def get_items(
 				items[0].update(resolved_item_data)
 
 		# Post-filter: hide unavailable bundles
-		# The SQL-level filter exempts non-stock items (is_stock_item=0) since they
-		# have no Bin rows. Bundles are non-stock items whose availability is computed
-		# from component stock. Filter them out here if they have 0 availability.
-		# Stock items too: the SQL sees raw Bin qty, which the unconsolidated-POS-
-		# Invoice deduction may drive to <= 0 (no-op while the deduction is empty).
 		if hide_unavailable:
-			items = [
-				item
-				for item in items
-				if (not item.get("is_bundle") or item.get("actual_qty", 0) > 0)
-				and (
-					not item.get("is_stock_item")
-					or item.get("has_variants")
-					or item.get("actual_qty", 0) > 0
-				)
-			]
+			items = _post_filter_unavailable(items)
 
 		return items
 	except Exception as e:
@@ -1759,19 +1771,11 @@ def get_items_bulk(
 			if item.get("variant_of") and item_code in attributes_map:
 				item["attributes"] = attributes_map[item_code]
 
-		# Post-filter: hide unavailable bundles and stock items whose effective
-		# qty (Bin minus unconsolidated POS Invoices) dropped to <= 0.
+		# Post-filter: hide unavailable bundles and (POS Invoice mode only)
+		# stock items whose effective qty (Bin minus unconsolidated POS
+		# Invoices) dropped to <= 0.
 		if hide_unavailable:
-			items = [
-				item
-				for item in items
-				if (not item.get("is_bundle") or item.get("actual_qty", 0) > 0)
-				and (
-					not item.get("is_stock_item")
-					or item.get("has_variants")
-					or item.get("actual_qty", 0) > 0
-				)
-			]
+			items = _post_filter_unavailable(items)
 
 		return items
 	except Exception as e:
