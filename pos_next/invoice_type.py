@@ -28,6 +28,46 @@ def get_sales_report_doctypes():
 	return [SALES_INVOICE]
 
 
+_SI_EXCLUSION = "IFNULL({prefix}.is_consolidated, 0) = 0"
+
+
+def sales_invoice_union(columns, where=""):
+	"""SQL source for sales reporting: UNION ALL of ``get_sales_report_doctypes()``
+	projected to ``columns``, as derived table ``si``.
+
+	``where`` (optional, ``si.``-prefixed SQL; may use ``{dt}`` for the branch
+	doctype) is pushed into every branch so the union stays index-sized. The
+	Sales Invoice branch additionally drops ``is_consolidated`` rows — each
+	consolidated legacy SI represents POS Invoices that are already in the
+	union (anti double-count)."""
+	parts = []
+	for dt in get_sales_report_doctypes():
+		cond = where.format(dt=dt) if where else ""
+		if dt == SALES_INVOICE:
+			cond += (" AND " if cond else "") + _SI_EXCLUSION.format(prefix="si")
+		cond = f" WHERE {cond}" if cond else ""
+		parts.append(f"(SELECT {columns} FROM `tab{dt}` si{cond})")
+	return f"({' UNION ALL '.join(parts)}) si"
+
+
+def sales_invoice_item_union(columns, where=""):
+	"""sales_invoice_union for the per-doctype item child tables: each branch
+	is ``tab<dt> Item sii`` pre-joined to its invoice (``si``), so ``columns``
+	and ``where`` may reference both ``sii.`` and ``si.`` columns. Consolidated
+	legacy invoices are excluded together with their items."""
+	parts = []
+	for dt in get_sales_report_doctypes():
+		cond = where.format(dt=dt) if where else ""
+		if dt == SALES_INVOICE:
+			cond += (" AND " if cond else "") + _SI_EXCLUSION.format(prefix="si")
+		cond = f" WHERE {cond}" if cond else ""
+		parts.append(
+			f"(SELECT {columns} FROM `tab{dt} Item` sii "
+			f"INNER JOIN `tab{dt}` si ON si.name = sii.parent{cond})"
+		)
+	return f"({' UNION ALL '.join(parts)}) sii"
+
+
 def is_pos_next_owned(doc):
 	"""True when a POS Invoice was created by POS Next (vs ERPNext built-in POS)."""
 	return bool(doc.get("posa_pos_opening_shift"))

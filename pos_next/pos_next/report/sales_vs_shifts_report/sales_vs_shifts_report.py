@@ -81,6 +81,21 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, time_diff_in_hours
 
 from pos_next.hq_scope import apply_company_scope
+from pos_next.invoice_type import sales_invoice_union
+
+# pos_transactions stores the invoice in `sales_invoice` (legacy) or
+# `pos_invoice` (POS Invoice mode) — resolve either to a name.
+_SIR_INVOICE = "COALESCE(NULLIF(sir.sales_invoice, ''), sir.pos_invoice)"
+
+
+def _invoice_from():
+	"""``si`` source: POS Invoice + legacy Sales Invoice (non-consolidated)
+	union with the columns this module reads."""
+	return sales_invoice_union(
+		"si.name, si.docstatus, si.is_pos, si.is_return, si.company, si.posting_date,"
+		" si.posting_time, si.pos_profile, si.owner, si.grand_total, si.discount_amount,"
+		" si.total_qty, si.customer",
+	)
 
 
 def execute(filters=None):
@@ -686,7 +701,7 @@ def fetch_shifts_with_invoices(filters):
 		FROM `tabPOS Closing Shift` pcs
 		LEFT JOIN `tabSales Invoice Reference` sir ON sir.parent = pcs.name
 			AND sir.parenttype = 'POS Closing Shift'
-		LEFT JOIN `tabSales Invoice` si ON si.name = sir.sales_invoice
+		LEFT JOIN {_invoice_from()} ON si.name = {_SIR_INVOICE}
 			AND si.docstatus = 1
 		WHERE pcs.docstatus = 1
 		{conditions}
@@ -736,18 +751,18 @@ def fetch_payment_data_batch(shifts):
 
 def fetch_payment_data_single(shift):
 	"""Fetch payment data for a single shift via pos_transactions child table"""
-	query = """
-		SELECT
-			LOWER(sip.mode_of_payment) AS mode,
-			SUM(sip.amount) AS amount
-		FROM `tabSales Invoice Payment` sip
-		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
-		INNER JOIN `tabSales Invoice Reference` sir ON sir.sales_invoice = si.name
-			AND sir.parent = %(shift)s
-			AND sir.parenttype = 'POS Closing Shift'
-		WHERE si.docstatus = 1 AND si.is_return = 0
-		GROUP BY LOWER(sip.mode_of_payment)
-	"""
+	query = f"""
+			SELECT
+				LOWER(sip.mode_of_payment) AS mode,
+				SUM(sip.amount) AS amount
+			FROM `tabSales Invoice Payment` sip
+			INNER JOIN {_invoice_from()} ON si.name = sip.parent
+			INNER JOIN `tabSales Invoice Reference` sir ON {_SIR_INVOICE} = si.name
+				AND sir.parent = %(shift)s
+				AND sir.parenttype = 'POS Closing Shift'
+			WHERE si.docstatus = 1 AND si.is_return = 0
+			GROUP BY LOWER(sip.mode_of_payment)
+		"""
 
 	payments = frappe.db.sql(
 		query,
@@ -778,13 +793,13 @@ def fetch_salesperson_data_batch(shifts):
 
 def fetch_salesperson_data_single(shift):
 	"""Fetch sales person data for a single shift via pos_transactions child table"""
-	query = """
+	query = f"""
 		SELECT
 			st.sales_person,
 			SUM(st.allocated_amount) AS contribution
 		FROM `tabSales Team` st
-		INNER JOIN `tabSales Invoice` si ON si.name = st.parent
-		INNER JOIN `tabSales Invoice Reference` sir ON sir.sales_invoice = si.name
+		INNER JOIN {_invoice_from()} ON si.name = st.parent
+		INNER JOIN `tabSales Invoice Reference` sir ON {_SIR_INVOICE} = si.name
 			AND sir.parent = %(shift)s
 			AND sir.parenttype = 'POS Closing Shift'
 		WHERE si.docstatus = 1 AND si.is_return = 0
@@ -832,10 +847,10 @@ def fetch_peak_hours_batch(shifts):
 
 def fetch_peak_hour_single(shift):
 	"""Fetch peak hour for a single shift via pos_transactions child table"""
-	query = """
+	query = f"""
 		SELECT HOUR(si.posting_time) AS hour, SUM(si.grand_total) AS total
-		FROM `tabSales Invoice` si
-		INNER JOIN `tabSales Invoice Reference` sir ON sir.sales_invoice = si.name
+		FROM {_invoice_from()}
+		INNER JOIN `tabSales Invoice Reference` sir ON {_SIR_INVOICE} = si.name
 			AND sir.parent = %(shift)s
 			AND sir.parenttype = 'POS Closing Shift'
 		WHERE si.docstatus = 1 AND si.is_return = 0
@@ -1168,7 +1183,7 @@ def get_hourly_breakdown(filters):
 			HOUR(si.posting_time) AS hour,
 			COUNT(*) AS invoice_count,
 			SUM(si.grand_total) AS total_sales
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0
 		{where}
 		GROUP BY HOUR(si.posting_time)
@@ -1194,7 +1209,7 @@ def get_payment_method_breakdown(filters):
 			COUNT(DISTINCT si.name) AS transaction_count,
 			SUM(sip.amount) AS total_amount
 		FROM `tabSales Invoice Payment` sip
-		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
+		INNER JOIN {_invoice_from()} ON si.name = sip.parent
 		WHERE si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0
 		{where}
 		GROUP BY sip.mode_of_payment
@@ -1219,7 +1234,7 @@ def get_daily_trend(filters):
 			si.posting_date AS date,
 			COUNT(*) AS invoice_count,
 			SUM(si.grand_total) AS total_sales
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0
 		{where}
 		GROUP BY si.posting_date

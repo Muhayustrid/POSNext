@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
 from pos_next.api.utilities import get_wallet_payment_modes
+from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
 
 @frappe.whitelist()
@@ -335,7 +336,8 @@ def get_session_summary(opening_shift):
 	"""Pre-closing sales summary for an active POS session.
 
 	Read-only preview of what POS Closing Shift would report: same invoice
-	dataset (submitted Sales Invoices linked to this opening shift), same
+	dataset (submitted invoices linked to this opening shift — POS Invoices or
+	legacy non-consolidated Sales Invoices), same
 	base-currency aggregation. Mirrors _process_invoice semantics — credit
 	returns without payment rows are excluded because no money moved.
 
@@ -430,6 +432,32 @@ def _session_invoice_where(alias="si"):
 	return f"{alias}.docstatus = 1 AND {alias}.posa_pos_opening_shift = %(shift)s"
 
 
+# Shift filter pushed into every union branch so the union stays index-sized.
+_SHIFT_BRANCH_WHERE = "si.docstatus = 1 AND si.posa_pos_opening_shift = %(shift)s"
+
+# Columns the session-summary queries read off the invoice union / item union.
+_SESSION_INVOICE_COLUMNS = (
+	"si.name, si.docstatus, si.is_return, si.currency, si.grand_total,"
+	" si.base_grand_total, si.base_net_total, si.base_total_taxes_and_charges,"
+	" si.base_discount_amount, si.base_change_amount, si.total_qty,"
+	" si.outstanding_amount, si.conversion_rate, si.posa_pos_opening_shift"
+)
+_SESSION_ITEM_COLUMNS = (
+	"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
+	" sii.base_net_amount, sii.price_list_rate, sii.rate, sii.pos_package_role"
+)
+
+
+def _invoice_from():
+	"""Invoice source for the session summary: POS Invoice + legacy Sales
+	Invoice (non-consolidated) union, shift filter pushed into every branch."""
+	return sales_invoice_union(_SESSION_INVOICE_COLUMNS, where=_SHIFT_BRANCH_WHERE)
+
+
+def _item_from():
+	return sales_invoice_item_union(_SESSION_ITEM_COLUMNS, where=_SHIFT_BRANCH_WHERE)
+
+
 # Returns with no payment rows never touched the drawer; closing skips them,
 # so exclude from every money/count aggregate (pattern reused in each query).
 _NO_DRAWER_RETURN = (
@@ -463,7 +491,7 @@ def _aggregate_session_totals(opening_shift):
 			SELECT si.is_return, si.base_grand_total, si.base_net_total,
 				si.base_total_taxes_and_charges, si.base_discount_amount,
 				si.total_qty, si.outstanding_amount, si.conversion_rate
-			FROM `tabSales Invoice` si
+			FROM {_invoice_from()}
 			WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
 		) si
 		""",
@@ -475,7 +503,7 @@ def _aggregate_session_totals(opening_shift):
 	currencies = frappe.db.sql(
 		f"""
 		SELECT si.currency, SUM(si.grand_total) AS amount
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
 		GROUP BY si.currency
 		ORDER BY amount DESC
@@ -486,7 +514,7 @@ def _aggregate_session_totals(opening_shift):
 
 	# Raw count of every submitted invoice in the shift, before the drawer filter
 	invoice_count = frappe.db.sql(
-		f"SELECT COUNT(*) AS c FROM `tabSales Invoice` si WHERE {_session_invoice_where()}",
+		f"SELECT COUNT(*) AS c FROM {_invoice_from()} WHERE {_session_invoice_where()}",
 		values,
 		as_dict=True,
 	)[0].c
@@ -509,7 +537,7 @@ def _aggregate_session_payments(opening_shift, cash_mode, pos_profile=None):
 		f"""
 		SELECT sip.mode_of_payment, SUM(sip.base_amount) AS amount
 		FROM `tabSales Invoice Payment` sip
-		JOIN `tabSales Invoice` si ON si.name = sip.parent
+		JOIN {_invoice_from()} ON si.name = sip.parent
 		WHERE {_session_invoice_where()}
 		GROUP BY sip.mode_of_payment
 		""",
@@ -544,7 +572,7 @@ def _aggregate_session_payments(opening_shift, cash_mode, pos_profile=None):
 	# Change given back leaves the drawer in the designated cash mode
 	change = flt(
 		frappe.db.sql(
-			f"SELECT SUM(si.base_change_amount) AS c FROM `tabSales Invoice` si "
+			f"SELECT SUM(si.base_change_amount) AS c FROM {_invoice_from()} "
 			f"WHERE {_session_invoice_where()}",
 			values,
 			as_dict=True,
@@ -627,8 +655,8 @@ def _aggregate_session_payments(opening_shift, cash_mode, pos_profile=None):
 
 def _aggregate_session_items(opening_shift, limit=100):
 	where = f"""
-		FROM `tabSales Invoice Item` sii
-		JOIN `tabSales Invoice` si ON si.name = sii.parent
+		FROM {_item_from()}
+		JOIN {_invoice_from()} ON si.name = sii.parent
 		WHERE {_session_invoice_where()}
 			AND ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
 		GROUP BY sii.item_code, sii.pos_package_role
@@ -691,7 +719,7 @@ def _aggregate_session_charges(opening_shift):
 			MAX(acc.account_type) AS account_type,
 			SUM(st.base_tax_amount_after_discount_amount) AS amount
 		FROM `tabSales Taxes and Charges` st
-		JOIN `tabSales Invoice` si ON si.name = st.parent
+		JOIN {_invoice_from()} ON si.name = st.parent
 		LEFT JOIN `tabAccount` acc ON acc.name = st.account_head
 		WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
 		GROUP BY st.account_head
@@ -733,8 +761,8 @@ def _aggregate_session_categories(opening_shift, limit=20):
 		" (SELECT item.item_group FROM `tabItem` item WHERE item.name = sii.item_code))"
 	)
 	where = f"""
-		FROM `tabSales Invoice Item` sii
-		JOIN `tabSales Invoice` si ON si.name = sii.parent
+		FROM {_item_from()}
+		JOIN {_invoice_from()} ON si.name = sii.parent
 		WHERE {_session_invoice_where()}
 			AND ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
 	"""
@@ -787,8 +815,8 @@ def _aggregate_session_discounts(opening_shift):
 		frappe.db.sql(
 			f"""
 			SELECT SUM((ifnull(sii.price_list_rate, sii.rate) - sii.rate) * sii.qty) AS item_discount
-			FROM `tabSales Invoice Item` sii
-			JOIN `tabSales Invoice` si ON si.name = sii.parent
+			FROM {_item_from()}
+			JOIN {_invoice_from()} ON si.name = sii.parent
 			WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
 			""",
 			{"shift": opening_shift},

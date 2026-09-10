@@ -5,6 +5,22 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from pos_next.invoice_type import sales_invoice_union
+
+# pos_transactions stores the invoice in `sales_invoice` (legacy) or
+# `pos_invoice` (POS Invoice mode) — resolve either to a name.
+_SIR_INVOICE = "COALESCE(NULLIF(sir.sales_invoice, ''), sir.pos_invoice)"
+
+
+def _invoice_from():
+	"""``si`` source: POS Invoice + legacy Sales Invoice (non-consolidated)
+	union with the columns this module reads."""
+	return sales_invoice_union(
+		"si.name, si.docstatus, si.is_pos, si.is_return, si.posting_date,"
+		" si.pos_profile, si.owner, si.grand_total, si.discount_amount",
+		where="si.docstatus = 1 AND si.is_pos = 1",
+	)
+
 
 def execute(filters=None):
 	columns = get_columns()
@@ -71,9 +87,8 @@ def get_data(filters):
 			COALESCE(SUM(CASE WHEN si.is_return = 0 THEN si.discount_amount ELSE 0 END), 0) as total_discounts,
 			COUNT(CASE WHEN si.is_return = 1 THEN si.name END) as return_count,
 			COALESCE(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) as return_amount
-		FROM `tabSales Invoice` si
-		WHERE si.docstatus = 1
-		AND si.is_pos = 1
+		FROM {_invoice_from()}
+		WHERE 1=1
 		{conditions}
 		GROUP BY si.owner
 		ORDER BY total_sales DESC
@@ -187,10 +202,10 @@ def get_conditions(filters):
 		conditions.append("si.owner = %(cashier)s")
 
 	if filters.get("shift"):
-		conditions.append("""
+		conditions.append(f"""
 			EXISTS (
 				SELECT 1 FROM `tabSales Invoice Reference` sir
-				WHERE sir.sales_invoice = si.name
+				WHERE {_SIR_INVOICE} = si.name
 				AND sir.parent = %(shift)s
 				AND sir.parenttype = 'POS Closing Shift'
 			)

@@ -85,7 +85,7 @@ def process_loyalty_to_wallet(doc, method=None):
 	# Get the loyalty points earned from this invoice
 	loyalty_entry = frappe.db.get_value(
 		"Loyalty Point Entry",
-		{"invoice_type": "Sales Invoice", "invoice": doc.name, "loyalty_points": [">", 0]},
+		{"invoice_type": doc.doctype, "invoice": doc.name, "loyalty_points": [">", 0]},
 		["loyalty_points", "name"],
 		as_dict=True,
 	)

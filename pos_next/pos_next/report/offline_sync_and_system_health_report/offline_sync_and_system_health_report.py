@@ -19,10 +19,16 @@ def get_columns():
 	return [
 		{"fieldname": "offline_id", "label": _("Offline ID"), "fieldtype": "Data", "width": 180},
 		{
+			"fieldname": "invoice_doctype",
+			"label": _("Invoice Type"),
+			"fieldtype": "Data",
+			"width": 110,
+		},
+		{
 			"fieldname": "sales_invoice",
-			"label": _("Sales Invoice"),
-			"fieldtype": "Link",
-			"options": "Sales Invoice",
+			"label": _("Invoice"),
+			"fieldtype": "Dynamic Link",
+			"options": "invoice_doctype",
 			"width": 150,
 		},
 		{
@@ -62,22 +68,32 @@ def get_data(filters):
 	"""Get offline sync and system health data"""
 	conditions = get_conditions(filters)
 
-	# Query to get offline sync records with related invoice data
+	# Query to get offline sync records with related invoice data.
+	# Sync rows point at whichever doctype was current when they were created
+	# (sales_invoice in legacy mode, pos_invoice in POS Invoice mode), so
+	# resolve both: link + doctype via COALESCE, invoice facts from whichever
+	# document exists.
 	query = f"""
 		SELECT
 			ois.offline_id,
-			ois.sales_invoice,
+			COALESCE(NULLIF(ois.sales_invoice, ''), ois.pos_invoice) AS sales_invoice,
+			CASE
+				WHEN COALESCE(ois.sales_invoice, '') <> '' THEN 'Sales Invoice'
+				ELSE 'POS Invoice'
+			END AS invoice_doctype,
 			ois.pos_profile,
 			ois.customer,
 			ois.status,
 			ois.synced_at,
-			si.creation as invoice_created_at,
-			si.posting_date,
-			si.owner as user
+			COALESCE(si.creation, pi.creation) AS invoice_created_at,
+			COALESCE(si.posting_date, pi.posting_date) AS posting_date,
+			COALESCE(si.owner, pi.owner) AS user
 		FROM
 			`tabOffline Invoice Sync` ois
 		LEFT JOIN
 			`tabSales Invoice` si ON si.name = ois.sales_invoice
+		LEFT JOIN
+			`tabPOS Invoice` pi ON pi.name = ois.pos_invoice
 		WHERE
 			1=1
 			{conditions}
@@ -152,7 +168,7 @@ def get_conditions(filters):
 		conditions.append("ois.status = %(status)s")
 
 	if filters.get("user"):
-		conditions.append("si.owner = %(user)s")
+		conditions.append("COALESCE(si.owner, pi.owner) = %(user)s")
 
 	return " AND " + " AND ".join(conditions) if conditions else ""
 
