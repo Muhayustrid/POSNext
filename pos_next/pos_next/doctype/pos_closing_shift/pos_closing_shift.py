@@ -6,13 +6,31 @@ from collections import defaultdict
 
 import frappe
 from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import (
-	consolidate_pos_invoices,
+	create_merge_logs,
+	get_invoice_customer_map,
 )
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint, flt
+from frappe.utils import flt
 
 from pos_next.invoice_type import get_pos_invoice_doctype
+
+
+class _ClosingEntryContext(frappe._dict):
+	"""Minimal POS Closing Entry stand-in for ERPNext's merge-log flow.
+
+	create_merge_logs reads company/posting_date/posting_time off the closing
+	entry and (it being truthy) calls set_status/db_set/update_opening_entry
+	when done — all no-ops here. name=None keeps pos_closing_entry unset."""
+
+	def set_status(self, *args, **kwargs):
+		pass
+
+	def db_set(self, *args, **kwargs):
+		pass
+
+	def update_opening_entry(self):
+		pass
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -89,26 +107,38 @@ class POSClosingShift(Document):
 		return any(d.get("pos_invoice") for d in self.pos_transactions)
 
 	def _consolidate_pos_invoices(self):
-		# no closing_entry: synchronous merge (merge log submits the
-		# consolidated Sales Invoice, which writes GL + SLE via update_stock)
-		invoices = []
-		for d in self.pos_transactions:
-			if not d.get("pos_invoice"):
-				continue
-			is_return, customer = frappe.db.get_value(
-				"POS Invoice", d.pos_invoice, ["is_return", "customer"]
-			)
-			invoices.append(
-				frappe._dict(
-					{
-						"pos_invoice": d.pos_invoice,
-						"is_return": cint(is_return),
-						# merge log groups by customer (validate_customer)
-						"customer": customer,
-					}
-				)
-			)
-		consolidate_pos_invoices(pos_invoices=invoices)
+		posis = [d.pos_invoice for d in self.pos_transactions if d.get("pos_invoice")]
+		# ERPNext-native row shape: merge-log child rows (POS Invoice
+		# Reference) require posting_date/grand_total/customer, and
+		# split_invoices needs is_return/return_against
+		invoices = frappe.get_all(
+			"POS Invoice",
+			filters={"name": ("in", posis)},
+			fields=[
+				"name as pos_invoice",
+				"posting_date",
+				"grand_total",
+				"customer",
+				"is_return",
+				"return_against",
+			],
+		)
+		if not invoices:
+			return
+		# create_merge_logs directly (not consolidate_pos_invoices): the
+		# >=10-invoices enqueue gate lives only there, and closing on an
+		# inactive scheduler must never queue the merge
+		create_merge_logs(
+			get_invoice_customer_map(invoices),
+			closing_entry=self._consolidation_context(),
+		)
+
+	def _consolidation_context(self):
+		return _ClosingEntryContext(
+			company=self.company,
+			posting_date=self.period_end_date,
+			posting_time=frappe.utils.nowtime(),
+		)
 
 	def on_cancel(self):
 		if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
@@ -666,15 +696,20 @@ def submit_closing_shift(closing_shift):
 
 
 def submit_printed_invoices(pos_opening_shift, doctype):
-	filters = {
-		"posa_pos_opening_shift": pos_opening_shift,
-		"docstatus": 0,
-	}
-	# posa_is_printed is a Sales Invoice custom field — POS Invoices carry no
-	# printed-draft state, so the sweep is a no-op in POS Invoice mode
-	if frappe.db.has_column(doctype, "posa_is_printed"):
-		filters["posa_is_printed"] = 1
-	invoices_list = frappe.get_all(doctype, filters=filters)
+	if doctype == "POS Invoice":
+		# posa_is_printed exists only on Sales Invoice — POS Invoices carry no
+		# printed-draft state. Returning early also guarantees we never submit
+		# unprinted drafts: without the posa_is_printed filter below,
+		# frappe.get_all would match EVERY draft on the shift.
+		return
+	invoices_list = frappe.get_all(
+		doctype,
+		filters={
+			"posa_pos_opening_shift": pos_opening_shift,
+			"docstatus": 0,
+			"posa_is_printed": 1,
+		},
+	)
 	for invoice in invoices_list:
 		invoice_doc = frappe.get_doc(doctype, invoice.name)
 		invoice_doc.submit()

@@ -61,5 +61,10 @@ class TestClosingConsolidation(POSInvoiceModeMixin, FrappeTestCase):
 		self.assertEqual(cint(cons.is_consolidated), 1)
 		self.assertGreater(frappe.db.count("GL Entry", {"voucher_no": cons.name}), 0)
 		self.assertGreater(frappe.db.count("Stock Ledger Entry", {"voucher_no": cons.name}), 0)
-		self.assertTrue(frappe.db.exists("POS Invoice Merge Log", {"pos_invoice": self.posi_name}))
+		# merge log must carry the closing shift's company (reqd on the doctype;
+		# must not depend on the site's default-company fallback)
+		self.assertEqual(
+			frappe.db.get_value("POS Invoice Merge Log", {"pos_invoice": self.posi_name}, "company"),
+			self.profile.company,
+		)
 		frappe.db.commit()
