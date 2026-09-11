@@ -7,12 +7,12 @@ import unittest
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from pos_next.api.shifts import get_session_summary
+from pos_next.api.shifts import get_period_summary, get_session_summary
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
+	make_test_item,
 	make_test_pos_profile,
 	make_test_warehouse,
-	make_test_item,
 	manual_item_price,
 )
 
@@ -95,6 +95,20 @@ class TestSessionSummary(IntegrationTestCase):
 			).insert(ignore_permissions=True)
 		elif not frappe.db.get_value("User", cls.other_user, "enabled"):
 			frappe.db.set_value("User", cls.other_user, "enabled", 1)
+		# second cashier on the same profile: period recaps span every cashier,
+		# while other_user stays OFF the profile as the denied outsider
+		cls.second_cashier = "session.summary.cashier2@example.com"
+		if not frappe.db.exists("User", cls.second_cashier):
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": cls.second_cashier,
+					"first_name": "Cashier Two",
+					"roles": [{"role": "Sales User"}],
+				}
+			).insert(ignore_permissions=True)
+		elif not frappe.db.get_value("User", cls.second_cashier, "enabled"):
+			frappe.db.set_value("User", cls.second_cashier, "enabled", 1)
 		# payment-method fixtures: extra profile methods (one unused, one used
 		# but unconfigured) and a second non-cash profile
 		cls.qr_mode = cls._make_mode_of_payment("_SESSUM QR", "Bank")
@@ -110,6 +124,9 @@ class TestSessionSummary(IntegrationTestCase):
 				{"mode_of_payment": cls.card_mode},
 			],
 		)
+		# period recaps are gated on POS Profile User membership
+		cls._ensure_profile_user(cls.pos_profile, cls.user)
+		cls._ensure_profile_user(cls.pos_profile, cls.second_cashier)
 		frappe.db.commit()
 
 		cls.item_a = _make_item("_SESSUM_ITEM_A", 1000)
@@ -144,7 +161,7 @@ class TestSessionSummary(IntegrationTestCase):
 
 	@classmethod
 	def _make_opening_shift(
-		cls, opening_cash=0, pos_profile=None, extra_cash=None, extra_cash_amount=0
+		cls, opening_cash=0, pos_profile=None, extra_cash=None, extra_cash_amount=0, user=None
 	):
 		details = [{"mode_of_payment": cls.cash_mode, "amount": opening_cash}]
 		if extra_cash:
@@ -154,7 +171,7 @@ class TestSessionSummary(IntegrationTestCase):
 				"doctype": "POS Opening Shift",
 				"company": cls.company,
 				"pos_profile": pos_profile or cls.pos_profile,
-				"user": cls.user,
+				"user": user or cls.user,
 				"period_start_date": frappe.utils.now_datetime(),
 				"balance_details": details,
 			}
@@ -162,6 +179,22 @@ class TestSessionSummary(IntegrationTestCase):
 		doc.insert(ignore_permissions=True)
 		doc.submit()
 		return doc.name
+
+	@classmethod
+	def _ensure_profile_user(cls, profile, user):
+		if frappe.db.exists(
+			"POS Profile User", {"parent": profile, "parenttype": "POS Profile", "user": user}
+		):
+			return
+		frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": user,
+			}
+		).insert(ignore_permissions=True)
 
 	@classmethod
 	def _make_mode_of_payment(cls, name, mop_type):
@@ -229,13 +262,16 @@ class TestSessionSummary(IntegrationTestCase):
 
 	@classmethod
 	def _make_invoice_on(
-		cls, shift, rows, paid, is_return=False, pay_mode=None, invoice_discount=None
+		cls, shift, rows, paid, is_return=False, pay_mode=None, invoice_discount=None, posting_date=None
 	):
 		inv = frappe.new_doc("Sales Invoice")
 		inv.company = cls.company
 		inv.customer = cls.customer
 		inv.is_pos = 1
 		inv.posa_pos_opening_shift = shift
+		if posting_date:
+			inv.set_posting_time = 1
+			inv.posting_date = posting_date
 		if is_return:
 			inv.is_return = 1
 		if invoice_discount:
@@ -812,3 +848,155 @@ class TestSessionSummary(IntegrationTestCase):
 		cat = summary["categories"][0]
 		self.assertEqual(cat["qty"], 1)
 		self.assertEqual(cat["base_net_amount"], 1000)
+
+	# ── Period recap (posting-date window, every cashier of the profile) ──────
+	# The dev site is shared across runs, so period tests assert deltas around
+	# their own fixtures instead of absolute numbers.
+
+	def _today_period(self, profile=None):
+		today = frappe.utils.nowdate()
+		return get_period_summary(profile or self.pos_profile, today, today)
+
+	@staticmethod
+	def _cash_amount(summary, mode):
+		return next(p["amount"] for p in summary["payments"] if p["mode_of_payment"] == mode)
+
+	def test_period_sums_every_cashiers_shift(self):
+		before = self._today_period()
+		shift_a = self._make_opening_shift(opening_cash=3000)
+		shift_b = self._make_opening_shift(opening_cash=4000, user=self.second_cashier)
+		self._make_invoice_on(shift_a, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=1000)
+		self._make_invoice_on(shift_b, [{"item": self.item_b, "qty": 2, "rate": 250}], paid=500)
+
+		after = self._today_period()
+		self.assertEqual(after["shift_count"], before["shift_count"] + 2)
+		self.assertEqual(after["net_sales"], before["net_sales"] + 1500)
+		self.assertEqual(after["sales_count"], before["sales_count"] + 2)
+		self.assertEqual(after["opening_cash"], before["opening_cash"] + 7000)
+		self.assertEqual(after["cash_collected"], before["cash_collected"] + 1500)
+		self.assertEqual(after["cash_in_hand"], after["opening_cash"] + after["cash_collected"])
+		# period header instead of shift-scoped fields
+		self.assertEqual(frappe.utils.getdate(after["period_from"]), frappe.utils.getdate())
+		self.assertNotIn("closing_time", after)
+		self.assertNotIn("cashier", after)
+
+	def test_period_excludes_other_dates_and_profiles(self):
+		before = self._today_period()
+		old_day = frappe.utils.add_days(frappe.utils.nowdate(), -40)
+		before_old = get_period_summary(self.pos_profile, old_day, old_day)
+		# this profile, but posted outside today's window
+		shift = self._make_opening_shift(opening_cash=0)
+		self._make_invoice_on(
+			shift, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=1000, posting_date=old_day
+		)
+		# today, but on another profile
+		other_shift = self._make_opening_shift(opening_cash=0, pos_profile=self.pm_profile)
+		self._make_invoice_on(other_shift, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=1000)
+
+		after = self._today_period()
+		self.assertEqual(after["net_sales"], before["net_sales"])
+		self.assertEqual(after["invoice_count"], before["invoice_count"])
+		self.assertEqual(after["shift_count"], before["shift_count"] + 1)  # own backdated shift only
+		self.assertEqual(after["opening_cash"], before["opening_cash"])
+		# a window covering the old posting date picks the invoice up
+		after_old = get_period_summary(self.pos_profile, old_day, old_day)
+		self.assertEqual(after_old["net_sales"], before_old["net_sales"] + 1000)
+		self.assertEqual(after_old["sales_count"], before_old["sales_count"] + 1)
+
+	def test_period_agrees_with_session_summary(self):
+		"""Both endpoints share one aggregation: the period delta equals the
+		lone shift's own session summary, section by section."""
+		before = self._today_period()
+		shift = self._make_opening_shift(opening_cash=25000)
+		self._make_invoice_on(
+			shift,
+			[{"item": self.item_a, "qty": 1, "rate": 900, "price_list_rate": 1000}],
+			paid=900,
+		)
+		self._make_invoice_on(
+			shift, [{"item": self.item_a, "qty": -1, "rate": 1000}], paid=-1000, is_return=True
+		)
+		self._make_payment_entry(
+			self._make_invoice_on(shift, [{"item": self.item_b, "qty": 2, "rate": 250}], paid=250),
+			250,
+			shift,
+		)
+		session = get_session_summary(shift)
+		after = self._today_period()
+
+		for key in (
+			"net_sales",
+			"gross_sales",
+			"returns_total",
+			"net_total",
+			"total_qty",
+			"item_discount",
+			"invoice_discount",
+			"total_discount",
+			"sales_count",
+			"returns_count",
+			"counted_invoices",
+			"invoice_count",
+		):
+			self.assertEqual(
+				after[key] - before[key], session[key], f"period delta mismatch for {key}"
+			)
+		self.assertEqual(
+			self._cash_amount(after, self.cash_mode) - self._cash_amount(before, self.cash_mode),
+			self._cash_amount(session, self.cash_mode),
+		)
+		self.assertEqual(after["opening_cash"] - before["opening_cash"], session["opening_cash"])
+
+	def test_period_credit_return_without_payments_excluded(self):
+		before = self._today_period()
+		shift = self._make_opening_shift(opening_cash=0)
+		inv = frappe.new_doc("Sales Invoice")
+		inv.company = self.company
+		inv.customer = self.customer
+		inv.is_pos = 1
+		inv.posa_pos_opening_shift = shift
+		inv.is_return = 1
+		inv.append(
+			"items",
+			{"item_code": self.item_b, "qty": -1, "rate": 250, "price_list_rate": 250},
+		)
+		inv.insert(ignore_permissions=True)
+		inv.submit()
+
+		after = self._today_period()
+		self.assertEqual(after["invoice_count"], before["invoice_count"] + 1)  # raw count sees it
+		self.assertEqual(after["counted_invoices"], before["counted_invoices"])  # drawer doesn't
+		self.assertEqual(after["net_sales"], before["net_sales"])
+		self.assertEqual(after["returns_count"], before["returns_count"])
+
+	def test_period_partial_payment_entry_enters_the_drawer(self):
+		before = self._today_period()
+		shift = self._make_opening_shift(opening_cash=0)
+		inv = self._make_invoice_on(shift, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=400)
+		self._make_payment_entry(inv, 600, shift)
+
+		after = self._today_period()
+		self.assertEqual(
+			self._cash_amount(after, self.cash_mode),
+			self._cash_amount(before, self.cash_mode) + 1000,  # 400 at sale + 600 later
+		)
+		self.assertEqual(after["credit_outstanding"], before["credit_outstanding"])
+
+	def test_period_denied_for_user_outside_the_profile(self):
+		frappe.set_user(self.other_user)  # never added to the profile's users
+		with self.assertRaises(frappe.PermissionError):
+			self._today_period()
+
+	def test_period_validation_and_limits(self):
+		today = frappe.utils.nowdate()
+		with self.assertRaises(frappe.ValidationError):  # from after to
+			get_period_summary(self.pos_profile, today, frappe.utils.add_days(today, -1))
+		with self.assertRaises(frappe.ValidationError):  # window over 366 days
+			get_period_summary(self.pos_profile, frappe.utils.add_days(today, -400), today)
+		with self.assertRaises(frappe.ValidationError):  # missing date
+			get_period_summary(self.pos_profile, "", today)
+		with self.assertRaises(frappe.DoesNotExistError):
+			get_period_summary("_SESSUM_NO_SUCH_PROFILE", today, today)
+		# a full leap year is the accepted maximum
+		full_year = get_period_summary(self.pos_profile, frappe.utils.add_days(today, -366), today)
+		self.assertIn("period_from", full_year)

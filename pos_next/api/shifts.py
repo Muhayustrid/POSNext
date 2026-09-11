@@ -6,9 +6,11 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
+from frappe.rate_limiter import rate_limit
+from frappe.utils import cint, flt, get_datetime, getdate, nowdate, nowtime
+
 from pos_next.api.utilities import get_wallet_payment_modes
-from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
+from pos_next.services.sales_recap import build_recap, period_scope, shift_scope
 
 
 @frappe.whitelist()
@@ -325,21 +327,14 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 	}
 
 
-# Package component rows carry zero revenue and belong to their parent package;
-# counting them would double both qty and line counts in the session summary.
-PACKAGE_COMPONENT_ROLE = "Package Item"
-PACKAGE_PARENT_ROLE = "Package"
-
-
 @frappe.whitelist()
 def get_session_summary(opening_shift):
 	"""Pre-closing sales summary for an active POS session.
 
 	Read-only preview of what POS Closing Shift would report: same invoice
 	dataset (submitted invoices linked to this opening shift — POS Invoices or
-	legacy non-consolidated Sales Invoices), same
-	base-currency aggregation. Mirrors _process_invoice semantics — credit
-	returns without payment rows are excluded because no money moved.
+	legacy non-consolidated Sales Invoices), same base-currency aggregation
+	(see pos_next.services.sales_recap).
 
 	Sections: shift info (name, cashier, opening/closing times), sales totals,
 	cash ledger (opening balance, cash receipts, expense, cash in hand), all
@@ -395,17 +390,88 @@ def get_session_summary(opening_shift):
 		"generated_at": get_datetime(),
 	}
 	summary.update(_closing_time_info(shift))
-	summary.update(_aggregate_session_totals(opening_shift))
-	summary.update(_aggregate_session_payments(opening_shift, cash_mode, shift.pos_profile))
-	summary.update(_aggregate_session_items(opening_shift))
-	summary.update(_aggregate_session_charges(opening_shift))
-	summary.update(_aggregate_session_categories(opening_shift))
-	# Combined discount overwrites the invoice-only subtotal from totals
-	summary.update(_aggregate_session_discounts(opening_shift))
-	summary["total_discount"] = flt(
-		summary.get("item_discount", 0) + summary.get("invoice_discount", 0)
-	)
+	summary.update(build_recap(shift_scope(opening_shift), cash_mode, shift.pos_profile))
 	return summary
+
+
+# Longest posting-date window one recap may cover: a full (leap) year.
+MAX_PERIOD_DAYS = 366
+
+
+@frappe.whitelist()
+@rate_limit(limit=30, seconds=60)
+def get_period_summary(pos_profile, from_date, to_date):
+	"""Sales recap of one POS Profile over a posting-date range, all cashiers.
+
+	Same sections and money semantics as get_session_summary, aggregated over
+	every submitted invoice posted in [from_date, to_date] under any of the
+	profile's shifts (outlet attribution follows the shift link, like closing).
+	Cash figures (opening float, Payment Entries) come from the shifts opened
+	in the window, so a shift crossing midnight is attributed to its opening
+	day — the rule a per-shift closing follows too. Period presets are the
+	client's job; the server only accepts explicit dates.
+
+	Security: only users listed on the POS Profile (POS Profile User) may read
+	it — the profile pins the company, and naming another outlet's profile is
+	refused, so this is stricter than the per-shift owner rule while covering
+	more data. Rate limited: it is the one endpoint doing free-range scans.
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	profile = frappe.db.get_value(
+		"POS Profile",
+		pos_profile,
+		("name", "company", "posa_cash_mode_of_payment"),
+		as_dict=True,
+	)
+	if not profile:
+		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
+	_check_profile_access(pos_profile)
+	from_date, to_date = _validate_period(from_date, to_date)
+
+	cash_mode = profile.posa_cash_mode_of_payment or "Cash"
+	scope = period_scope(pos_profile, from_date, to_date)
+	summary = {
+		"pos_profile": pos_profile,
+		"company": profile.company,
+		"company_currency": frappe.get_cached_value("Company", profile.company, "default_currency"),
+		"cash_mode_of_payment": cash_mode,
+		"period_from": from_date,
+		"period_to": to_date,
+		"shift_count": len(scope.shifts),
+		"generated_at": get_datetime(),
+	}
+	summary.update(build_recap(scope, cash_mode, pos_profile))
+	return summary
+
+
+def _check_profile_access(pos_profile):
+	if frappe.session.user == "Administrator":
+		return
+	is_profile_user = frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
+	)
+	if not is_profile_user:
+		frappe.throw(
+			_("You are not a user of POS Profile {0}").format(pos_profile),
+			frappe.PermissionError,
+		)
+
+
+def _validate_period(from_date, to_date):
+	if not from_date or not to_date:
+		frappe.throw(_("From Date and To Date are required"))
+	try:
+		start, end = getdate(from_date), getdate(to_date)
+	except (TypeError, ValueError):
+		frappe.throw(_("Invalid date range"))
+	if start > end:
+		frappe.throw(_("From Date cannot be after To Date"))
+	if (end - start).days > MAX_PERIOD_DAYS:
+		frappe.throw(_("Date range cannot exceed {0} days").format(MAX_PERIOD_DAYS))
+	return start, end
 
 
 def _cashier_full_name(user):
@@ -426,401 +492,3 @@ def _closing_time_info(shift):
 	if shift.pos_schedule_deadline:
 		return {"closing_time": shift.pos_schedule_deadline, "closing_source": "estimate"}
 	return {"closing_time": None, "closing_source": None}
-
-
-def _session_invoice_where(alias="si"):
-	return f"{alias}.docstatus = 1 AND {alias}.posa_pos_opening_shift = %(shift)s"
-
-
-# Shift filter pushed into every union branch so the union stays index-sized.
-_SHIFT_BRANCH_WHERE = "si.docstatus = 1 AND si.posa_pos_opening_shift = %(shift)s"
-
-# Columns the session-summary queries read off the invoice union / item union.
-_SESSION_INVOICE_COLUMNS = (
-	"si.name, si.docstatus, si.is_return, si.currency, si.grand_total,"
-	" si.base_grand_total, si.base_net_total, si.base_total_taxes_and_charges,"
-	" si.base_discount_amount, si.base_change_amount, si.total_qty,"
-	" si.outstanding_amount, si.conversion_rate, si.posa_pos_opening_shift"
-)
-_SESSION_ITEM_COLUMNS = (
-	"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
-	" sii.base_net_amount, sii.price_list_rate, sii.rate, sii.pos_package_role"
-)
-
-
-def _invoice_from():
-	"""Invoice source for the session summary: POS Invoice + legacy Sales
-	Invoice (non-consolidated) union, shift filter pushed into every branch."""
-	return sales_invoice_union(_SESSION_INVOICE_COLUMNS, where=_SHIFT_BRANCH_WHERE)
-
-
-def _item_from():
-	return sales_invoice_item_union(_SESSION_ITEM_COLUMNS, where=_SHIFT_BRANCH_WHERE)
-
-
-# Returns with no payment rows never touched the drawer; closing skips them,
-# so exclude from every money/count aggregate (pattern reused in each query).
-_NO_DRAWER_RETURN = (
-	"NOT (si.is_return = 1 AND NOT EXISTS ("
-	"SELECT 1 FROM `tabSales Invoice Payment` p WHERE p.parent = si.name))"
-)
-
-
-def _aggregate_session_totals(opening_shift):
-	values = {"shift": opening_shift}
-	# Derived table so the no-drawer-return NOT EXISTS is evaluated once per
-	# invoice instead of once per aggregate column.
-	row = frappe.db.sql(
-		f"""
-		SELECT
-			SUM(1) AS counted_invoices,
-			SUM(CASE WHEN si.is_return = 0 THEN si.base_grand_total ELSE 0 END) AS gross_sales,
-			SUM(CASE WHEN si.is_return = 1 THEN ABS(si.base_grand_total) ELSE 0 END) AS returns_total,
-			SUM(CASE WHEN si.is_return = 0 THEN 1 ELSE 0 END) AS sales_count,
-			SUM(CASE WHEN si.is_return = 1 THEN 1 ELSE 0 END) AS returns_count,
-			SUM(si.base_grand_total) AS net_sales,
-			SUM(si.base_net_total) AS net_total,
-			SUM(si.base_total_taxes_and_charges) AS total_taxes_and_charges,
-			SUM(si.base_discount_amount) AS invoice_discount,
-			SUM(si.total_qty) AS total_qty,
-			-- outstanding_amount is the authoritative, reconciliation-aware figure
-			-- (updated by Payment Entries); convert per invoice with its own rate
-			SUM(CASE WHEN si.is_return = 0 AND si.outstanding_amount > 0
-				THEN si.outstanding_amount * ifnull(si.conversion_rate, 1) ELSE 0 END) AS credit_outstanding
-		FROM (
-			SELECT si.is_return, si.base_grand_total, si.base_net_total,
-				si.base_total_taxes_and_charges, si.base_discount_amount,
-				si.total_qty, si.outstanding_amount, si.conversion_rate
-			FROM {_invoice_from()}
-			WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
-		) si
-		""",
-		values,
-		as_dict=True,
-	)[0]
-
-	# Per-currency net sales so mixed-currency sessions stay visible, never summed
-	currencies = frappe.db.sql(
-		f"""
-		SELECT si.currency, SUM(si.grand_total) AS amount
-		FROM {_invoice_from()}
-		WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
-		GROUP BY si.currency
-		ORDER BY amount DESC
-		""",
-		values,
-		as_dict=True,
-	)
-
-	# Raw count of every submitted invoice in the shift, before the drawer filter
-	invoice_count = frappe.db.sql(
-		f"SELECT COUNT(*) AS c FROM {_invoice_from()} WHERE {_session_invoice_where()}",
-		values,
-		as_dict=True,
-	)[0].c
-
-	result = {key: flt(row.get(key) or 0) for key in row}
-	result["invoice_count"] = cint(invoice_count)
-	sales_count = int(result.get("sales_count") or 0)
-	result["average_sale"] = flt(result.get("net_sales")) / sales_count if sales_count else 0
-	result["currency_breakdown"] = [
-		{"currency": r.currency, "amount": flt(r.amount)} for r in currencies
-	]
-	return result
-
-
-def _aggregate_session_payments(opening_shift, cash_mode, pos_profile=None):
-	values = {"shift": opening_shift}
-
-	payments = {}
-	for row in frappe.db.sql(
-		f"""
-		SELECT sip.mode_of_payment, SUM(sip.base_amount) AS amount
-		FROM `tabSales Invoice Payment` sip
-		JOIN {_invoice_from()} ON si.name = sip.parent
-		WHERE {_session_invoice_where()}
-		GROUP BY sip.mode_of_payment
-		""",
-		values,
-		as_dict=True,
-	):
-		payments[row.mode_of_payment] = payments.get(row.mode_of_payment, 0) + flt(row.amount)
-
-	# Payment Entries (partial payments) also enter the drawer, same as closing
-	for row in frappe.db.sql(
-		"""
-		SELECT pe.mode_of_payment, SUM(pe.base_paid_amount) AS amount
-		FROM `tabPayment Entry` pe
-		WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive' AND pe.reference_no = %(shift)s
-		GROUP BY pe.mode_of_payment
-		""",
-		values,
-		as_dict=True,
-	):
-		payments[row.mode_of_payment] = payments.get(row.mode_of_payment, 0) + flt(row.amount)
-
-	# One lookup table: cash-ness comes from Mode of Payment.type, never from
-	# hardcoded mode names
-	mode_types = {
-		row.name: row.type
-		for row in frappe.get_all("Mode of Payment", fields=["name", "type"])
-	}
-
-	def is_cash(mode):
-		return mode_types.get(mode) == "Cash"
-
-	# Change given back leaves the drawer in the designated cash mode
-	change = flt(
-		frappe.db.sql(
-			f"SELECT SUM(si.base_change_amount) AS c FROM {_invoice_from()} "
-			f"WHERE {_session_invoice_where()}",
-			values,
-			as_dict=True,
-		)[0].c
-	)
-	if change or cash_mode in payments:
-		payments[cash_mode] = payments.get(cash_mode, 0) - change
-
-	# Every configured method appears, zero included; methods used but no
-	# longer on the profile follow, largest first
-	configured = frappe.get_all(
-		"POS Payment Method",
-		filters={"parent": pos_profile, "parenttype": "POS Profile"},
-		fields=["mode_of_payment"],
-		order_by="idx asc",
-		pluck="mode_of_payment",
-	) if pos_profile else []
-
-	rows = []
-	seen = set()
-	for mode in configured:
-		seen.add(mode)
-		rows.append(
-			{
-				"mode_of_payment": mode,
-				"amount": flt(payments.get(mode, 0)),
-				"is_cash": is_cash(mode),
-				"configured": True,
-			}
-		)
-	used_extra = sorted(
-		((mode, amount) for mode, amount in payments.items() if mode not in seen),
-		key=lambda kv: -kv[1],
-	)
-	for mode, amount in used_extra:
-		rows.append(
-			{
-				"mode_of_payment": mode,
-				"amount": flt(amount),
-				"is_cash": is_cash(mode),
-				"configured": False,
-			}
-		)
-
-	total_cash = flt(sum(r["amount"] for r in rows if r["is_cash"]))
-	total_non_cash = flt(sum(r["amount"] for r in rows if not r["is_cash"]))
-
-	# Opening float across every Cash-type mode, reported separately — never
-	# mixed into receipt totals
-	opening_cash = flt(
-		sum(
-			flt(row.amount)
-			for row in frappe.get_all(
-				"POS Opening Shift Detail",
-				filters={"parent": opening_shift},
-				fields=["mode_of_payment", "amount"],
-			)
-			if is_cash(row.mode_of_payment)
-		)
-	)
-
-	cash_collected = total_cash
-	cash_in_hand = flt(opening_cash + cash_collected)
-	return {
-		"payments": rows,
-		"opening_cash": opening_cash,
-		"cash_collected": cash_collected,
-		"cash_expected": cash_in_hand,
-		"cash_in_hand": cash_in_hand,
-		# No shift-scoped expense ledger exists in this app (closing print also
-		# hardcodes 0): report None honestly instead of a fabricated zero —
-		# cash_in_hand is the balance BEFORE any cash expense.
-		"expense": None,
-		"expense_supported": False,
-		"total_cash": total_cash,
-		"total_non_cash": total_non_cash,
-		"methods_grand_total": flt(total_cash + total_non_cash),
-	}
-
-
-def _aggregate_session_items(opening_shift, limit=100):
-	where = f"""
-		FROM {_item_from()}
-		JOIN {_invoice_from()} ON si.name = sii.parent
-		WHERE {_session_invoice_where()}
-			AND ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
-		GROUP BY sii.item_code, sii.pos_package_role
-	"""
-
-	# Distinct item/role groups so the UI can disclose a capped table
-	total_groups = cint(
-		frappe.db.sql(f"SELECT COUNT(*) AS c FROM (SELECT sii.item_code {where}) t", {"shift": opening_shift}, as_dict=True)[0].c
-	)
-
-	rows = frappe.db.sql(
-		f"""
-		SELECT
-			sii.item_code,
-			MAX(sii.item_name) AS item_name,
-			sii.pos_package_role AS package_role,
-			SUM(sii.qty) AS qty,
-			SUM(sii.base_net_amount) AS base_net_amount
-		{where}
-		ORDER BY base_net_amount DESC
-		LIMIT {cint(limit)}
-		""",
-		{"shift": opening_shift},
-		as_dict=True,
-	)
-
-	items = []
-	packages = []
-	for row in rows:
-		entry = {
-			"item_code": row.item_code,
-			"item_name": row.item_name,
-			"qty": flt(row.qty),
-			"base_net_amount": flt(row.base_net_amount),
-		}
-		if row.package_role == PACKAGE_PARENT_ROLE:
-			packages.append(entry)
-		else:
-			items.append(entry)
-
-	return {
-		"items": items,
-		"packages": packages,
-		"items_shown": len(rows),
-		"items_total_groups": total_groups,
-		"items_truncated": total_groups > len(rows),
-	}
-
-
-def _aggregate_session_charges(opening_shift):
-	"""Classify invoice tax rows by the Account's own account_type — "Tax"
-	becomes the tax total; anything else is listed by account so a service
-	charge (or any other charge) shows under its real name instead of a
-	guessed keyword split."""
-	rows = frappe.db.sql(
-		f"""
-		SELECT
-			st.account_head,
-			MAX(COALESCE(acc.account_name, st.account_head)) AS label,
-			MAX(acc.account_type) AS account_type,
-			SUM(st.base_tax_amount_after_discount_amount) AS amount
-		FROM `tabSales Taxes and Charges` st
-		JOIN {_invoice_from()} ON si.name = st.parent
-		LEFT JOIN `tabAccount` acc ON acc.name = st.account_head
-		WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
-		GROUP BY st.account_head
-		ORDER BY amount DESC
-		""",
-		{"shift": opening_shift},
-		as_dict=True,
-	)
-
-	tax_total = 0.0
-	other_charges = []
-	for row in rows:
-		amount = flt(row.amount)
-		if row.account_type == "Tax":
-			tax_total = flt(tax_total + amount)
-		else:
-			other_charges.append(
-				{
-					"account_head": row.account_head,
-					"label": row.label,
-					"amount": amount,
-				}
-			)
-
-	return {
-		"tax_total": tax_total,
-		"total_tax": tax_total,
-		"other_charges": other_charges,
-		"other_charges_total": flt(sum(o["amount"] for o in other_charges)),
-	}
-
-
-def _aggregate_session_categories(opening_shift, limit=20):
-	"""Group by the invoice item's item_group snapshot (Item fallback for
-	legacy rows). Bundle revenue sits on the parent row; components are
-	excluded. Returns show up negative; amounts are net (pre-tax)."""
-	category_expr = (
-		"COALESCE(NULLIF(sii.item_group, ''),"
-		" (SELECT item.item_group FROM `tabItem` item WHERE item.name = sii.item_code))"
-	)
-	where = f"""
-		FROM {_item_from()}
-		JOIN {_invoice_from()} ON si.name = sii.parent
-		WHERE {_session_invoice_where()}
-			AND ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
-	"""
-
-	total_groups = cint(
-		frappe.db.sql(
-			f"SELECT COUNT(*) AS c FROM (SELECT {category_expr} AS category {where} GROUP BY category) t",
-			{"shift": opening_shift},
-			as_dict=True,
-		)[0].c
-	)
-
-	rows = frappe.db.sql(
-		f"""
-		SELECT
-			{category_expr} AS category,
-			SUM(sii.qty) AS qty,
-			SUM(sii.base_net_amount) AS base_net_amount
-		{where}
-		GROUP BY category
-		ORDER BY base_net_amount DESC
-		LIMIT {cint(limit)}
-		""",
-		{"shift": opening_shift},
-		as_dict=True,
-	)
-
-	categories = [
-		{
-			"category": row.category,
-			"qty": flt(row.qty),
-			"base_net_amount": flt(row.base_net_amount),
-		}
-		for row in rows
-	]
-	return {
-		"categories": categories,
-		"categories_shown": len(rows),
-		"categories_total_groups": total_groups,
-		"categories_truncated": total_groups > len(rows),
-	}
-
-
-def _aggregate_session_discounts(opening_shift):
-	"""Item-level discount ((list - rate) x qty) plus the invoice-level
-	additional discount — the same split the closing print reports. Both are
-	already netted out of net_total/net_sales, so nothing is double-counted.
-	"""
-	item_discount = flt(
-		frappe.db.sql(
-			f"""
-			SELECT SUM((ifnull(sii.price_list_rate, sii.rate) - sii.rate) * sii.qty) AS item_discount
-			FROM {_item_from()}
-			JOIN {_invoice_from()} ON si.name = sii.parent
-			WHERE {_session_invoice_where()} AND {_NO_DRAWER_RETURN}
-			""",
-			{"shift": opening_shift},
-			as_dict=True,
-		)[0].item_discount
-	)
-	return {"item_discount": item_discount}

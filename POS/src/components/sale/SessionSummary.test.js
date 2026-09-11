@@ -58,6 +58,13 @@ vi.mock("reka-ui", () => ({
 	DialogTitle: { name: "DialogTitle", template: "<h2><slot /></h2>" },
 }))
 
+// Real period math, stubbed printer: the print stack needs a device.
+const printMock = vi.hoisted(() => ({ printSalesRecap: vi.fn() }))
+vi.mock("@/utils/salesRecap", async (importOriginal) => ({
+	...(await importOriginal()),
+	printSalesRecap: printMock.printSalesRecap,
+}))
+
 // The app installs __() as a global property; templates need it.
 globalThis.__ = (message, replacements = []) => {
 	if (!Array.isArray(replacements) || !replacements.length) return message
@@ -67,6 +74,7 @@ globalThis.__ = (message, replacements = []) => {
 	return out
 }
 
+import { periodRange } from "@/utils/salesRecap"
 import InvoiceHistoryDialog from "./InvoiceHistoryDialog.vue"
 import SessionSummary from "./SessionSummary.vue"
 
@@ -583,5 +591,143 @@ describe("InvoiceHistoryDialog tabs", () => {
 		)
 		expect(summaryInstances.length).toBe(2)
 		expect(wrapper.text()).toContain("Loading session summary...")
+	})
+})
+
+describe("SessionSummary period lens", () => {
+	const PERIOD = {
+		...SUMMARY,
+		opening_shift: undefined,
+		shift_name: undefined,
+		cashier: undefined,
+		period_from: "2026-09-01",
+		period_to: "2026-09-07",
+		shift_count: 9,
+	}
+
+	function periodResource() {
+		return resources.instances.find(
+			(i) => i.url === "pos_next.api.shifts.get_period_summary",
+		)
+	}
+
+	function mountPeriod(props = {}) {
+		resources.instances.length = 0
+		return mount(SessionSummary, {
+			props: { openingShift: "OS-1", posProfile: "Kasir 1", ...props },
+			global: { config: { globalProperties: { __: globalThis.__ } } },
+		})
+	}
+
+	it("offers the open shift first, then the profile-wide windows", () => {
+		const wrapper = mountPeriod()
+		const options = wrapper.findAll("option").map((o) => o.text())
+		expect(options).toEqual([
+			"This Shift",
+			"Today",
+			"Yesterday",
+			"Last 7 Days",
+			"This Month",
+			"This Year",
+			"Custom Range",
+		])
+		// the shift lens is the default and the only fetch on mount
+		expect(summaryResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(periodResource().resource.reload).not.toHaveBeenCalled()
+	})
+
+	it("switching to a preset fetches the profile window with explicit dates", async () => {
+		const wrapper = mountPeriod()
+		await wrapper.find('[data-test="period-select"]').setValue("yesterday")
+		await flushPromises()
+
+		const period = periodResource()
+		expect(period.resource.reload).toHaveBeenCalledTimes(1)
+		const expected = periodRange("yesterday")
+		expect(period.opts.makeParams()).toEqual({
+			pos_profile: "Kasir 1",
+			from_date: expected.from,
+			to_date: expected.to,
+		})
+		// the shift's numbers never masquerade as the window's while it loads
+		expect(wrapper.text()).toContain("Loading session summary...")
+	})
+
+	it("shows the period header instead of the shift info once the window loads", async () => {
+		const wrapper = mountPeriod()
+		await wrapper.find('[data-test="period-select"]').setValue("last7")
+		const period = periodResource()
+		period.resource.data = PERIOD
+		period.resource.loading = false
+		await flushPromises()
+
+		expect(wrapper.find('[data-test="shift-info"]').exists()).toBe(false)
+		const info = wrapper.find('[data-test="period-info"]').text()
+		expect(info).toContain("D:2026-09-01 – D:2026-09-07")
+		expect(info).toContain("9")
+		expect(info).toContain("All cashiers")
+		expect(wrapper.find("h3").text()).toBe("Kasir 1")
+		// every money section is still on screen
+		expect(wrapper.find('[data-test="sales-summary"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="payments-table"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="categories-table"]').exists()).toBe(true)
+	})
+
+	it("waits for both custom dates before fetching", async () => {
+		const wrapper = mountPeriod()
+		await wrapper.find('[data-test="period-select"]').setValue("custom")
+		await flushPromises()
+		const period = periodResource()
+		expect(period.resource.reload).not.toHaveBeenCalled()
+		expect(wrapper.text()).toContain(
+			"Pick a from and to date to load the recap.",
+		)
+
+		await wrapper.find('[data-test="period-from"]').setValue("2026-08-01")
+		await wrapper.find('[data-test="period-to"]').setValue("2026-08-31")
+		await flushPromises()
+		expect(period.resource.reload).toHaveBeenCalledTimes(1)
+		expect(period.opts.makeParams()).toEqual({
+			pos_profile: "Kasir 1",
+			from_date: "2026-08-01",
+			to_date: "2026-08-31",
+		})
+	})
+
+	it("defaults to today's window when there is a profile but no open shift", async () => {
+		const wrapper = mountPeriod({ openingShift: "" })
+		await flushPromises()
+
+		const options = wrapper.findAll("option").map((o) => o.text())
+		expect(options).not.toContain("This Shift")
+		const period = periodResource()
+		expect(period.resource.reload).toHaveBeenCalledTimes(1)
+		expect(period.opts.makeParams().from_date).toBe(periodRange("today").from)
+		expect(summaryResource().resource.reload).not.toHaveBeenCalled()
+	})
+
+	it("returns to the shift lens with a fresh session fetch", async () => {
+		const wrapper = mountPeriod()
+		const session = summaryResource()
+		await wrapper.find('[data-test="period-select"]').setValue("month")
+		await wrapper.find('[data-test="period-select"]').setValue("shift")
+		await flushPromises()
+		expect(session.resource.reload).toHaveBeenCalledTimes(2)
+	})
+
+	it("prints the loaded recap for the profile", async () => {
+		printMock.printSalesRecap.mockReset().mockResolvedValue(undefined)
+		const wrapper = mountPeriod()
+		const session = summaryResource()
+		session.resource.data = SUMMARY
+		session.resource.loading = false
+		await flushPromises()
+
+		await wrapper.find('button[aria-label="Print"]').trigger("click")
+		await flushPromises()
+		expect(printMock.printSalesRecap).toHaveBeenCalledTimes(1)
+		expect(printMock.printSalesRecap).toHaveBeenCalledWith(SUMMARY, {
+			posProfile: "Kasir 1",
+		})
 	})
 })

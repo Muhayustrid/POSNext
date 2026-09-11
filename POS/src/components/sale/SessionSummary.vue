@@ -1,14 +1,61 @@
 <template>
 	<div class="flex flex-col gap-4">
-		<!-- No active shift -->
-		<div v-if="!openingShift" class="text-center py-8">
+		<!-- Period selector: always rendered so a window that failed to load can be changed -->
+		<div
+			v-if="openingShift || posProfile"
+			class="flex flex-wrap items-center gap-2"
+			data-test="period-bar"
+		>
+			<label class="text-xs text-gray-500" for="ss-period">{{ __("Period") }}</label>
+			<select
+				id="ss-period"
+				v-model="period"
+				class="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900"
+				data-test="period-select"
+			>
+				<option v-if="openingShift" value="shift">{{ __("This Shift") }}</option>
+				<option value="today">{{ __("Today") }}</option>
+				<option value="yesterday">{{ __("Yesterday") }}</option>
+				<option value="last7">{{ __("Last 7 Days") }}</option>
+				<option value="month">{{ __("This Month") }}</option>
+				<option value="year">{{ __("This Year") }}</option>
+				<option value="custom">{{ __("Custom Range") }}</option>
+			</select>
+			<template v-if="period === 'custom'">
+				<input
+					v-model="customFrom"
+					type="date"
+					:max="customTo || undefined"
+					class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900"
+					:aria-label="__('From Date')"
+					data-test="period-from"
+				/>
+				<span class="text-xs text-gray-500">–</span>
+				<input
+					v-model="customTo"
+					type="date"
+					:min="customFrom || undefined"
+					class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900"
+					:aria-label="__('To Date')"
+					data-test="period-to"
+				/>
+			</template>
+		</div>
+
+		<!-- Nothing to summarise: neither an open shift nor a profile -->
+		<div v-if="!openingShift && !posProfile" class="text-center py-8">
 			<p class="text-sm text-gray-500">{{ __("No open shift for this session.") }}</p>
 		</div>
 
 		<!-- Loading (first load only; keep stale data visible on refresh errors) -->
-		<div v-else-if="summaryResource.loading && !summary" class="text-center py-8">
+		<div v-else-if="loading && !summary" class="text-center py-8">
 			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
 			<p class="mt-3 text-xs text-gray-500">{{ __("Loading session summary...") }}</p>
+		</div>
+
+		<!-- Custom range not complete yet -->
+		<div v-else-if="!canLoad" class="text-center py-8" role="status">
+			<p class="text-sm text-gray-500">{{ __("Pick a from and to date to load the recap.") }}</p>
 		</div>
 
 		<!-- Error without cached data -->
@@ -20,28 +67,44 @@
 		</div>
 
 		<template v-else>
-			<!-- Header + shift info: name, cashier, opening, closing -->
+			<!-- Header + shift/period info -->
 			<div class="flex items-start justify-between gap-3">
 				<div class="min-w-0">
 					<h3 class="text-base font-semibold text-gray-900 truncate">
-						{{ summary.shift_name || summary.pos_profile }}
+						{{ isShiftMode ? summary.shift_name || summary.pos_profile : summary.pos_profile }}
 					</h3>
-					<p class="text-xs text-gray-500 truncate">
+					<p v-if="isShiftMode" class="text-xs text-gray-500 truncate">
 						{{ summary.pos_profile }} · ID {{ summary.opening_shift }}
+					</p>
+					<p v-else class="text-xs text-gray-500 truncate" data-test="period-label">
+						{{ periodLabel }}
 					</p>
 				</div>
 				<div class="flex-shrink-0 flex flex-col items-end gap-1">
-					<Button
-						variant="subtle"
-						:loading="summaryResource.loading"
-						@click="refresh"
-						:title="__('Refresh')"
-						:aria-label="__('Refresh')"
-					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-						</svg>
-					</Button>
+					<div class="flex items-center gap-1">
+						<Button
+							variant="subtle"
+							:loading="printing"
+							@click="print"
+							:title="__('Print')"
+							:aria-label="__('Print')"
+						>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+							</svg>
+						</Button>
+						<Button
+							variant="subtle"
+							:loading="loading"
+							@click="refresh"
+							:title="__('Refresh')"
+							:aria-label="__('Refresh')"
+						>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+							</svg>
+						</Button>
+					</div>
 					<p class="text-xs text-gray-500">
 						{{ __("Updated {0}", [formatDateTime(summary.generated_at)]) }}
 					</p>
@@ -59,6 +122,7 @@
 
 			<!-- 1. Shift info -->
 			<dl
+				v-if="isShiftMode"
 				class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-lg bg-gray-50 border border-gray-200 p-3"
 				data-test="shift-info"
 				:aria-label="__('Session Information')"
@@ -86,8 +150,29 @@
 				</div>
 			</dl>
 
+			<!-- 1b. Period info: the window covers every cashier of the profile -->
+			<dl
+				v-else
+				class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-lg bg-gray-50 border border-gray-200 p-3"
+				data-test="period-info"
+				:aria-label="__('Period Information')"
+			>
+				<div class="min-w-0">
+					<dt class="text-xs text-gray-500">{{ __("Period") }}</dt>
+					<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ periodLabel }}</dd>
+				</div>
+				<div class="min-w-0">
+					<dt class="text-xs text-gray-500">{{ __("Shifts") }}</dt>
+					<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ summary.shift_count ?? 0 }}</dd>
+				</div>
+				<div class="min-w-0">
+					<dt class="text-xs text-gray-500">{{ __("Cashiers") }}</dt>
+					<dd class="text-sm font-semibold text-gray-900">{{ __("All cashiers") }}</dd>
+				</div>
+			</dl>
+
 			<p v-if="!summary.counted_invoices" class="text-xs text-gray-500 text-center" role="status">
-				{{ __("No sales yet in this session.") }}
+				{{ emptyText }}
 			</p>
 
 			<!-- 2. Sales Summary -->
@@ -282,7 +367,7 @@
 						<tbody>
 							<tr v-if="!summary.categories.length">
 								<td colspan="3" class="px-3 py-3 text-center text-xs text-gray-500">
-									{{ __("No sales yet in this session.") }}
+									{{ emptyText }}
 								</td>
 							</tr>
 							<tr v-for="cat in summary.categories" :key="cat.category ?? 'none'" class="border-t border-gray-100">
@@ -379,7 +464,7 @@
 					</section>
 
 					<p v-if="!summary.items.length && !summary.packages.length" class="text-xs text-gray-500">
-						{{ __("No sales yet in this session.") }}
+						{{ emptyText }}
 					</p>
 				</div>
 			</details>
@@ -389,22 +474,40 @@
 
 <script setup>
 import { useFormatters } from "@/composables/useFormatters"
+import { useToast } from "@/composables/useToast"
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
+import { periodRange, printSalesRecap } from "@/utils/salesRecap"
 import { Button, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
 const { formatDate, formatTime } = useFormatters()
+const { showSuccess, showError } = useToast()
 
 const props = defineProps({
 	openingShift: { type: String, default: "" },
+	posProfile: { type: String, default: "" },
 })
 
-const stale = ref(false)
+// Two lenses on one dataset: the open shift (default) or a posting-date
+// window over the whole profile, every cashier included. Presets resolve to
+// explicit dates here; the server only ever sees from/to.
+const period = ref(props.openingShift ? "shift" : "today")
+const customFrom = ref("")
+const customTo = ref("")
+const isShiftMode = computed(() => period.value === "shift")
+const range = computed(() =>
+	isShiftMode.value
+		? null
+		: periodRange(period.value, { from: customFrom.value, to: customTo.value }),
+)
 
-const summaryResource = createResource({
+const stale = ref(false)
+const printing = ref(false)
+
+const sessionResource = createResource({
 	url: "pos_next.api.shifts.get_session_summary",
 	makeParams() {
 		return { opening_shift: props.openingShift }
@@ -416,21 +519,80 @@ const summaryResource = createResource({
 	},
 })
 
-const summary = computed(() => summaryResource.data || null)
+const periodResource = createResource({
+	url: "pos_next.api.shifts.get_period_summary",
+	makeParams() {
+		return {
+			pos_profile: props.posProfile,
+			from_date: range.value?.from,
+			to_date: range.value?.to,
+		}
+	},
+	auto: false,
+	onError() {
+		stale.value = true
+	},
+})
+
+const activeResource = computed(() =>
+	isShiftMode.value ? sessionResource : periodResource,
+)
+const summary = computed(() => activeResource.value.data || null)
+const loading = computed(() => activeResource.value.loading)
+// A custom window without both dates has nothing to fetch yet
+const canLoad = computed(() =>
+	isShiftMode.value
+		? Boolean(props.openingShift)
+		: Boolean(props.posProfile && range.value),
+)
 
 function refresh() {
-	if (!props.openingShift) return
+	if (!canLoad.value) return
 	if (summary.value) stale.value = false
-	summaryResource.reload()
+	activeResource.value.reload()
 }
 
 watch(
-	() => props.openingShift,
-	(val) => {
+	[() => props.openingShift, period, range],
+	([shift]) => {
 		stale.value = false
-		if (val) summaryResource.reload()
+		if (!shift && isShiftMode.value) {
+			// the shift closed underneath us: fall back to the profile's day
+			period.value = "today"
+			return
+		}
+		if (canLoad.value) activeResource.value.reload()
 	},
 	{ immediate: true },
+)
+
+async function print() {
+	if (!summary.value || printing.value) return
+	printing.value = true
+	try {
+		await printSalesRecap(summary.value, {
+			posProfile: props.posProfile || summary.value.pos_profile,
+		})
+		showSuccess(__("Sales recap sent to the printer"))
+	} catch (error) {
+		showError(error?.message || __("Could not print the sales recap"))
+	} finally {
+		printing.value = false
+	}
+}
+
+// Label and numbers come from the same response, so a window that is still
+// loading never shows the new dates over the old figures.
+const periodLabel = computed(() => {
+	const s = summary.value
+	if (!s?.period_from) return ""
+	return `${formatDate(s.period_from)} – ${formatDate(s.period_to)}`
+})
+
+const emptyText = computed(() =>
+	isShiftMode.value
+		? __("No sales yet in this session.")
+		: __("No sales in this period."),
 )
 
 const formatMoney = (amount) =>
