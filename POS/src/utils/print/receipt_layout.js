@@ -34,10 +34,11 @@ function migrateDeviceConfig(stored) {
 }
 
 /**
- * Per-device print overrides, kept in localStorage on the till itself.
- * Lives here (rather than in imin_client) because the receipt builder and the
- * Direct Print preview need the same values the driver uses — three readers,
- * one source of truth. imin_client re-exports these for its existing callers.
+ * Per-device localStorage record on the till. The printer `host` (a device
+ * attachment, like the QZ printer name) still lives here; LAYOUT knobs do
+ * not any more — those resolve from the server config alone. The record is
+ * kept (and Direct Print's migration of it) so existing tills keep their
+ * printer address. imin_client re-exports these for its existing callers.
  */
 export function loadDeviceConfig() {
 	try {
@@ -208,9 +209,12 @@ export function clampInt(v, lo, hi, dflt) {
 }
 
 /**
- * Single source of truth for how device localStorage overrides the server
- * (POS Settings) print config. Both the iMin driver and the Direct Print
- * preview call this, so what you preview is exactly what prints.
+ * Single source of truth for how a per-device override layer resolves on top
+ * of the server (POS Settings) print config. Production print paths pass an
+ * empty device layer (layout is server-config only); the layering stays for
+ * test injection and Direct Print's one-time migration. Both the iMin driver
+ * and the Direct Print preview call this, so what you preview is exactly
+ * what prints.
  *
  * Precedence per value: device key if present (including false / "58mm")
  * wins; only an ABSENT device key falls through to the server value; then the

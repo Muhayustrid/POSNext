@@ -13,9 +13,9 @@
  *
  * Sheet layout (2026-09-06): a job prints `copies` IDENTICAL receipt sheets,
  * then at most one crew slip — strictly last. The slip is gated purely by
- * the crewSlipEnabled knob (device > server > false), never by the copy
- * count; the tear-off pause runs between every pair of sheets, none after
- * the last one.
+ * the crewSlipEnabled knob (server config; > device override only under test
+ * injection), never by the copy count; the tear-off pause runs between every
+ * pair of sheets, none after the last one.
  *
  * Correction history: an earlier revision forbade feeding, taken from the
  * note at the top of iMin's demo imin-customer-odoo.js ("printSingleBitmap
@@ -43,6 +43,15 @@ const SETTLE_MS = 200
 // Feed / tail / copies defaults and clamps live in
 // receipt_layout.resolvePrintConfig — the same resolver the Direct Print
 // preview uses, so a preview cannot drift from what actually prints.
+
+/**
+ * The printer host is a device attachment (like the QZ printer name), so it
+ * stays in localStorage — layout knobs do NOT come from here any more; they
+ * resolve from the server config (opts.config) alone.
+ */
+function loadPrinterHost() {
+	return loadDeviceConfig().host
+}
 
 /** 58mm -> pageFormat 1; 80mm -> 0; custom keeps 58mm's value by dot count. */
 function pageFormatFor(paper, dots) {
@@ -76,12 +85,14 @@ function bitmapPrintMs(heightDots) {
 /**
  * @param {object} [deps] - injectable for tests.
  * @param {() => object} [deps.factory] - returns the SDK printer instance.
- * @param {() => object} [deps.loadConfig]
+ * @param {() => object} [deps.loadConfig] - per-device override layer for
+ *   resolvePrintConfig; defaults to empty (layout comes from the server
+ *   config passed per print). Injected by tests to exercise precedence.
  * @param {number} [deps.statusTimeoutMs] - injectable timeout for tests (default 15000)
  * @param {number} [deps.statusPollMs] - injectable poll interval for tests (default 500)
  */
 export function createIminDriver(deps = {}) {
-	const loadConfig = deps.loadConfig || loadDeviceConfig
+	const loadConfig = deps.loadConfig || (() => ({}))
 	const statusTimeoutMs = deps.statusTimeoutMs ?? STATUS_TIMEOUT_MS
 	const statusPollMs = deps.statusPollMs ?? STATUS_POLL_MS
 	let printer = null
@@ -91,9 +102,9 @@ export function createIminDriver(deps = {}) {
 		if (!deps.factory) {
 			throw new Error("iMin SDK not loaded (window.IminPrinter missing)")
 		}
-		const cfg = loadConfig()
 		const p = deps.factory()
-		if (cfg.host) p.address = cfg.host
+		const host = loadPrinterHost()
+		if (host) p.address = host
 		const connected = await p.connect()
 		if (!connected) throw new Error("Could not connect to iMin print service")
 		p.initPrinter("SPI")
@@ -180,12 +191,13 @@ export function createIminDriver(deps = {}) {
 			 *   the copy count), it renders at the resolved crewFontScale and
 			 *   prints exactly once AFTER every receipt copy — nothing is
 			 *   prepended to it, and nothing is printed above any sheet.
-			 * @param {object} [opts.config] - server (transport) config used as the
-			 *   fallback below each device value. An explicit device value
-			 *   (including false / "58mm") always wins; only an ABSENT device key
-			 *   falls through to the server value. `??` (not `||`) keeps that
-			 *   distinction. Returns the EFFECTIVE { paper, dots } so the caller
-			 *   can log what was actually printed.
+			 * @param {object} [opts.config] - server (POS Settings) config, the
+				 *   layout source in production: resolvePrintConfig layering only
+				 *   kicks in when a deps.loadConfig override is injected (tests).
+				 *   An explicit override value (including false / "58mm") always
+				 *   wins; only an ABSENT key falls through to the server value.
+				 *   `??` (not `||`) keeps that distinction. Returns the EFFECTIVE
+				 *   { paper, dots } so the caller can log what was actually printed.
 			 * @returns {Promise<{paper:string, dots:number, copies:number}>}
 			 *   copies counts every sheet that reached the printer: the receipt
 			 *   copies plus the crew slip when it applied.
@@ -309,11 +321,10 @@ export function createIminDriver(deps = {}) {
 		},
 
 		describe() {
-			const cfg = loadConfig()
 			return {
 				id: "imin",
 				label: "iMin Direct",
-				detail: cfg.host || "127.0.0.1:8081",
+				detail: loadPrinterHost() || "127.0.0.1:8081",
 			}
 		},
 	}

@@ -10,7 +10,6 @@ import {
 } from "@/utils/print/transport"
 import { buildCrewSlipHTML } from "@/utils/print/crew_slip"
 import {
-	loadDeviceConfig,
 	receiptStylesFor,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
@@ -141,20 +140,21 @@ export async function hydrateLocalOnlyInvoice(invoiceData) {
 export const RECEIPT_STYLES = receiptStylesFor(576)
 
 /**
- * Paper width (dots) the CURRENT print config resolves to: device overrides
- * on top of the transport's server config. Receipts embed this so the
- * stylesheet's @page/body width matches the paper actually loaded — without
- * it every local receipt claimed the 576-dot default even on a 58mm till.
- * Falls back to the 576 default when the transport is unreachable (offline
- * first print); the bitmap lane re-resolves independently anyway.
+ * Paper width (dots) the CURRENT print config resolves to: the transport's
+ * server config alone (layout no longer reads device localStorage).
+ * Receipts embed this so the stylesheet's @page/body width matches the paper
+ * actually loaded — without it every local receipt claimed the 576-dot
+ * default even on a 58mm till. Falls back to the 576 default when the
+ * transport is unreachable (offline first print); the bitmap lane
+ * re-resolves independently anyway.
  */
 export function effectiveReceiptDots() {
 	try {
 		const c = getTransport().getConfig() || {}
-		return resolvePrintConfig(loadDeviceConfig(), {
-			paper: c.paper,
-			customDots: c.custom_dots,
-		}).dots
+		return resolvePrintConfig(
+			{},
+			{ paper: c.paper, customDots: c.custom_dots },
+		).dots
 	} catch {
 		return 576
 	}
