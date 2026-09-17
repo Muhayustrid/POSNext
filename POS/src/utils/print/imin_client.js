@@ -188,20 +188,20 @@ export function createIminDriver(deps = {}) {
 		 * @param {object} [opts]
 		 * @param {(html, o) => Promise<{dataURL:string}>} [opts.render] - injected for tests
 		 * @param {string} [opts.crewHTML] - complete document for the compact
-			 *   crew slip. Gated ONLY by the resolved crewSlipEnabled (never by
-			 *   the copy count), it renders at the resolved crewFontScale and
-			 *   prints exactly once AFTER every receipt copy — nothing is
-			 *   prepended to it, and nothing is printed above any sheet.
-			 * @param {object} [opts.config] - server (POS Settings) config, the
-				 *   layout source in production: resolvePrintConfig layering only
-				 *   kicks in when a deps.loadConfig override is injected (tests).
-				 *   An explicit override value (including false / "58mm") always
-				 *   wins; only an ABSENT key falls through to the server value.
-				 *   `??` (not `||`) keeps that distinction. Returns the EFFECTIVE
-				 *   { paper, dots } so the caller can log what was actually printed.
-			 * @returns {Promise<{paper:string, dots:number, copies:number}>}
-			 *   copies counts every sheet that reached the printer: the receipt
-			 *   copies plus the crew slip when it applied.
+		 *   crew slip. Gated ONLY by the resolved crewSlipEnabled (never by
+		 *   the copy count), it renders at the resolved crewFontScale and
+		 *   prints exactly once AFTER every receipt copy — nothing is
+		 *   prepended to it, and nothing is printed above any sheet.
+		 * @param {object} [opts.config] - server (POS Settings) config, the
+		 *   layout source in production: resolvePrintConfig layering only
+		 *   kicks in when a deps.loadConfig override is injected (tests).
+		 *   An explicit override value (including false / "58mm") always
+		 *   wins; only an ABSENT key falls through to the server value.
+		 *   `??` (not `||`) keeps that distinction. Returns the EFFECTIVE
+		 *   { paper, dots } so the caller can log what was actually printed.
+		 * @returns {Promise<{paper:string, dots:number, copies:number}>}
+		 *   copies counts every sheet that reached the printer: the receipt
+		 *   copies plus the crew slip when it applied.
 		 */
 		async printHTML(html, opts = {}) {
 			const r = resolvePrintConfig(loadConfig(), opts.config || {}, {
