@@ -60,6 +60,22 @@ export function saveDeviceConfig(patch) {
 }
 
 /**
+ * One-time migration (Direct Print): layout knobs moved to the server config,
+ * so the per-device record shrinks to its device-attachment half {host, _v}.
+ */
+export function stripDeviceLayoutKeys() {
+	const { host } = loadDeviceConfig()
+	try {
+		localStorage.setItem(
+			DEVICE_CONFIG_KEY,
+			JSON.stringify({ host, _v: DEVICE_CONFIG_VERSION }),
+		)
+	} catch {
+		// localStorage write failed (private mode etc.) — nothing to strip.
+	}
+}
+
+/**
  * CSS for the off-screen bitmap frame. The frame's inline width is the single
  * width authority; overflow:hidden keeps anything the source CSS sized too
  * wide from painting outside the paper.

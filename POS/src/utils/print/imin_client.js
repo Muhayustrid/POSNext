@@ -31,9 +31,10 @@ import {
 	loadDeviceConfig,
 	resolvePrintConfig,
 	saveDeviceConfig,
+	stripDeviceLayoutKeys,
 } from "./receipt_layout"
 
-export { loadDeviceConfig, saveDeviceConfig }
+export { loadDeviceConfig, saveDeviceConfig, stripDeviceLayoutKeys }
 const log = logger.create("IminClient")
 const STATUS_POLL_MS = 500
 const STATUS_TIMEOUT_MS = 15000
