@@ -20,7 +20,6 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const profileWarehouse = computed(() => currentProfile.value?.warehouse);
 	const profileCompany = computed(() => currentProfile.value?.company);
 	const profileCustomer = computed(() => currentProfile.value?.customer);
-	const autoPrintEnabled = computed(() => currentProfile.value?.print_receipt_on_order_complete);
 	const writeOffAccount = computed(() => currentProfile.value?.write_off_account);
 	const writeOffCostCenter = computed(() => currentProfile.value?.write_off_cost_center);
 	const writeOffLimit = computed(() => currentProfile.value?.write_off_limit || 0);
@@ -122,7 +121,6 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		profileWarehouse,
 		profileCompany,
 		profileCustomer,
-		autoPrintEnabled,
 		writeOffAccount,
 		writeOffCostCenter,
 		writeOffLimit,

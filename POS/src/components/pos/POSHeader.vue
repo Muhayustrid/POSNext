@@ -339,7 +339,7 @@
 						<ActionButton
 							:icon="printerIcon"
 							:title="
-								silentPrintEnabled
+								printEnabled
 									? qzConnected
 										? __('Silent Print: Connected')
 										: __('Silent Print: Disconnected')
@@ -348,7 +348,7 @@
 							@click="$emit('printer-click')"
 						/>
 						<span
-							v-if="silentPrintEnabled"
+							v-if="printEnabled"
 							class="absolute top-0.5 end-0.5 w-2 h-2 rounded-full border border-white"
 							:class="qzConnected ? 'bg-green-500' : 'bg-red-500'"
 						></span>
@@ -504,7 +504,7 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
-	silentPrintEnabled: {
+	printEnabled: {
 		type: Boolean,
 		default: false,
 	},
