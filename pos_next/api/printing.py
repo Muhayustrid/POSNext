@@ -5,6 +5,10 @@
 
 The frontend transport calls get_print_config once per session and logs every
 print attempt. Logging is fire-and-forget and never blocks a print.
+
+update_print_config is the single write path for the print knobs (the Direct
+Print page is its UI) and clamps through the same table as the read path, so
+a stored row can never hold a value get_print_config would silently change.
 """
 
 import frappe
@@ -50,17 +54,100 @@ MAX_SIDE_MARGIN_DOTS = 64
 MAX_TOP_MARGIN_DOTS = 128
 MAX_QUEUE_GAP_DOTS = 128
 
+# Integer knobs: fieldname -> (response key, default, lo, hi).
+#
+# Feed vs tail: the tail is white space INSIDE the bitmap, the feed the
+# advance after it — head->cutter clearance ~= tail + feed. The SDK clamps
+# printAndFeedPaper to 0..255, so part of the gap living in the raster keeps
+# it safe on builds where the feed ceiling matters. Side/top margins and the
+# scales are physical answers, so a deliberate 0 (edge-to-edge) survives;
+# only None/garbage falls back to the default. (VERIFY ON DEVICE: 24 tail
+# dots / 3 mm is a starting value, not a measured one.)
+_INT_KNOBS = {
+	"imin_print_copies": ("copies", 1, 1, MAX_COPIES),
+	"imin_copy_delay_ms": ("copy_delay_ms", 800, 0, MAX_COPY_DELAY_MS),
+	"imin_feed_dots": ("feed_dots", 160, 8, MAX_FEED_DOTS),
+	"imin_tail_dots": ("tail_dots", 24, 0, MAX_TAIL_DOTS),
+	"imin_font_scale": ("font_scale", 100, 60, 250),
+	"imin_crew_font_scale": ("crew_font_scale", 100, 60, 250),
+	"imin_line_spacing": ("line_spacing", 100, MIN_LINE_SPACING, MAX_LINE_SPACING),
+	"imin_side_margin": ("side_margin", 16, 0, MAX_SIDE_MARGIN_DOTS),
+	"imin_top_margin": ("top_margin", 0, 0, MAX_TOP_MARGIN_DOTS),
+	"imin_queue_gap": ("queue_gap", 40, 0, MAX_QUEUE_GAP_DOTS),
+	"imin_eod_print_copies": ("eod_copies", 1, 1, MAX_COPIES),
+	"imin_eod_copy_delay_ms": ("eod_copy_delay_ms", 800, 0, MAX_COPY_DELAY_MS),
+	"imin_eod_feed_dots": ("eod_feed_dots", 160, 8, MAX_FEED_DOTS),
+	"imin_eod_tail_dots": ("eod_tail_dots", 24, 0, MAX_TAIL_DOTS),
+	"imin_eod_font_scale": ("eod_font_scale", 100, 60, 250),
+	"imin_eod_line_spacing": ("eod_line_spacing", 100, MIN_LINE_SPACING, MAX_LINE_SPACING),
+	"imin_eod_side_margin": ("eod_side_margin", 16, 0, MAX_SIDE_MARGIN_DOTS),
+	"imin_eod_top_margin": ("eod_top_margin", 0, 0, MAX_TOP_MARGIN_DOTS),
+}
 
-@frappe.whitelist()
-def get_print_config(pos_profile):
-	"""Resolve the print configuration for a POS Profile.
+# Copy counts treat 0 as unset ("or default"); every other knob keeps a
+# deliberate 0.
+_OR_DEFAULT_KNOBS = {"imin_print_copies", "imin_eod_print_copies"}
 
-	A null/empty pos_profile is a supported caller state, not an error: the
-	Direct Print diagnostic page has no shift or invoice in context (no open
-	shift -> bootstrap returns pos_profile: None). Fall back to the first
-	enabled POS Settings row on the site, then to pure transport defaults.
-	The response reports which profile was actually used via `pos_profile`,
-	so callers (and logs) can see when the fallback fired.
+_SELECT_KNOBS = {
+	"print_driver": ("browser", "qz", "imin"),
+	"imin_paper_width": ("58mm", "80mm", "custom"),
+}
+_CHECK_KNOBS = ("imin_cut_paper", "imin_crew_slip_enabled", "print_fallback_enabled")
+
+
+def _get_setting(settings, fieldname):
+	if isinstance(settings, dict):
+		return settings.get(fieldname)
+	return getattr(settings, fieldname, None)
+
+
+def _clamp_int(value, default, lo, hi):
+	"""default on None/garbage, then clamp into [lo, hi]."""
+	try:
+		n = default if value is None else int(value)
+	except (TypeError, ValueError):
+		n = default
+	return max(lo, min(n, hi))
+
+
+def _normalized_print_config(settings):
+	"""Clamped transport config from a POS Settings row (or an all-None dict).
+
+	Bounds come from _INT_KNOBS so the read and write paths can never drift
+	apart. Percent knobs are relative to the CSS as authored at 96 DPI
+	(100 = unchanged); the line-spacing band is deliberately narrow because
+	50% starts colliding lines and 150% wastes paper.
+	"""
+	out = {}
+	for fieldname, (key, default, lo, hi) in _INT_KNOBS.items():
+		raw = _get_setting(settings, fieldname)
+		if fieldname in _OR_DEFAULT_KNOBS:
+			raw = raw or default
+		out[key] = _clamp_int(raw, default, lo, hi)
+
+	raw_fallback = _get_setting(settings, "print_fallback_enabled")
+	return {
+		"driver": _get_setting(settings, "print_driver") or "browser",
+		"paper": _get_setting(settings, "imin_paper_width") or "58mm",
+		"custom_dots": _get_setting(settings, "imin_custom_dots") or 384,
+		"cut": bool(_get_setting(settings, "imin_cut_paper")),
+		"crew_slip_enabled": bool(_get_setting(settings, "imin_crew_slip_enabled")),
+		# Check defaulting to 1 means "unset is enabled": when the row is
+		# missing or NULL, fallback stays on so a broken iMin/QZ chain still
+		# reaches the browser driver. Only an explicit 0 disables it. `cut`
+		# keeps the strict bool() — cutting on an uncut-capable printer is
+		# worse than not cutting.
+		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
+		**out,
+	}
+
+
+def _resolve_settings_row(pos_profile):
+	"""(resolved_profile, settings_row_or_None) with the meta guard applied.
+
+	The meta guard keeps the endpoint answering transport defaults on a site
+	whose POS Settings print columns have not migrated yet, instead of raising
+	pymysql's Unknown column error.
 	"""
 	resolved_profile = pos_profile
 	if not resolved_profile:
@@ -68,10 +155,6 @@ def get_print_config(pos_profile):
 			"POS Settings", {"enabled": 1}, "pos_profile", order_by="modified desc"
 		)
 
-	# POS Settings print fields are introduced in Task 7. Until that migration
-	# has landed, querying by those column names would raise
-	# pymysql.err.OperationalError: (1054, "Unknown column '...'"). Guard on
-	# meta so the endpoint still returns transport defaults on a fresh migrate.
 	try:
 		meta = frappe.get_meta("POS Settings")
 	except Exception:
@@ -92,199 +175,89 @@ def get_print_config(pos_profile):
 	else:
 		settings = None
 
+	return resolved_profile, settings
+
+
+@frappe.whitelist()
+def get_print_config(pos_profile):
+	"""Resolve the print configuration for a POS Profile.
+
+	A null/empty pos_profile is a supported caller state, not an error: the
+	Direct Print diagnostic page has no shift/invoice in context (no open
+	shift -> bootstrap returns pos_profile: None). Fall back to the first
+	enabled POS Settings row on the site, then to pure transport defaults.
+	The response reports which profile was actually used via `pos_profile`,
+	so callers (and logs) can see when the fallback fired.
+	"""
+	resolved_profile, settings = _resolve_settings_row(pos_profile)
 	if not settings:
 		settings = {field: None for field in PRINT_CONFIG_FIELDS}
 
-	# A Check field defaulting to 1 means "unset is enabled": when the POS
-	# Settings row is missing or the column is NULL, fallback stays on so a
-	# broken iMin/QZ chain still reaches the browser driver. Only an explicit
-	# 0 disables it. `cut` keeps the strict bool() — default-off is correct
-	# there (cutting on an uncut-capable printer is worse than not cutting).
-	raw_fallback = getattr(settings, "print_fallback_enabled", None)
+	cfg = _normalized_print_config(settings)
+	cfg["pos_profile"] = resolved_profile
+	return cfg
 
-	try:
-		copies = int(getattr(settings, "imin_print_copies", None) or 1)
-	except (TypeError, ValueError):
-		copies = 1
-	copies = max(1, min(copies, MAX_COPIES))
 
-	try:
-		delay = getattr(settings, "imin_copy_delay_ms", None)
-		delay = 800 if delay is None else int(delay)
-	except (TypeError, ValueError):
-		delay = 800
-	delay = max(0, min(delay, MAX_COPY_DELAY_MS))
+@frappe.whitelist()
+def update_print_config(pos_profile, config):
+	"""Write print knobs for a POS Profile. The Direct Print page is the UI.
 
-	try:
-		feed = getattr(settings, "imin_feed_dots", None)
-		feed = 160 if feed is None else int(feed)
-	except (TypeError, ValueError):
-		feed = 160
-	feed = max(8, min(feed, MAX_FEED_DOTS))
+	Only PRINT_CONFIG_FIELDS are accepted; every value is clamped through the
+	same table the read path uses before it is stored. Permission gate matches
+	update_pos_settings: a user assigned to the profile, or POS Settings write
+	permission. Returns the fresh resolved config for the caller's transport.
+	"""
+	from json import JSONDecodeError, loads
 
-	# Tail is white space INSIDE the bitmap. Together with feed it forms the
-	# clearance between the last printed line and the tear bar:
-	# head->cutter ~= tailDots + feedDots. The SDK clamps printAndFeedPaper to
-	# 0..255 dots, so some of that gap living in the raster keeps it safe even
-	# on builds where the feed ceiling matters.
-	# VERIFY ON DEVICE: 24 dots (3mm) is a starting value, not a measured one.
-	try:
-		tail = getattr(settings, "imin_tail_dots", None)
-		tail = 24 if tail is None else int(tail)
-	except (TypeError, ValueError):
-		tail = 24
-	tail = max(0, min(tail, MAX_TAIL_DOTS))
+	if isinstance(config, str):
+		try:
+			config = loads(config)
+		except (JSONDecodeError, ValueError):
+			frappe.throw(_("Invalid print config payload"))
+	if not isinstance(config, dict):
+		config = {}
 
-	# Crew vs customer distinction lives in the slip itself now (its own short
-	# order list), so there is no copy-label switch to serve: neither copy
-	# carries a banner on the paper.
+	if not pos_profile:
+		frappe.throw(
+			_("No POS Profile in context — open a shift on this device before editing print settings.")
+		)
 
-	# Font scale on top of the fixed 205/96 DPI translation. 100 = as authored
-	# at 96 DPI (already ~2.1x bigger than what printed before the translation
-	# existed); raise for chunkier text. Percent, clamped to a sane band.
-	try:
-		font_scale = getattr(settings, "imin_font_scale", None)
-		font_scale = 100 if font_scale is None else int(font_scale)
-	except (TypeError, ValueError):
-		font_scale = 100
-	font_scale = max(60, min(font_scale, 250))
+	has_access = frappe.db.exists(
+		"POS Profile User", {"parent": pos_profile, "user": frappe.session.user}
+	)
+	if not has_access and not frappe.has_permission("POS Settings", "write"):
+		frappe.throw(_("You don't have permission to update print settings for this POS Profile"))
 
-	# The crew slip has its own scale and starts bigger than the receipt: it is
-	# read across a counter, not handed to the customer, and it carries no
-	# prices to crowd the line. Same clamp band as the receipt scale.
-	try:
-		crew_font_scale = getattr(settings, "imin_crew_font_scale", None)
-		crew_font_scale = 100 if crew_font_scale is None else int(crew_font_scale)
-	except (TypeError, ValueError):
-		crew_font_scale = 100
-	crew_font_scale = max(60, min(crew_font_scale, 250))
+	updates = {}
+	for key, value in config.items():
+		if key in _INT_KNOBS:
+			_, default, lo, hi = _INT_KNOBS[key]
+			if key in _OR_DEFAULT_KNOBS:
+				value = value or default
+			updates[key] = _clamp_int(value, default, lo, hi)
+		elif key == "imin_custom_dots":
+			# 0 is stored as "unset"; the read path answers the 384 default.
+			updates[key] = _clamp_int(value, 384, 0, 576)
+		elif key in _SELECT_KNOBS:
+			if value in _SELECT_KNOBS[key]:
+				updates[key] = value
+		elif key in _CHECK_KNOBS:
+			updates[key] = 1 if value in (True, 1, "1") else 0
 
-	# Vertical density of the printed output, as a percent of the values the
-	# receipt CSS was authored with: 100 = as authored, 80 = 20% tighter. Lower
-	# closes up the vertical gaps without shrinking the glyphs. The clamp band
-	# is deliberately narrow — 50% starts colliding lines, 150% wastes paper.
-	try:
-		line_spacing = getattr(settings, "imin_line_spacing", None)
-		line_spacing = 100 if line_spacing is None else int(line_spacing)
-	except (TypeError, ValueError):
-		line_spacing = 100
-	line_spacing = max(MIN_LINE_SPACING, min(line_spacing, MAX_LINE_SPACING))
+	if not updates:
+		frappe.throw(_("No valid print settings in the request"))
 
-	# Left/right print margin in printer dots, applied to BOTH sides (16 = 2 mm
-	# at 205 DPI). The rendered bitmap inherits whatever padding the print
-	# format's own CSS puts on body/frame — the stock receipt ships `padding:
-	# 5mm` inside `@media print`, ~40 dots a side — so this is the knob that
-	# claws the width back. It deliberately defaults narrower than that 40; the
-	# renderer pins the sides to this value. 0 is a legal explicit answer
-	# (edge-to-edge), so only garbage/NULL falls back to the default.
-	try:
-		side_margin = getattr(settings, "imin_side_margin", None)
-		side_margin = 16 if side_margin is None else int(side_margin)
-	except (TypeError, ValueError):
-		side_margin = 16
-	side_margin = max(0, min(side_margin, MAX_SIDE_MARGIN_DOTS))
+	existing = frappe.db.exists("POS Settings", {"pos_profile": pos_profile})
+	if existing:
+		doc = frappe.get_doc("POS Settings", existing)
+	else:
+		doc = frappe.new_doc("POS Settings")
+		doc.pos_profile = pos_profile
+		doc.enabled = 1
+	doc.update(updates)
+	doc.save()
 
-	try:
-		top_margin = getattr(settings, "imin_top_margin", None)
-		top_margin = 0 if top_margin is None else int(top_margin)
-	except (TypeError, ValueError):
-		top_margin = 0
-	top_margin = max(0, min(top_margin, MAX_TOP_MARGIN_DOTS))
-
-	try:
-		queue_gap = getattr(settings, "imin_queue_gap", None)
-		queue_gap = 40 if queue_gap is None else int(queue_gap)
-	except (TypeError, ValueError):
-		queue_gap = 40
-	queue_gap = max(0, min(queue_gap, MAX_QUEUE_GAP_DOTS))
-
-	# The Closing/EOD lane is a separate print job, so it gets its own knobs at
-	# the same defaults and clamp bands as the sales receipt. Device overrides
-	# (eodCopies/eodCopyDelayMs/...) land in POS Settings as imin_eod_*.
-	try:
-		eod_copies = int(getattr(settings, "imin_eod_print_copies", None) or 1)
-	except (TypeError, ValueError):
-		eod_copies = 1
-	eod_copies = max(1, min(eod_copies, MAX_COPIES))
-
-	try:
-		eod_delay = getattr(settings, "imin_eod_copy_delay_ms", None)
-		eod_delay = 800 if eod_delay is None else int(eod_delay)
-	except (TypeError, ValueError):
-		eod_delay = 800
-	eod_delay = max(0, min(eod_delay, MAX_COPY_DELAY_MS))
-
-	try:
-		eod_feed = getattr(settings, "imin_eod_feed_dots", None)
-		eod_feed = 160 if eod_feed is None else int(eod_feed)
-	except (TypeError, ValueError):
-		eod_feed = 160
-	eod_feed = max(8, min(eod_feed, MAX_FEED_DOTS))
-
-	# Same split as the sales receipt: tail is white space INSIDE the bitmap,
-	# feed is the advance after it, head->cutter ~= tail + feed.
-	try:
-		eod_tail = getattr(settings, "imin_eod_tail_dots", None)
-		eod_tail = 24 if eod_tail is None else int(eod_tail)
-	except (TypeError, ValueError):
-		eod_tail = 24
-	eod_tail = max(0, min(eod_tail, MAX_TAIL_DOTS))
-
-	try:
-		eod_font_scale = getattr(settings, "imin_eod_font_scale", None)
-		eod_font_scale = 100 if eod_font_scale is None else int(eod_font_scale)
-	except (TypeError, ValueError):
-		eod_font_scale = 100
-	eod_font_scale = max(60, min(eod_font_scale, 250))
-
-	try:
-		eod_line_spacing = getattr(settings, "imin_eod_line_spacing", None)
-		eod_line_spacing = 100 if eod_line_spacing is None else int(eod_line_spacing)
-	except (TypeError, ValueError):
-		eod_line_spacing = 100
-	eod_line_spacing = max(MIN_LINE_SPACING, min(eod_line_spacing, MAX_LINE_SPACING))
-
-	try:
-		eod_side_margin = getattr(settings, "imin_eod_side_margin", None)
-		eod_side_margin = 16 if eod_side_margin is None else int(eod_side_margin)
-	except (TypeError, ValueError):
-		eod_side_margin = 16
-	eod_side_margin = max(0, min(eod_side_margin, MAX_SIDE_MARGIN_DOTS))
-
-	try:
-		eod_top_margin = getattr(settings, "imin_eod_top_margin", None)
-		eod_top_margin = 0 if eod_top_margin is None else int(eod_top_margin)
-	except (TypeError, ValueError):
-		eod_top_margin = 0
-	eod_top_margin = max(0, min(eod_top_margin, MAX_TOP_MARGIN_DOTS))
-
-	return {
-		"pos_profile": resolved_profile,
-		"driver": getattr(settings, "print_driver", None) or "browser",
-		"paper": getattr(settings, "imin_paper_width", None) or "58mm",
-		"custom_dots": getattr(settings, "imin_custom_dots", None) or 384,
-		"cut": bool(getattr(settings, "imin_cut_paper", None)),
-		"copies": copies,
-		"copy_delay_ms": delay,
-		"feed_dots": feed,
-		"tail_dots": tail,
-		"font_scale": font_scale,
-		"crew_font_scale": crew_font_scale,
-		"crew_slip_enabled": bool(getattr(settings, "imin_crew_slip_enabled", None)),
-		"line_spacing": line_spacing,
-		"side_margin": side_margin,
-		"top_margin": top_margin,
-		"queue_gap": queue_gap,
-		"eod_copies": eod_copies,
-		"eod_copy_delay_ms": eod_delay,
-		"eod_feed_dots": eod_feed,
-		"eod_tail_dots": eod_tail,
-		"eod_font_scale": eod_font_scale,
-		"eod_line_spacing": eod_line_spacing,
-		"eod_side_margin": eod_side_margin,
-		"eod_top_margin": eod_top_margin,
-		"fallback_enabled": True if raw_fallback is None else bool(raw_fallback),
-	}
+	return get_print_config(pos_profile)
 
 
 @frappe.whitelist()

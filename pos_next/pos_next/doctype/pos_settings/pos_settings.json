@@ -474,6 +474,14 @@
    "label": "Enable Silent Print"
   },
   {
+   "default": "Manual",
+   "description": "Behavior after a sale: Auto prints the receipt immediately, Manual prints from the success dialog, Off does not print",
+   "fieldname": "print_mode",
+   "fieldtype": "Select",
+   "label": "Print Mode",
+   "options": "Off\nManual\nAuto"
+  },
+  {
    "default": "browser",
    "description": "Driver used for silent printing",
    "fieldname": "print_driver",
