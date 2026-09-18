@@ -358,6 +358,48 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			doc = get_invoice(legacy[0])
 			self.assertEqual(doc.get("doctype"), "Sales Invoice")
 
+	def test_history_serves_both_doctypes(self):
+		"""A profile's history spans both doctypes (the invoice type is
+		switchable). Listing only the current mode's doctype would hide the
+		other half of the shift's own sales."""
+		from pos_next.api.invoices import get_invoices
+
+		# one POS Invoice (the new mode)…
+		result = submit_invoice(invoice=self._payload())
+		posi_name = result.get("name")
+		self._created.append(posi_name)
+
+		# …and one pre-switch Sales Invoice on the same shift
+		si = frappe.get_doc(
+			{
+				"doctype": "Sales Invoice",
+				"customer": self.customer,
+				"company": self.profile.company,
+				"pos_profile": self.profile.name,
+				"is_pos": 1,
+				"update_stock": 0,
+				"posa_pos_opening_shift": self.shift.name,
+				"items": [
+					{"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.profile.warehouse}
+				],
+				"payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+			}
+		)
+		si.flags.ignore_permissions = True
+		si.insert()
+		si.submit()
+		self._created.append(si.name)
+
+		rows = get_invoices(pos_profile=self.profile.name)
+		by_name = {r["name"]: r for r in rows}
+		self.assertIn(posi_name, by_name)
+		self.assertIn(si.name, by_name)
+		# each row carries its own doctype and the matching child-table items
+		self.assertEqual(by_name[posi_name]["doctype"], "POS Invoice")
+		self.assertEqual(by_name[si.name]["doctype"], "Sales Invoice")
+		self.assertTrue(by_name[posi_name]["items"])
+		self.assertTrue(by_name[si.name]["items"])
+
 	def test_draft_invoices_default_resolves_doctype(self):
 		from pos_next.api.invoices import get_draft_invoices
 

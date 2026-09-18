@@ -111,8 +111,9 @@ def sales_invoice_union(columns, where=""):
 	"""SQL source for sales reporting: UNION ALL of ``get_sales_report_doctypes()``
 	projected to ``columns``, as derived table ``si``.
 
-	``where`` (optional, ``si.``-prefixed SQL; may use ``{dt}`` for the branch
-	doctype) is pushed into every branch so the union stays index-sized. In
+	``columns`` and ``where`` (optional, ``si.``-prefixed SQL) may use ``{dt}``
+	for the branch doctype — e.g. projecting a literal doctype label per row.
+	``where`` is pushed into every branch so the union stays index-sized. In
 	POS Invoice mode the Sales Invoice branch additionally drops
 	``is_consolidated`` rows — each consolidated legacy SI represents POS
 	Invoices that are already in the union (anti double-count)."""
@@ -121,7 +122,10 @@ def sales_invoice_union(columns, where=""):
 	parts = []
 	for dt in doctypes:
 		cond = _branch_where(dt, where, exclude)
-		parts.append(f"(SELECT {columns} FROM `tab{dt}` si{cond})")
+		# only substitute when the caller asked for it, so a projection that
+		# legitimately contains other braces is never reformatted
+		cols = columns.format(dt=dt) if "{dt}" in columns else columns
+		parts.append(f"(SELECT {cols} FROM `tab{dt}` si{cond})")
 	return f"({' UNION ALL '.join(parts)}) si"
 
 

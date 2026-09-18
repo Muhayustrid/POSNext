@@ -12,7 +12,11 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
-from pos_next.invoice_type import POS_INVOICE, get_pos_invoice_doctype
+from pos_next.invoice_type import (
+	POS_INVOICE,
+	get_pos_invoice_doctype,
+	sales_invoice_union,
+)
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -1848,8 +1852,16 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	limit = cint(limit) or 100
 	start = cint(start) or 0
 
-	# Serve whichever doctype the site is currently operating in
+	# Serve both doctypes: the site-wide invoice type is switchable, so a
+	# profile's history legitimately spans Sales Invoices (created before the
+	# switch) and POS Invoices. Reading only the current mode's doctype would
+	# hide the other half of the shift's own sales.
 	doctype = get_pos_invoice_doctype()
+	union = sales_invoice_union(
+		"""name, customer, customer_name, buyer_name, posting_date, posting_time,
+		grand_total, paid_amount, outstanding_amount, status, docstatus, is_return,
+		return_against, pos_queue_number, pos_profile, is_pos, '{dt}' AS doctype"""
+	)
 
 	# Permission check
 	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
@@ -1911,9 +1923,10 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			docstatus,
 			is_return,
 			return_against,
-			pos_queue_number
+			pos_queue_number,
+			doctype
 		FROM
-			`tab{doctype}`
+			{union}
 		WHERE
 			{where_clause}
 		ORDER BY
@@ -1958,7 +1971,9 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 	# Load items for each invoice for filtering purposes
 	for invoice in invoices:
-		invoice["doctype"] = doctype
+		# per-row doctype: the union returns both kinds in one list, and the
+		# child tables differ (POS Invoice Item vs Sales Invoice Item)
+		row_doctype = invoice.get("doctype") or doctype
 		invoice.payments = payments_by_invoice.get(invoice.name, [])
 		items = frappe.db.sql(
 			f"""
@@ -1969,7 +1984,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 				rate,
 				amount
 			FROM
-				`tab{doctype} Item`
+				`tab{row_doctype} Item`
 			WHERE
 				parent = %(invoice_name)s
 			ORDER BY
