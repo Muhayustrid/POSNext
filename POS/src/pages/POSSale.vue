@@ -121,26 +121,6 @@
 						<span>{{ __("Invoice History") }}</span>
 					</button>
 					<button
-						v-if="canAccessShiftActions"
-						@click="handleManagementMenuClick('invoices')"
-						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
-					>
-						<svg
-							class="w-5 h-5 text-indigo-600"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-							/>
-						</svg>
-						<span>{{ __("Invoice Management") }}</span>
-					</button>
-					<button
 						@click="navigateToShiftHistory"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
 					>
