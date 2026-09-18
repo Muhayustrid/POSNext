@@ -52,7 +52,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		fetch_coupon: 0,
 		// Printing
 		allow_print_last_invoice: 0,
-		silent_print: 0,
+		print_mode: "Manual",
 		print_driver: "browser",
 		imin_paper_width: "58mm",
 		imin_custom_dots: 384,
@@ -156,7 +156,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 
 	// Computed - Printing
 	const allowPrintLastInvoice = computed(() => Boolean(settings.value.allow_print_last_invoice));
-	const silentPrint = computed(() => Boolean(settings.value.silent_print));
+	const printMode = computed(() => settings.value.print_mode || "Manual");
+	const isPrintAuto = computed(() => printMode.value === "Auto");
+	const isPrintOff = computed(() => printMode.value === "Off");
 	const printDriver = computed(() => settings.value.print_driver || "browser");
 	const iminPaper = computed(() => settings.value.imin_paper_width || "58mm");
 	const iminCustomDots = computed(() => Number.parseInt(settings.value.imin_custom_dots) || 384);
@@ -293,7 +295,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_duplicate_customer_names: 0,
 			fetch_coupon: 0,
 			allow_print_last_invoice: 0,
-			silent_print: 0,
+			print_mode: "Manual",
 			print_driver: "browser",
 			imin_paper_width: "58mm",
 			imin_custom_dots: 384,
@@ -427,7 +429,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 
 		// Computed - Printing
 		allowPrintLastInvoice,
-		silentPrint,
+		printMode,
+		isPrintAuto,
+		isPrintOff,
 		printDriver,
 		iminPaper,
 		iminCustomDots,

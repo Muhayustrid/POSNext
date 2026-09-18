@@ -30,15 +30,37 @@ export function shouldValidateItemStock(item) {
 }
 
 /**
+ * The qty cart validation must compare against.
+ *
+ * `actual_qty` on items coming from filteredItems is DISPLAY stock (server
+ * minus cart reservations), while the qty being validated already includes
+ * the cart — comparing the two subtracts the cart twice and blocks sales
+ * well below real stock. The stock store's server map holds the un-reserved
+ * figure; fall back to original_stock (the injected server figure), then the
+ * item's own fields for items the store has not registered.
+ *
+ * @param {Object} item - Item (may carry display stock in actual_qty)
+ * @param {Map|null} serverMap - stockStore.server: item_code -> { qty }
+ * @returns {number}
+ */
+export function validationStockQty(item, serverMap) {
+	const fromStore = serverMap?.get(item.item_code)?.qty;
+	if (fromStore !== undefined && fromStore !== null) return fromStore;
+	return item.original_stock ?? item.actual_qty ?? item.stock_qty ?? 0;
+}
+
+/**
  * Check if the requested quantity exceeds available stock.
  *
  * @param {Object}  item       - Item with actual_qty / stock_qty
  * @param {number}  requestedQty - Total quantity to validate against
  * @param {string}  [warehouse]  - Warehouse name (for error message)
+ * @param {number}  [availableQty] - Explicit stock figure; pass
+ *   validationStockQty() so display stock on the item is not used as the base
  * @returns {{ available: boolean, actualQty: number, error: string|null }}
  */
-export function checkStockAvailability(item, requestedQty, warehouse) {
-	const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
+export function checkStockAvailability(item, requestedQty, warehouse, availableQty) {
+	const actualQty = availableQty ?? item.actual_qty ?? item.stock_qty ?? 0;
 	const wh = warehouse || item.warehouse || "";
 
 	if (actualQty >= requestedQty) {

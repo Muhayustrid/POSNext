@@ -23,7 +23,7 @@
 				:cache-stats="itemStore.cacheStats"
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
-				:silent-print-enabled="posSettingsStore.silentPrint"
+				:print-enabled="!posSettingsStore.isPrintOff"
 				:qz-connected="qzConnected"
 				:show-production="canProduction"
 				@nav-click="handleManagementMenuClick"
@@ -118,10 +118,10 @@
 								d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
 							/>
 						</svg>
-					<span>{{ __("Invoice History") }}</span>
-				</button>
-				<button
-					@click="navigateToShiftHistory"
+						<span>{{ __("Invoice History") }}</span>
+					</button>
+					<button
+						@click="navigateToShiftHistory"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
 					>
 						<svg
@@ -675,6 +675,13 @@
 				@return-created="handleReturnCreated"
 			/>
 
+			<!-- Sales Recap Dialog -->
+			<SalesRecapDialog
+				v-model="showSalesRecap"
+				:pos-profile="shiftStore.profileName"
+				:opening-shift="shiftStore.currentShift?.name"
+			/>
+
 			<!-- Shift History Dialog -->
 			<ShiftHistoryDialog
 				v-model="showShiftHistoryDialog"
@@ -987,6 +994,7 @@
 							{{ __("Close") }}
 						</Button>
 						<Button
+							v-if="!posSettingsStore.isPrintOff"
 							variant="solid"
 							theme="blue"
 							:disabled="activePrintCount > 0"
@@ -1102,6 +1110,7 @@ import PackageSelectionDialog from "@/components/sale/PackageSelectionDialog.vue
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import SalesRecapDialog from "@/components/sale/SalesRecapDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
@@ -1121,8 +1130,6 @@ import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import {
 	hydrateLocalOnlyInvoice,
-	printInvoice,
-	printInvoiceByName,
 	printWithSilentFallback,
 } from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
@@ -1260,6 +1267,9 @@ const showStockLookup = ref(false);
 
 // Invoice Management dialog
 const showInvoiceManagement = ref(false);
+
+// Sales Recap dialog
+const showSalesRecap = ref(false);
 
 // Invoice Detail dialog
 const showInvoiceDetail = ref(false);
@@ -1476,11 +1486,11 @@ onMounted(async () => {
 		});
 	});
 
-	// QZ Tray lifecycle — lazy connect when silent print is enabled
+	// QZ Tray lifecycle — lazy connect when printing is enabled (print_mode != Off)
 	watch(
-		() => posSettingsStore.silentPrint,
-		async (enabled) => {
-			if (enabled) {
+		() => posSettingsStore.printMode,
+		async (mode) => {
+			if (mode !== "Off") {
 				await qzConnect();
 			} else {
 				await qzDisconnect();
@@ -2414,7 +2424,7 @@ async function handlePaymentCompleted(paymentData) {
 			);
 			showSuccess(__("Invoice saved offline. Will sync when online"));
 
-			if (shiftStore.autoPrintEnabled) {
+			if (posSettingsStore.isPrintAuto) {
 				handlePrintInvoice({ name: offlineReceiptName }).catch((error) => {
 					log.error("Offline auto-print error:", error);
 					showWarning(
@@ -2493,7 +2503,7 @@ async function handlePaymentCompleted(paymentData) {
 				);
 				showSuccess(__("Invoice {0} created successfully", [invoiceName]));
 
-				if (shiftStore.autoPrintEnabled) {
+				if (posSettingsStore.isPrintAuto) {
 					handlePrintInvoice({ name: invoiceName }).catch((error) => {
 						log.error("Auto-print error:", error);
 						showWarning(__("Invoice {0} created but print failed", [invoiceName]));
@@ -3143,6 +3153,8 @@ function restoreBodyStyles() {
 			loadInvoiceHistoryData();
 			draftsStore.loadDrafts();
 			showInvoiceManagement.value = true;
+		} else if (menuItem === "sales-recap") {
+			showSalesRecap.value = true;
 		} else if (menuItem === "products") {
 			showStockLookup.value = true;
 		} else if (menuItem === "production") {
@@ -3275,22 +3287,11 @@ async function runPrintInvoice(invoiceData) {
 			invoiceData = offlineSnapshot;
 		}
 
-		// Silent print path — send directly to thermal printer via QZ Tray
-		if (posSettingsStore.silentPrint) {
-			const result = await printWithSilentFallback(invoiceData);
-			if (result.method === "browser") {
-				log.info("Used browser print fallback");
-			}
-			return;
-		}
-
-		// Standard browser print path
-		if (invoiceData.items && Array.isArray(invoiceData.items)) {
-			await printInvoice(invoiceData);
-		} else {
-			// If it's just an invoice object with name, fetch and print
-			// printInvoiceByName will automatically fetch the print format from the invoice's POS Profile
-			await printInvoiceByName(invoiceData.name);
+		// Silent transport with automatic browser fallback — print_mode decides
+		// whether we get here at all, this path decides how the receipt prints.
+		const result = await printWithSilentFallback(invoiceData);
+		if (result.method === "browser") {
+			log.info("Used browser print fallback");
 		}
 	} catch (error) {
 		log.error("Error printing invoice:", error);

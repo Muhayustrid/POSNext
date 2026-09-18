@@ -21,6 +21,12 @@ export const MANAGEMENT_MENU = [
 		activeClass: "bg-indigo-100 text-indigo-600",
 	},
 	{
+		id: "sales-recap",
+		icon: "clipboard",
+		label: "Sales Recap",
+		activeClass: "bg-teal-100 text-teal-600",
+	},
+	{
 		id: "production",
 		icon: "tool",
 		label: "Production",

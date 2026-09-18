@@ -3,10 +3,15 @@ import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
+import { useStockStore } from "@/stores/stock";
 import { parseError } from "@/utils/errorHandler";
 import { hasDiscountRelevantChange, resolveOfferUnitDiscount } from "@/utils/offerDiscount";
 import { PACKAGE_ROLE } from "@/utils/packageQuote";
-import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
+import {
+	shouldValidateItemStock,
+	checkStockAvailability,
+	validationStockQty,
+} from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
@@ -117,6 +122,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const offersStore = usePOSOffersStore();
 	const settingsStore = usePOSSettingsStore();
+	const stockStore = useStockStore();
+
+	/**
+	 * Stock check against the store's un-reserved server qty.
+	 *
+	 * The item objects arriving here (from filteredItems) carry DISPLAY stock
+	 * in actual_qty — server minus cart reservations — while the qty being
+	 * validated already includes the cart. Validating one against the other
+	 * subtracts the cart twice; resolve the base through validationStockQty so
+	 * cart display stock never caps the sale below real stock.
+	 */
+	function checkCartStock(item, requestedQty, warehouse) {
+		return checkStockAvailability(
+			item,
+			requestedQty,
+			warehouse,
+			validationStockQty(item, stockStore.server)
+		);
+	}
 
 	// Additional cart state
 	const pendingItem = ref(null);
@@ -200,7 +224,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const totalQty = (existing ? existing.quantity : 0) + qty;
 			const warehouse = item.warehouse || currentProfile.warehouse;
 
-			const check = checkStockAvailability(item, totalQty, warehouse);
+			const check = checkCartStock(item, totalQty, warehouse);
 			if (!check.available) {
 				throw new Error(check.error);
 			}
@@ -236,7 +260,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const catalogItem = itemsStore.allItems.find((i) => i.item_code === itemCode);
 				if (!catalogItem || !shouldValidateItemStock(catalogItem)) continue;
 
-				const check = checkStockAvailability(catalogItem, qty, warehouse);
+				const check = checkCartStock(catalogItem, qty, warehouse);
 				if (!check.available) {
 					throw new Error(check.error);
 				}
@@ -266,7 +290,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			const check = checkStockAvailability(item, newQty);
+			const check = checkCartStock(item, newQty);
 			if (!check.available) {
 				showWarning(check.error);
 				return;
@@ -1448,7 +1472,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				settingsStore.shouldEnforceStockValidation() &&
 				shouldValidateItemStock(cartItem)
 			) {
-				const check = checkStockAvailability(cartItem, updates.quantity);
+				const check = checkCartStock(cartItem, updates.quantity);
 				if (!check.available) {
 					throw new Error(check.error);
 				}

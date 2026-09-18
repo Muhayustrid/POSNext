@@ -1100,11 +1100,26 @@ const {
 	isAnyDialogOpen,
 });
 
-// Local state
-const viewMode = ref("grid");
+// Local state — the view follows the LAST choice made on this device
+// (localStorage), falling back to the POS Settings "Default Card View" for
+// first-time users. A stored preference also counts as a manual choice, so
+// the load-time auto-switch to list leaves it alone.
+const VIEW_PREF_KEY = "pos_item_view_mode";
+const storedView = localStorage.getItem(VIEW_PREF_KEY);
+const viewMode = ref(storedView === "list" ? "list" : "grid");
 const itemThreshold = ref(50); // Threshold for auto-switching to list view
-const userManuallySetView = ref(false); // Track if user manually changed view mode
+const userManuallySetView = ref(Boolean(storedView)); // Track if user manually changed view mode
 const lastAutoSwitchCount = ref(0);
+
+// POS Settings default applies only while this device has no stored
+// preference; settings can also load after mount, hence the watcher.
+watch(
+	() => settingsStore.defaultCardView,
+	(card) => {
+		if (!storedView && !userManuallySetView.value) viewMode.value = card ? "grid" : "list";
+	},
+	{ immediate: true }
+);
 const showSortDropdown = ref(false); // Sort dropdown visibility
 const skipPageReset = ref(false); // Skip page reset when navigating via pagination
 
@@ -1524,6 +1539,7 @@ watch(viewMode, async () => {
 function setViewMode(mode) {
 	viewMode.value = mode;
 	userManuallySetView.value = true;
+	localStorage.setItem(VIEW_PREF_KEY, mode);
 }
 
 function handleAllFilterClick() {

@@ -739,19 +739,20 @@
 													__('Enable partial payment for invoices')
 												"
 											/>
-											<CheckboxField
-												v-model="settings.silent_print"
-												:label="__('Silent Print')"
+											<SelectField
+												v-model="settings.print_mode"
+												:label="__('Print Mode')"
+												:options="printModeOptions"
 												:description="
 													__(
-														'Send receipts directly to a thermal printer via QZ Tray (no browser dialog)'
+														'Auto: print after each sale. Manual: print from the success dialog. Off: no receipt printing.'
 													)
 												"
 											/>
 
-											<!-- QZ Tray Printer Settings (shown when silent print is enabled) -->
+											<!-- QZ Tray Printer Settings (shown when printing is enabled) -->
 											<div
-												v-if="settings.silent_print"
+												v-if="settings.print_mode !== 'Off'"
 												class="ps-6 flex flex-col gap-3 border-s-2 border-teal-200"
 											>
 												<!-- Connection Status -->
@@ -1716,7 +1717,7 @@ const settings = ref({
 	require_refund_code: 1,
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
-	silent_print: 0,
+	print_mode: "Manual",
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
 	// Printing
@@ -1804,6 +1805,11 @@ const printDriverOptions = [
 	{ label: "Browser", value: "browser" },
 	{ label: "QZ Tray", value: "qz" },
 	{ label: "iMin", value: "imin" },
+];
+const printModeOptions = [
+	{ label: __("Off"), value: "Off" },
+	{ label: __("Manual"), value: "Manual" },
+	{ label: __("Auto"), value: "Auto" },
 ];
 const paperWidthOptions = [
 	{ label: "58mm (384 dots)", value: "58mm" },
@@ -2060,11 +2066,11 @@ async function saveSettings() {
 	}
 }
 
-// Auto-connect and discover printers when silent_print is toggled on
+// Auto-connect and discover printers when printing is enabled (print_mode != Off)
 watch(
-	() => settings.value.silent_print,
-	async (enabled) => {
-		if (enabled) {
+	() => settings.value.print_mode,
+	async (mode) => {
+		if (mode !== "Off") {
 			await handleQzConnect();
 		}
 	}
