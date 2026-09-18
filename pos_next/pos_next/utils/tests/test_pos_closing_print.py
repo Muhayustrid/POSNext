@@ -6,6 +6,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from pos_next.pos_next.utils.pos_closing_print import (
 	_collect_parent_targets,
+	_fetch_items_for_targets,
 	format_rupiah,
 	get_items_sold,
 	get_sales_recap,
@@ -101,6 +102,29 @@ class TestFormatRupiah(FrappeTestCase):
 
 	def test_numeric_strings_are_accepted(self):
 		self.assertEqual(format_rupiah("1200"), "Rp1.200")
+
+
+class TestItemsComeFromEachDoctypesOwnChildTable(FrappeTestCase):
+	"""POS Invoice items live in `POS Invoice Item`, Sales Invoice items in
+	`Sales Invoice Item`. Reading one table for both doctypes silently returns
+	nothing for the other, which emptied the EOD "items sold" section (and the
+	product-discount / category aggregates) for POS Invoices."""
+
+	@patch("pos_next.pos_next.utils.pos_closing_print.frappe.db.sql")
+	def test_items_are_read_per_doctype(self, mock_sql):
+		mock_sql.return_value = [
+			{"item_code": "RP001", "item_name": "Roti", "qty": 3.0, "amount": 30000.0}
+		]
+
+		rows = _fetch_items_for_targets({("PSINV-0001", "POS Invoice")})
+
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0]["item_code"], "RP001")
+		self.assertEqual(rows[0]["qty"], 3.0)
+		# the POS Invoice branch must query the POS Invoice Item table
+		queried = str(mock_sql.call_args[0][0])
+		self.assertIn("`tabPOS Invoice Item`", queried)
+		self.assertNotIn("`tabSales Invoice Item`", queried)
 
 
 def _recap_stub_targets():
