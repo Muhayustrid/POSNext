@@ -4,6 +4,26 @@ Date: 2026-09-10
 App: POS Next
 Scope: Global invoice doctype switch — create `POS Invoice` (ERPNext v16) instead of `Sales Invoice` for new POS transactions.
 
+> **Superseded in part (2026-09-18).** This spec describes the original design,
+> in which POS Next's POS Invoices deferred their accounting to shift-close
+> consolidation, exactly like ERPNext's built-in POS. The owner later required
+> POS Invoice to *behave like* Sales Invoice, so that design was replaced:
+>
+> - A POS Next POS Invoice now posts its own Stock Ledger and GL entries at
+>   submit (`CustomPOSInvoice.on_submit`) and is **never consolidated**.
+>   `POS Closing Shift` no longer consolidates, and a `POS Invoice Merge Log`
+>   guard refuses to consolidate a POS Next invoice (double-posting).
+> - The `get_unconsolidated_posi_qty` "effective stock" compensation was
+>   deleted — with real SLEs at submit it was a double subtraction.
+> - `invoice_type` now defaults to `POS Invoice` (code fallback and field
+>   default), not `Sales Invoice`.
+> - Closing, invoice history, returns, number search and the EOD item
+>   aggregates read BOTH doctypes, because a shift can hold both (the type is
+>   switchable and pre-switch invoices remain linked to the same shift).
+>
+> Everything else below (the hook chain, custom fields, ownership gating,
+> coexistence with built-in-POS invoices, frontend awareness) still holds.
+
 ## Problem Statement
 
 Every POS Next transaction today creates a `Sales Invoice` (`is_pos=1`, `update_stock=1`). The POS invoices therefore mix into the same list as non-POS Sales Invoices. ERPNext v16 ships a dedicated `POS Invoice` doctype (a `SalesInvoice` subclass with its own table and list) that keeps POS traffic separated and consolidates into Sales Invoices for accounting at shift close.
