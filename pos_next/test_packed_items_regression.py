@@ -3,9 +3,53 @@
 
 """Regression tests for duplicate rows in Sales Invoice Packed Items (Product Bundles)."""
 
+from contextlib import contextmanager
 from types import SimpleNamespace
+import sys
+import types as _types
+import unittest
 
 import frappe
+
+# erpnext.tests.utils runs a full fixture bootstrap at import time
+# (module-level BootStrapTestData()) that only works on disposable CI sites;
+# on a live site it dies repeatedly (password policy, missing fixture cascade:
+# _Test companies/accounts/fiscal years/items that the bootstrap itself never
+# creates). Every erpnext test module we import below needs exactly one name
+# from it -- ERPNextTestSuite -- so stub that one name to skip the bootstrap
+# while keeping the real helper functions (create_sales_invoice, make_item...).
+class _ERPNextTestSuiteStub(unittest.TestCase):
+	@classmethod
+	@contextmanager
+	def change_settings(cls, doctype, settings_dict=None, /, **settings):
+		"""Mirror of erpnext.tests.utils.ERPNextTestSuite.change_settings."""
+		import copy
+
+		if settings_dict is None:
+			settings_dict = settings
+
+		doc = frappe.get_doc(doctype)
+		previous_settings = copy.deepcopy(settings_dict)
+		for key in previous_settings:
+			previous_settings[key] = getattr(doc, key)
+
+		for key, value in settings_dict.items():
+			setattr(doc, key, value)
+		doc.save(ignore_permissions=True)
+		try:
+			yield
+		finally:
+			doc = frappe.get_doc(doctype)
+			for key, value in previous_settings.items():
+				setattr(doc, key, value)
+			doc.save(ignore_permissions=True)
+
+
+if "erpnext.tests.utils" not in sys.modules:
+    _stub = _types.ModuleType("erpnext.tests.utils")
+    _stub.ERPNextTestSuite = _ERPNextTestSuiteStub
+    sys.modules["erpnext.tests.utils"] = _stub
+
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
 from erpnext.stock.doctype.item.test_item import make_item
@@ -59,7 +103,23 @@ def _sales_invoice_bundle_context():
 	if not warehouse:
 		frappe.throw(f"No warehouse for company {company}.")
 
-	customer = frappe.db.get_value("Customer", {"disabled": 0}, "name", order_by="modified desc")
+	# prefer a customer that is not internal and not restricted to other
+	# companies ("Allowed To Transact With"); live sites commonly have
+	# inter-company customers limited to specific companies
+	customer = frappe.db.sql(
+		"""
+		select c.name from `tabCustomer` c
+		where c.disabled = 0
+		  and not coalesce(c.is_internal_customer, 0)
+		  and not exists (
+			select 1 from `tabAllowed To Transact With` a where a.parent = c.name
+		  )
+		order by c.modified desc limit 1
+		"""
+	)
+	customer = customer[0][0] if customer else None
+	if not customer:
+		customer = frappe.db.get_value("Customer", {"disabled": 0}, "name", order_by="modified desc")
 	if not customer:
 		frappe.throw("No Customer found for packed_items regression test.")
 
@@ -109,6 +169,12 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 			getattr(packed_item_module, "_pos_next_packed_item_keying_patched", False),
 			msg="pos_next packed_item patch must be active (import pos_next before ERPNext saves).",
 		)
+		# the live site names items by series, which would override the explicit
+		# _PNXB*/_PNXC* item codes this module keys on; flip for the test
+		# (restored by the change_settings context manager on cleanup)
+		_naming = _ERPNextTestSuiteStub.change_settings("Stock Settings", {"item_naming_by": "Item Code"})
+		_naming.__enter__()
+		self.addCleanup(_naming.__exit__, None, None, None)
 
 	def _unique_codes(self):
 		sfx = frappe.generate_hash(length=8)
@@ -119,8 +185,8 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		ctx = _sales_invoice_bundle_context()
 		bundle_code, child_code = self._unique_codes()
 
-		make_item(child_code, {"is_stock_item": 1})
-		bundle_item = make_item(bundle_code, {"is_stock_item": 0})
+		make_item(child_code, {"is_stock_item": 1, "stock_uom": "Nos", "uom": "Nos"})
+		bundle_item = make_item(bundle_code, {"is_stock_item": 0, "stock_uom": "Nos", "uom": "Nos"})
 		bundle_item.reload()
 		for row in bundle_item.item_defaults:
 			if row.company == ctx.company:
@@ -153,6 +219,9 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 			update_stock=1,
 			warehouse=ctx.warehouse,
 			posting_date=nowdate(),
+			# pin the doc currency to the company's, else the bootstrap's INR
+			# "Standard Selling" price list leaks in (see test_two_bundle_lines)
+			currency=frappe.get_cached_value("Company", ctx.company, "default_currency"),
 			do_not_submit=True,
 		)
 		_assert_no_duplicate_packed_rows(si)
@@ -170,8 +239,8 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		ctx = _sales_invoice_bundle_context()
 		bundle_code, child_code = self._unique_codes()
 
-		make_item(child_code, {"is_stock_item": 1})
-		bundle_item = make_item(bundle_code, {"is_stock_item": 0})
+		make_item(child_code, {"is_stock_item": 1, "stock_uom": "Nos", "uom": "Nos"})
+		bundle_item = make_item(bundle_code, {"is_stock_item": 0, "stock_uom": "Nos", "uom": "Nos"})
 		bundle_item.reload()
 		for row in bundle_item.item_defaults:
 			if row.company == ctx.company:

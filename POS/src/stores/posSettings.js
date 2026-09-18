@@ -23,6 +23,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		disable_rounded_total: 1, // Disable rounding for accurate totals
 		allow_credit_sale: 0,
 		allow_customer_credit_payment: 0,
+		// Doctype new POS invoices are created in (from bootstrap pos_settings).
+		// POS Invoice is the server default; this fallback only applies before
+		// bootstrap answers, and matching the server avoids briefly enabling
+		// credit paths the POS Invoice mode does not support.
+		invoice_type: "POS Invoice",
 		allow_return: 0,
 		allow_write_off_change: 0,
 		allow_partial_payment: 0,
@@ -106,6 +111,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowCustomerCreditPayment = computed(() =>
 		Boolean(settings.value.allow_customer_credit_payment)
 	);
+	const isPosInvoiceMode = computed(() => settings.value.invoice_type === "POS Invoice");
 	const allowReturn = computed(() => Boolean(settings.value.allow_return));
 	const allowWriteOffChange = computed(() => Boolean(settings.value.allow_write_off_change));
 	const allowPartialPayment = computed(() => Boolean(settings.value.allow_partial_payment));
@@ -269,6 +275,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			disable_rounded_total: 1,
 			allow_credit_sale: 0,
 			allow_customer_credit_payment: 0,
+			invoice_type: "POS Invoice",
 			allow_return: 0,
 			allow_write_off_change: 0,
 			allow_partial_payment: 0,
@@ -389,6 +396,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		disableRoundedTotal,
 		allowCreditSale,
 		allowCustomerCreditPayment,
+		isPosInvoiceMode,
 		allowReturn,
 		allowWriteOffChange,
 		allowPartialPayment,

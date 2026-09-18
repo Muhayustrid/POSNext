@@ -78,7 +78,9 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 	)
 	return {
 		name: offlineId,
-		doctype: "Sales Invoice",
+		// The queued payload carries the doctype it was captured with; older
+		// queue entries predate POS Invoice mode and fall back to it.
+		doctype: raw.doctype || "POS Invoice",
 		is_offline: true,
 		pos_profile: raw.pos_profile,
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
@@ -556,6 +558,24 @@ export async function fetchServerPrintHTML(doctype, name, printFormat) {
 }
 
 /**
+ * Route already-built client-side HTML through the print transport — same
+ * contract as silentPrintDoc minus the server document: `kind` selects the
+ * print lane ("receipt" | "eod"), `logContext` identifies the print in
+ * POS Print Log (it carries no reference doc of its own for server formats).
+ */
+export async function silentPrintHTML(
+	html,
+	{ posProfile = null, kind = "receipt", logContext = {} } = {},
+) {
+	await ensureTransportInitialized(posProfile)
+	await transportPrint(html, {
+		kind,
+		logContext: { pos_profile: posProfile, ...logContext },
+	})
+	return true
+}
+
+/**
  * Fetch server-rendered print HTML for any doctype and route it through the
  * print transport. `posProfile` is optional — callers without one in scope
  * (e.g. EOD) pass nothing and the log context records a null profile.
@@ -605,6 +625,7 @@ export async function silentPrintInvoice(
 	invoiceName,
 	printFormat = null,
 	posProfile = null,
+	doctype = null,
 ) {
 	if (isLocalOnlyInvoiceName(invoiceName)) {
 		const doc = await hydrateLocalOnlyInvoice({ name: invoiceName })
@@ -616,11 +637,12 @@ export async function silentPrintInvoice(
 		)
 	}
 	const format = printFormat || DEFAULT_PRINT_FORMAT
+	const resolvedDoctype = doctype || "Sales Invoice"
 
 	await ensureTransportInitialized(posProfile)
 
 	const [htmlResult, docResult] = await Promise.allSettled([
-		fetchServerPrintHTML("Sales Invoice", invoiceName, format),
+		fetchServerPrintHTML(resolvedDoctype, invoiceName, format),
 		call("pos_next.api.invoices.get_invoice", { invoice_name: invoiceName }),
 	])
 	if (htmlResult.status === "rejected") throw htmlResult.reason
@@ -637,7 +659,7 @@ export async function silentPrintInvoice(
 			? buildCrewSlipHTML(invoiceDoc, { dots: effectiveReceiptDots() })
 			: null,
 		logContext: {
-			reference_doctype: "Sales Invoice",
+			reference_doctype: resolvedDoctype,
 			reference_name: invoiceName,
 			pos_profile: posProfile,
 		},
@@ -664,7 +686,7 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
 		// the doc we already hold. The driver drops it for single copies.
 		crewHTML: buildCrewSlipHTML(invoiceData, { dots }),
 		logContext: {
-			reference_doctype: "Sales Invoice",
+			reference_doctype: invoiceData?.doctype || "Sales Invoice",
 			reference_name: invoiceData?.name,
 			pos_profile: invoiceData?.pos_profile || null,
 		},
@@ -709,6 +731,7 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 			invoiceName,
 			printFormat,
 			invoiceData?.pos_profile || null,
+			invoiceData?.doctype || null,
 		)
 		return { method: "silent", success: true }
 	} catch (err) {

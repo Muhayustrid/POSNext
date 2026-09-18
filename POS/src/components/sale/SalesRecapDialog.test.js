@@ -1,79 +1,194 @@
-import { describe, expect, it, vi } from "vitest"
+/**
+ * @vitest-environment jsdom
+ *
+ * The Sales Recap dialog must expose a labelled Print button in its fixed
+ * footer. The recap itself lives in SessionSummary, whose own print control is
+ * an icon inside the scroll region — easy to miss and scrolled out of sight,
+ * which is exactly how the button came to be reported as missing.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { flushPromises, mount } from "@vue/test-utils"
 
-// Importing the SFC pulls in the frappe-ui/reka-ui barrels, which do not
-// resolve under vitest (same reason apiWrapper.test.js mocks them). Nothing
-// under test touches them; only recapPeriodRange is exercised.
-vi.mock("frappe-ui", () => ({
-	Button: { name: "Button", render: () => null },
-	Dialog: { name: "Dialog", render: () => null },
-	createResource: vi.fn(() => ({ reload: vi.fn() })),
-	call: vi.fn(),
+// The app installs __() as a global property; templates need it, and it must
+// exist before the component module is evaluated.
+vi.hoisted(() => {
+	globalThis.__ = (message, replacements = []) => {
+		if (!Array.isArray(replacements) || !replacements.length) return message
+		let out = message
+		for (const [i, v] of replacements.entries())
+			out = out.split(`{${i}}`).join(String(v))
+		return out
+	}
+})
+
+const resources = vi.hoisted(() => ({ instances: [] }))
+
+vi.mock("frappe-ui", async () => {
+	const { defineComponent, reactive } = await import("vue")
+	const Button = defineComponent({
+		name: "Button",
+		emits: ["click"],
+		template: `<button v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
+	})
+	const Dialog = defineComponent({
+		name: "Dialog",
+		props: {
+			modelValue: { type: Boolean, default: false },
+			options: { type: Object, default: () => ({}) },
+		},
+		template: `<div><slot name="body" /></div>`,
+	})
+	return {
+		Button,
+		Dialog,
+		createResource: (opts) => {
+			const reload = vi.fn(() => {
+				r.loading = true
+			})
+			const r = reactive({ loading: false, data: null, error: null, reload })
+			resources.instances.push({ url: opts.url, opts, resource: r })
+			return r
+		},
+	}
+})
+
+vi.mock("@/composables/useFormatters", () => ({
+	useFormatters: () => ({
+		formatDate: (d) => `D:${d}`,
+		formatTime: (t) => `T:${t}`,
+		formatDateTime: (d) => `DT:${d}`,
+	}),
 }))
-vi.mock("reka-ui", () => ({
-	DialogTitle: { name: "DialogTitle", render: () => null },
-}))
-vi.mock("@/composables/useToast", () => ({
-	useToast: () => ({ showSuccess: vi.fn(), showError: vi.fn() }),
-}))
+
 vi.mock("@/utils/currency", () => ({
 	DEFAULT_CURRENCY: "IDR",
-	formatCurrency: vi.fn(),
-}))
-vi.mock("@/utils/print/transport", () => ({
-	printHTML: vi.fn(),
+	formatCurrency: (amount, currency) => `${amount} ${currency}`,
 }))
 
-import { recapPeriodRange } from "./SalesRecapDialog.vue"
+vi.mock("reka-ui", () => ({
+	DialogTitle: { name: "DialogTitle", template: "<h2><slot /></h2>" },
+}))
 
-// new Date(2026, 8, 18) → September 18, 2026 (month is 0-based)
-const NOW = new Date(2026, 8, 18)
+const printMock = vi.hoisted(() => ({ printSalesRecap: vi.fn() }))
+vi.mock("@/utils/salesRecap", async (importOriginal) => ({
+	...(await importOriginal()),
+	printSalesRecap: printMock.printSalesRecap,
+}))
 
-describe("recapPeriodRange", () => {
-	it("returns today for both bounds on 'today'", () => {
-		expect(recapPeriodRange("today", NOW)).toEqual({
-			from: "2026-09-18",
-			to: "2026-09-18",
-		})
+import SalesRecapDialog from "./SalesRecapDialog.vue"
+
+// Shape mirrors the real get_session_summary payload the component renders.
+const SUMMARY = {
+	opening_shift: "POSA-OS-26-0000007",
+	pos_profile: "POS - PKU DELANGGU",
+	shift_name: null,
+	cashier: "Administrator",
+	company: "PT JUARA ROTI",
+	company_currency: "IDR",
+	cash_mode_of_payment: "Cash",
+	period_start_date: "2026-09-18 09:32:26",
+	generated_at: "2026-09-18 14:00:00",
+	status: "Open",
+	closing_time: null,
+	closing_source: null,
+	counted_invoices: 2,
+	invoice_count: 2,
+	sales_count: 2,
+	returns_count: 0,
+	gross_sales: 30000,
+	returns_total: 0,
+	net_sales: 30000,
+	net_total: 30000,
+	total_qty: 3,
+	average_sale: 15000,
+	credit_outstanding: 0,
+	currency_breakdown: [{ currency: "IDR", amount: 30000 }],
+	payments: [
+		{ mode_of_payment: "Cash PKU DELANGGU", amount: 30000, is_cash: true, configured: true },
+	],
+	opening_cash: 100000,
+	cash_collected: 30000,
+	cash_in_hand: 130000,
+	cash_expected: 130000,
+	expense: null,
+	expense_supported: false,
+	total_cash: 30000,
+	total_non_cash: 0,
+	methods_grand_total: 30000,
+	items: [{ item_code: "RP001", item_name: "Ropi Butter", qty: 3, base_net_amount: 30000 }],
+	packages: [],
+	items_shown: 1,
+	items_total_groups: 1,
+	items_truncated: false,
+	tax_total: 0,
+	total_tax: 0,
+	other_charges: [],
+	other_charges_total: 0,
+	categories: [{ category: "Roti", qty: 3, base_net_amount: 30000 }],
+	categories_shown: 1,
+	categories_total_groups: 1,
+	categories_truncated: false,
+	item_discount: 0,
+	total_discount: 0,
+}
+
+function findResource(urlPart) {
+	return resources.instances.find((i) => i.url.includes(urlPart))
+}
+
+async function mountOpen() {
+	const wrapper = mount(SalesRecapDialog, {
+		props: { modelValue: true, posProfile: "POS - PKU DELANGGU", openingShift: "POSA-OS-26-0000007" },
+		attachTo: document.body,
+		global: { config: { globalProperties: { __: globalThis.__ } } },
+	})
+	await flushPromises()
+	return wrapper
+}
+
+describe("SalesRecapDialog print control", () => {
+	beforeEach(() => {
+		resources.instances.length = 0
+		printMock.printSalesRecap.mockReset().mockResolvedValue(undefined)
 	})
 
-	it("returns yesterday's date for 'yesterday'", () => {
-		expect(recapPeriodRange("yesterday", NOW)).toEqual({
-			from: "2026-09-17",
-			to: "2026-09-17",
-		})
+	it("shows a labelled Print button in the fixed footer", async () => {
+		const wrapper = await mountOpen()
+		const footer = wrapper.find('[data-test="dialog-footer"]')
+		expect(footer.exists()).toBe(true)
+		expect(footer.text()).toContain("Print")
+		expect(footer.text()).toContain("Close")
 	})
 
-	it("spans the first of the month through today for 'this_month'", () => {
-		expect(recapPeriodRange("this_month", NOW)).toEqual({
-			from: "2026-09-01",
-			to: "2026-09-18",
-		})
+	it("prints the loaded recap through the shared EOD-style sheet", async () => {
+		const wrapper = await mountOpen()
+		const session = findResource("get_session_summary")
+		session.resource.data = SUMMARY
+		session.resource.loading = false
+		await flushPromises()
+
+		const printButton = wrapper
+			.findAll("button")
+			.find((b) => b.text().includes("Print"))
+		await printButton.trigger("click")
+		await flushPromises()
+
+		expect(printMock.printSalesRecap).toHaveBeenCalledTimes(1)
+		expect(printMock.printSalesRecap).toHaveBeenCalledWith(
+			SUMMARY,
+			expect.objectContaining({ posProfile: "POS - PKU DELANGGU" }),
+		)
 	})
 
-	it("spans the full previous month for 'last_month'", () => {
-		expect(recapPeriodRange("last_month", NOW)).toEqual({
-			from: "2026-08-01",
-			to: "2026-08-31",
-		})
-	})
-
-	it("clamps to February on a month boundary (non-leap year)", () => {
-		expect(recapPeriodRange("last_month", new Date(2026, 2, 31))).toEqual({
-			from: "2026-02-01",
-			to: "2026-02-28",
-		})
-	})
-
-	it("keeps February 29 on a leap year boundary", () => {
-		expect(recapPeriodRange("last_month", new Date(2024, 2, 31))).toEqual({
-			from: "2024-02-01",
-			to: "2024-02-29",
-		})
-	})
-
-	it("returns null for shift and custom (no fixed range)", () => {
-		expect(recapPeriodRange("shift", NOW)).toBeNull()
-		expect(recapPeriodRange("custom", NOW)).toBeNull()
-		expect(recapPeriodRange("anything", NOW)).toBeNull()
+	it("keeps the button disabled until a recap is loaded", async () => {
+		const wrapper = await mountOpen()
+		const printButton = wrapper
+			.findAll("button")
+			.find((b) => b.text().includes("Print"))
+		// no data yet -> disabled, and clicking must not reach the printer
+		expect(printButton.attributes("disabled")).toBeDefined()
+		await printButton.trigger("click")
+		await flushPromises()
+		expect(printMock.printSalesRecap).not.toHaveBeenCalled()
 	})
 })

@@ -21,6 +21,8 @@ def validate(doc, method=None):
 		doc: Sales Invoice document
 		method: Hook method name (unused)
 	"""
+	if doc.get("is_consolidated"):
+		return
 	apply_tax_inclusive(doc)
 	auto_assign_loyalty_program_on_invoice(doc)
 
@@ -119,6 +121,8 @@ def record_one_time_offer_usage(doc, method=None):
 	composite name ({customer}::{pricing_rule}) makes a duplicate insert raise
 	DuplicateEntryError, so it stays idempotent and race-safe.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	import json
 
 	if doc.get("is_return") or not doc.get("customer"):
@@ -154,6 +158,8 @@ def record_one_time_offer_usage(doc, method=None):
 
 def release_one_time_offer_usage(doc, method=None):
 	"""Release one-time redemptions on cancel so the customer can redeem again."""
+	if doc.get("is_consolidated"):
+		return
 	frappe.db.delete("One Time Customer Offer Usage", {"sales_invoice": doc.name})
 
 
@@ -166,6 +172,8 @@ def before_cancel(doc, method=None):
 		doc: Sales Invoice document
 		method: Hook method name (unused)
 	"""
+	if doc.get("is_consolidated"):
+		return
 	try:
 		from pos_next.api.credit_sales import cancel_credit_journal_entries
 

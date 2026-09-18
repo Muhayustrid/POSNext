@@ -230,6 +230,8 @@ def refund_code_required(pos_profile):
 
 def validate_invoice_discounts(doc, method=None):
 	"""Sales Invoice validate hook — the hard gate (draft save and submit)."""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.get("is_pos"):
 		return
 	if doc.get("is_return"):
@@ -246,6 +248,8 @@ def validate_invoice_discounts(doc, method=None):
 def record_code_usage_on_submit(doc, method=None):
 	"""Sales Invoice on_submit hook — re-check the code under a row lock and
 	stamp the usage audit fields on it."""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.get("is_pos"):
 		return
 	code_value = (doc.get("discount_confirmation_code") or "").strip().upper()

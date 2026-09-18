@@ -8,9 +8,13 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
+from erpnext.accounts.doctype.pos_invoice.pos_invoice import POSInvoice
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from frappe import _
 from frappe.utils import cint, flt
+
+from pos_next.invoice_type import is_pos_next_owned
 
 
 def _find_paid_bundle_row_for_free(si_doc, free_row):
@@ -279,3 +283,110 @@ class CustomSalesInvoice(SalesInvoice):
 
 			for pi in to_remove:
 				self.remove(pi)
+
+
+class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
+	"""POS Invoice lifecycle (ERPNext) + POS Next customizations.
+
+	MRO: CustomPOSInvoice -> CustomSalesInvoice -> POSInvoice -> SalesInvoice.
+	ERPNext's POS Invoice validate/on_submit win over SalesInvoice's; POS Next's
+	update_packing_list / use_serial_batch_fields handling is inherited.
+
+	Accounting parity: stock ledger and GL entries. Stocked-up ERPNext POS
+	Invoices post nothing until a POS Closing Entry consolidates them into a
+	Sales Invoice, which leaves Stock Balance and the ledger blind for the
+	whole day. POS Next wants a POS Invoice to move stock and books like a
+	Sales Invoice does, so its own invoices post those two steps here and are
+	never consolidated. Built-in ERPNext POS Invoices (no
+	posa_pos_opening_shift) keep the deferred behaviour.
+
+	The accounting steps are added ON TOP of POSInvoice.on_submit/on_cancel
+	rather than by calling SalesInvoice's: the Sales Invoice lifecycle is not
+	doctype-safe here (it drives TCS through the `tax_withholding_entries`
+	child table, which POS Invoice does not have), and ERPNext itself never
+	runs it for a POS Invoice.
+	"""
+
+	# The GL builders walk a few fields that only exist on Sales Invoice.
+	# These defaults mirror the Sales Invoice field defaults exactly, so a
+	# POS Invoice books the same entries it would as a Sales Invoice; they are
+	# in-memory only — no column is added, and nothing reads them back.
+	use_company_roundoff_cost_center = 0
+	update_outstanding_for_self = 1
+	is_consolidated = 0
+
+	def _post_parity_accounting(self):
+		"""Stock ledger + GL, the two steps a POS Invoice defers to closing."""
+		if self.update_stock == 1:
+			self.update_stock_ledger()
+		self.make_gl_entries()
+		if self.update_stock == 1:
+			self.repost_future_sle_and_gle()
+
+	def on_submit(self):
+		if not is_pos_next_owned(self):
+			return super().on_submit()
+
+		# POS Invoice's own tail (loyalty, coupon counts, serial/batch bundles,
+		# unallocated-mode cleanup, status), then the deferred accounting.
+		POSInvoice.on_submit(self)
+		self._post_parity_accounting()
+
+	def on_cancel(self):
+		if not is_pos_next_owned(self):
+			return super().on_cancel()
+
+		# Reverse accounting while the serial/batch bundles are still linked:
+		# POSInvoice.on_cancel delinks them, which would leave the reversal
+		# without the bundle it has to reverse.
+		if self.update_stock == 1:
+			self.update_stock_ledger()
+		self.make_gl_entries_on_cancel()
+		if self.update_stock == 1:
+			self.repost_future_sle_and_gle()
+		POSInvoice.on_cancel(self)
+
+		# POSInvoice.on_cancel overwrites ignore_linked_doctypes with its narrow
+		# two-entry list. A parity POS Invoice OWNS the GL/SLE rows that carry
+		# its name, so Frappe's back-link check (which runs right after
+		# on_cancel) must treat them as its own books, not foreign links —
+		# hence the same list Sales Invoice uses. Assigned last, on purpose.
+		self.ignore_linked_doctypes = (
+			"GL Entry",
+			"Stock Ledger Entry",
+			"Repost Item Valuation",
+			"Repost Payment Ledger",
+			"Repost Payment Ledger Items",
+			"Repost Accounting Ledger",
+			"Repost Accounting Ledger Items",
+			"Unreconcile Payment",
+			"Unreconcile Payment Entries",
+			"Payment Ledger Entry",
+			"Serial and Batch Bundle",
+			"Tax Withholding Entry",
+		)
+
+	def validate_pos_opening_entry(self):
+		if is_pos_next_owned(self):
+			shift = frappe.db.get_value(
+				"POS Opening Shift",
+				self.posa_pos_opening_shift,
+				("name", "pos_profile", "status"),
+				as_dict=True,
+			)
+			if not shift or shift.status != "Open":
+				frappe.throw(
+					_("POS Opening Shift {0} is not open.").format(
+						frappe.bold(self.posa_pos_opening_shift)
+					)
+				)
+			if shift.pos_profile != self.pos_profile:
+				frappe.throw(
+					_("POS Opening Shift {0} belongs to POS Profile {1}, not {2}.").format(
+						frappe.bold(self.posa_pos_opening_shift),
+						frappe.bold(shift.pos_profile),
+						frappe.bold(self.pos_profile),
+					)
+				)
+			return
+		super().validate_pos_opening_entry()

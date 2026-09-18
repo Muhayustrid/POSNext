@@ -75,25 +75,29 @@ class OfflineInvoiceSync(Document):
 		    offline_id: The offline ID to check
 
 		Returns:
-		    dict with 'synced' (bool), 'sales_invoice' (str or None), and 'status' (str or None)
+		    dict with 'synced' (bool), 'sales_invoice'/'pos_invoice' (str or None),
+		    and 'status' (str or None)
 		"""
 		if not offline_id:
-			return {"synced": False, "sales_invoice": None, "status": None}
+			return {"synced": False, "sales_invoice": None, "pos_invoice": None, "status": None}
 
 		existing = frappe.db.get_value(
 			"Offline Invoice Sync",
 			{"offline_id": offline_id},
-			["name", "sales_invoice", "status"],
+			["name", "sales_invoice", "pos_invoice", "status"],
 			as_dict=True,
 		)
 
 		if existing:
-			# Only consider it synced if status is "Synced" and has a sales_invoice
-			is_synced = existing.status == "Synced" and existing.sales_invoice
+			# Only consider it synced if status is "Synced" with an invoice in
+			# either column (POS Invoice mode writes pos_invoice, not sales_invoice)
+			has_invoice = existing.sales_invoice or existing.pos_invoice
+			is_synced = existing.status == "Synced" and has_invoice
 			return {
-				"synced": is_synced,
+				"synced": bool(is_synced),
 				"sales_invoice": existing.sales_invoice if is_synced else None,
+				"pos_invoice": existing.pos_invoice if is_synced else None,
 				"status": existing.status,
 			}
 
-		return {"synced": False, "sales_invoice": None, "status": None}
+		return {"synced": False, "sales_invoice": None, "pos_invoice": None, "status": None}

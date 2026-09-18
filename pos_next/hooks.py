@@ -139,7 +139,10 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 # ---------------
 # Override standard doctype classes
 
-override_doctype_class = {"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"}
+override_doctype_class = {
+	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice",
+	"POS Invoice": "pos_next.overrides.sales_invoice.CustomPOSInvoice",
+}
 
 # Document Events
 # ---------------
@@ -204,10 +207,16 @@ doc_events = {
 	"Quotation": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"Delivery Note": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 	"POS Invoice": {
-		"validate": [
-			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
-			"pos_next.shift_schedule.validate_invoice",
-		]
+		"validate": "pos_next.pos_invoice_events.validate",
+		"before_cancel": "pos_next.pos_invoice_events.before_cancel",
+		"on_submit": "pos_next.pos_invoice_events.on_submit",
+		"on_cancel": "pos_next.pos_invoice_events.on_cancel",
+		"after_insert": "pos_next.pos_invoice_events.after_insert",
+	},
+	"POS Invoice Merge Log": {
+		# Parity POS Invoices already posted their own GL/stock at submit;
+		# consolidating them would double-post. Built-in-POS rows unaffected.
+		"before_validate": "pos_next.invoice_type.guard_against_retroactive_consolidation",
 	},
 }
 

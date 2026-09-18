@@ -266,6 +266,8 @@ def validate_invoice(doc, method=None):
 	the deadline is rejected (fail-closed). `posa_pos_opening_shift` edits by
 	the client are neutralized via _gate_shifts.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if doc.docstatus != 1:
 		return
 	shift = doc.get("posa_pos_opening_shift") or doc.get("pos_opening_shift")

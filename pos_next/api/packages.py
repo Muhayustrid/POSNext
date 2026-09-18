@@ -536,6 +536,8 @@ def validate_invoice_packages(doc, method=None):
 	rates come from here, never from the payload — so an edited offline queue or a
 	crafted request cannot change what a package costs.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if doc.get("is_return"):
 		_validate_return_packages(doc)
 		return

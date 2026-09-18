@@ -16,6 +16,8 @@ def validate_wallet_payment(doc, method=None):
 	Validate wallet payment on Sales Invoice.
 	Called during validate hook.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.is_pos:
 		return
 
@@ -43,6 +45,8 @@ def process_loyalty_to_wallet(doc, method=None):
 	Convert earned loyalty points to wallet balance after invoice submission.
 	Called during on_submit hook.
 	"""
+	if doc.get("is_consolidated"):
+		return
 	if not doc.is_pos or doc.is_return:
 		return
 
@@ -81,7 +85,7 @@ def process_loyalty_to_wallet(doc, method=None):
 	# Get the loyalty points earned from this invoice
 	loyalty_entry = frappe.db.get_value(
 		"Loyalty Point Entry",
-		{"invoice_type": "Sales Invoice", "invoice": doc.name, "loyalty_points": [">", 0]},
+		{"invoice_type": doc.doctype, "invoice": doc.name, "loyalty_points": [">", 0]},
 		["loyalty_points", "name"],
 		as_dict=True,
 	)

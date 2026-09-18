@@ -57,6 +57,7 @@
 					<SessionSummary
 						v-if="activeTab === 'summary'"
 						:opening-shift="posOpeningShift"
+						:pos-profile="posProfile"
 					/>
 
 					<template v-if="activeTab === 'transactions'">

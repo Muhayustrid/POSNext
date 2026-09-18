@@ -6,7 +6,6 @@ from decimal import ROUND_HALF_UP, Decimal
 import frappe
 from frappe.query_builder import DocType
 from frappe.utils import flt
-from pypika import Order
 from pypika.functions import Sum
 
 _TAX_KEYWORDS = ("PPN", "TAX", "VAT", "PAJAK")
@@ -66,32 +65,53 @@ def _get_pos_invoice_parent_targets(pos_invoices: set[str]) -> set[tuple[str, st
 
 
 def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]:
+	"""Items sold, read from each target's OWN child table.
+
+	POS Invoice rows live in `POS Invoice Item` and Sales Invoice rows in
+	`Sales Invoice Item`; querying one table for both silently returns nothing
+	for the other doctype (the EOD "items sold" section would come out empty).
+	"""
 	if not parent_targets:
 		return []
 
-	sales_invoice_item = DocType("Sales Invoice Item")
-	amount_sum = Sum(sales_invoice_item.amount)
-	qty_sum = Sum(sales_invoice_item.qty)
+	items: list[dict] = []
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		targets = sorted(t for t in parent_targets if t[1] == doctype)
+		if not targets:
+			continue
 
-	condition = None
-	for parent, parenttype in sorted(parent_targets):
-		current = (sales_invoice_item.parent == parent) & (sales_invoice_item.parenttype == parenttype)
-		condition = current if condition is None else (condition | current)
+		child = DocType(f"{doctype} Item")
+		amount_sum = Sum(child.amount)
+		qty_sum = Sum(child.qty)
 
-	query = (
-		frappe.qb.from_(sales_invoice_item)
-		.select(
-			sales_invoice_item.item_code,
-			sales_invoice_item.item_name,
-			qty_sum.as_("qty"),
-			amount_sum.as_("amount"),
+		condition = None
+		for parent, _parenttype in targets:
+			current = child.parent == parent
+			condition = current if condition is None else (condition | current)
+
+		rows = (
+			frappe.qb.from_(child)
+			.select(
+				child.item_code,
+				child.item_name,
+				qty_sum.as_("qty"),
+				amount_sum.as_("amount"),
+			)
+			.where(condition)
+			.groupby(child.item_code, child.item_name)
+			.run(as_dict=True)
 		)
-		.where(condition)
-		.groupby(sales_invoice_item.item_code, sales_invoice_item.item_name)
-		.orderby(amount_sum, order=Order.desc)
-	)
+		items.extend(rows)
 
-	return query.run(as_dict=True)
+	# one row per item across both doctypes
+	merged: dict[tuple[str, str], dict] = {}
+	for row in items:
+		key = (row.get("item_code"), row.get("item_name"))
+		bucket = merged.setdefault(key, {"item_code": key[0], "item_name": key[1], "qty": 0.0, "amount": 0.0})
+		bucket["qty"] += flt(row.get("qty"))
+		bucket["amount"] += flt(row.get("amount"))
+
+	return sorted(merged.values(), key=lambda r: r["amount"], reverse=True)
 
 
 def get_items_sold(doc) -> list[dict]:
@@ -131,26 +151,35 @@ def _fetch_discount_for_targets(parent_targets: set[tuple[str, str]]) -> float:
 	if not parent_targets:
 		return 0.0
 
-	sales_invoice_item = DocType("Sales Invoice Item")
-	discount_sum = Sum((sales_invoice_item.price_list_rate - sales_invoice_item.rate) * sales_invoice_item.qty)
-	row = (
-		frappe.qb.from_(sales_invoice_item)
-		.select(discount_sum.as_("discount"))
-		.where(_build_condition(sales_invoice_item, parent_targets))
-		.run(as_dict=True)
-	)
-	item_discount = flt(row[0].get("discount")) if row else 0.0
+	# item-level discount, summed over each target's own child table
+	item_discount = 0.0
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		targets = {t for t in parent_targets if t[1] == doctype}
+		if not targets:
+			continue
+		child = DocType(f"{doctype} Item")
+		discount_sum = Sum((child.price_list_rate - child.rate) * child.qty)
+		row = (
+			frappe.qb.from_(child)
+			.select(discount_sum.as_("discount"))
+			.where(_build_condition(child, targets))
+			.run(as_dict=True)
+		)
+		item_discount += flt(row[0].get("discount")) if row else 0.0
 
-	invoices = [parent for parent, parenttype in parent_targets if parenttype == "Sales Invoice"]
+	# invoice-level discount
 	invoice_discount = 0.0
-	if invoices:
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		invoices = [parent for parent, parenttype in parent_targets if parenttype == doctype]
+		if not invoices:
+			continue
 		rows = frappe.get_all(
-			"Sales Invoice",
+			doctype,
 			filters={"name": ["in", invoices]},
 			fields=["discount_amount"],
 			limit_page_length=0,
 		)
-		invoice_discount = sum(flt(row.get("discount_amount")) for row in rows)
+		invoice_discount += sum(flt(row.get("discount_amount")) for row in rows)
 
 	return flt(item_discount + invoice_discount, 2)
 
@@ -159,23 +188,27 @@ def _fetch_grouped_items_for_targets(parent_targets: set[tuple[str, str]]) -> li
 	if not parent_targets:
 		return []
 
-	sales_invoice_item = DocType("Sales Invoice Item")
-	amount_sum = Sum(sales_invoice_item.amount)
-	qty_sum = Sum(sales_invoice_item.qty)
-
-	return (
-		frappe.qb.from_(sales_invoice_item)
-		.select(
-			sales_invoice_item.item_group,
-			sales_invoice_item.item_code,
-			sales_invoice_item.item_name,
-			qty_sum.as_("qty"),
-			amount_sum.as_("amount"),
+	rows: list[dict] = []
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		targets = {t for t in parent_targets if t[1] == doctype}
+		if not targets:
+			continue
+		child = DocType(f"{doctype} Item")
+		rows.extend(
+			frappe.qb.from_(child)
+			.select(
+				child.item_group,
+				child.item_code,
+				child.item_name,
+				Sum(child.qty).as_("qty"),
+				Sum(child.amount).as_("amount"),
+			)
+			.where(_build_condition(child, targets))
+			.groupby(child.item_group, child.item_code, child.item_name)
+			.run(as_dict=True)
 		)
-		.where(_build_condition(sales_invoice_item, parent_targets))
-		.groupby(sales_invoice_item.item_group, sales_invoice_item.item_code, sales_invoice_item.item_name)
-		.run(as_dict=True)
-	)
+
+	return rows
 
 
 def _collect_categories(rows: list[dict]) -> list[dict]:

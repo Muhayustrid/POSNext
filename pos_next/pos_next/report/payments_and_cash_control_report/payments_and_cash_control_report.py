@@ -240,7 +240,7 @@ def _get_transaction_counts(data):
 		f"""
 		SELECT
 			sir.parent as shift,
-			COUNT(DISTINCT sir.sales_invoice) as cnt
+			COUNT(DISTINCT COALESCE(NULLIF(sir.sales_invoice, ''), sir.pos_invoice)) as cnt
 		FROM `tabSales Invoice Reference` sir
 		WHERE sir.parenttype = 'POS Closing Shift'
 		AND sir.parent IN ({placeholders})

@@ -6,8 +6,10 @@
 One read-only whitelisted endpoint feeding the "HQ Sales Monitoring" desk page.
 All metrics come from the same POS sales dataset:
 
-- Sales Invoice, ``docstatus = 1``, ``is_pos = 1`` — POS transactions only,
-  never the non-POS ledger.
+- POS Invoices plus legacy Sales Invoices (``docstatus = 1``, ``is_pos = 1``,
+  Sales Invoice side excluding ``is_consolidated`` — those duplicate the POS
+  Invoices already in the union) — POS transactions only, never the non-POS
+  ledger.
 - Money is summed in company/base currency (``base_*`` fields). Companies with
   different base currencies are NEVER raw-summed: every monetary metric is
   returned as ``{by_currency: {...}, default_currency, default}``.
@@ -57,6 +59,7 @@ from pos_next.hq_scope import (
 	get_permitted_pos_profiles,
 	resolve_company_scope,
 )
+from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
 HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "Nexus POS Manager")
 
@@ -347,6 +350,18 @@ def _si_window_where(companies, profiles, start, end, cutoff=None, alias="si"):
 	return " AND ".join(where), params
 
 
+def _invoice_from():
+	"""Invoice source for ``si`` aliases: report doctypes UNION ALL with the
+	columns this module reads; legacy consolidated SIs are dropped inside the
+	union (each one duplicates POS Invoices already present)."""
+	return sales_invoice_union(
+		"si.name, si.docstatus, si.is_pos, si.is_return, si.company, si.posting_date,"
+		" si.posting_time, si.pos_profile, si.base_grand_total, si.base_net_total,"
+		" si.base_total_taxes_and_charges",
+		where="si.docstatus = 1 AND si.is_pos = 1",
+	)
+
+
 def _totals_rows(where, params):
 	return frappe.db.sql(
 		f"""
@@ -359,7 +374,7 @@ def _totals_rows(where, params):
 			SUM(si.base_total_taxes_and_charges) AS taxes,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders,
 			COUNT(CASE WHEN si.is_return = 1 THEN 1 END) AS refund_orders
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE {where}
 		GROUP BY si.company
 		""",
@@ -484,7 +499,7 @@ def _hours_section(where, params):
 			HOUR(si.posting_time) AS hour,
 			SUM(si.base_grand_total) AS net_sales,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE {where}
 		GROUP BY HOUR(si.posting_time)
 		ORDER BY hour
@@ -507,16 +522,20 @@ def _hours_section(where, params):
 	return {"rows": rows, "peak": top[0] if top else None, "top": top, "lowest": lowest}
 
 
-_ITEM_FROM = """
-	FROM `tabSales Invoice Item` sii
-	INNER JOIN `tabSales Invoice` si ON si.name = sii.parent
-	WHERE {where}
-	  AND (sii.pos_package_role IS NULL OR sii.pos_package_role <> '{component}')
-"""
-
-
 def _item_from(where):
-	return _ITEM_FROM.format(where=where, component=COMPONENT_ROLE)
+	# ponytail: the item union is joined to the invoice union through derived
+	# tables (no indexes across them) — fine at POS volumes; push branches
+	# into a real view if EXPLAIN ever disagrees.
+	return f"""
+	FROM {sales_invoice_item_union(
+		"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
+		" sii.base_net_amount, sii.pos_package_role",
+		where="si.docstatus = 1 AND si.is_pos = 1",
+	)}
+	INNER JOIN {_invoice_from()} ON si.name = sii.parent
+	WHERE {where}
+	  AND (sii.pos_package_role IS NULL OR sii.pos_package_role <> '{COMPONENT_ROLE}')
+"""
 
 
 def _favorite_product(where, params):
@@ -737,7 +756,7 @@ def _outlet_ranking(where, params, currency_map):
 			SUM(CASE WHEN si.is_return = 0 THEN si.base_grand_total ELSE 0 END) AS gross,
 			SUM(si.base_grand_total) AS net_tax_incl,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE {where}
 		GROUP BY si.company
 		ORDER BY net_tax_incl DESC
@@ -754,7 +773,7 @@ def _outlet_ranking(where, params, currency_map):
 			si.pos_profile,
 			SUM(si.base_grand_total) AS net_tax_incl,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM `tabSales Invoice` si
+		FROM {_invoice_from()}
 		WHERE {where}
 		GROUP BY si.company, si.pos_profile
 		ORDER BY net_tax_incl DESC

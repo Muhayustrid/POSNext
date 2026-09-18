@@ -5,6 +5,27 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
+
+# pos_transactions stores the invoice in `sales_invoice` (legacy) or
+# `pos_invoice` (POS Invoice mode) — resolve either to a name.
+_SIR_INVOICE = "COALESCE(NULLIF(sir.sales_invoice, ''), sir.pos_invoice)"
+
+
+def _sold_items_from():
+	"""Sold-items source: per-doctype invoice item tables (POS Invoice Item +
+	Sales Invoice Item) UNION ALL, each pre-joined to its invoice for the base
+	filters, then joined to the invoice union so the dynamic conditions (and
+	the shift EXISTS) keep their ``si.`` aliases."""
+	return f"""{sales_invoice_item_union(
+			"sii.parent, sii.item_code, sii.item_name, sii.qty, sii.amount, sii.rate",
+			where="si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0",
+		)}
+		INNER JOIN {sales_invoice_union(
+			"si.name, si.docstatus, si.is_pos, si.is_return, si.posting_date, si.pos_profile",
+			where="si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0",
+		)} ON si.name = sii.parent"""
+
 
 def execute(filters=None):
 	columns = get_columns()
@@ -83,15 +104,11 @@ def get_data(filters):
 			AVG(sii.rate) as avg_selling_rate,
 			i.min_order_qty as reorder_level
 		FROM
-			`tabSales Invoice Item` sii
-		INNER JOIN
-			`tabSales Invoice` si ON si.name = sii.parent
+			{_sold_items_from()}
 		INNER JOIN
 			`tabItem` i ON i.name = sii.item_code
 		WHERE
-			si.docstatus = 1
-			AND si.is_pos = 1
-			AND si.is_return = 0
+			1=1
 			{conditions}
 		GROUP BY
 			sii.item_code
@@ -287,10 +304,10 @@ def get_conditions(filters):
 		conditions.append("si.pos_profile = %(pos_profile)s")
 
 	if filters.get("shift"):
-		conditions.append("""
+		conditions.append(f"""
 			EXISTS (
 				SELECT 1 FROM `tabSales Invoice Reference` sir
-				WHERE sir.sales_invoice = si.name
+				WHERE {_SIR_INVOICE} = si.name
 				AND sir.parent = %(shift)s
 				AND sir.parenttype = 'POS Closing Shift'
 			)

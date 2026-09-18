@@ -7,6 +7,7 @@
  "field_order": [
   "offline_id",
   "sales_invoice",
+  "pos_invoice",
   "status",
   "column_break_1",
   "pos_profile",
@@ -31,6 +32,13 @@
    "in_standard_filter": 1,
    "label": "Sales Invoice",
    "options": "Sales Invoice"
+  },
+  {
+   "fieldname": "pos_invoice",
+   "fieldtype": "Link",
+   "label": "POS Invoice",
+   "options": "POS Invoice",
+   "read_only": 1
   },
   {
    "default": "Synced",

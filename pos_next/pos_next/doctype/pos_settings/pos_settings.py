@@ -5,10 +5,15 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
+from pos_next.invoice_type import get_pos_invoice_doctype, validate_invoice_type_change
+
 
 class POSSettings(Document):
 	def validate(self):
 		"""Validate POS Settings"""
+		# invoice_type is global: every row must agree, and switching it is
+		# gated (no open shifts, no pending offline invoices).
+		validate_invoice_type_change(self)
 		# Guard against None values and validate discount percentage
 		max_discount = flt(self.max_discount_allowed)
 		if max_discount < 0 or max_discount > 100:
@@ -36,6 +41,22 @@ class POSSettings(Document):
 	def on_update(self):
 		"""Sync allow_negative_stock with Stock Settings"""
 		self.sync_negative_stock_setting()
+		self.sync_invoice_type()
+
+	def sync_invoice_type(self):
+		"""Keep the global invoice_type identical on every POS Settings row.
+
+		db.set_value skips controller hooks, so this cannot recurse; the
+		validate gate (validate_invoice_type_change) already ran for the
+		row the user actually saved.
+		"""
+		frappe.db.set_value(
+			"POS Settings",
+			{"name": ["!=", self.name]},
+			"invoice_type",
+			self.invoice_type,
+			update_modified=False,
+		)
 
 	def sync_negative_stock_setting(self):
 		"""
@@ -119,6 +140,11 @@ def get_pos_settings(pos_profile):
 	# Mirror the bootstrap preload feed so both feeds agree; the UI treats a
 	# missing key as disabled.
 	settings["queue_enabled"] = bool(settings.get("enable_pos_queue"))
+
+	# Mirror the bootstrap preload feed: doctype new POS invoices are created
+	# in ("Sales Invoice"/"POS Invoice"), so the non-bootstrap fallback feed
+	# shows the same mode.
+	settings["invoice_type"] = get_pos_invoice_doctype()
 
 	return settings
 

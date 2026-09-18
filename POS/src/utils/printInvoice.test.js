@@ -302,3 +302,22 @@ describe("crew slip (copy 2 when the profile prints two copies)", () => {
 		expect(transport.printHTML.mock.calls[1][1].kind).toBe("receipt")
 	})
 })
+
+describe("printWithSilentFallback (doctype passthrough, POS Invoice mode)", () => {
+	it("fetches server print HTML under the row's own doctype", async () => {
+		await printWithSilentFallback({ ...doc, doctype: "POS Invoice" })
+		expect(call).toHaveBeenCalledWith(
+			"frappe.www.printview.get_html_and_style",
+			expect.objectContaining({ doc: "POS Invoice", name: "SINV-1" }),
+		)
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				logContext: expect.objectContaining({
+					reference_doctype: "POS Invoice",
+					reference_name: "SINV-1",
+				}),
+			}),
+		)
+	})
+})
