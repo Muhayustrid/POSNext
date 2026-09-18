@@ -55,6 +55,31 @@
 				</div>
 			</div>
 
+			<!-- One-time migration banner: layout knobs this till saved locally
+				before print settings were centralized on the server. -->
+			<div
+				v-if="legacyDeviceLayout"
+				class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+			>
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<p>
+						{{
+							__(
+								"These print settings were saved on this device before print settings were centralized — re-apply them below if still wanted: {0}",
+								[legacyDeviceLayout],
+							)
+						}}
+					</p>
+					<Button
+						variant="ghost"
+						size="sm"
+						@click="legacyDeviceLayout = ''"
+					>
+						{{ __("Dismiss") }}
+					</Button>
+				</div>
+			</div>
+
 			<!-- Status card -->
 			<div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
 				<div class="mb-3 flex items-center justify-between">
@@ -136,7 +161,8 @@
 				</p>
 			</div>
 
-			<!-- Device card: the physical, global half — shared by both lanes. -->
+			<!-- Device card: only the printer address — a device attachment.
+				Layout knobs live on the server (sections below). -->
 			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
 				<h2 class="text-sm font-semibold text-gray-900">
 					{{ __("Device") }}
@@ -144,7 +170,7 @@
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Stored in this device's localStorage. Applied on the next print — no page format call is made when saving.",
+							"Only the printer address lives on this device; the print layout is saved on the server for the POS Profile.",
 						)
 					}}
 				</p>
@@ -163,7 +189,36 @@
 							{{ __("Hostname or IP for the iMin service. Port is fixed to 8081.") }}
 						</p>
 					</div>
+				</div>
 
+				<div class="mt-4 flex items-center gap-2">
+					<Button
+						variant="solid"
+						:loading="savingDevice"
+						@click="onSaveDeviceConfig"
+					>
+						{{ __("Save") }}
+					</Button>
+					<Button variant="ghost" @click="resetDeviceConfig">
+						{{ __("Reset") }}
+					</Button>
+				</div>
+			</div>
+
+			<!-- Sales receipt lane: its own knobs, save, test print and preview. -->
+			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
+				<h2 class="text-sm font-semibold text-gray-900">
+					{{ __("Struk Penjualan") }}
+				</h2>
+				<p class="mt-1 text-xs text-gray-500">
+					{{
+						__(
+							"Layout of the sales receipt and its crew copy, saved on the server for the POS Profile. Applies to the next print.",
+						)
+					}}
+				</p>
+
+				<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-paper">
 							{{ __("Paper") }}
@@ -200,36 +255,7 @@
 							:label="__('Cut paper after print (partial cut)')"
 						/>
 					</div>
-				</div>
 
-				<div class="mt-4 flex items-center gap-2">
-					<Button
-						variant="solid"
-						:loading="savingDevice"
-						@click="onSaveDeviceConfig"
-					>
-						{{ __("Save") }}
-					</Button>
-					<Button variant="ghost" @click="resetDeviceConfig">
-						{{ __("Reset") }}
-					</Button>
-				</div>
-			</div>
-
-			<!-- Sales receipt lane: its own knobs, save, test print and preview. -->
-			<div class="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
-				<h2 class="text-sm font-semibold text-gray-900">
-					{{ __("Struk Penjualan") }}
-				</h2>
-				<p class="mt-1 text-xs text-gray-500">
-					{{
-						__(
-							"Layout of the sales receipt and its crew copy. Stored on this device too; an empty field uses the server value.",
-						)
-					}}
-				</p>
-
-				<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-copies">
 							{{ __("Copies per transaction") }}
@@ -602,7 +628,7 @@
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Layout of the closing (end of day) report print. Same device storage; an empty field uses the server value.",
+							"Layout of the closing (end of day) report print, saved on the server for the POS Profile.",
 						)
 					}}
 				</p>
@@ -966,9 +992,13 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import { useRoute } from "vue-router"
 
 import { useToast } from "@/composables/useToast"
-import { call } from "@/utils/apiWrapper"
+import { call, serverErrorMessage } from "@/utils/apiWrapper"
 import { buildCrewSlipHTML } from "@/utils/print/crew_slip"
-import { loadDeviceConfig, saveDeviceConfig } from "@/utils/print/imin_client"
+import {
+	loadDeviceConfig,
+	saveDeviceConfig,
+	stripDeviceLayoutKeys,
+} from "@/utils/print/imin_client"
 import { PAPER_PROFILES } from "@/utils/print/paper"
 import { buildReceiptPreviewSet } from "@/utils/print/receipt_preview"
 import {
@@ -1013,6 +1043,23 @@ try {
 	buildLabel = ""
 }
 const bootstrap = useBootstrapStore()
+
+// One-time migration: layout knobs an older build saved into this device's
+// localStorage. Captured (as a readable summary) and stripped from localStorage
+// on mount; the banner stays up until dismissed so the operator can re-apply
+// them through the server-backed forms below.
+const legacyDeviceLayout = ref("")
+
+function captureLegacyDeviceConfig() {
+	const stored = loadDeviceConfig() || {}
+	const summary = Object.keys(stored)
+		.filter((k) => k !== "host" && k !== "_v")
+		.map((k) => `${k}: ${String(stored[k])}`)
+		.join(", ")
+	if (!summary) return
+	legacyDeviceLayout.value = summary
+	stripDeviceLayoutKeys()
+}
 
 const currentDriver = ref(null)
 const statusOk = ref(false)
@@ -1090,8 +1137,12 @@ const eodLineSpacingText = ref("100")
 const eodSideMarginDotsText = ref("16")
 const eodTopMarginDotsText = ref("0")
 
-function readDeviceIntoForm(stored) {
+function readHostIntoForm() {
+	const stored = loadDeviceConfig() || {}
 	cfg.host = typeof stored.host === "string" ? stored.host : ""
+}
+
+function readPaperIntoForm(stored) {
 	const p = stored.paper
 	cfg.paper = p === "58mm" || p === "80mm" || p === "custom" ? p : "58mm"
 	cfg.cut = Boolean(stored.cut)
@@ -1171,29 +1222,31 @@ function readEodIntoForm(stored) {
 		tm === undefined || tm === "" || tm === null ? "0" : String(tm)
 }
 
-function readCfgIntoForm() {
-	const stored = loadDeviceConfig() || {}
-	readDeviceIntoForm(stored)
+/** Seed every server-backed knob (paper/cut included) from the transport. */
+function readServerIntoForm() {
+	const stored = serverConfigFromTransport()
+	readPaperIntoForm(stored)
 	readReceiptIntoForm(stored)
 	readEodIntoForm(stored)
 }
 
 function resetDeviceConfig() {
-	readDeviceIntoForm(loadDeviceConfig() || {})
-	refreshEffectiveConfig()
+	readHostIntoForm()
 	showInfo(__("Device config reloaded from this browser."))
 }
 
 function resetReceiptConfig() {
-	readReceiptIntoForm(loadDeviceConfig() || {})
+	const stored = serverConfigFromTransport()
+	readPaperIntoForm(stored)
+	readReceiptIntoForm(stored)
 	refreshEffectiveConfig()
-	showInfo(__("Device config reloaded from this browser."))
+	showInfo(__("Print config reloaded from the server."))
 }
 
 function resetEodConfig() {
-	readEodIntoForm(loadDeviceConfig() || {})
+	readEodIntoForm(serverConfigFromTransport())
 	refreshEffectiveConfig()
-	showInfo(__("Device config reloaded from this browser."))
+	showInfo(__("Print config reloaded from the server."))
 }
 
 function transportSnapshot() {
@@ -1236,34 +1289,41 @@ async function pollStatus() {
 
 let timer = null
 
+/**
+ * Same profile source the page's config load uses: a `profile` query param
+ * (Desk's EOD entry point pins it) else the signed-in user's preloaded profile.
+ * Null is a supported caller state — the server throws its own clear error.
+ */
+function contextPosProfile() {
+	if (typeof route.query.profile === "string" && route.query.profile) {
+		return route.query.profile
+	}
+	return bootstrap.getPreloadedPOSProfile()?.name || null
+}
+
+/** Apply the endpoint's returned config to the transport and the page. */
+async function savePrintConfigToServer(config) {
+	await call("pos_next.api.printing.update_print_config", {
+		pos_profile: contextPosProfile(),
+		config,
+	})
+	// Direct refetch — printInvoice's ensureTransportInitialized is
+	// once-per-session, so a save must call initTransportFromServer itself
+	// (same pattern as the settings dialog) or the next print would reuse the
+	// pre-save values until a reload.
+	await initTransportFromServer(contextPosProfile())
+	transportSnapshot()
+	refreshEffectiveConfig()
+	await fetchLogs()
+}
+
 function onSaveDeviceConfig() {
 	savingDevice.value = true
 	try {
-		const host = (cfg.host || "").trim()
-		const paper = cfg.paper
-		let customDots = undefined
-		if (paper === "custom") {
-			const n = Number(customDotsText.value)
-			if (!Number.isFinite(n))
-				throw new Error(__("Custom dots must be a number."))
-			customDots = n
-		}
-		if (
-			paper === "custom" &&
-			(customDots == null || String(customDots).trim() === "")
-		) {
-			throw new Error(__("Custom dots is required when paper is custom."))
-		}
-		saveDeviceConfig({
-			host: host || undefined,
-			paper,
-			customDots,
-			cut: Boolean(cfg.cut),
-		})
-		// Do not call setPageFormat directly — imin_client applies it on next print.
-		showSuccess(__("Device config saved. It will apply on the next print."))
-		transportSnapshot()
-		refreshEffectiveConfig()
+		// The host is a device attachment; it is the only thing still saved
+		// here. Layout knobs go to the server (update_print_config below).
+		saveDeviceConfig({ host: (cfg.host || "").trim() || undefined })
+		showSuccess(__("Printer host saved to this device."))
 	} catch (e) {
 		showError(e?.message || String(e))
 	} finally {
@@ -1271,12 +1331,22 @@ function onSaveDeviceConfig() {
 	}
 }
 
-function onSaveReceiptConfig() {
+async function onSaveReceiptConfig() {
 	savingReceipt.value = true
 	try {
 		// Parse BEFORE writing anything: a non-numeric delay used to silently
 		// save as 0, which disabled the tear-off pause entirely (device report:
 		// "sometimes the delay happens, sometimes it doesn't").
+		const paper = cfg.paper
+		let customDots
+		if (paper === "custom") {
+			if (String(customDotsText.value).trim() === "")
+				throw new Error(__("Custom dots is required when paper is custom."))
+			const n = Number(customDotsText.value)
+			if (!Number.isFinite(n))
+				throw new Error(__("Custom dots must be a number."))
+			customDots = n
+		}
 		const copyDelayMs = parseNumericField(
 			"Delay between copies",
 			copyDelayText.value,
@@ -1346,34 +1416,37 @@ function onSaveReceiptConfig() {
 				dflt: 40,
 			},
 		)
-		saveDeviceConfig({
-			copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
-			copyDelayMs,
-			feedDots,
-			tailDots,
-			fontScale,
-			crewFontScale,
-			lineSpacing,
-			sideMarginDots,
-			topMarginDots,
-			queueGapDots,
-			crewSlipEnabled:
-				crewSlipChoice.value === "1"
-					? true
-					: crewSlipChoice.value === "0"
-						? false
-						: undefined, // JSON.stringify drops it = unset
-		})
-		showSuccess(__("Receipt layout saved. It will apply on the next print."))
-		refreshEffectiveConfig()
+		// snake_case fieldnames exactly as PRINT_CONFIG_FIELDS expects.
+		const config = {
+			imin_paper_width: paper,
+			imin_cut_paper: Boolean(cfg.cut),
+			imin_print_copies: Math.max(1, Math.min(Number(cfg.copies) || 1, 5)),
+			imin_copy_delay_ms: copyDelayMs,
+			imin_feed_dots: feedDots,
+			imin_tail_dots: tailDots,
+			imin_font_scale: fontScale,
+			imin_crew_font_scale: crewFontScale,
+			// undefined is dropped by JSON = "leave the stored value alone".
+			imin_crew_slip_enabled:
+				crewSlipChoice.value === "" ? undefined : crewSlipChoice.value === "1",
+			imin_line_spacing: lineSpacing,
+			imin_side_margin: sideMarginDots,
+			imin_top_margin: topMarginDots,
+			imin_queue_gap: queueGapDots,
+		}
+		if (customDots != null) config.imin_custom_dots = customDots
+		await savePrintConfigToServer(config)
+		showSuccess(__("Receipt layout saved to the server."))
 	} catch (e) {
-		showError(e?.message || String(e))
+		// The endpoint's own message (e.g. "No POS Profile in context…") is the
+		// actionable text — e.message alone is just "method ValidationError".
+		showError(serverErrorMessage(e, e?.message || String(e)))
 	} finally {
 		savingReceipt.value = false
 	}
 }
 
-function onSaveEodConfig() {
+async function onSaveEodConfig() {
 	savingEod.value = true
 	try {
 		// Same ranges as the resolver's own clamps, so a saved value never
@@ -1441,20 +1514,23 @@ function onSaveEodConfig() {
 				dflt: 0,
 			},
 		)
-		saveDeviceConfig({
-			eodCopies: Math.max(1, Math.min(Number(cfg.eodCopies) || 1, 5)),
-			eodCopyDelayMs,
-			eodFeedDots,
-			eodTailDots,
-			eodFontScale,
-			eodLineSpacing,
-			eodSideMarginDots,
-			eodTopMarginDots,
-		})
-		showSuccess(__("Closing layout saved. It will apply on the next print."))
-		refreshEffectiveConfig()
+		const config = {
+			imin_eod_print_copies: Math.max(
+				1,
+				Math.min(Number(cfg.eodCopies) || 1, 5),
+			),
+			imin_eod_copy_delay_ms: eodCopyDelayMs,
+			imin_eod_feed_dots: eodFeedDots,
+			imin_eod_tail_dots: eodTailDots,
+			imin_eod_font_scale: eodFontScale,
+			imin_eod_line_spacing: eodLineSpacing,
+			imin_eod_side_margin: eodSideMarginDots,
+			imin_eod_top_margin: eodTopMarginDots,
+		}
+		await savePrintConfigToServer(config)
+		showSuccess(__("Closing layout saved to the server."))
 	} catch (e) {
-		showError(e?.message || String(e))
+		showError(serverErrorMessage(e, e?.message || String(e)))
 	} finally {
 		savingEod.value = false
 	}
@@ -1632,9 +1708,9 @@ async function onTestPrintClosing() {
 }
 
 /**
- * Read the effective print config the way the driver does: device
- * localStorage on top of the transport's server config. Shared resolver, so
- * the preview cannot drift from the print.
+ * Read the effective print config the way the driver does: from the
+ * transport's server config alone. Shared resolver, so the preview cannot
+ * drift from the print.
  */
 
 const previewing = ref(false)
@@ -1683,24 +1759,19 @@ function serverConfigFromTransport() {
 }
 
 /**
- * Resolve exactly what the NEXT print will use (device localStorage on top of
- * the transport's server config, same resolver the driver calls). Exposed on
- * the page so "sometimes the delay applies, sometimes it doesn't" is visible
- * as a concrete value instead of a guess.
+ * Resolve exactly what the NEXT print will use (the transport's server config,
+ * same resolver the driver calls). Exposed on the page so "sometimes the delay
+ * applies, sometimes it doesn't" is visible as a concrete value instead of a
+ * guess.
  */
 function effectivePrintConfig(copiesOverride) {
-	const device = { ...(loadDeviceConfig() || {}) }
-	if (copiesOverride != null) device.copies = copiesOverride
+	const device = copiesOverride != null ? { copies: copiesOverride } : {}
 	return resolvePrintConfig(device, serverConfigFromTransport())
 }
 
 /** Same, for the closing lane: the EOD knobs resolve instead. */
 function effectiveEodPrintConfig() {
-	return resolvePrintConfig(
-		{ ...(loadDeviceConfig() || {}) },
-		serverConfigFromTransport(),
-		{ kind: "eod" },
-	)
+	return resolvePrintConfig({}, serverConfigFromTransport(), { kind: "eod" })
 }
 
 const effectiveCfg = ref(null)
@@ -1765,13 +1836,12 @@ async function runPreview(copiesOverride) {
 	clearPreview()
 	previewing.value = true
 	try {
-		const device = { ...(loadDeviceConfig() || {}) }
-		if (copiesOverride != null) device.copies = copiesOverride
 		const server = serverConfigFromTransport()
 		const bundle = await getSampleBundle()
 		const set = await buildReceiptPreviewSet(sampleReceiptHTML(bundle), {
-			device,
 			server,
+			// The override lands on the lane's copies knob inside the builder.
+			copies: copiesOverride,
 			// The crew slip prints once, after all the copies, gated by its own
 			// switch — exactly as the driver prints it.
 			crewHTML: sampleCrewHTML(bundle),
@@ -1787,9 +1857,9 @@ async function runPreview(copiesOverride) {
 }
 
 /**
- * Closing preview: the same builder with kind "eod", so the EOD knobs (device
- * overrides on top of the server config) shape the bitmap exactly as the next
- * real closing print will. No crewHTML — the closing report has no crew slip.
+ * Closing preview: the same builder with kind "eod", so the EOD knobs on the
+ * server config shape the bitmap exactly as the next real closing print will.
+ * No crewHTML — the closing report has no crew slip.
  * The bundle is not refreshed here: the cache is good enough for a look, and
  * Test Print Closing is the path that pays for a fresh fetch.
  */
@@ -1797,7 +1867,6 @@ async function runEodPreview() {
 	clearEodPreview()
 	eodPreviewing.value = true
 	try {
-		const device = { ...(loadDeviceConfig() || {}) }
 		const server = serverConfigFromTransport()
 		const bundle = await getClosingBundle()
 		if (bundle.source !== "server") {
@@ -1807,7 +1876,6 @@ async function runEodPreview() {
 			return
 		}
 		const set = await buildReceiptPreviewSet(bundle.serverHTML, {
-			device,
 			server,
 			kind: "eod",
 		})
@@ -1907,7 +1975,8 @@ async function autoprintEod(closingName, posProfile) {
 }
 
 onMounted(async () => {
-	readCfgIntoForm()
+	captureLegacyDeviceConfig()
+	readHostIntoForm()
 	// Load the server print config before anything reads transport state.
 	// Test Print calls the module-level transportPrint, which relies on the
 	// singleton config populated here; without it the chain is empty and no
@@ -1916,14 +1985,13 @@ onMounted(async () => {
 	// A `profile` query param (sent by Desk's EOD print button) pins the
 	// config to the closing shift's own POS Profile instead of the signed-in
 	// user's default.
-	const routeProfile =
-		typeof route.query.profile === "string" ? route.query.profile : null
 	try {
 		await bootstrap.loadInitialData()
-		const cfg = await initTransportFromServer(
-			routeProfile || bootstrap.getPreloadedPOSProfile()?.name || null,
-		)
+		const cfg = await initTransportFromServer(contextPosProfile())
 		configError.value = ""
+		// The forms are server-backed: seed them only once the transport holds
+		// the resolved server config (host came from localStorage above).
+		readServerIntoForm()
 		// Load the iMin SDK before the first status poll whenever the chain can
 		// reach it. Without this the very first poll throws "not a constructor"
 		// and the card reads "Unavailable / code -1" on a perfectly healthy
@@ -1952,7 +2020,7 @@ onMounted(async () => {
 	// prints that closing report through the same transport and EOD knobs as
 	// the till's closing flow.
 	if (typeof route.query.eod === "string" && route.query.eod) {
-		autoprintEod(route.query.eod, routeProfile)
+		autoprintEod(route.query.eod, contextPosProfile())
 	}
 })
 

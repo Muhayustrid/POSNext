@@ -48,6 +48,7 @@ declare module 'vue' {
     ReturnInvoiceDialog: typeof import('./src/components/sale/ReturnInvoiceDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SalesRecapDialog: typeof import('./src/components/sale/SalesRecapDialog.vue')['default']
     SelectField: typeof import('./src/components/settings/SelectField.vue')['default']
     SelectInput: typeof import('./src/components/common/SelectInput.vue')['default']
     SessionLockScreen: typeof import('./src/components/common/SessionLockScreen.vue')['default']

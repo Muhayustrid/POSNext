@@ -14,6 +14,7 @@ from pos_next.api.printing import (
 	get_print_config,
 	get_print_logs,
 	log_print_attempt,
+	update_print_config,
 )
 
 
@@ -30,6 +31,32 @@ def _settings_row(**values):
 	meta = SimpleNamespace(get=lambda _k: [SimpleNamespace(fieldname=f) for f in PRINT_CONFIG_FIELDS])
 	with patch("pos_next.api.printing.frappe.get_meta", return_value=meta), patch(
 		"pos_next.api.printing.frappe.db.get_value", return_value=row
+	):
+		yield
+
+
+class _RecordingDoc:
+	"""Stands in for the POS Settings doc update_print_config writes through."""
+
+	def __init__(self):
+		self.saved = {}
+
+	def update(self, values):
+		self.saved.update(values)
+
+	def save(self):
+		pass
+
+
+@contextmanager
+def _write_capture(doc):
+	"""Route update_print_config's write path to doc.
+
+	The truthy db.exists return both satisfies the permission gate and makes
+	the endpoint take the "existing row" branch, so nothing touches the DB.
+	"""
+	with patch("pos_next.api.printing.frappe.db.exists", return_value="_Test-POS-Settings"), patch(
+		"pos_next.api.printing.frappe.get_doc", return_value=doc
 	):
 		yield
 
@@ -395,4 +422,64 @@ class TestPrintingAPI(FrappeTestCase):
 	def _has_column(self, fieldname):
 		meta = frappe.get_meta("POS Settings")
 		return any(df.fieldname == fieldname for df in meta.get("fields"))
+
+	def test_update_print_config_clamps_to_the_same_bands_as_read(self):
+		# update_print_config clamps through the same table as get_print_config,
+		# so a stored row can never hold a value the read path would change.
+		doc = _RecordingDoc()
+		with _settings_row(), _write_capture(doc):
+			update_print_config(
+				self.profile,
+				{
+					"imin_print_copies": 99,
+					"imin_copy_delay_ms": 99999,
+					"imin_font_scale": 999,
+					"imin_tail_dots": -5,
+				},
+			)
+		self.assertEqual(doc.saved["imin_print_copies"], 5)
+		self.assertEqual(doc.saved["imin_copy_delay_ms"], 10000)
+		self.assertEqual(doc.saved["imin_font_scale"], 250)
+		self.assertEqual(doc.saved["imin_tail_dots"], 0)
+
+		# The clamped values round-trip: the read path serves them unchanged.
+		with _settings_row(**doc.saved):
+			cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["copies"], 5)
+		self.assertEqual(cfg["copy_delay_ms"], 10000)
+		self.assertEqual(cfg["font_scale"], 250)
+		self.assertEqual(cfg["tail_dots"], 0)
+
+		# Copy counts treat 0 as unset: the write path stores the default.
+		doc = _RecordingDoc()
+		with _settings_row(), _write_capture(doc):
+			update_print_config(self.profile, {"imin_print_copies": 0})
+		self.assertEqual(doc.saved["imin_print_copies"], 1)
+
+	def test_update_print_config_ignores_unknown_keys(self):
+		# print_mode is a POS Settings field but not a print knob: this endpoint
+		# is the Direct Print page's transport, not a general settings form.
+		# Unknown keys must never reach the document.
+		doc = _RecordingDoc()
+		with _settings_row(), _write_capture(doc):
+			update_print_config(self.profile, {"imin_print_copies": 2, "print_mode": "Auto"})
+		self.assertEqual(doc.saved, {"imin_print_copies": 2})
+
+		# A payload of only unknown keys has nothing valid to write.
+		doc = _RecordingDoc()
+		with _settings_row(), _write_capture(doc):
+			with self.assertRaises(frappe.ValidationError):
+				update_print_config(self.profile, {"print_mode": "Auto"})
+		self.assertEqual(doc.saved, {})
+
+	def test_update_print_config_requires_profile_access_or_write_permission(self):
+		# Neither assigned to the profile nor POS Settings write permission ->
+		# refused before anything is resolved or written.
+		doc = _RecordingDoc()
+		with patch("pos_next.api.printing.frappe.db.exists", return_value=None), patch(
+			"pos_next.api.printing.frappe.has_permission", return_value=False
+		):
+			with self.assertRaises(frappe.ValidationError):
+				update_print_config(self.profile, {"imin_print_copies": 2})
+		self.assertEqual(doc.saved, {})
 
