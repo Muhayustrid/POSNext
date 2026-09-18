@@ -1105,6 +1105,17 @@ const viewMode = ref("grid");
 const itemThreshold = ref(50); // Threshold for auto-switching to list view
 const userManuallySetView = ref(false); // Track if user manually changed view mode
 const lastAutoSwitchCount = ref(0);
+
+// POS Settings "Default Card View" drives the layout (checked = card/grid,
+// unchecked = list). Settings can load after mount, so watch instead of
+// initializing once — but never override a view the cashier picked manually.
+watch(
+	() => settingsStore.defaultCardView,
+	(card) => {
+		if (!userManuallySetView.value) viewMode.value = card ? "grid" : "list";
+	},
+	{ immediate: true }
+);
 const showSortDropdown = ref(false); // Sort dropdown visibility
 const skipPageReset = ref(false); // Skip page reset when navigating via pagination
 
