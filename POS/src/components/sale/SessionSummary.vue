@@ -581,6 +581,12 @@ async function print() {
 	}
 }
 
+// A recap exists and is printable — the enclosing dialog shows its own Print
+// button and needs to know when to enable it.
+const printable = computed(() => Boolean(summary.value))
+
+defineExpose({ print, printing, printable })
+
 // Label and numbers come from the same response, so a window that is still
 // loading never shows the new dates over the old figures.
 const periodLabel = computed(() => {

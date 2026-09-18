@@ -25,6 +25,10 @@ from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 PACKAGE_COMPONENT_ROLE = "Package Item"
 PACKAGE_PARENT_ROLE = "Package"
 
+# Item rows printed under each category, matching the EOD sheet's shape. A
+# category with more items than this is disclosed as truncated.
+ITEMS_PER_CATEGORY = 50
+
 
 class RecapScope:
 	"""Which invoices (and whose drawers) one recap covers.
@@ -453,6 +457,49 @@ def _aggregate_categories(scope, limit=20):
 		}
 		for row in rows
 	]
+
+	# Per-category item breakdown so a recap prints the same nested sheet the
+	# EOD report does (category name, then its items under it). The full
+	# per-category list is built first so the truncation note is exact; only
+	# the first ITEMS_PER_CATEGORY rows are emitted, because an unbounded
+	# month of items would be a metre of till roll.
+	if categories:
+		item_where = f"""
+			FROM {_item_from(scope)}
+			JOIN {_invoice_from(scope)} ON si.name = sii.parent
+			WHERE ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
+		"""
+		item_rows = frappe.db.sql(
+			f"""
+			SELECT
+				{category_expr} AS category,
+				sii.item_code,
+				MAX(sii.item_name) AS item_name,
+				SUM(sii.qty) AS qty,
+				SUM(sii.base_net_amount) AS base_net_amount
+			{item_where}
+			GROUP BY category, sii.item_code
+			ORDER BY category, base_net_amount DESC
+			""",
+			scope.values,
+			as_dict=True,
+		)
+		by_category: dict = {}
+		for row in item_rows:
+			by_category.setdefault(row.category, []).append(
+				{
+					"item_code": row.item_code,
+					"item_name": row.item_name,
+					"qty": flt(row.qty),
+					"base_net_amount": flt(row.base_net_amount),
+				}
+			)
+		for category in categories:
+			all_items = by_category.get(category["category"], [])
+			category["items"] = all_items[:ITEMS_PER_CATEGORY]
+			category["items_shown"] = len(category["items"])
+			category["items_truncated"] = len(all_items) > ITEMS_PER_CATEGORY
+
 	return {
 		"categories": categories,
 		"categories_shown": len(rows),

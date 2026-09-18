@@ -75,6 +75,9 @@ const RECAP_CSS = `
 	.group-title { text-align: center; font-weight: bold; margin: 2px 0 3px; }
 	.row { display: flex; justify-content: space-between; }
 	.row.bold { font-weight: bold; }
+	.category { margin-top: 6px; }
+	.category:first-of-type { margin-top: 0; }
+	.category-name { font-weight: bold; margin-bottom: 1px; }
 	.item-row { display: flex; justify-content: space-between; }
 	.item-row .name { flex: 1; padding-right: 8px; }
 	.footer { margin-top: 8px; text-align: center; font-size: 10px; }
@@ -160,12 +163,26 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 	const charges = (summary.other_charges || []).map((c) =>
 		row(c.label || c.account_head, money(c.amount)),
 	)
-	const categories = (summary.categories || []).map((c) =>
-		itemRow(c.qty, c.category || __("No category"), money(c.base_net_amount)),
-	)
-	const sold = [...(summary.packages || []), ...(summary.items || [])].map(
-		(i) => itemRow(i.qty, i.item_name || i.item_code, money(i.base_net_amount)),
-	)
+
+	// Same nested shape as the EOD sheet: category name, then its items.
+	// Falls back to the flat category line for a server that predates the
+	// per-category item breakdown.
+	const categoryBlocks = (summary.categories || []).map((c) => {
+		const label = c.category || __("No category")
+		const items = c.items || []
+		if (!items.length) {
+			return itemRow(c.qty, label, money(c.base_net_amount))
+		}
+		const lines = items.map((i) =>
+			itemRow(i.qty, i.item_name || i.item_code, money(i.base_net_amount)),
+		)
+		if (c.items_truncated) {
+			lines.push(
+				note(__("Top {0} items shown", [c.items_shown ?? items.length])),
+			)
+		}
+		return `<div class="category"><div class="category-name">${esc(label)}</div>${lines.join("")}</div>`
+	})
 
 	const body = [
 		`<div class="center title">${esc(__("SALES RECAP"))}</div>`,
@@ -210,7 +227,7 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 		),
 		DIVIDER,
 		title(__("SALES PER CATEGORY")),
-		...(categories.length ? categories : [note("-")]),
+		...(categoryBlocks.length ? categoryBlocks : [note("-")]),
 	]
 	if (summary.categories_truncated) {
 		body.push(
@@ -221,19 +238,6 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 				]),
 			),
 		)
-	}
-	if (sold.length) {
-		body.push(DIVIDER, title(__("ITEMS SOLD")), ...sold)
-		if (summary.items_truncated) {
-			body.push(
-				note(
-					__("Top {0} of {1} items", [
-						summary.items_shown,
-						summary.items_total_groups,
-					]),
-				),
-			)
-		}
 	}
 	body.push(DIVIDER, '<div class="footer">-- Akhir Laporan --</div>')
 

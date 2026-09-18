@@ -6,13 +6,29 @@
 					<!-- One dataset, two lenses: the open shift or a posting-date
 					     window. SessionSummary owns the period picker, the recap
 					     queries (union of POS Invoice + legacy Sales Invoice) and
-					     its own print, so this dialog stays a frame around it. -->
-					<SessionSummary :opening-shift="openingShift" :pos-profile="posProfile" />
+					     the print call, so this dialog stays a frame around it. -->
+					<SessionSummary
+						ref="summaryEl"
+						:opening-shift="openingShift"
+						:pos-profile="posProfile"
+					/>
 				</div>
+				<!-- Print lives in the fixed footer: inside the scroll region it
+				     was an unlabelled icon that scrolled out of sight, which read
+				     as "there is no print button". -->
 				<div
-					class="flex shrink-0 justify-end border-t border-gray-200 px-4 py-2.5 sm:px-5"
+					class="flex shrink-0 items-center justify-between border-t border-gray-200 px-4 py-2.5 sm:px-5"
 					data-test="dialog-footer"
 				>
+					<Button
+						variant="subtle"
+						theme="blue"
+						:loading="printing"
+						:disabled="!canPrint"
+						@click="print"
+					>
+						{{ __("Print") }}
+					</Button>
 					<Button variant="subtle" @click="show = false">
 						{{ __("Close") }}
 					</Button>
@@ -36,6 +52,22 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue"])
 
 const show = ref(props.modelValue)
+const summaryEl = ref(null)
+// Mirrored from the child: the footer button must stay disabled until a recap
+// is actually loaded, and show progress while the child prints. The child
+// owns the fetch and the success/error toasts.
+const printing = ref(false)
+const canPrint = ref(false)
+
+async function print() {
+	if (!canPrint.value || printing.value) return
+	printing.value = true
+	try {
+		await summaryEl.value?.print()
+	} finally {
+		printing.value = false
+	}
+}
 
 watch(
 	() => props.modelValue,
@@ -47,4 +79,15 @@ watch(
 watch(show, (val) => {
 	emit("update:modelValue", val)
 })
+
+// Re-read on mount and whenever the child finishes loading a recap.
+watch(summaryEl, (el) => {
+	canPrint.value = Boolean(el?.printable)
+})
+watch(
+	() => summaryEl.value?.printable,
+	(val) => {
+		canPrint.value = Boolean(val)
+	},
+)
 </script>

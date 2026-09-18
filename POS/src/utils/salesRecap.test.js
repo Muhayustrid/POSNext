@@ -56,8 +56,36 @@ const PERIOD_SUMMARY = {
 	item_discount: 50000,
 	invoice_discount: 10000,
 	categories: [
-		{ category: "Makanan", qty: 30, base_net_amount: 3500000 },
-		{ category: "Minuman", qty: 25.5, base_net_amount: 1000000 },
+		{
+			category: "Makanan",
+			qty: 30,
+			base_net_amount: 3500000,
+			items: [
+				{
+					item_code: "I1",
+					item_name: "<b>Kopi</b> & Susu",
+					qty: 12,
+					base_net_amount: 240000,
+				},
+			],
+			items_shown: 1,
+			items_truncated: false,
+		},
+		{
+			category: "Minuman",
+			qty: 25.5,
+			base_net_amount: 1000000,
+			items: [
+				{
+					item_code: "I2",
+					item_name: "Es Teh",
+					qty: 25.5,
+					base_net_amount: 1000000,
+				},
+			],
+			items_shown: 1,
+			items_truncated: false,
+		},
 	],
 	categories_truncated: false,
 	packages: [
@@ -159,7 +187,6 @@ describe("buildRecapHTML", () => {
 			"DISCOUNT",
 			"REFUND",
 			"SALES PER CATEGORY",
-			"ITEMS SOLD",
 			"-- Akhir Laporan --",
 		]
 		let last = -1
@@ -172,6 +199,9 @@ describe("buildRecapHTML", () => {
 		// EOD typography travels with the sheet so both print alike
 		expect(html).toContain("DejaVu Sans")
 		expect(html).toContain("border-top: 2px dashed #333")
+		// EOD's category section nests items under the category name; there is
+		// no separate ITEMS SOLD section to drift out of sync with it.
+		expect(html).not.toContain("ITEMS SOLD")
 	})
 
 	it("prints the period header for a date-range recap", () => {
@@ -222,23 +252,54 @@ describe("buildRecapHTML", () => {
 		expect(html).not.toContain("<b>Kopi</b>")
 	})
 
-	it("lists categories with quantities and discloses capped tables", () => {
+	it("nests each category's items under its name, like the EOD sheet", () => {
 		const html = buildRecapHTML(
 			{
 				...PERIOD_SUMMARY,
 				categories_truncated: true,
 				categories_shown: 2,
 				categories_total_groups: 25,
-				items_truncated: true,
-				items_shown: 2,
-				items_total_groups: 140,
 			},
 			{ printedAt },
 		)
-		expect(html).toContain("25.5x Minuman")
-		expect(html).toContain("3x Paket Hemat")
+		// category name is its own bold line, items follow underneath
+		expect(html).toContain('<div class="category"><div class="category-name">Makanan</div>')
+		expect(html).toContain('<div class="category-name">Minuman</div>')
+		expect(html).toMatch(/Makanan<\/div>.*12x &lt;b&gt;Kopi&lt;\/b&gt; &amp; Susu/s)
+		expect(html).toMatch(/Minuman<\/div>.*25\.5x Es Teh/s)
 		expect(html).toContain("Top 2 of 25 categories")
-		expect(html).toContain("Top 2 of 140 items")
+	})
+
+	it("discloses a category whose item list was capped", () => {
+		const html = buildRecapHTML(
+			{
+				...PERIOD_SUMMARY,
+				categories: [
+					{
+						category: "Makanan",
+						qty: 30,
+						base_net_amount: 3500000,
+						items: [{ item_code: "I1", item_name: "Kopi", qty: 12, base_net_amount: 240000 }],
+						items_shown: 1,
+						items_truncated: true,
+					},
+				],
+			},
+			{ printedAt },
+		)
+		expect(html).toContain("Top 1 items shown")
+	})
+
+	it("falls back to the flat category line when the server sends no items", () => {
+		const html = buildRecapHTML(
+			{
+				...PERIOD_SUMMARY,
+				categories: [{ category: "Makanan", qty: 30, base_net_amount: 3500000 }],
+			},
+			{ printedAt },
+		)
+		expect(html).toContain("30x Makanan")
+		expect(html).not.toContain('<div class="category">')
 	})
 
 	it("keeps the sheet readable when a window has no sales", () => {
