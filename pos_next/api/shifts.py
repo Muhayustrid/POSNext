@@ -6,7 +6,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
+from frappe.utils import nowdate, nowtime, get_datetime, getdate, flt, cint
 from pos_next.api.utilities import get_wallet_payment_modes
 
 
@@ -404,6 +404,96 @@ def get_session_summary(opening_shift):
 		summary.get("item_discount", 0) + summary.get("invoice_discount", 0)
 	)
 	return summary
+
+
+@frappe.whitelist()
+def get_sales_recap(pos_profile=None, from_date=None, to_date=None):
+	"""Sales recap for a posting_date range (submitted POS Sales Invoices).
+
+	Same base-currency aggregation style as the session summary helpers, but
+	keyed on si.posting_date instead of the opening-shift link, so any period
+	(today, yesterday, a month, a custom range) can be recapped. Unlike the
+	session summary this is a sales report, not a drawer report: returns
+	without payment rows are included.
+	"""
+	if not from_date or not to_date:
+		frappe.throw(_("from_date and to_date are required"))
+	if getdate(from_date) > getdate(to_date):
+		frappe.throw(_("from_date cannot be after to_date"))
+
+	if not frappe.has_permission("Sales Invoice", "read"):
+		frappe.throw(_("Insufficient permissions to view sales recap"), frappe.PermissionError)
+
+	values = {"from": from_date, "to": to_date}
+	where = [
+		"si.docstatus = 1",
+		"si.is_pos = 1",
+		"si.posting_date BETWEEN %(from)s AND %(to)s",
+	]
+	if pos_profile:
+		where.append("si.pos_profile = %(profile)s")
+		values["profile"] = pos_profile
+	where_sql = " AND ".join(where)
+
+	row = frappe.db.sql(
+		f"""
+		SELECT
+			SUM(1) AS invoice_count,
+			SUM(CASE WHEN si.is_return = 1 THEN 1 ELSE 0 END) AS returned_count,
+			SUM(CASE WHEN si.is_return = 0 THEN si.base_grand_total ELSE 0 END) AS gross_total,
+			SUM(si.base_discount_amount) AS total_discount,
+			SUM(si.base_total_taxes_and_charges) AS total_taxes,
+			SUM(si.base_net_total) AS net_total,
+			SUM(si.base_grand_total) AS grand_total
+		FROM `tabSales Invoice` si
+		WHERE {where_sql}
+		""",
+		values,
+		as_dict=True,
+	)[0]
+
+	payments = [
+		{"mode_of_payment": r.mode_of_payment, "amount": flt(r.amount)}
+		for r in frappe.db.sql(
+			f"""
+			SELECT sip.mode_of_payment, SUM(sip.base_amount) AS amount
+			FROM `tabSales Invoice Payment` sip
+			JOIN `tabSales Invoice` si ON si.name = sip.parent
+			WHERE {where_sql}
+			GROUP BY sip.mode_of_payment
+			HAVING amount > 0
+			ORDER BY amount DESC
+			""",
+			values,
+			as_dict=True,
+		)
+	]
+
+	company = frappe.db.sql(
+		f"SELECT si.company FROM `tabSales Invoice` si WHERE {where_sql} ORDER BY si.creation LIMIT 1",
+		values,
+		as_dict=True,
+	)
+	currency = (
+		frappe.get_cached_value("Company", company[0].company, "default_currency")
+		if company
+		else frappe.db.get_single_value("System Settings", "currency")
+	)
+
+	return {
+		"from_date": from_date,
+		"to_date": to_date,
+		"pos_profile": pos_profile,
+		"company_currency": currency,
+		"invoice_count": cint(row.invoice_count),
+		"returned_count": cint(row.returned_count),
+		"gross_total": flt(row.gross_total),
+		"total_discount": flt(row.total_discount),
+		"total_taxes": flt(row.total_taxes),
+		"net_total": flt(row.net_total),
+		"grand_total": flt(row.grand_total),
+		"payments": payments,
+	}
 
 
 def _cashier_full_name(user):

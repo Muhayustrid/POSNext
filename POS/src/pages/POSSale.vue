@@ -695,6 +695,13 @@
 				@return-created="handleReturnCreated"
 			/>
 
+			<!-- Sales Recap Dialog -->
+			<SalesRecapDialog
+				v-model="showSalesRecap"
+				:pos-profile="shiftStore.profileName"
+				:opening-shift="shiftStore.currentShift?.name"
+			/>
+
 			<!-- Shift History Dialog -->
 			<ShiftHistoryDialog
 				v-model="showShiftHistoryDialog"
@@ -1123,6 +1130,7 @@ import PackageSelectionDialog from "@/components/sale/PackageSelectionDialog.vue
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import SalesRecapDialog from "@/components/sale/SalesRecapDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
@@ -1279,6 +1287,9 @@ const showStockLookup = ref(false);
 
 // Invoice Management dialog
 const showInvoiceManagement = ref(false);
+
+// Sales Recap dialog
+const showSalesRecap = ref(false);
 
 // Invoice Detail dialog
 const showInvoiceDetail = ref(false);
@@ -3162,6 +3173,8 @@ function restoreBodyStyles() {
 			loadInvoiceHistoryData();
 			draftsStore.loadDrafts();
 			showInvoiceManagement.value = true;
+		} else if (menuItem === "sales-recap") {
+			showSalesRecap.value = true;
 		} else if (menuItem === "products") {
 			showStockLookup.value = true;
 		} else if (menuItem === "production") {
