@@ -498,10 +498,6 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
 	opening_shift = json.loads(opening_shift)
-	doctype = get_pos_invoice_doctype()
-	invoice_field = "pos_invoice" if doctype == "POS Invoice" else "sales_invoice"
-
-	submit_printed_invoices(opening_shift.get("name"), doctype)
 
 	# Initialize closing shift document
 	closing_shift = frappe.new_doc("POS Closing Shift")
@@ -548,9 +544,14 @@ def make_closing_shift_from_opening(opening_shift):
 			)
 		)
 
-	# Process invoices
-	invoices = get_pos_invoices(opening_shift.get("name"), doctype)
+	# Process invoices. Each row is written to the column matching ITS OWN
+	# doctype: a shift can hold both kinds, and a Sales Invoice name stored in
+	# the pos_invoice column would point the closing entry at the wrong table.
+	invoices = get_pos_invoices(opening_shift.get("name"))
 	for invoice in invoices:
+		invoice_field = (
+			"pos_invoice" if invoice.get("doctype") == "POS Invoice" else "sales_invoice"
+		)
 		txn = _process_invoice(invoice, invoice_field, company_currency, cash_mode, payments, taxes, summary)
 		pos_transactions.append(txn)
 
