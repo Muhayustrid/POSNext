@@ -213,6 +213,11 @@ doc_events = {
 		"on_cancel": "pos_next.pos_invoice_events.on_cancel",
 		"after_insert": "pos_next.pos_invoice_events.after_insert",
 	},
+	"POS Invoice Merge Log": {
+		# Parity POS Invoices already posted their own GL/stock at submit;
+		# consolidating them would double-post. Built-in-POS rows unaffected.
+		"before_validate": "pos_next.invoice_type.guard_against_retroactive_consolidation",
+	},
 }
 
 # Scheduled Tasks

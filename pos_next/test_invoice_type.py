@@ -54,7 +54,17 @@ class TestInvoiceType(FrappeTestCase):
 		except AttributeError:
 			pass  # not cached yet (`in frappe.local` is unreliable on v16)
 
-	def test_defaults_to_sales_invoice(self):
+	def test_code_default_is_pos_invoice(self):
+		"""A site with no stored choice gets POS Invoice. The stored row wins
+		when present, so this exercises the resolver's fallback directly."""
+		with mock.patch("frappe.db.get_value", return_value=None):
+			self._clear_cache()
+			self.assertEqual(get_pos_invoice_doctype(), POS_INVOICE)
+			self.assertEqual(get_sales_report_doctypes(), ["POS Invoice", "Sales Invoice"])
+
+	def test_stored_choice_wins(self):
+		_set_invoice_type(SALES_INVOICE)
+		self._clear_cache()
 		self.assertEqual(get_pos_invoice_doctype(), SALES_INVOICE)
 		self.assertEqual(get_sales_report_doctypes(), ["Sales Invoice"])
 
@@ -70,16 +80,15 @@ class TestInvoiceType(FrappeTestCase):
 		from frappe.utils import nowdate
 
 		# a profile whose schedule never blocks (enforce_closing=0): insert must
-		# not throw for being outside the scheduled shift window. Site data has
-		# no schedule-off profile; among enforce=0 profiles only ones with valid
-		# schedule times pass validate_schedule_values. (`pos_schedule_start is
-		# set` excludes midnight starts like 00:00:00, so filter on end only.)
+		# not throw for being outside the scheduled shift window. No
+		# pos_schedule_end filter: a profile with no schedule configured is
+		# equally safe, and filtering on it skips every profile on a site that
+		# never configures schedules.
 		profile, company = frappe.db.get_value(
 			"POS Profile",
 			[
 				["disabled", "=", 0],
 				["pos_schedule_enforce_closing", "=", 0],
-				["pos_schedule_end", "is", "set"],
 			],
 			("name", "company"),
 		)

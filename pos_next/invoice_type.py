@@ -1,7 +1,6 @@
 """Global invoice-doctype resolution for POS Next (see spec 2026-09-10)."""
 
 import frappe
-from frappe.utils import flt
 
 SALES_INVOICE = "Sales Invoice"
 POS_INVOICE = "POS Invoice"
@@ -14,16 +13,44 @@ def get_pos_invoice_doctype():
 	Stored on the POS Settings rows — one global value shared by every row;
 	the POS Settings controller keeps all rows in sync on save, so reading
 	any row yields the site-wide choice.
+
+	POS Invoice is the default: POS Next's POS Invoices post their own GL and
+	stock ledger entries at submit (see CustomPOSInvoice), so they behave like
+	Sales Invoices while keeping POS traffic out of the Sales Invoice list.
 	"""
 	cached = getattr(frappe.local, "_pos_next_invoice_doctype", None)
 	if cached:
 		return cached
 	# NOTE: filters={} (any row) — filters=None would be a name lookup of None.
-	value = frappe.db.get_value("POS Settings", {}, "invoice_type") or SALES_INVOICE
+	value = frappe.db.get_value("POS Settings", {}, "invoice_type") or POS_INVOICE
 	if value not in _VALID_TYPES:
-		value = SALES_INVOICE
+		value = POS_INVOICE
 	frappe.local._pos_next_invoice_doctype = value
 	return value
+
+
+def _legacy_deferred_pos_invoices():
+	"""POS Next POS Invoices that still defer their books to consolidation.
+
+	A POS Invoice created before accounting parity posts nothing until a POS
+	Closing Entry consolidates it, so it still depends on the consolidation
+	path this mode no longer runs. Newer parity invoices post their own GL and
+	are therefore excluded — counting them would block the switch forever.
+	"""
+	return frappe.db.sql(
+		"""
+		SELECT COUNT(*) FROM `tabPOS Invoice` pi
+		WHERE pi.docstatus = 1
+		  AND IFNULL(pi.consolidated_invoice, '') = ''
+		  AND IFNULL(pi.posa_pos_opening_shift, '') <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM `tabGL Entry` gl
+			WHERE gl.voucher_type = 'POS Invoice'
+			  AND gl.voucher_no = pi.name
+			  AND gl.is_cancelled = 0
+		  )
+		"""
+	)[0][0]
 
 
 def validate_invoice_type_change(doc):
@@ -48,6 +75,13 @@ def validate_invoice_type_change(doc):
 			_("Invoice Type cannot be changed while {0} offline invoice(s) are pending sync.").format(
 				frappe.bold(pending)
 			)
+		)
+	deferred = _legacy_deferred_pos_invoices()
+	if deferred:
+		frappe.throw(
+			_(
+				"Invoice Type cannot be changed while {0} POS Invoice(s) still have no stock and accounting entries. Consolidate or cancel them first."
+			).format(frappe.bold(deferred))
 		)
 
 
@@ -114,24 +148,27 @@ def is_pos_next_owned(doc):
 	return bool(doc.get("posa_pos_opening_shift"))
 
 
-def get_unconsolidated_posi_qty(item_codes, warehouse):
-	"""Sold-but-unconsolidated POS Invoice qty per item for a warehouse.
-	SLEs only appear at consolidation, so this is the intraday reservation."""
-	# ponytail: exact-warehouse match only — group-warehouse callers need the
-	# per-child sum expanded at the call site if that case ever matters.
-	if get_pos_invoice_doctype() != POS_INVOICE or not item_codes or not warehouse:
-		return {}
-	data = frappe.db.sql(
-		"""
-		select item.item_code, sum(item.stock_qty)
-		from `tabPOS Invoice` inv, `tabPOS Invoice Item` item
-		where item.parent = inv.name
-		  and inv.docstatus = 1 and ifnull(inv.consolidated_invoice,'') = ''
-		  and ifnull(inv.is_return, 0) = 0
-		  and item.warehouse = %(warehouse)s
-		  and item.item_code in %(items)s
-		group by item.item_code
-		""",
-		{"warehouse": warehouse, "items": list(item_codes)},
-	)
-	return {item_code: flt(qty) for item_code, qty in data}
+def guard_against_retroactive_consolidation(doc, method=None):
+	"""POS Invoice Merge Log before_validate: refuse to consolidate invoices
+	POS Next already accounted for.
+
+	Parity POS Invoices post their own GL/stock entries at submit, so
+	ERPNext's consolidation (usually reached through the built-in POS Closing
+	Entry, which selects on an empty ``consolidated_invoice``) would post the
+	same money and stock twice. Built-in ERPNext POS Invoices carry no
+	``posa_pos_opening_shift`` and stay consolidatable.
+	"""
+	from frappe import _
+
+	owned = [
+		row.pos_invoice
+		for row in (doc.get("pos_invoices") or [])
+		if row.get("pos_invoice")
+		and frappe.db.get_value("POS Invoice", row.pos_invoice, "posa_pos_opening_shift")
+	]
+	if owned:
+		frappe.throw(
+			_(
+				"Cannot consolidate POS Invoice(s) {0}: they already posted their own stock and accounting entries."
+			).format(frappe.bold(", ".join(owned)))
+		)

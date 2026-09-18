@@ -23,12 +23,14 @@ from pos_next.api.invoices import (
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
 
-# Schedule-safe profile: inserting a POS Opening Shift can never throw for
-# being outside a scheduled window (same filter as pos_next.test_invoice_type).
+# Schedule-safe profile: inserting a POS Opening Shift must never throw for
+# being outside a scheduled window. Enforced closing is the only scheduling
+# rule that blocks a shift, so requiring it to be off is enough; a profile
+# with no schedule at all is just as safe (hence no pos_schedule_end filter —
+# it would skip every profile on a site that never configures schedules).
 _PROFILE_FILTER = [
 	["disabled", "=", 0],
 	["pos_schedule_enforce_closing", "=", 0],
-	["pos_schedule_end", "is", "set"],
 ]
 
 
@@ -236,45 +238,105 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			(POS_INVOICE, name),
 		)
 
-	def test_effective_stock_blocks_oversell(self):
-		from pos_next.api.invoices import validate_cart_items
-		from pos_next.api.items import get_item_stock
+	def test_stock_and_ledger_post_at_submit(self):
+		"""Accounting parity: a POS Invoice moves stock and books like a Sales
+		Invoice does, instead of deferring both to shift-close consolidation."""
+		before = frappe.utils.flt(
+			frappe.db.get_value(
+				"Bin", {"item_code": self.item, "warehouse": self.profile.warehouse}, "actual_qty"
+			)
+			or 0
+		)
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+		self.assertTrue(name)
 
-		def _bin_qty():
-			return frappe.utils.flt(
+		self.assertEqual(
+			frappe.utils.flt(
 				frappe.db.get_value(
 					"Bin", {"item_code": self.item, "warehouse": self.profile.warehouse}, "actual_qty"
 				)
 				or 0
-			)
-
-		# submit one invoice consuming ALL stocked qty (5 from _make_stock, plus
-		# any residual on this shared site so effective stock lands at exactly 0)
-		qty = int(_bin_qty())
-		payload = {
-			"pos_profile": self.profile.name, "posa_pos_opening_shift": self.shift.name,
-			"customer": self.customer,
-			"items": [{"item_code": self.item, "qty": qty, "rate": 100,
-			           "warehouse": self.profile.warehouse}],
-			"payments": [{"mode_of_payment": self.mode[0], "amount": 100 * qty}],
-		}
-		result = submit_invoice(invoice=payload)
-		self._created.append(result.get("name"))
-		frappe.db.commit()
-
-		# Bin still shows the full qty (no SLE until consolidation)…
-		bin_after = _bin_qty()
-		self.assertEqual(bin_after, qty)
-		# …but the items API reports the effective (deducted) qty …
-		stock = get_item_stock(self.item, self.profile.warehouse)
-		self.assertEqual(stock["stock_qty"], 0)
-		# …and cart validation rejects another unit (real signature returns the
-		# error list instead of raising).
-		errors = validate_cart_items(
-			[{"item_code": self.item, "qty": 1, "warehouse": self.profile.warehouse}],
-			pos_profile=self.profile.name,
+			),
+			before - 1,
 		)
-		self.assertTrue(errors)
+		# one SLE row for a plain item; a product bundle legitimately splits
+		# into one row per component, so assert the net movement instead of a
+		# row count.
+		self.assertEqual(
+			frappe.utils.flt(
+				frappe.db.sql(
+					"""select sum(actual_qty) from `tabStock Ledger Entry`
+					where voucher_no=%s and voucher_type='POS Invoice'""",
+					name,
+				)[0][0]
+				or 0
+			),
+			-1,
+		)
+		self.assertGreater(
+			frappe.db.count("GL Entry", {"voucher_no": name, "voucher_type": "POS Invoice"}), 0
+		)
+		# nothing consolidated, so nothing can double-post later
+		self.assertFalse(frappe.db.get_value("POS Invoice", name, "consolidated_invoice"))
+		self.assertEqual(frappe.db.count("POS Invoice Merge Log", {"pos_invoice": name}), 0)
+
+	def test_cancel_reverses_stock_and_ledger(self):
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+		before = frappe.utils.flt(
+			frappe.db.get_value(
+				"Bin", {"item_code": self.item, "warehouse": self.profile.warehouse}, "actual_qty"
+			)
+			or 0
+		)
+		doc = frappe.get_doc("POS Invoice", name)
+		doc.flags.ignore_permissions = True
+		doc.cancel()
+
+		self.assertEqual(
+			frappe.utils.flt(
+				frappe.db.get_value(
+					"Bin", {"item_code": self.item, "warehouse": self.profile.warehouse}, "actual_qty"
+				)
+				or 0
+			),
+			before + 1,
+		)
+		# submit + reversal nets to zero on the ledger
+		self.assertEqual(
+			frappe.utils.flt(
+				frappe.db.sql(
+					"""select sum(actual_qty) from `tabStock Ledger Entry`
+					where voucher_no=%s and voucher_type='POS Invoice'""",
+					name,
+				)[0][0]
+				or 0
+			),
+			0,
+		)
+		self.assertEqual(
+			frappe.db.count(
+				"GL Entry",
+				{"voucher_no": name, "voucher_type": "POS Invoice", "is_cancelled": 0},
+			),
+			0,
+		)
+		self.assertEqual(frappe.db.get_value("POS Invoice", name, "status"), "Cancelled")
+
+	def test_merge_log_refuses_pos_next_invoice(self):
+		"""Guard: consolidating an already-accounted POS Invoice would post the
+		same money and stock twice, so the merge log must refuse it."""
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+
+		merge_log = frappe.new_doc("POS Invoice Merge Log")
+		merge_log.append("pos_invoices", {"pos_invoice": name})
+		with self.assertRaises(frappe.ValidationError):
+			merge_log.insert(ignore_permissions=True)
 
 	def test_history_lists_pos_invoice(self):
 		from pos_next.api.invoices import get_invoice, get_invoices

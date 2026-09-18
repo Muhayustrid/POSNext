@@ -120,8 +120,8 @@
    "label": "Enabled"
   },
   {
-   "default": "Sales Invoice",
-   "description": "Global for all profiles: the document type the POS screen creates (Sales Invoice or POS Invoice). Changing it applies to every profile. Blocked while shifts are open or offline invoices are pending sync.",
+   "default": "POS Invoice",
+   "description": "Global for all profiles: the document type the POS screen creates (Sales Invoice or POS Invoice). POS Next's POS Invoices post their own stock and GL entries on submit, so they behave like Sales Invoices while keeping POS traffic out of the Sales Invoice list. Changing it is blocked while shifts are open, offline invoices are pending, or legacy unconsolidated POS Invoices exist.",
    "fieldname": "invoice_type",
    "fieldtype": "Select",
    "label": "Invoice Type Created via POS Screen",

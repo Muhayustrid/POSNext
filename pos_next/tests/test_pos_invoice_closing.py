@@ -1,10 +1,13 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
-"""Closing-shift tests in POS Invoice mode: make_closing_shift_from_opening
-must collect POS Invoices into pos_transactions (pos_invoice column) and
-on_submit must consolidate them into a (submitted, is_consolidated) Sales
-Invoice with real GL + Stock Ledger entries. Run via
+"""Closing-shift tests in POS Invoice mode.
+
+A POS Next POS Invoice posts its own GL + Stock Ledger entries at submit, so
+closing a shift must only collect it into pos_transactions (linking it for
+edit/cancel blocking) and must NOT consolidate it into a Sales Invoice —
+consolidating an already-accounted invoice would post the same money and stock
+twice. Run via
 pos_next/_pn_run_tests.py pos_next.tests.test_pos_invoice_closing
 """
 
@@ -12,7 +15,6 @@ import json
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import cint
 
 from pos_next.api.invoices import submit_invoice
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
@@ -30,7 +32,7 @@ class TestClosingConsolidation(POSInvoiceModeMixin, FrappeTestCase):
 		self._created.append(self.posi_name)
 		frappe.db.commit()
 
-	def test_close_shift_consolidates(self):
+	def test_close_shift_does_not_consolidate(self):
 		opening = frappe.get_doc("POS Opening Shift", self.shift.name)
 		result = make_closing_shift_from_opening(
 			json.dumps(
@@ -54,17 +56,22 @@ class TestClosingConsolidation(POSInvoiceModeMixin, FrappeTestCase):
 		closing_doc.insert(ignore_permissions=True)
 		self.closing = closing_doc
 		closing_doc.submit()
-
-		posi = frappe.get_doc("POS Invoice", self.posi_name)
-		self.assertTrue(posi.consolidated_invoice)
-		cons = frappe.get_doc("Sales Invoice", posi.consolidated_invoice)
-		self.assertEqual(cint(cons.is_consolidated), 1)
-		self.assertGreater(frappe.db.count("GL Entry", {"voucher_no": cons.name}), 0)
-		self.assertGreater(frappe.db.count("Stock Ledger Entry", {"voucher_no": cons.name}), 0)
-		# merge log must carry the closing shift's company (reqd on the doctype;
-		# must not depend on the site's default-company fallback)
-		self.assertEqual(
-			frappe.db.get_value("POS Invoice Merge Log", {"pos_invoice": self.posi_name}, "company"),
-			self.profile.company,
-		)
 		frappe.db.commit()
+
+		# No consolidation: the POS Invoice keeps its own books (GL/SLE made at
+		# submit stay the only ones) and is never folded into a Sales Invoice.
+		posi = frappe.get_doc("POS Invoice", self.posi_name)
+		self.assertFalse(posi.consolidated_invoice)
+		self.assertEqual(frappe.db.count("POS Invoice Merge Log", {"pos_invoice": self.posi_name}), 0)
+
+		# The entries made at submit are still the only ones (nothing doubled).
+		self.assertGreater(
+			frappe.db.count("GL Entry", {"voucher_no": self.posi_name, "voucher_type": "POS Invoice"}),
+			0,
+		)
+		self.assertGreater(
+			frappe.db.count(
+				"Stock Ledger Entry", {"voucher_no": self.posi_name, "voucher_type": "POS Invoice"}
+			),
+			0,
+		)

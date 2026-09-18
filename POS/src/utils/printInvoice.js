@@ -78,7 +78,9 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 	)
 	return {
 		name: offlineId,
-		doctype: "Sales Invoice",
+		// The queued payload carries the doctype it was captured with; older
+		// queue entries predate POS Invoice mode and fall back to it.
+		doctype: raw.doctype || "POS Invoice",
 		is_offline: true,
 		pos_profile: raw.pos_profile,
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),

@@ -12,7 +12,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
-from pos_next.invoice_type import POS_INVOICE, get_pos_invoice_doctype, get_unconsolidated_posi_qty
+from pos_next.invoice_type import POS_INVOICE, get_pos_invoice_doctype
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -532,12 +532,10 @@ def _get_available_stock(item):
 	if batch_no:
 		return get_batch_qty(batch_no, warehouse) or 0
 
-	# Get stock from Bin, minus sold-but-unconsolidated POS Invoice qty
-	# (SLEs only land at shift-close consolidation, so Bin alone is stale).
-	# Not gated on posa_pos_opening_shift: built-in-POS sales reserve stock too.
+	# Get stock from Bin. POS Next's POS Invoices post their own stock ledger
+	# entries at submit, so Bin is already live and needs no adjustment.
 	bin_qty = frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty")
-	deducted = get_unconsolidated_posi_qty([item_code], warehouse).get(item_code, 0)
-	return (flt(bin_qty) or 0) - deducted
+	return flt(bin_qty) or 0
 
 
 def _collect_stock_errors(items):

@@ -13,12 +13,14 @@ import frappe
 
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
 
-# Schedule-safe profile: inserting a POS Opening Shift can never throw for
-# being outside a scheduled window (same filter as pos_next.test_invoice_type).
+# Schedule-safe profile: inserting a POS Opening Shift must never throw for
+# being outside a scheduled window. Enforced closing is the only scheduling
+# rule that blocks a shift, so requiring it to be off is enough; a profile
+# with no schedule at all is just as safe (hence no pos_schedule_end filter —
+# it would skip every profile on a site that never configures schedules).
 _PROFILE_FILTER = [
 	["disabled", "=", 0],
 	["pos_schedule_enforce_closing", "=", 0],
-	["pos_schedule_end", "is", "set"],
 ]
 
 
@@ -141,9 +143,9 @@ class POSInvoiceModeMixin:
 		return payload
 
 	def tearDown(self):
-		# cancel the closing shift through production code: on_cancel clears
-		# merge logs, cancels consolidated Sales Invoices and resets the POS
-		# Invoices' consolidated_invoice/status
+		# Cancel the closing shift through production code, then sweep any
+		# merge log left behind: pos_next never consolidates its own POS
+		# Invoices, but this shared site also holds built-in-ERPNext rows.
 		if getattr(self, "closing", None) and frappe.db.exists("POS Closing Shift", self.closing.name):
 			doc = frappe.get_doc("POS Closing Shift", self.closing.name)
 			if doc.docstatus == 1:
