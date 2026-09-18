@@ -18,6 +18,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from pos_next.api.invoices import submit_invoice
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
+	get_pos_invoices,
 	make_closing_shift_from_opening,
 )
 from pos_next.tests._posi_test_utils import POSInvoiceModeMixin
@@ -75,3 +76,32 @@ class TestClosingConsolidation(POSInvoiceModeMixin, FrappeTestCase):
 			),
 			0,
 		)
+
+	def test_shift_holding_both_doctypes_is_collected_whole(self):
+		"""A shift can hold both doctypes (invoices created before the site-wide
+		switch). Closing must read both, or the older half silently vanishes
+		from every closing total."""
+		# a Sales Invoice on the same shift, as pre-switch rows are
+		si = frappe.get_doc(
+			{
+				"doctype": "Sales Invoice",
+				"customer": self.customer,
+				"company": self.profile.company,
+				"pos_profile": self.profile.name,
+				"is_pos": 1,
+				"update_stock": 0,
+				"posa_pos_opening_shift": self.shift.name,
+				"items": [
+					{"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.profile.warehouse}
+				],
+				"payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+			}
+		)
+		si.flags.ignore_permissions = True
+		si.insert()
+		si.submit()
+		self._created.append(si.name)
+
+		collected = {row["name"] for row in get_pos_invoices(self.shift.name)}
+		self.assertIn(self.posi_name, collected)
+		self.assertIn(si.name, collected)

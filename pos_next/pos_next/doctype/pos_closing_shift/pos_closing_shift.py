@@ -310,25 +310,40 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
-	# whitelist gate: client input is interpolated into the SQL table name —
-	# anything but the two invoice doctypes resolves to the site's mode
-	doctype = doctype if doctype in ("Sales Invoice", "POS Invoice") else get_pos_invoice_doctype()
-	submit_printed_invoices(pos_opening_shift, doctype)
-	cond = " and ifnull(consolidated_invoice,'') = ''" if doctype == "POS Invoice" else ""
-	data = frappe.db.sql(
-		f"""
-	select
-		name
-	from
-		`tab{doctype}`
-	where
-		docstatus = 1 and posa_pos_opening_shift = %s{cond}
-	""",
-		(pos_opening_shift),
-		as_dict=1,
-	)
+	"""Every submitted invoice on the shift, across BOTH invoice doctypes.
 
-	data = [frappe.get_doc(doctype, d.name).as_dict() for d in data]
+	A shift can legitimately hold both: the site-wide invoice type may be
+	switched mid-shift (the switch is blocked while a shift is open, but a
+	shift reopened on an older doctype, or rows created before the switch,
+	still link here). Reading only the current mode's doctype would silently
+	drop the other half from every closing total, so both are always read.
+	"""
+	# whitelist gate: client input is interpolated into the SQL table name
+	if doctype in ("Sales Invoice", "POS Invoice"):
+		doctypes = [doctype]
+	else:
+		doctypes = ["POS Invoice", "Sales Invoice"]
+
+	data = []
+	for dt in doctypes:
+		submit_printed_invoices(pos_opening_shift, dt)
+		# A consolidated POS Invoice (legacy data only — parity rows are never
+		# consolidated) already had its books posted to the Sales Invoice that
+		# absorbed it, so counting it here would double it.
+		cond = " and ifnull(consolidated_invoice,'') = ''" if dt == "POS Invoice" else ""
+		rows = frappe.db.sql(
+			f"""
+		select
+			name
+		from
+			`tab{dt}`
+		where
+			docstatus = 1 and posa_pos_opening_shift = %s{cond}
+		""",
+			(pos_opening_shift),
+			as_dict=1,
+		)
+		data.extend(frappe.get_doc(dt, d.name).as_dict() for d in rows)
 
 	return data
 
