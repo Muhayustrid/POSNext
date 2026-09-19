@@ -510,7 +510,7 @@ describe("SessionSummary", () => {
 	})
 })
 
-describe("InvoiceHistoryDialog tabs", () => {
+describe("InvoiceHistoryDialog", () => {
 	function mountDialog(posOpeningShift = "OS-1") {
 		return mount(InvoiceHistoryDialog, {
 			props: { modelValue: true, posProfile: "juri1", posOpeningShift },
@@ -521,28 +521,19 @@ describe("InvoiceHistoryDialog tabs", () => {
 		})
 	}
 
-	it("defaults to the session summary tab when a shift is open", async () => {
+	it("opens straight on the transactions list with or without a shift", async () => {
 		resources.instances.length = 0
 		const wrapper = mountDialog()
 		await flushPromises()
 
-		expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
-		const urls = resources.instances.map((i) => i.url)
-		expect(urls).toContain("pos_next.api.shifts.get_session_summary")
-	})
-
-	it("defaults to the transactions tab without an open shift", async () => {
-		resources.instances.length = 0
-		const wrapper = mountDialog("")
-		await flushPromises()
-
+		// the session recap lives in the Sales Recap view now, not here
 		const urls = resources.instances.map((i) => i.url)
 		expect(urls).not.toContain("pos_next.api.shifts.get_session_summary")
-		expect(wrapper.text()).not.toContain("Sales Summary")
+		expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
 		expect(wrapper.text()).toContain("Load More")
 	})
 
-	it("uses a constrained dialog with fixed header tabs, close and a minimal footer", async () => {
+	it("uses a constrained dialog with a fixed header, close and a minimal footer", async () => {
 		resources.instances.length = 0
 		const wrapper = mountDialog()
 		await flushPromises()
@@ -550,11 +541,6 @@ describe("InvoiceHistoryDialog tabs", () => {
 		const dialog = wrapper.findComponent({ name: "Dialog" })
 		// constrained width (~1152px) instead of full-viewport stretch
 		expect(dialog.props("options").size).toBe("6xl")
-
-		// tabs live in the fixed header, body scrolls, footer only closes
-		expect(
-			wrapper.find('[data-test="dialog-header"] [role="tablist"]').exists(),
-		).toBe(true)
 		expect(
 			wrapper
 				.find('[data-test="dialog-header"] button[aria-label="Close"]')
@@ -565,32 +551,6 @@ describe("InvoiceHistoryDialog tabs", () => {
 		expect(wrapper.find('[data-test="dialog-footer"]').text()).toContain(
 			"Close",
 		)
-	})
-
-	it("switches between tabs on click", async () => {
-		resources.instances.length = 0
-		const wrapper = mountDialog()
-		await flushPromises()
-		expect(wrapper.text()).not.toContain("Load More")
-
-		const tabs = wrapper.findAll('[role="tab"]')
-		await tabs[1].trigger("click")
-		await flushPromises()
-		// transactions tab: list controls visible, summary gone
-		expect(wrapper.text()).toContain("Load More")
-		expect(wrapper.text()).not.toContain("Sales Summary")
-		expect(tabs[1].attributes("aria-selected")).toBe("true")
-		expect(tabs[0].attributes("aria-selected")).toBe("false")
-
-		await tabs[0].trigger("click")
-		await flushPromises()
-		expect(tabs[0].attributes("aria-selected")).toBe("true")
-		// re-entering the tab remounts the summary and refetches fresh data
-		const summaryInstances = resources.instances.filter(
-			(i) => i.url === "pos_next.api.shifts.get_session_summary",
-		)
-		expect(summaryInstances.length).toBe(2)
-		expect(wrapper.text()).toContain("Loading session summary...")
 	})
 })
 

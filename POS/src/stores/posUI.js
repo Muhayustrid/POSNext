@@ -4,6 +4,20 @@ import { computed, ref } from "vue";
 
 const LEFT_PANEL_MIN = 320;
 const RIGHT_PANEL_MIN = 360;
+const LEFT_PANEL_WIDTH_STORAGE_KEY = "pos_left_panel_width";
+// Items panel gets a slightly larger share of the screen than the cart so the
+// cart never starves on smaller laptops; the cashier can still drag it.
+const LEFT_PANEL_DEFAULT_RATIO = 0.56;
+
+function readStoredLeftPanelWidth() {
+	if (typeof localStorage === "undefined") return null;
+	try {
+		const stored = Number(localStorage.getItem(LEFT_PANEL_WIDTH_STORAGE_KEY));
+		return Number.isFinite(stored) && stored >= LEFT_PANEL_MIN ? stored : null;
+	} catch {
+		return null;
+	}
+}
 
 export const usePOSUIStore = defineStore("posUI", () => {
 	// Loading state
@@ -55,8 +69,10 @@ export const usePOSUIStore = defineStore("posUI", () => {
 	const mobileActiveTab = ref("items"); // 'items' or 'cart'
 	const windowWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
 
-	// Layout state
-	const leftPanelWidth = ref(800);
+	// Layout state: null until the first layout pass picks the saved divider
+	// position or the proportional default for the current screen.
+	const leftPanelWidth = ref(null);
+	const storedLeftPanelWidth = readStoredLeftPanelWidth();
 	const isResizing = ref(false);
 
 	// Computed
@@ -137,9 +153,34 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		isResizing.value = resizing;
 	}
 
+	function defaultLeftPanelWidth(containerWidth) {
+		return clampLeftPanelWidth(
+			Math.round(containerWidth * LEFT_PANEL_DEFAULT_RATIO),
+			containerWidth,
+		);
+	}
+
 	function updateLayoutBounds(containerWidth) {
 		if (containerWidth) {
-			leftPanelWidth.value = clampLeftPanelWidth(leftPanelWidth.value, containerWidth);
+			leftPanelWidth.value = clampLeftPanelWidth(
+				leftPanelWidth.value ??
+					storedLeftPanelWidth ??
+					defaultLeftPanelWidth(containerWidth),
+				containerWidth,
+			);
+		}
+	}
+
+	/** Persist the cashier's divider position so it survives reloads. */
+	function saveLeftPanelWidth() {
+		if (typeof localStorage === "undefined") return;
+		try {
+			localStorage.setItem(
+				LEFT_PANEL_WIDTH_STORAGE_KEY,
+				String(leftPanelWidth.value),
+			);
+		} catch {
+			// Storage unavailable (private mode) — keep the session-only width.
 		}
 	}
 
@@ -223,6 +264,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		setResizing,
 		updateLayoutBounds,
 		clampLeftPanelWidth,
+		saveLeftPanelWidth,
 		resetAllDialogs,
 	};
 });

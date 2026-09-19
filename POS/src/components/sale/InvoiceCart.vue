@@ -501,11 +501,6 @@
 						:aria-label="__('Buyer name')"
 					/>
 				</div>
-				<p class="mt-0.5 text-[10px] text-gray-400">
-					{{
-						__("Only shown on the receipt. The sale uses the walk-in customer.")
-					}}
-				</p>
 			</div>
 		</div>
 

@@ -3,8 +3,8 @@
 		<template #body>
 			<!-- Constrained dialog: fixed header + tabs, scrollable body, minimal footer -->
 			<div class="flex flex-col max-h-[calc(100dvh-6rem)] text-start">
-				<!-- Compact fixed header: title, close, tabs -->
-				<div class="shrink-0 border-b border-gray-200 px-4 pt-4 sm:px-5" data-test="dialog-header">
+				<!-- Compact fixed header: title, close -->
+				<div class="shrink-0 border-b border-gray-200 px-4 pt-4 pb-3 sm:px-5" data-test="dialog-header">
 					<div class="flex items-center justify-between gap-3">
 						<DialogTitle class="text-lg font-semibold leading-6 text-gray-900">
 							{{ __("Invoice History") }}
@@ -20,48 +20,11 @@
 							</svg>
 						</Button>
 					</div>
-					<!-- Tabs Navigation -->
-					<div class="mt-3 flex w-fit p-1 bg-gray-100 rounded-lg" role="tablist" :aria-label="__('History Sections')">
-						<button
-							@click="activeTab = 'summary'"
-							role="tab"
-							:aria-selected="activeTab === 'summary'"
-							:class="[
-								'px-3 md:px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200',
-								activeTab === 'summary'
-									? 'bg-white text-gray-900 shadow-sm'
-									: 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50',
-							]"
-						>
-							{{ __("Session Summary") }}
-						</button>
-						<button
-							@click="activeTab = 'transactions'"
-							role="tab"
-							:aria-selected="activeTab === 'transactions'"
-							:class="[
-								'px-3 md:px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200',
-								activeTab === 'transactions'
-									? 'bg-white text-gray-900 shadow-sm'
-									: 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/50',
-							]"
-						>
-							{{ __("Transactions") }}
-						</button>
-					</div>
 				</div>
 
 				<!-- Scrollable body -->
 				<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5" data-test="dialog-body">
-					<!-- Current Session Summary -->
-					<SessionSummary
-						v-if="activeTab === 'summary'"
-						:opening-shift="posOpeningShift"
-						:pos-profile="posProfile"
-					/>
-
-					<template v-if="activeTab === 'transactions'">
-				<!-- Filters -->
+					<!-- Filters -->
 				<div class="flex items-center gap-2">
 					<div class="flex-1">
 						<Input
@@ -208,7 +171,6 @@
 						{{ __('Load More') }}
 					</Button>
 				</div>
-				</template>
 				</div>
 
 				<!-- Minimal footer -->
@@ -249,7 +211,6 @@ import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { DialogTitle } from "reka-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
-import SessionSummary from "./SessionSummary.vue"
 
 const { showError } = useToast()
 const { formatDate, formatTime } = useFormatters()
@@ -277,7 +238,6 @@ const emit = defineEmits([
 ])
 
 const show = ref(props.modelValue)
-const activeTab = ref(props.posOpeningShift ? "summary" : "transactions")
 const invoices = ref([])
 const searchTerm = ref("")
 const page = ref(0)
@@ -336,8 +296,6 @@ watch(
 	(val) => {
 		show.value = val
 		if (val && props.posProfile) {
-			// Default to the session summary when there is an active shift
-			activeTab.value = props.posOpeningShift ? "summary" : "transactions"
 			loadInvoices()
 		}
 	},

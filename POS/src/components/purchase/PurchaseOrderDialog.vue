@@ -1,5 +1,9 @@
 <template>
-	<Dialog v-model="show" :options="{ title: dialogTitle, size: 'lg' }">
+	<DialogHost
+		v-model:show="show"
+		:embedded="embedded"
+		:options="{ title: dialogTitle, size: 'lg' }"
+	>
 		<template #body-content>
 			<!-- LIST VIEW -->
 			<div v-if="view === 'list'" class="flex flex-col gap-3">
@@ -416,11 +420,11 @@
 					</Button>
 				</div>
 			</div>
-			<div v-else class="flex justify-end w-full">
+			<div v-else-if="!embedded" class="flex justify-end w-full">
 				<Button variant="subtle" @click="show = false">{{ __("Close") }}</Button>
 			</div>
 		</template>
-	</Dialog>
+	</DialogHost>
 </template>
 
 <script setup>
@@ -432,7 +436,7 @@ import { usePermissions } from "@/composables/usePermissions"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
 import { parseError } from "@/utils/errorHandler"
 import { Button, Dialog } from "frappe-ui"
-import { computed, ref, watch } from "vue"
+import { Comment, computed, defineComponent, h, ref, watch } from "vue"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -440,9 +444,66 @@ const props = defineProps({
 	company: { type: String, default: null },
 	warehouse: { type: String, default: null },
 	currency: { type: String, default: "" },
+	embedded: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(["update:modelValue"])
+
+// Standalone: renders the frappe-ui Dialog as today. Embedded: renders only
+// the dialog's slot content inside the app shell's container — the shell owns
+// the header and close.
+const DialogHost = defineComponent({
+	props: {
+		embedded: { type: Boolean, default: false },
+		show: { type: Boolean, default: false },
+		options: { type: Object, default: () => ({}) },
+	},
+	emits: ["update:show"],
+	setup(hostProps, { slots, emit: hostEmit }) {
+		return () => {
+			if (!hostProps.embedded) {
+				return h(
+					Dialog,
+					{
+						modelValue: hostProps.show,
+						"onUpdate:modelValue": (v) => hostEmit("update:show", v),
+						options: hostProps.options,
+					},
+					{
+						"body-title": slots["body-title"],
+						"body-content": slots["body-content"],
+						actions: slots.actions,
+					},
+				)
+			}
+			// Mirror the frappe Dialog body padding so content
+			// written for the dialog renders identically and the
+			// form/list scrolls on its own; actions stay pinned.
+			// The footer is skipped when the actions slot renders
+			// nothing (e.g. the list view has no footer when embedded).
+			const actions = slots.actions?.() ?? []
+			const hasActions = actions.some((vnode) => vnode?.type !== Comment)
+			return h("div", { class: "h-full min-h-0 flex flex-col" }, [
+				h(
+					"div",
+					{
+						class: "flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6",
+					},
+					[slots["body-content"]?.()],
+				),
+				hasActions
+					? h(
+							"div",
+							{
+								class: "shrink-0 px-4 pb-4 pt-3 sm:px-6 border-t border-gray-200",
+							},
+							actions,
+						)
+					: null,
+			])
+		}
+	},
+});
 
 const { showSuccess, showError } = useToast()
 const { formatDate } = useFormatters()

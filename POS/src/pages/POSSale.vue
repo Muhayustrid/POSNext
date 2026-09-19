@@ -18,16 +18,13 @@
 				:is-offline="offlineStore.isOffline"
 				:is-syncing="offlineStore.isSyncing"
 				:pending-invoices-count="offlineStore.pendingInvoicesCount"
-				:is-any-dialog-open="uiStore.isAnyDialogOpen"
 				:cache-syncing="itemStore.cacheSyncing"
 				:cache-stats="itemStore.cacheStats"
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
 				:qz-connected="qzConnected"
-				:show-production="canProduction"
-				:show-purchase-order="canPurchaseOrder"
-				@nav-click="handleManagementMenuClick"
+				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
 				@printer-click="openHistoryDialog"
 				@refresh-click="handleRefresh"
@@ -258,13 +255,6 @@
 				v-if="shiftStore.hasOpenShift"
 				class="pos-content-shell flex-1 flex overflow-hidden relative"
 			>
-				<!-- Icon-Only Management Slider - Always Visible -->
-				<ManagementSlider
-					:show-production="canProduction"
-					:show-purchase-order="canPurchaseOrder"
-					@menu-clicked="handleManagementMenuClick"
-				/>
-
 				<!-- Main Content Container -->
 				<div
 					ref="containerRef"
@@ -345,7 +335,11 @@
 						<div
 							v-if="uiStore.isDesktop || uiStore.mobileActiveTab === 'items'"
 							:style="{
-								width: uiStore.isDesktop ? uiStore.leftPanelWidth + 'px' : '100%',
+								width: uiStore.isDesktop
+									? uiStore.leftPanelWidth
+										? uiStore.leftPanelWidth + 'px'
+										: '56%'
+									: '100%',
 							}"
 							:class="[
 								'flex flex-col bg-white overflow-hidden',
@@ -395,10 +389,7 @@
 					<keep-alive>
 						<div
 							v-if="uiStore.isDesktop || uiStore.mobileActiveTab === 'cart'"
-							:class="[
-								'flex flex-col bg-gray-50 overflow-hidden',
-								uiStore.isDesktop ? 'flex-1' : 'flex-1',
-							]"
+							class="flex flex-col bg-gray-50 overflow-hidden flex-1"
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
@@ -628,24 +619,6 @@
 				"
 			/>
 
-			<!-- Production Dialog -->
-			<ProductionDialog
-				v-model="showProductionDialog"
-				:pos-profile="shiftStore.profileName"
-				:company="shiftStore.profileCompany"
-				:currency="shiftStore.profileCurrency"
-				@production-created="handleProductionCreated"
-			/>
-
-			<!-- Purchase Order Dialog -->
-			<PurchaseOrderDialog
-				v-model="showPurchaseOrderDialog"
-				:pos-profile="shiftStore.profileName"
-				:company="shiftStore.profileCompany"
-				:warehouse="shiftStore.profileWarehouse"
-				:currency="shiftStore.profileCurrency"
-			/>
-
 			<!-- Batch/Serial Dialog -->
 			<BatchSerialDialog
 				v-model="uiStore.showBatchSerialDialog"
@@ -686,13 +659,6 @@
 				@return-created="handleReturnCreated"
 			/>
 
-			<!-- Sales Recap Dialog -->
-			<SalesRecapDialog
-				v-model="showSalesRecap"
-				:pos-profile="shiftStore.profileName"
-				:opening-shift="shiftStore.currentShift?.name"
-			/>
-
 			<!-- Shift History Dialog -->
 			<ShiftHistoryDialog
 				v-model="showShiftHistoryDialog"
@@ -724,42 +690,30 @@
 				@customer-updated="handleCustomerUpdated"
 			/>
 
-			<!-- Promotion Management -->
-			<PromotionManagement
-				v-model="showPromotionManagement"
+			<!-- Management Menu Shell (promotions, settings, invoices, sales
+			     recap, products, production, purchase order as embedded views) -->
+			<POSMenuDialog
+				v-model:open="showPOSMenu"
+				:initial-view="posMenuInitialView"
 				:pos-profile="shiftStore.profileName"
 				:company="shiftStore.profileCompany"
 				:currency="shiftStore.profileCurrency"
-				@promotion-saved="handlePromotionSaved"
-			/>
-
-			<!-- POS Settings -->
-			<POSSettings
-				v-model="showPOSSettings"
-				:pos-profile="shiftStore.profileName"
+				:warehouse="shiftStore.profileWarehouse"
 				:current-warehouse="shiftStore.profileWarehouse"
-			/>
-
-			<!-- Stock Lookup Dialog (Products Menu) -->
-			<WarehouseAvailabilityDialog
-				v-model="showStockLookup"
-				mode="search"
-				:pos-profile="shiftStore.profileName"
-				:company="shiftStore.profileCompany"
-			/>
-
-			<!-- Invoice Management -->
-			<InvoiceManagement
-				v-model="showInvoiceManagement"
-				:pos-profile="shiftStore.profileName"
-				:currency="shiftStore.profileCurrency"
+				:opening-shift="shiftStore.currentShift?.name"
 				:history-invoices="invoiceHistoryData"
 				:draft-invoices="draftsStore.drafts"
+				:can-purchase-order="canPurchaseOrder"
+				:can-production="canProduction"
+				:is-offline="offlineStore.isOffline"
+				@menu-selected="handlePOSMenuSelected"
 				@view-invoice="handleViewInvoice"
 				@print-invoice="handlePrintInvoice"
 				@load-draft="handleLoadDraftFromManagement"
 				@delete-draft="handleDeleteDraft"
 				@refresh-history="loadInvoiceHistoryData"
+				@promotion-saved="handlePromotionSaved"
+				@production-created="handleProductionCreated"
 			/>
 
 			<!-- Invoice Detail Dialog -->
@@ -1102,9 +1056,7 @@ import ClearCacheOverlay from "@/components/common/ClearCacheOverlay.vue";
 import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
 import POSFooter from "@/components/common/POSFooter.vue";
-import ManagementSlider from "@/components/pos/ManagementSlider.vue";
-import ProductionDialog from "@/components/pos/ProductionDialog.vue";
-import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue";
+import POSMenuDialog from "@/components/pos/POSMenuDialog.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
 import CouponDialog from "@/components/sale/CouponDialog.vue";
@@ -1120,15 +1072,11 @@ import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PackageSelectionDialog from "@/components/sale/PackageSelectionDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
-import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
-import SalesRecapDialog from "@/components/sale/SalesRecapDialog.vue";
-import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
-import POSSettings from "@/components/settings/POSSettings.vue";
-import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
+import { registerDialog } from "@/composables/useDialogState";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { usePermissions } from "@/composables/usePermissions";
@@ -1268,20 +1216,11 @@ function computeCartHash() {
 		.join("|");
 }
 
-// Promotion dialog
-const showPromotionManagement = ref(false);
-
-// Settings dialog
-const showPOSSettings = ref(false);
-
-// Stock Lookup dialog (Products menu)
-const showStockLookup = ref(false);
-
-// Invoice Management dialog
-const showInvoiceManagement = ref(false);
-
-// Sales Recap dialog
-const showSalesRecap = ref(false);
+// Management menu application shell — registered with useDialogState so
+// isAnyDialogOpen (divider hiding, search refocus) covers it too
+const showPOSMenu = registerDialog(ref(false), "posMenu");
+onUnmounted(() => showPOSMenu.cleanup?.());
+const posMenuInitialView = ref(null);
 
 // Invoice Detail dialog
 const showInvoiceDetail = ref(false);
@@ -1357,13 +1296,15 @@ const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_t
 let resizeState = null;
 let bodyStyleSnapshot = null;
 
+// Shared resize handler at setup scope so onUnmounted removes the same reference
+const handleWindowResize = () => {
+	uiStore.setWindowWidth(window.innerWidth);
+	updateLayoutBounds();
+};
+
 onMounted(async () => {
 	// Window resize listeners (passive for better performance)
-	const handleResize = () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	};
-	window.addEventListener("resize", handleResize, { passive: true });
+	window.addEventListener("resize", handleWindowResize, { passive: true });
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
@@ -1630,7 +1571,10 @@ watch(
 		uiStore.showDraftDialog = false;
 		uiStore.showHistoryDialog = false;
 		uiStore.showReturnDialog = false;
-	}
+	},
+	// The main container renders under v-if="hasOpenShift"; measure it only
+	// after the DOM patch, otherwise containerRef is still null here.
+	{ flush: "post" },
 );
 
 // Shift schedule: warning toast before the deadline, forced closing after it.
@@ -1830,10 +1774,7 @@ watch(
 );
 
 onUnmounted(() => {
-	window.removeEventListener("resize", () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	});
+	window.removeEventListener("resize", handleWindowResize);
 	stopResize();
 
 	// Stop periodic stock sync on unmount
@@ -3052,8 +2993,10 @@ async function handleSyncAll() {
 
 // Resizable layout helpers
 function updateLayoutBounds() {
-	if (!containerRef.value) return;
-	const containerWidth = containerRef.value.offsetWidth;
+	// The container spans the app width, so before it mounts (or while hidden,
+	// where offsetWidth is 0) the window width is a close enough estimate —
+	// the next real measurement clamps the exact value.
+	const containerWidth = containerRef.value?.offsetWidth || window.innerWidth;
 	uiStore.updateLayoutBounds(containerWidth);
 }
 
@@ -3143,6 +3086,8 @@ function stopResize(event) {
 	resizeState = null;
 	restoreBodyStyles();
 	updateLayoutBounds();
+	// Remember the cashier's chosen split for the next session
+	uiStore.saveLeftPanelWidth();
 }
 
 function restoreBodyStyles() {
@@ -3155,44 +3100,44 @@ function restoreBodyStyles() {
 	bodyStyleSnapshot = null;
 }
 
-// Management and Promotion handlers
-	function handleManagementMenuClick(menuItem) {
-		if (menuItem === "promotions") {
-			showPromotionManagement.value = true;
-		} else if (menuItem === "settings") {
-			showPOSSettings.value = true;
-		} else if (menuItem === "invoices") {
-			loadInvoiceHistoryData();
-			draftsStore.loadDrafts();
-			showInvoiceManagement.value = true;
-		} else if (menuItem === "sales-recap") {
-			showSalesRecap.value = true;
-		} else if (menuItem === "products") {
-			showStockLookup.value = true;
-		} else if (menuItem === "production") {
-			openProduction();
-		} else if (menuItem === "purchase-order") {
-			openPurchaseOrder();
-		}
+// Management menu shell
+function openPOSMenu(view = null) {
+	// Hamburger path never stacks the shell over another open dialog
+	// (parity with the old drawer guard); production/PO keep the
+	// pre-shell behavior of the old direct dialogs.
+	if (view === null && uiStore.isAnyDialogOpen) return;
+	posMenuInitialView.value = view;
+	if (view === "invoices") {
+		// Same fresh-data contract as the old direct invoices path.
+		loadInvoiceHistoryData();
+		draftsStore.loadDrafts();
 	}
+	showPOSMenu.value = true;
+}
+
+function handlePOSMenuSelected(id) {
+	// Fresh data whenever the user switches to the invoices view.
+	if (id === "invoices") {
+		loadInvoiceHistoryData();
+		draftsStore.loadDrafts();
+	}
+}
 
 // Production
-const showProductionDialog = ref(false);
 const { usePermissionCheck } = usePermissions();
 const { hasPermission: canProduction } = usePermissionCheck("POS Production Log", "create");
 
 function openProduction() {
 	if (offlineStore.isOffline) return;
-	showProductionDialog.value = true;
+	openPOSMenu("production");
 }
 
 // Purchase Order
-const showPurchaseOrderDialog = ref(false);
 const { hasPermission: canPurchaseOrder } = usePermissionCheck("Purchase Order", "create");
 
 function openPurchaseOrder() {
 	if (offlineStore.isOffline) return;
-	showPurchaseOrderDialog.value = true;
+	openPOSMenu("purchase-order");
 }
 
 function handleProductionCreated(result) {
@@ -3329,7 +3274,7 @@ async function runPrintInvoice(invoiceData) {
 // Note: handleLoadDraft already exists above, will delegate to it
 function handleLoadDraftFromManagement(draft) {
 	handleLoadDraft(draft);
-	showInvoiceManagement.value = false;
+	showPOSMenu.value = false;
 }
 
 function handleDeleteDraft(draftId) {

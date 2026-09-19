@@ -124,12 +124,12 @@ export function useResponsivePayment() {
 		const height = viewportHeight.value;
 
 		// Very small phones - smaller buttons
-		if (width < 360 || height < 550) return "h-9";
+		if (width < 360 || height < 550) return "h-10";
 		// Small phones
-		if (width < 640) return "h-10";
+		if (width < 640) return "h-11";
 		// Short screens
-		if (height < 700) return "h-10";
-		return "h-12";
+		if (height < 700) return "h-12";
+		return "h-14";
 	});
 
 	// Mobile action button sizing
@@ -139,33 +139,34 @@ export function useResponsivePayment() {
 
 		if (width < 360 || height < 550) {
 			return {
-				height: "h-9",
-				text: "text-xs",
-				icon: "w-3.5 h-3.5",
-				gap: "gap-1",
-			};
-		}
-		if (width < 640) {
-			return {
-				height: "h-10",
+				height: "h-11",
 				text: "text-sm",
 				icon: "w-4 h-4",
 				gap: "gap-1.5",
 			};
 		}
+		if (width < 640) {
+			return {
+				height: "h-12",
+				text: "text-sm",
+				icon: "w-5 h-5",
+				gap: "gap-1.5",
+			};
+		}
 		return {
-			height: "h-11",
-			text: "text-sm",
-			icon: "w-4 h-4",
+			height: "h-14",
+			text: "text-base",
+			icon: "w-5 h-5",
 			gap: "gap-2",
 		};
 	});
 
-	// Dynamic numpad key size
+	// Dynamic numpad key size — cashiers stab at these all day, keep every
+	// key a comfortable touch target (48px floor, 64px on normal screens).
 	const dynamicNumpadSize = computed(() => {
-		if (viewportHeight.value < 600) return { key: "h-10", addBtn: "h-[6.5rem]" };
-		if (viewportHeight.value < 700) return { key: "h-10", addBtn: "h-[7rem]" };
-		return { key: "h-12", addBtn: "h-[8.5rem]" };
+		if (viewportHeight.value < 600) return { key: "h-12", addBtn: "h-[6.5rem]" };
+		if (viewportHeight.value < 700) return { key: "h-14", addBtn: "h-[7.5rem]" };
+		return { key: "h-16", addBtn: "h-[8.5rem]" };
 	});
 
 	return {

@@ -1,46 +1,84 @@
 <template>
-	<!-- Full Page Overlay -->
+	<!-- Full Page Overlay (standalone) / embedded content view -->
 	<Transition name="fade">
 		<div
-			v-if="show"
-			class="fixed inset-0 bg-black bg-opacity-50 z-[300]"
-			@click.self="handleClose"
+			v-if="embedded || show"
+			:class="
+				embedded
+					? 'relative h-full min-h-0 flex flex-col'
+					: 'fixed inset-0 bg-black bg-opacity-50 z-[300]'
+			"
+			@click.self="!embedded && handleClose()"
 		>
 			<!-- Main Container -->
-			<div class="fixed inset-0 flex items-center justify-center p-4">
+			<div
+				:class="
+					embedded
+						? 'flex h-full min-h-0 flex-col'
+						: 'fixed inset-0 flex items-center justify-center p-4'
+				"
+			>
 				<div
-					class="w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col"
+					:class="
+						embedded
+							? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+							: 'w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col'
+					"
 				>
-					<!-- Header -->
+					<!-- Toolbar: tabs + actions in one band, matching the other views -->
 					<div
-						class="flex items-center justify-between px-6 py-5 border-b bg-gradient-to-r from-indigo-50 to-purple-50"
+						class="flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-gray-200 bg-white px-4 sm:px-6"
 					>
-						<div class="flex items-center gap-3">
-							<div class="p-2 bg-indigo-100 rounded-lg">
-								<svg
-									class="w-6 h-6 text-indigo-600"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
+						<div class="flex items-center gap-3 min-w-0">
+							<h2
+								v-if="!embedded"
+								class="text-sm font-semibold text-gray-900 truncate"
+							>
+								{{ __("Invoice Management") }}
+							</h2>
+							<nav class="flex gap-1" :aria-label="__('Tabs')">
+								<button
+									v-for="tab in tabs"
+									:key="tab.id"
+									@click="activeTab = tab.id"
+									:class="[
+										'px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+										activeTab === tab.id
+											? 'text-blue-600 border-blue-600'
+											: 'text-gray-600 border-transparent hover:text-gray-900 hover:border-gray-300',
+									]"
 								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-									/>
-								</svg>
-							</div>
-							<div>
-								<h2 class="text-xl font-bold text-gray-900">
-									{{ __("Invoice Management") }}
-								</h2>
-								<p class="text-sm text-gray-600 flex items-center mt-0.5">
-									{{ __("Manage all your invoices in one place") }}
-								</p>
-							</div>
+									<div class="flex items-center gap-2">
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												:d="tab.icon"
+											/>
+										</svg>
+										<span>{{ tab.label }}</span>
+										<span
+											v-if="tab.badge && tab.badge() > 0"
+											:class="[
+												'ms-1 px-2 py-0.5 text-xs font-bold rounded-full',
+												activeTab === tab.id
+													? 'bg-blue-100 text-blue-700'
+													: 'bg-gray-100 text-gray-600',
+											]"
+										>
+											{{ tab.badge() }}
+										</span>
+									</div>
+								</button>
+							</nav>
 						</div>
-						<div class="flex items-center gap-2">
+						<div class="flex items-center gap-2 shrink-0">
 							<Button
 								@click="refreshCurrentTab"
 								:loading="loading"
@@ -65,8 +103,9 @@
 								{{ __("Refresh") }}
 							</Button>
 							<button
+								v-if="!embedded"
 								@click="handleClose"
-								class="p-2 hover:bg-white/50 rounded-lg transition-colors"
+								class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
 							>
 								<svg
 									class="w-5 h-5 text-gray-600"
@@ -83,51 +122,6 @@
 								</svg>
 							</button>
 						</div>
-					</div>
-
-					<!-- Tabs Navigation -->
-					<div class="border-b border-gray-200 bg-gray-50">
-						<nav class="flex gap-2 px-6" :aria-label="__('Tabs')">
-							<button
-								v-for="tab in tabs"
-								:key="tab.id"
-								@click="activeTab = tab.id"
-								:class="[
-									'px-4 py-3 text-sm font-semibold transition-all border-b-2 relative',
-									activeTab === tab.id
-										? getTabActiveClass(tab.id)
-										: 'text-gray-600 border-transparent hover:text-gray-800 hover:border-gray-300',
-								]"
-							>
-								<div class="flex items-center gap-2">
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											:d="tab.icon"
-										/>
-									</svg>
-									<span>{{ tab.label }}</span>
-									<span
-										v-if="tab.badge && tab.badge() > 0"
-										:class="[
-											'ms-1 px-2 py-0.5 text-xs font-bold rounded-full',
-											activeTab === tab.id
-												? getBadgeActiveClass(tab.id)
-												: getBadgeInactiveClass(tab.id),
-										]"
-									>
-										{{ tab.badge() }}
-									</span>
-								</div>
-							</button>
-						</nav>
 					</div>
 
 					<!-- Tab Content -->
@@ -1119,6 +1113,7 @@ const { formatDate, formatDateTime, formatTime } = useFormatters();
 
 const props = defineProps({
 	modelValue: Boolean,
+	embedded: { type: Boolean, default: false },
 	posProfile: String,
 	currency: {
 		type: String,
@@ -1253,53 +1248,6 @@ const currentTabLabel = computed(() => {
 	return tabs.value.find((t) => t.id === activeTab.value)?.label || "";
 });
 
-// Tab class helpers
-function getTabActiveClass(tabId) {
-	switch (tabId) {
-		case "partial":
-			return "text-orange-600 border-orange-500";
-		case "history":
-			return "text-indigo-600 border-indigo-500";
-		case "drafts":
-			return "text-purple-600 border-purple-500";
-		case "returns":
-			return "text-red-600 border-red-500";
-		default:
-			return "text-gray-600 border-gray-500";
-	}
-}
-
-// Badge class helpers
-function getBadgeActiveClass(tabId) {
-	switch (tabId) {
-		case "partial":
-			return "bg-orange-100 text-orange-700";
-		case "history":
-			return "bg-indigo-100 text-indigo-700";
-		case "drafts":
-			return "bg-purple-100 text-purple-700";
-		case "returns":
-			return "bg-red-100 text-red-700";
-		default:
-			return "bg-gray-100 text-gray-700";
-	}
-}
-
-function getBadgeInactiveClass(tabId) {
-	switch (tabId) {
-		case "partial":
-			return "bg-gray-200 text-gray-600";
-		case "history":
-			return "bg-gray-200 text-gray-600";
-		case "drafts":
-			return "bg-gray-200 text-gray-600";
-		case "returns":
-			return "bg-gray-200 text-gray-600";
-		default:
-			return "bg-gray-200 text-gray-600";
-	}
-}
-
 // Watchers
 watch(
 	() => props.modelValue,
@@ -1313,7 +1261,10 @@ watch(
 				emit("refresh-history");
 			}
 		}
-	}
+	},
+	// immediate: embedded mode mounts with modelValue already true and must load;
+	// standalone mounts with false, which the guard no-ops.
+	{ immediate: true }
 );
 
 watch(show, (val) => {

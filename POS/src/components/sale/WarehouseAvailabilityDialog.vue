@@ -1,5 +1,5 @@
 <template>
-	<Dialog v-model="show" :options="{ size: '3xl' }">
+	<DialogHost v-model:show="show" :embedded="embedded" :options="{ size: '3xl' }">
 		<template #body-title>
 			<h3 class="text-lg font-semibold text-gray-900">{{ __("Stock Lookup") }}</h3>
 		</template>
@@ -18,6 +18,7 @@
 					</p>
 				</div>
 				<button
+					v-if="!embedded"
 					@click="closeDialog"
 					class="mt-6 px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
 				>
@@ -828,6 +829,7 @@
 						</div>
 					</div>
 					<button
+						v-if="!embedded"
 						@click="closeDialog"
 						class="w-full sm:w-auto sm:ms-auto px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
 					>
@@ -836,7 +838,7 @@
 				</div>
 			</div>
 		</template>
-	</Dialog>
+	</DialogHost>
 </template>
 
 <script setup>
@@ -852,7 +854,7 @@
  * RTL Support: Fully compatible with right-to-left languages
  * Translations: All user-facing strings use __() for i18n
  */
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, defineComponent, h } from "vue";
 import { call, Dialog } from "frappe-ui";
 import { __ } from "@/utils/translation";
 import { formatCurrencyNumber } from "@/utils/currency";
@@ -878,9 +880,60 @@ const props = defineProps({
 		type: String,
 		default: "item",
 	},
+	embedded: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:modelValue", "close"]);
+
+// Standalone: renders the frappe-ui Dialog as today. Embedded: renders only
+// the dialog's slot content inside the app shell's container — the shell owns
+// the header and close.
+const DialogHost = defineComponent({
+	props: {
+		embedded: { type: Boolean, default: false },
+		show: { type: Boolean, default: false },
+		options: { type: Object, default: () => ({}) },
+	},
+	emits: ["update:show"],
+	setup(hostProps, { slots, emit: hostEmit }) {
+		return () =>
+				hostProps.embedded
+					? h("div", { class: "h-full min-h-0 flex flex-col" }, [
+							// Mirror the frappe Dialog body padding so content
+							// written for the dialog (e.g. -mt-2 subtitles)
+							// renders identically and scrolls on its own.
+							h(
+								"div",
+								{
+									class: "flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6",
+								},
+								[slots["body-content"]?.()],
+							),
+							slots.actions
+								? h(
+										"div",
+										{
+											class: "shrink-0 px-4 pb-4 pt-3 sm:px-6 border-t border-gray-200",
+										},
+										[slots.actions?.()],
+									)
+								: null,
+						])
+				: h(
+						Dialog,
+						{
+							modelValue: hostProps.show,
+							"onUpdate:modelValue": (v) => hostEmit("update:show", v),
+							options: hostProps.options,
+						},
+						{
+							"body-title": slots["body-title"],
+							"body-content": slots["body-content"],
+							actions: slots.actions,
+						},
+					);
+	},
+});
 
 // v-model binding for Dialog
 const show = computed({
@@ -1182,8 +1235,9 @@ function handleEscape() {
 	} else if (searchQuery.value) {
 		// Second escape clears search
 		clearSearch();
-	} else {
-		// Third escape closes dialog
+	} else if (!props.embedded) {
+		// Third escape closes dialog — never in embedded mode, the shell owns
+		// closing there
 		closeDialog();
 	}
 }
