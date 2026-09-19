@@ -793,6 +793,24 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 	return {"valid": True}
 
 
+def _enforce_profile_warehouse(invoice_doc, pos_profile_doc):
+	"""The POS Profile warehouse is the server-side source of truth.
+
+	items[].warehouse arrives from the frontend, so a tampered payload could
+	post a sale against another outlet's warehouse. Overwrite set_warehouse
+	and every item row with the profile warehouse; the honest frontend always
+	sends the profile warehouse anyway, so only cross-outlet tampering changes
+	the outcome. Mirrors how _set_payment_accounts already resolves accounts
+	server-side instead of trusting the payload.
+	"""
+	wh = pos_profile_doc.get("warehouse") if pos_profile_doc else None
+	if not wh:
+		return
+	invoice_doc.set_warehouse = wh
+	for item in invoice_doc.get("items") or []:
+		item.warehouse = wh
+
+
 # ==========================================
 # Invoice Management (Two-Step Flow)
 # ==========================================
@@ -1141,6 +1159,10 @@ def update_invoice(data):
 					errors = _collect_stock_errors(stock_items)
 					if errors:
 						frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
+
+		# Outlet isolation: never persist items[].warehouse from the payload —
+		# the POS Profile warehouse wins on every row (see _enforce_profile_warehouse).
+		_enforce_profile_warehouse(invoice_doc, pos_profile_doc)
 
 		# Save as draft
 		invoice_doc.flags.ignore_permissions = True
@@ -1621,6 +1643,14 @@ def submit_invoice(invoice=None, data=None):
 						f"Failed to apply write-off from POS Profile {pos_profile}: {e}",
 						"POS Write-Off Error",
 					)
+
+		# Outlet isolation on submit: payloads that skipped the draft step must
+		# not smuggle a foreign warehouse — enforce before stock validation so
+		# availability is checked against the warehouse that will actually post.
+		if pos_profile:
+			_enforce_profile_warehouse(
+				invoice_doc, frappe.get_cached_doc("POS Profile", pos_profile)
+			)
 
 		# Validate stock availability before submission
 		# _validate_stock_on_invoice checks _should_block internally
