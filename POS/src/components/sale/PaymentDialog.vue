@@ -1149,10 +1149,7 @@
 						</div>
 						<div
 							v-else-if="filteredPaymentMethods.length > 0"
-							:class="[
-								'flex flex-wrap',
-								isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2',
-							]"
+							class="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-1.5 lg:gap-2"
 						>
 							<button
 								v-for="method in filteredPaymentMethods"
@@ -1167,10 +1164,7 @@
 									getMethodTotal(method.mode_of_payment) === 0
 								"
 								:class="[
-									'inline-flex items-center rounded-lg border-2 transition-all font-medium select-none touch-none',
-									isSmallMobile
-										? 'gap-0.5 px-1.5 h-7 text-[10px]'
-										: 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+									'flex items-center justify-center rounded-lg border-2 transition-all font-semibold select-none touch-none min-h-11 lg:min-h-14 gap-1 lg:gap-1.5 px-2 lg:px-3 text-xs lg:text-sm',
 									lastSelectedMethod?.mode_of_payment === method.mode_of_payment
 										? isWalletPaymentMethod(method.mode_of_payment)
 											? 'border-amber-500 bg-amber-50 text-amber-700'
@@ -1182,14 +1176,12 @@
 										: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{
+								<span :class="isSmallMobile ? 'text-base' : 'text-base lg:text-lg'">{{
 									isWalletPaymentMethod(method.mode_of_payment)
 										? "🎁"
 										: getPaymentIcon(method.type)
 								}}</span>
-								<span class="truncate max-w-[80px] lg:max-w-none">{{
-									__(method.mode_of_payment)
-								}}</span>
+								<span class="truncate">{{ __(method.mode_of_payment) }}</span>
 								<!-- Wallet Balance Badge -->
 								<span
 									v-if="
@@ -1231,13 +1223,10 @@
 									(remainingAvailableCredit > 0 ||
 										getMethodTotal('Customer Credit') > 0)
 								"
-								@click="applyCustomerCredit"
-								:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
-								:class="[
-									'inline-flex items-center rounded-lg border-2 transition-all font-medium',
-									isSmallMobile
-										? 'gap-0.5 px-1.5 h-7 text-[10px]'
-										: 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+							@click="applyCustomerCredit"
+							:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
+							:class="[
+								'flex items-center justify-center rounded-lg border-2 transition-all font-semibold select-none min-h-11 lg:min-h-14 gap-1 lg:gap-1.5 px-2 lg:px-3 text-xs lg:text-sm',
 									remainingAmount === 0 || remainingAvailableCredit === 0
 										? 'opacity-50 cursor-not-allowed'
 										: 'cursor-pointer',
@@ -1246,9 +1235,7 @@
 										: 'border-emerald-300 bg-emerald-50 hover:border-emerald-500 hover:bg-emerald-100 text-emerald-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-									>💳</span
-								>
+								<span class="text-base lg:text-lg">💳</span>
 								<span class="truncate">{{ __("Credit Balance") }}</span>
 								<span
 									v-if="getMethodTotal('Customer Credit') > 0"
@@ -1269,26 +1256,19 @@
 							<template v-if="receivableAccounts.length > 0">
 								<!-- Divider: a full-width line forces a wrap, then the AR accounts -->
 								<div class="w-full border-t border-gray-200 my-0.5"></div>
-								<button
-									v-for="acc in receivableAccounts"
-									:key="acc.name"
-									@click="toggleReceivableAccount(acc)"
-									:class="[
-										'inline-flex items-center rounded-lg border-2 transition-all font-medium select-none',
-										isSmallMobile
-											? 'gap-0.5 px-1.5 h-7 text-[10px]'
-											: 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+							<button
+								v-for="acc in receivableAccounts"
+								:key="acc.name"
+								@click="toggleReceivableAccount(acc)"
+								:class="[
+									'flex items-center justify-center rounded-lg border-2 transition-all font-semibold select-none min-h-11 lg:min-h-14 gap-1 lg:gap-1.5 px-2 lg:px-3 text-xs lg:text-sm',
 										selectedReceivableAccount === acc.name
 											? 'border-blue-500 bg-blue-50 text-blue-700'
 											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 									]"
 								>
-									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-										>🧾</span
-									>
-									<span class="truncate max-w-[80px] lg:max-w-none">{{
-										__(acc.account_name || acc.name)
-									}}</span>
+								<span class="text-base lg:text-lg">🧾</span>
+								<span class="truncate">{{ __(acc.account_name || acc.name) }}</span>
 									<!-- Amount that will stay outstanding on this account -->
 									<span
 										v-if="selectedReceivableAccount === acc.name"
@@ -1366,10 +1346,10 @@
 						</div>
 					</div>
 
-					<!-- Quick Amounts Area (Desktop) - Consistent layout for all payment methods -->
+					<!-- Quick Amounts Area (Tablet/Desktop) - Consistent layout for all payment methods -->
 					<div
 						v-if="lastSelectedMethod && remainingAmount > 0"
-						class="hidden lg:block"
+						class="hidden md:block"
 						:class="isCompactMode ? 'mb-2' : 'mb-3'"
 					>
 						<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
@@ -1388,8 +1368,7 @@
 								@click="addCustomPayment(lastSelectedMethod, amount)"
 								:disabled="isQuickAmountDisabled(amount)"
 								:class="[
-									'font-semibold rounded-lg border-2 transition-all',
-									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
+									'font-semibold rounded-lg border-2 transition-all h-12 lg:h-14 text-sm lg:text-base touch-manipulation',
 									isQuickAmountDisabled(amount)
 										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600',
@@ -1403,7 +1382,7 @@
 							<button
 								@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
 								:class="[
-									'font-semibold rounded-lg border-2 px-2 py-2 text-sm transition-all',
+									'font-bold rounded-lg border-2 h-12 lg:h-14 text-sm lg:text-base transition-all touch-manipulation',
 									'bg-green-50 border-green-200 hover:border-green-400 hover:bg-green-100 text-green-700',
 								]"
 							>
@@ -1414,7 +1393,7 @@
 								:key="amount"
 								@click="addCustomPayment(lastSelectedMethod, amount)"
 								:class="[
-									'font-semibold rounded-lg border-2 px-2 py-2 text-sm transition-all',
+									'font-semibold rounded-lg border-2 h-12 lg:h-14 text-sm lg:text-base transition-all touch-manipulation',
 									'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600',
 								]"
 							>
@@ -1428,7 +1407,7 @@
 							remainingAmount > 0 &&
 							!selectedReceivableAccount
 						"
-						class="hidden lg:block"
+						class="hidden md:block"
 						:class="[
 							'bg-blue-50 rounded-lg text-center',
 							isCompactMode ? 'mb-2 p-2' : 'mb-3 p-3 lg:p-2',
@@ -1439,9 +1418,9 @@
 						</p>
 					</div>
 
-					<!-- Mobile Payment Section - Dynamic & Responsive -->
+					<!-- Mobile Payment Section (phones only — tablets get the numpad) -->
 					<div
-						class="lg:hidden flex flex-col"
+						class="md:hidden flex flex-col"
 						:class="isSmallMobile ? 'gap-1' : 'gap-1.5'"
 					>
 						<!-- Mobile Quick Amounts + Custom Input (consistent layout for all payment methods) -->
@@ -1453,7 +1432,7 @@
 							<div
 								v-if="!isIDRCash"
 								class="grid grid-cols-4"
-								:class="isSmallMobile ? 'gap-0.5' : 'gap-1'"
+								:class="isSmallMobile ? 'gap-1' : 'gap-1.5'"
 							>
 								<button
 									v-for="amount in quickAmounts"
@@ -1461,8 +1440,7 @@
 									@click="addCustomPayment(lastSelectedMethod, amount)"
 									:disabled="isQuickAmountDisabled(amount)"
 									:class="[
-										'font-semibold rounded border transition-colors',
-										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										'font-semibold rounded-lg border-2 transition-colors h-11 text-xs sm:text-sm touch-manipulation',
 										isQuickAmountDisabled(amount)
 											? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 											: 'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400',
@@ -1471,17 +1449,16 @@
 									{{ formatCurrency(amount) }}
 								</button>
 							</div>
-							<!-- Cash denominations row (IDR only): Pas + banknote face values (mobile) -->
+							<!-- Cash denominations (IDR only): Pas + banknotes, 2 rows on phones -->
 							<div
 								v-if="isIDRCash"
-								class="grid grid-cols-7"
-								:class="isSmallMobile ? 'gap-0.5' : 'gap-1'"
+								class="grid grid-cols-4"
+								:class="isSmallMobile ? 'gap-1' : 'gap-1.5'"
 							>
 								<button
 									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
 									:class="[
-										'font-semibold rounded border transition-colors',
-										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										'font-bold rounded-lg border-2 h-11 text-xs sm:text-sm transition-colors touch-manipulation',
 										'bg-green-50 border-green-200 text-green-700 active:bg-green-100 active:border-green-400',
 									]"
 								>
@@ -1492,8 +1469,7 @@
 									:key="amount"
 									@click="addCustomPayment(lastSelectedMethod, amount)"
 									:class="[
-										'font-semibold rounded border transition-colors',
-										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										'font-semibold rounded-lg border-2 h-11 text-xs sm:text-sm transition-colors touch-manipulation',
 										'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400',
 									]"
 								>
@@ -1502,12 +1478,11 @@
 							</div>
 
 							<!-- Custom Amount Row (disabled for non-cash when exact amount mode is active) -->
-							<div :class="['flex', isSmallMobile ? 'gap-0.5' : 'gap-1']">
+							<div :class="['flex', isSmallMobile ? 'gap-1' : 'gap-1.5']">
 								<div class="relative flex-1">
 									<span
 										:class="[
-											'absolute start-2 top-1/2 -translate-y-1/2',
-											isSmallMobile ? 'text-[10px]' : 'text-xs',
+											'absolute start-2.5 top-1/2 -translate-y-1/2 text-sm',
 											isExactAmountModeActive &&
 											!isCashPaymentMethod(lastSelectedMethod)
 												? 'text-gray-300'
@@ -1532,10 +1507,7 @@
 											!isCashPaymentMethod(lastSelectedMethod)
 										"
 										:class="[
-											'w-full border rounded focus:outline-none font-semibold',
-											isSmallMobile
-												? 'h-7 ps-5 pe-1.5 text-xs'
-												: 'h-8 ps-6 pe-2 text-sm',
+											'w-full border rounded-lg focus:outline-none font-semibold h-11 ps-7 pe-2 text-sm',
 											isExactAmountModeActive &&
 											!isCashPaymentMethod(lastSelectedMethod)
 												? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
@@ -1552,10 +1524,7 @@
 										mobileCustomAmount <= 0
 									"
 									:class="[
-										'font-semibold rounded transition-all flex-shrink-0',
-										isSmallMobile
-											? 'h-7 px-2 text-[10px]'
-											: 'h-8 px-3 text-xs',
+										'font-bold rounded-lg transition-all flex-shrink-0 h-11 px-4 text-sm touch-manipulation',
 										(isExactAmountModeActive &&
 											!isCashPaymentMethod(lastSelectedMethod)) ||
 										!mobileCustomAmount ||
@@ -1589,9 +1558,11 @@
 							</p>
 						</div>
 
-						<!-- Mobile Action Buttons - Always visible at bottom -->
+						<!-- Mobile Action Buttons - Sticky so Pay/Complete stays under the thumb
+						     while the invoice summary scrolls above -->
 						<div
-							:class="['flex-shrink-0', isSmallMobile ? 'space-y-1' : 'space-y-1.5']"
+							class="sticky bottom-0 z-10 -mb-4 sm:-mb-6 -mx-2 px-2 pb-4 pt-2 mt-2 bg-white rounded-t-xl shadow-[0_-4px_16px_rgba(0,0,0,0.12)]"
+							:class="isSmallMobile ? 'space-y-1' : 'space-y-1.5'"
 						>
 							<!-- Two buttons side by side when both needed -->
 							<div
@@ -1776,10 +1747,10 @@
 					</div>
 					<!-- End Mobile Payment Section -->
 
-					<!-- Numeric Keypad (Desktop only) -->
+					<!-- Numeric Keypad (Tablet/Desktop — phones use quick amounts + custom input) -->
 					<div
 						:class="[
-							'hidden lg:block bg-white rounded-lg border border-gray-200',
+							'hidden md:block bg-white rounded-lg border border-gray-200',
 							isCompactMode ? 'p-2' : 'p-3',
 						]"
 					>
@@ -1794,7 +1765,7 @@
 								dir="ltr"
 								:class="[
 									'font-bold text-gray-900 text-center flex items-center justify-center gap-2',
-									isCompactMode ? 'text-xl' : 'text-2xl',
+									isCompactMode ? 'text-2xl' : 'text-3xl',
 								]"
 							>
 								<span>{{ currencySymbol }}</span>
@@ -1813,7 +1784,7 @@
 								@click="numpadInput(num)"
 								:class="[
 									dynamicNumpadSize.key,
-									'text-xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95',
+									'text-2xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95 touch-manipulation',
 								]"
 							>
 								{{ num }}
@@ -1847,7 +1818,7 @@
 								@click="numpadInput(num)"
 								:class="[
 									dynamicNumpadSize.key,
-									'text-xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95',
+									'text-2xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95 touch-manipulation',
 								]"
 							>
 								{{ num }}
@@ -1869,7 +1840,7 @@
 								@click="numpadInput(num)"
 								:class="[
 									dynamicNumpadSize.key,
-									'text-xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95',
+									'text-2xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95 touch-manipulation',
 								]"
 							>
 								{{ num }}
@@ -1892,8 +1863,8 @@
 							<button
 								@click="numpadInput('00')"
 								:class="[
-									isCompactMode ? 'h-12' : 'h-16',
-									'text-2xl font-semibold rounded-xl bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95',
+									dynamicNumpadSize.key,
+									'text-2xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95 touch-manipulation',
 								]"
 							>
 								00
@@ -1901,8 +1872,8 @@
 							<button
 								@click="numpadInput('0')"
 								:class="[
-									isCompactMode ? 'h-12' : 'h-16',
-									'text-2xl font-semibold rounded-xl bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95',
+									dynamicNumpadSize.key,
+									'text-2xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95 touch-manipulation',
 								]"
 							>
 								0
@@ -1911,8 +1882,8 @@
 								@click="numpadInput('.')"
 								:disabled="numpadDisplay.includes('.')"
 								:class="[
-									isCompactMode ? 'h-12' : 'h-16',
-									'text-2xl font-semibold rounded-xl transition-all active:scale-95',
+									dynamicNumpadSize.key,
+									'text-2xl font-semibold rounded-lg transition-all active:scale-95 touch-manipulation',
 									numpadDisplay.includes('.')
 										? 'bg-gray-100 border-2 border-gray-200 text-gray-400 cursor-not-allowed'
 										: 'bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800',
@@ -1923,10 +1894,10 @@
 						</div>
 					</div>
 
-					<!-- Action Buttons - Below Keypad (Desktop only) -->
+					<!-- Action Buttons - Below Keypad (Tablet/Desktop) -->
 					<div
 						:class="[
-							'hidden lg:flex items-center gap-2',
+							'hidden md:flex items-center gap-2',
 							isCompactMode ? 'mt-2' : 'mt-4',
 						]"
 					>
@@ -1938,7 +1909,7 @@
 							:class="[
 								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
 								dynamicButtonHeight,
-								'text-sm font-semibold px-4 rounded-lg',
+								'text-sm lg:text-base font-bold px-4 rounded-lg touch-manipulation',
 								paymentEntries.length > 0 || isSubmitting
 									? 'bg-orange-300 text-white cursor-not-allowed'
 									: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400',
@@ -1990,7 +1961,7 @@
 							:class="[
 								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
 								dynamicButtonHeight,
-								'text-sm font-semibold px-5 rounded-lg',
+								'text-sm lg:text-base font-bold px-5 rounded-lg touch-manipulation',
 								!canComplete || isSubmitting
 									? 'bg-blue-300 text-white cursor-not-allowed'
 									: 'bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 focus-visible:ring-2 focus-visible:ring-blue-400',
