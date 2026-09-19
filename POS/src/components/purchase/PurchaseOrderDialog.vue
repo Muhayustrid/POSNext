@@ -143,7 +143,12 @@
 				</div>
 
 				<p class="text-xs text-gray-500">
-					{{ __("Company: {0} | Warehouse: {1}", [props.company || "-", props.warehouse || "-"]) }}
+					{{
+						__("Company: {0} | Warehouse: {1}", [
+							props.company || "-",
+							form.set_warehouse || props.warehouse || "-",
+						])
+					}}
 				</p>
 
 				<div
@@ -439,6 +444,7 @@ function blankForm() {
 		transaction_date: localDate(),
 		schedule_date: localDate(1),
 		currency: props.currency || "",
+		set_warehouse: "",
 		taxes_and_charges: "",
 		remarks: "",
 		items: [],
@@ -454,10 +460,37 @@ const loadingItems = ref(false)
 const saving = ref(false)
 let supplierTimer = null
 let itemTimer = null
+let poDefaults = null
 
-function openNew() {
+// POS Settings defaults (per profile) — one fetch per dialog session
+async function loadPoDefaults() {
+	if (poDefaults) return poDefaults
+	try {
+		poDefaults = await call(`${API}.get_po_defaults`, { pos_profile: props.posProfile })
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+		poDefaults = {}
+	}
+	return poDefaults
+}
+
+// AutocompleteSelect only shows a label for options it has; make the
+// prefilled supplier selectable/displayable even before a search runs
+function seedSupplierOption(name, label) {
+	if (name && !supplierOptions.value.some((o) => o.value === name)) {
+		supplierOptions.value.unshift({ value: name, label: label || name })
+	}
+}
+
+async function openNew() {
 	form.value = blankForm()
 	view.value = "form"
+	const d = await loadPoDefaults()
+	if (form.value.name) return // user switched away mid-await
+	form.value.supplier = d?.supplier || ""
+	form.value.set_warehouse = d?.warehouse || ""
+	seedSupplierOption(d?.supplier, d?.supplier_name)
+	if (d?.supplier) await onSupplierSelect(d.supplier)
 }
 
 async function openEdit(order) {
@@ -469,6 +502,7 @@ async function openEdit(order) {
 			transaction_date: d?.transaction_date || localDate(),
 			schedule_date: d?.schedule_date || localDate(1),
 			currency: d?.currency || props.currency || "",
+			set_warehouse: d?.set_warehouse || "",
 			// prefill the loaded template — an empty value here is the explicit
 			// remove-tax signal, not "leave untouched"
 			taxes_and_charges: d?.taxes_and_charges || "",
@@ -481,6 +515,7 @@ async function openEdit(order) {
 				rate: i.rate,
 			})),
 		}
+		seedSupplierOption(d?.supplier, d?.supplier_name)
 		view.value = "form"
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
@@ -607,7 +642,7 @@ async function save(submitAfter) {
 			schedule_date: form.value.schedule_date,
 			company: props.company,
 			currency: form.value.currency,
-			set_warehouse: props.warehouse,
+			set_warehouse: form.value.set_warehouse || null,
 			taxes_and_charges: form.value.taxes_and_charges,
 			remarks: form.value.remarks || "",
 			items: form.value.items.map((row) => ({

@@ -36,6 +36,31 @@ def _profile_value(pos_profile, fieldname):
 	return frappe.db.get_value("POS Profile", pos_profile, fieldname) if pos_profile else None
 
 
+def _po_setting(pos_profile, fieldname):
+	"""Field from this profile's enabled POS Settings row, else None."""
+	if not pos_profile:
+		return None
+	return frappe.db.get_value("POS Settings", {"enabled": 1, "pos_profile": pos_profile}, fieldname)
+
+
+@frappe.whitelist()
+def get_po_defaults(pos_profile=None):
+	"""Default supplier/warehouse the cashier form pre-fills with.
+
+	Both come from POS Settings (per profile); the warehouse falls back to the
+	POS Profile's own warehouse.
+	"""
+	_check_guest()
+	_check_permission("Purchase Order", "read")
+	supplier = _po_setting(pos_profile, "po_default_supplier")
+	return {
+		"supplier": supplier,
+		"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name") if supplier else None,
+		"warehouse": _po_setting(pos_profile, "po_default_warehouse")
+		or _profile_value(pos_profile, "warehouse"),
+	}
+
+
 def _resolve_company(pos_profile=None):
 	"""POS Profile's company when given, else the user/site default company."""
 	return (
@@ -143,6 +168,7 @@ def _po_summary(doc):
 		"transaction_date": doc.transaction_date,
 		"schedule_date": doc.schedule_date,
 		"company": doc.company,
+		"set_warehouse": doc.set_warehouse,
 		"currency": doc.currency,
 		"net_total": doc.net_total,
 		"total_taxes_and_charges": doc.total_taxes_and_charges,
@@ -181,7 +207,8 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	"""
 	_check_guest()
 	data = _parse(data) or {}
-	if not data.get("supplier"):
+	# payload first, then the profile's POS Settings default supplier
+	if not data.get("supplier") and not _po_setting(pos_profile, "po_default_supplier"):
 		frappe.throw(_("Supplier is required"))
 	items = _parse(data.get("items")) or []
 	if not items:
@@ -197,10 +224,14 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 		_check_permission("create")
 		doc = frappe.new_doc("Purchase Order")
 
-	set_warehouse = data.get("set_warehouse") or _profile_value(pos_profile, "warehouse")
+	set_warehouse = (
+		data.get("set_warehouse")
+		or _po_setting(pos_profile, "po_default_warehouse")
+		or _profile_value(pos_profile, "warehouse")
+	)
 	schedule_date = data.get("schedule_date") or add_days(nowdate(), 1)
 
-	doc.supplier = data.get("supplier")
+	doc.supplier = data.get("supplier") or _po_setting(pos_profile, "po_default_supplier")
 	doc.transaction_date = data.get("transaction_date") or nowdate()
 	doc.schedule_date = schedule_date
 	doc.company = data.get("company") or _resolve_company(pos_profile)

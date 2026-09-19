@@ -235,6 +235,38 @@ describe("PurchaseOrderDialog", () => {
 		vi.useRealTimers()
 	})
 
+	it("New pre-fills the POS Settings default supplier and warehouse", async () => {
+		mocks.call.mockImplementation((method) => {
+			if (method.endsWith("get_po_defaults"))
+				return Promise.resolve({
+					supplier: "SUP-DEFAULT",
+					supplier_name: "Default Supplier",
+					warehouse: "WH-PURCH",
+				})
+			if (method.endsWith("get_supplier_details"))
+				return Promise.resolve({
+					supplier_name: "Default Supplier",
+					currency: "IDR",
+					buying_price_list: null,
+					taxes_and_charges: null,
+				})
+			if (method.endsWith("get_purchase_orders"))
+				return Promise.resolve({ orders: [DRAFT_ORDER] })
+			return Promise.resolve({ suppliers: [], items: [] })
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		await button(wrapper, "New").trigger("click")
+		await flushPromises()
+
+		const supplierInput = wrapper
+			.findAll("input")
+			.find((i) => i.attributes("placeholder") === "Search supplier...")
+		expect(supplierInput.element.value).toBe("SUP-DEFAULT")
+		expect(wrapper.text()).toContain("WH-PURCH")
+	})
+
 	it("supplier search calls search_suppliers with the term after debounce", async () => {
 		vi.useFakeTimers()
 		mocks.call.mockResolvedValue({ suppliers: [] })
@@ -279,7 +311,11 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	it("Save Draft posts the full payload with submit: 0", async () => {
-		mocks.call.mockResolvedValue({ orders: [] })
+		mocks.call.mockImplementation((method) => {
+			if (method.includes("get_po_defaults"))
+				return Promise.resolve({ supplier: null, supplier_name: null, warehouse: "WH-1" })
+			return Promise.resolve({ orders: [] })
+		})
 		const wrapper = mountOpen()
 		await flushPromises()
 		await button(wrapper, "New").trigger("click")

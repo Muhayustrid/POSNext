@@ -12,6 +12,7 @@ from frappe.utils import add_days, flt, getdate, nowdate
 
 from pos_next.api.purchase_orders import (
 	cancel_purchase_order,
+	get_po_defaults,
 	get_purchase_item_details,
 	get_purchase_order,
 	get_purchase_orders,
@@ -383,6 +384,74 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		)
 		self.assertEqual(result["company"], self.profile_company)
 		self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
+
+	def test_pos_settings_supply_po_defaults(self):
+		"""POS Settings (per profile) is the default supplier/warehouse source."""
+		if not self.pos_profile:
+			self.skipTest("no POS Profile on this site")
+
+		# a different leaf warehouse proves the setting wins over the profile's
+		alt_warehouse = frappe.db.get_value(
+			"Warehouse",
+			{"company": self.company, "is_group": 0, "disabled": 0, "name": ["!=", self.warehouse]},
+			"name",
+		)
+		target_warehouse = alt_warehouse or self.warehouse
+
+		settings_name = frappe.db.get_value("POS Settings", {"pos_profile": self.pos_profile}, "name")
+		created = False
+		orig = None
+		try:
+			if settings_name:
+				orig = frappe.db.get_value(
+					"POS Settings",
+					settings_name,
+					["enabled", "po_default_supplier", "po_default_warehouse"],
+					as_dict=True,
+				)
+			else:
+				settings_name = (
+					frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.pos_profile})
+					.insert()
+					.name
+				)
+				created = True
+			frappe.db.set_value(
+				"POS Settings",
+				settings_name,
+				{
+					"enabled": 1,
+					"po_default_supplier": self.supplier,
+					"po_default_warehouse": target_warehouse,
+				},
+			)
+
+			defaults = get_po_defaults(self.pos_profile)
+			self.assertEqual(defaults["supplier"], self.supplier)
+			self.assertEqual(defaults["supplier_name"], self.supplier_name)
+			self.assertEqual(defaults["warehouse"], target_warehouse)
+
+			# payload omits supplier AND set_warehouse — settings drive the PO
+			result = self._save(
+				{"items": [{"item_code": self.item, "qty": 1, "rate": 10}]},
+				pos_profile=self.pos_profile,
+			)
+			self.assertEqual(result["supplier"], self.supplier)
+			self.assertEqual(result["set_warehouse"], target_warehouse)
+			self.assertEqual(result["items"][0]["warehouse"], target_warehouse)
+		finally:
+			if created and settings_name:
+				frappe.delete_doc("POS Settings", settings_name, force=1)
+			elif settings_name and orig:
+				frappe.db.set_value(
+					"POS Settings",
+					settings_name,
+					{
+						"enabled": orig.enabled,
+						"po_default_supplier": orig.po_default_supplier,
+						"po_default_warehouse": orig.po_default_warehouse,
+					},
+				)
 
 	def test_search_suppliers_and_purchase_items(self):
 		suppliers = search_suppliers(self.supplier_name)["suppliers"]
