@@ -24,7 +24,12 @@ def _check_permission(perm, doc=None):
 
 def _parse(value):
 	"""Whitelisted list/dict args arrive as JSON strings."""
-	return json.loads(value) if isinstance(value, str) else value
+	if not isinstance(value, str):
+		return value
+	try:
+		return json.loads(value)
+	except json.JSONDecodeError:
+		frappe.throw(_("Invalid request data"), frappe.ValidationError)
 
 
 def _profile_value(pos_profile, fieldname):
@@ -142,8 +147,8 @@ def _po_summary(doc):
 		"net_total": doc.net_total,
 		"total_taxes_and_charges": doc.total_taxes_and_charges,
 		"grand_total": doc.grand_total,
-		# ERPNext v16 dropped the PO remarks field — stays null where absent
-		"remarks": doc.get("remarks"),
+		# PO v16 has no remarks field — the payload remarks ride the native terms field
+		"remarks": doc.terms,
 		"items": [
 			{
 				"name": row.name,
@@ -163,6 +168,14 @@ def _po_summary(doc):
 
 @frappe.whitelist()
 def save_purchase_order(data, pos_profile=None, submit=0):
+	"""Create or update a Purchase Order and optionally submit it.
+
+	The update path (payload carries `name`) expects the FULL payload: omitted
+	optional fields (transaction_date, schedule_date, company, set_warehouse,
+	currency, taxes_and_charges, remarks...) are reset to their defaults, and
+	the items table is replaced wholesale. `remarks` is stored in the native
+	`terms` field (PO has no remarks field in ERPNext v16).
+	"""
 	_check_guest()
 	data = _parse(data) or {}
 	if not data.get("supplier"):
@@ -174,9 +187,9 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	name = data.get("name")
 	if name:
 		doc = frappe.get_doc("Purchase Order", name)
+		_check_permission("write", doc=doc)
 		if doc.docstatus != 0:
 			frappe.throw(_("Only a Draft Purchase Order can be edited"))
-		_check_permission("write", doc=doc)
 	else:
 		_check_permission("create")
 		doc = frappe.new_doc("Purchase Order")
@@ -196,8 +209,7 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 		doc.conversion_rate = flt(data.get("conversion_rate"))
 	if data.get("taxes_and_charges"):
 		doc.taxes_and_charges = data.get("taxes_and_charges")
-	if data.get("remarks"):
-		doc.remarks = data.get("remarks")
+	doc.terms = data.get("remarks")
 
 	doc.set("items", [])
 	for row in items:
@@ -275,9 +287,9 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 def submit_purchase_order(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Order", name)
+	_check_permission("submit", doc=doc)
 	if doc.docstatus != 0:
 		frappe.throw(_("Only a Draft Purchase Order can be submitted"))
-	_check_permission("submit", doc=doc)
 	doc.submit()
 	return _po_summary(doc)
 
@@ -286,8 +298,8 @@ def submit_purchase_order(name):
 def cancel_purchase_order(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Order", name)
+	_check_permission("cancel", doc=doc)
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted Purchase Order can be cancelled"))
-	_check_permission("cancel", doc=doc)
 	doc.cancel()
 	return _po_summary(doc)

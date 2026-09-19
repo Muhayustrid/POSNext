@@ -76,7 +76,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 						"companies": [{"company": cls.company}],
 					}
 				)
-				.insert(ignore_permissions=True)
+				.insert()
 				.name
 			)
 
@@ -93,7 +93,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 					**({"default_price_list": cls.price_list} if cls.price_list else {}),
 				}
 			)
-			.insert(ignore_permissions=True)
+			.insert()
 			.name
 		)
 
@@ -130,14 +130,12 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 							or frappe.get_cached_value("Company", cls.company, "default_currency"),
 						}
 					)
-					.insert(ignore_permissions=True)
+					.insert()
 					.name
 				)
 
 		cls.user = f"po.proxy.{cls._uniq()}@example.com"
-		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PO Proxy Tester"}).insert(
-			ignore_permissions=True
-		)
+		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PO Proxy Tester"}).insert()
 
 	@classmethod
 	def _make_item(cls):
@@ -151,7 +149,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				"is_stock_item": 1,
 				"is_purchase_item": 1,
 			}
-		).insert(ignore_permissions=True)
+		).insert()
 
 	@staticmethod
 	def _uniq():
@@ -260,6 +258,16 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		self.assertEqual(result["docstatus"], 0)
 		self.assertEqual(len(result["items"]), 1)
 		self.assertEqual(flt(result["items"][0]["qty"]), 3)
+
+	def test_remarks_persist_via_terms_field(self):
+		result = self._save(self._data(remarks="POS proxy remarks"))
+		self.assertEqual(result["remarks"], "POS proxy remarks")
+		# remarks ride the native terms field — must survive a server reload
+		self.assertEqual(get_purchase_order(result["name"])["remarks"], "POS proxy remarks")
+
+	def test_malformed_json_payload_throws_cleanly(self):
+		with self.assertRaises(ValidationError):
+			save_purchase_order("{not json")
 
 	def test_edit_non_draft_throws(self):
 		name = self._save(submit=1)["name"]
