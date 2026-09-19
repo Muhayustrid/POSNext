@@ -38,6 +38,7 @@ import { MANAGEMENT_MENU } from "./managementMenu"
 
 const props = defineProps({
 	showProduction: { type: Boolean, default: false },
+	showPurchaseOrder: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(["menu-clicked"])
@@ -46,7 +47,9 @@ const activeMenu = ref("")
 
 const visibleItems = computed(() =>
 	MANAGEMENT_MENU.filter(
-		(item) => !item.requiresProduction || props.showProduction,
+		(item) =>
+			(!item.requiresProduction || props.showProduction) &&
+			(!item.requiresPurchaseOrder || props.showPurchaseOrder),
 	),
 )
 

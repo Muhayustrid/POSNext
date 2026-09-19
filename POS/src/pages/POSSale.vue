@@ -26,6 +26,7 @@
 				:print-enabled="!posSettingsStore.isPrintOff"
 				:qz-connected="qzConnected"
 				:show-production="canProduction"
+				:show-purchase-order="canPurchaseOrder"
 				@nav-click="handleManagementMenuClick"
 				@sync-click="handleSyncClick"
 				@printer-click="openHistoryDialog"
@@ -260,6 +261,7 @@
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
 					:show-production="canProduction"
+					:show-purchase-order="canPurchaseOrder"
 					@menu-clicked="handleManagementMenuClick"
 				/>
 
@@ -633,6 +635,15 @@
 				:company="shiftStore.profileCompany"
 				:currency="shiftStore.profileCurrency"
 				@production-created="handleProductionCreated"
+			/>
+
+			<!-- Purchase Order Dialog -->
+			<PurchaseOrderDialog
+				v-model="showPurchaseOrderDialog"
+				:pos-profile="shiftStore.profileName"
+				:company="shiftStore.profileCompany"
+				:warehouse="shiftStore.profileWarehouse"
+				:currency="shiftStore.profileCurrency"
 			/>
 
 			<!-- Batch/Serial Dialog -->
@@ -1093,6 +1104,7 @@ import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
 import POSFooter from "@/components/common/POSFooter.vue";
 import ManagementSlider from "@/components/pos/ManagementSlider.vue";
 import ProductionDialog from "@/components/pos/ProductionDialog.vue";
+import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
 import CouponDialog from "@/components/sale/CouponDialog.vue";
@@ -3159,6 +3171,8 @@ function restoreBodyStyles() {
 			showStockLookup.value = true;
 		} else if (menuItem === "production") {
 			openProduction();
+		} else if (menuItem === "purchase-order") {
+			openPurchaseOrder();
 		}
 	}
 
@@ -3170,6 +3184,15 @@ const { hasPermission: canProduction } = usePermissionCheck("POS Production Log"
 function openProduction() {
 	if (offlineStore.isOffline) return;
 	showProductionDialog.value = true;
+}
+
+// Purchase Order
+const showPurchaseOrderDialog = ref(false);
+const { hasPermission: canPurchaseOrder } = usePermissionCheck("Purchase Order", "create");
+
+function openPurchaseOrder() {
+	if (offlineStore.isOffline) return;
+	showPurchaseOrderDialog.value = true;
 }
 
 function handleProductionCreated(result) {

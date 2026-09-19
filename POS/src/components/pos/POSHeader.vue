@@ -401,6 +401,7 @@
 		<ManagementDrawer
 			v-if="showNavDrawer"
 			:show-production="showProduction"
+			:show-purchase-order="showPurchaseOrder"
 			@navigate="(itemId) => emit('nav-click', itemId)"
 			@close="closeNavDrawer"
 		/>
@@ -513,6 +514,10 @@ const props = defineProps({
 		default: false,
 	},
 	showProduction: {
+		type: Boolean,
+		default: false,
+	},
+	showPurchaseOrder: {
 		type: Boolean,
 		default: false,
 	},

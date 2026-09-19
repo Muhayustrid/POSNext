@@ -56,6 +56,7 @@ import { MANAGEMENT_MENU } from "./managementMenu"
 
 const props = defineProps({
 	showProduction: { type: Boolean, default: false },
+	showPurchaseOrder: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(["navigate", "close"])
@@ -65,7 +66,9 @@ const closeBtnRef = ref(null)
 
 const visibleItems = computed(() =>
 	MANAGEMENT_MENU.filter(
-		(item) => !item.requiresProduction || props.showProduction,
+		(item) =>
+			(!item.requiresProduction || props.showProduction) &&
+			(!item.requiresPurchaseOrder || props.showPurchaseOrder),
 	),
 )
 
