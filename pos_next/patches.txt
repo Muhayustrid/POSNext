@@ -15,3 +15,4 @@ pos_next.patches.v2_5_0.move_queue_toggle_to_pos_settings
 pos_next.patches.v2_6_0.set_print_mode
 pos_next.patches.v2_7_0.reorder_pos_settings_fields
 pos_next.patches.v2_8_0.reorder_pos_settings_fields
+pos_next.patches.v2_9_0.reorder_pos_settings_fields

@@ -75,24 +75,21 @@
 						class="bg-white border border-gray-200 rounded-lg p-3"
 						:data-test="`receipt-${receipt.name}`"
 					>
-						<div class="flex items-start justify-between gap-2">
-							<div class="min-w-0">
-								<div class="flex items-center gap-2">
-									<span class="text-sm font-semibold text-gray-900">{{ receipt.name }}</span>
-									<StatusBadge :variant="statusVariant(receipt.status)" size="xs" :text="receipt.status" />
+							<div class="flex items-start justify-between gap-2">
+								<div class="min-w-0">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-semibold text-gray-900">{{ receipt.name }}</span>
+										<StatusBadge :variant="statusVariant(receipt.status)" size="xs" :text="receipt.status" />
+									</div>
+									<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receipt.supplier_name }}</p>
+									<p class="text-xs text-gray-400 mt-0.5">
+										{{ formatDate(receipt.posting_date) }}
+									</p>
+									<p v-if="receipt.docstatus === 1" class="text-xs text-gray-400 mt-0.5">
+										{{ __("Billed {0}%", [Math.round(receipt.per_billed || 0)]) }}
+									</p>
 								</div>
-								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receipt.supplier_name }}</p>
-								<p class="text-xs text-gray-400 mt-0.5">
-									{{ formatDate(receipt.posting_date) }}
-								</p>
-								<p v-if="receipt.docstatus === 1" class="text-xs text-gray-400 mt-0.5">
-									{{ __("Billed {0}%", [Math.round(receipt.per_billed || 0)]) }}
-								</p>
 							</div>
-							<span class="text-sm font-bold text-gray-900 whitespace-nowrap">
-								{{ formatMoney(receipt.grand_total, receipt.currency) }}
-							</span>
-						</div>
 
 						<div class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
 							<button
@@ -120,27 +117,24 @@
 						:key="order.name"
 						class="bg-white border border-gray-200 rounded-lg p-3"
 					>
-						<div class="flex items-start justify-between gap-2">
-							<div class="min-w-0">
-								<div class="flex items-center gap-2">
-									<span class="text-sm font-semibold text-gray-900">{{ order.name }}</span>
-									<StatusBadge :variant="statusVariant(order.status)" size="xs" :text="order.status" />
-									<StatusBadge
-										v-if="order.is_internal_supplier && order.inter_company_order_reference"
-										variant="gray"
-										size="xs"
-										:text="__('Factory SO')"
-									/>
+							<div class="flex items-start justify-between gap-2">
+								<div class="min-w-0">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-semibold text-gray-900">{{ order.name }}</span>
+										<StatusBadge :variant="statusVariant(order.status)" size="xs" :text="order.status" />
+										<StatusBadge
+											v-if="order.is_internal_supplier && order.inter_company_order_reference"
+											variant="gray"
+											size="xs"
+											:text="__('Factory SO')"
+										/>
+									</div>
+									<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
+									<p class="text-xs text-gray-400 mt-0.5">
+										{{ formatDate(order.transaction_date) }}
+									</p>
 								</div>
-								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
-								<p class="text-xs text-gray-400 mt-0.5">
-									{{ formatDate(order.transaction_date) }}
-								</p>
 							</div>
-							<span class="text-sm font-bold text-gray-900 whitespace-nowrap">
-								{{ formatMoney(order.grand_total, order.currency) }}
-							</span>
-						</div>
 
 						<div class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
 							<button
@@ -231,7 +225,6 @@
 								<th class="py-1 text-start w-16">{{ __("Received") }}</th>
 								<th class="py-1 text-start w-16">{{ __("Remaining") }}</th>
 								<th class="py-1 text-start w-20">{{ __("Qty") }}</th>
-								<th class="py-1 text-end w-24">{{ __("Rate") }}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -257,9 +250,6 @@
 										:aria-label="`${row.item_name} — ${__('Qty')}`"
 										class="w-full px-2 py-1 text-sm border border-gray-300 rounded"
 									/>
-								</td>
-								<td class="py-1.5 text-end whitespace-nowrap">
-									{{ formatMoney(row.rate, receive.currency) }}
 								</td>
 							</tr>
 						</tbody>
@@ -342,8 +332,7 @@
 							<tr class="text-xs text-gray-500 uppercase">
 								<th class="py-1 text-start">{{ __("Item") }}</th>
 								<th class="py-1 text-start w-20">{{ __("Qty") }}</th>
-								<th class="py-1 text-start w-28">{{ __("Rate") }}</th>
-								<th class="py-1 text-end">{{ __("Amount") }}</th>
+								<th class="py-1 text-start w-24">{{ __("UOM") }}</th>
 								<th class="py-1 w-8"></th>
 							</tr>
 						</thead>
@@ -351,7 +340,6 @@
 							<tr v-for="(row, idx) in form.items" :key="idx" class="border-t border-gray-100">
 								<td class="py-1.5 pe-2">
 									<div class="truncate max-w-[180px]">{{ row.item_name }}</div>
-									<div class="text-xs text-gray-400">{{ row.uom }}</div>
 								</td>
 								<td class="py-1.5 pe-2">
 									<input
@@ -365,18 +353,17 @@
 									/>
 								</td>
 								<td class="py-1.5 pe-2">
-									<input
-										v-model.number="row.rate"
-										data-test="item-rate"
-										type="number"
-										min="0"
-										step="any"
-										:aria-label="`${row.item_name} — ${__('Rate')}`"
-										class="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-									/>
-								</td>
-								<td class="py-1.5 text-end whitespace-nowrap">
-									{{ formatMoney(rowAmount(row), form.currency) }}
+									<select
+										v-model="row.uom"
+										data-test="item-uom"
+										:aria-label="`${row.item_name} — ${__('UOM')}`"
+										class="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-white"
+										@change="onUomChange(row)"
+									>
+										<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">
+											{{ u }}
+										</option>
+									</select>
 								</td>
 								<td class="py-1.5">
 									<button
@@ -390,12 +377,6 @@
 							</tr>
 						</tbody>
 					</table>
-					<div class="flex justify-end gap-2 mt-2 text-sm">
-						<span class="text-gray-500">{{ __("Total") }}</span>
-						<span class="font-bold text-gray-900">
-							{{ formatMoney(totalAmount, form.currency) }}
-						</span>
-					</div>
 				</div>
 
 				<div>
@@ -449,7 +430,6 @@ import { useToast } from "@/composables/useToast"
 import { useFormatters } from "@/composables/useFormatters"
 import { usePermissions } from "@/composables/usePermissions"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
-import { formatCurrency } from "@/utils/currency"
 import { parseError } from "@/utils/errorHandler"
 import { Button, Dialog } from "frappe-ui"
 import { computed, ref, watch } from "vue"
@@ -840,6 +820,7 @@ async function openEdit(order) {
 				item_name: i.item_name,
 				qty: i.qty,
 				uom: i.uom,
+				uoms: [i.uom],
 				rate: i.rate,
 			})),
 		}
@@ -914,23 +895,61 @@ function onItemSearch(term) {
 	}, 300)
 }
 
+// the cashier's last-chosen UOM per item, remembered in this browser — wins
+// over the backend's default (custom field, else stock UOM)
+const PO_UOM_STORAGE_KEY = "posNext.poUom"
+
+function readLastUoms() {
+	try {
+		return JSON.parse(localStorage.getItem(PO_UOM_STORAGE_KEY)) || {}
+	} catch {
+		return {}
+	}
+}
+
+function lastUsedUom(itemCode) {
+	return readLastUoms()[itemCode] || null
+}
+
+function rememberUom(itemCode, uom) {
+	const all = readLastUoms()
+	all[itemCode] = uom
+	localStorage.setItem(PO_UOM_STORAGE_KEY, JSON.stringify(all))
+}
+
+function uomOptionsOf(row) {
+	// rows edited from an existing PO start with their saved UOM only — the
+	// full list fills in after the first change re-fetches details
+	return row.uoms?.length ? row.uoms : [row.uom]
+}
+
+async function fetchItemDetails(code, uom, qty) {
+	const defaults = await loadPoDefaults()
+	return call(`${API}.get_purchase_item_details`, {
+		item_code: code,
+		supplier: form.value.supplier || null,
+		pos_profile: props.posProfile,
+		qty: qty || 1,
+		transaction_date: form.value.transaction_date || null,
+		warehouse: props.warehouse || null,
+		uom: uom || null,
+		price_list: defaults?.price_list || null,
+	})
+}
+
 async function onItemPick(code) {
 	itemPick.value = ""
 	if (!code) return
 	try {
-		const d = await call(`${API}.get_purchase_item_details`, {
-			item_code: code,
-			supplier: form.value.supplier || null,
-			pos_profile: props.posProfile,
-			qty: 1,
-			transaction_date: form.value.transaction_date || null,
-			warehouse: props.warehouse || null,
-		})
+		// the remembered pick (if any) prices the row in that UOM from the start
+		const d = await fetchItemDetails(code, lastUsedUom(code), 1)
 		form.value.items.push({
 			item_code: d?.item_code || code,
 			item_name: d?.item_name || code,
 			qty: 1,
-			uom: d?.uom || d?.stock_uom || "",
+			uom: d?.uom || d?.default_uom || d?.stock_uom || "",
+			uoms: (d?.uoms || []).map((u) => u.uom),
+			// kept for the payload but never shown — pricing lives in Desk
 			rate: d?.price_list_rate || d?.rate || 0,
 		})
 	} catch (error) {
@@ -938,19 +957,15 @@ async function onItemPick(code) {
 	}
 }
 
-function rowAmount(row) {
-	return (Number(row.qty) || 0) * (Number(row.rate) || 0)
-}
-
-const totalAmount = computed(() =>
-	form.value.items.reduce((sum, row) => sum + rowAmount(row), 0),
-)
-
-function formatMoney(amount, currency) {
-	return formatCurrency(
-		Number(amount) || 0,
-		currency || props.currency || "USD",
-	)
+async function onUomChange(row) {
+	rememberUom(row.item_code, row.uom)
+	try {
+		const d = await fetchItemDetails(row.item_code, row.uom, row.qty)
+		row.rate = d?.price_list_rate || d?.rate || row.rate
+		if (d?.uoms?.length) row.uoms = d.uoms.map((u) => u.uom)
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
 }
 
 async function save(submitAfter) {
@@ -964,6 +979,7 @@ async function save(submitAfter) {
 	}
 	saving.value = true
 	try {
+		const defaults = await loadPoDefaults()
 		const payload = {
 			supplier: form.value.supplier,
 			transaction_date: form.value.transaction_date,
@@ -971,6 +987,7 @@ async function save(submitAfter) {
 			company: props.company,
 			currency: form.value.currency,
 			set_warehouse: form.value.set_warehouse || null,
+			buying_price_list: defaults?.price_list || null,
 			taxes_and_charges: form.value.taxes_and_charges,
 			remarks: form.value.remarks || "",
 			items: form.value.items.map((row) => ({
