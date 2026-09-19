@@ -8,7 +8,11 @@
 						v-model="searchTerm"
 						type="text"
 						data-test="list-search"
-						:placeholder="__('Search PO or supplier...')"
+						:placeholder="
+							showReceipts
+								? __('Search receipt or supplier...')
+								: __('Search PO or supplier...')
+						"
 						class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
 						@input="onListSearch"
 					/>
@@ -18,30 +22,97 @@
 				</div>
 
 				<div class="flex flex-wrap gap-1">
+					<template v-if="!showReceipts">
+						<button
+							v-for="chip in STATUS_CHIPS"
+							:key="chip.value"
+							type="button"
+							class="px-2.5 py-1 text-xs rounded-full border transition-colors"
+							:class="
+								statusFilter === chip.value
+									? 'bg-blue-600 text-white border-blue-600'
+									: 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+							"
+							@click="setStatus(chip.value)"
+						>
+							{{ __(chip.label) }}
+						</button>
+					</template>
 					<button
-						v-for="chip in STATUS_CHIPS"
-						:key="chip.value"
 						type="button"
+						data-test="receipts-toggle"
 						class="px-2.5 py-1 text-xs rounded-full border transition-colors"
 						:class="
-							statusFilter === chip.value
+							showReceipts
 								? 'bg-blue-600 text-white border-blue-600'
 								: 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
 						"
-						@click="setStatus(chip.value)"
+						@click="toggleReceipts"
 					>
-						{{ __(chip.label) }}
+						{{ __("Receipts") }}
 					</button>
 				</div>
 
-				<div v-if="loadingOrders" class="py-8 text-center text-sm text-gray-500">
+				<div
+					v-if="loadingOrders || loadingReceipts"
+					class="py-8 text-center text-sm text-gray-500"
+				>
 					{{ __("Loading...") }}
 				</div>
-				<div v-else-if="orders.length === 0" class="py-8 text-center">
+				<div v-else-if="showReceipts && receipts.length === 0" class="py-8 text-center">
+					<p class="text-sm font-medium text-gray-900">{{ __("No purchase receipts") }}</p>
+				</div>
+				<div v-else-if="!showReceipts && orders.length === 0" class="py-8 text-center">
 					<p class="text-sm font-medium text-gray-900">{{ __("No purchase orders") }}</p>
 					<p class="text-xs text-gray-500 mt-1">
 						{{ __("Create one with the New button") }}
 					</p>
+				</div>
+				<div v-else-if="showReceipts" class="flex flex-col gap-2 max-h-96 overflow-y-auto">
+					<div
+						v-for="receipt in receipts"
+						:key="receipt.name"
+						class="bg-white border border-gray-200 rounded-lg p-3"
+						:data-test="`receipt-${receipt.name}`"
+					>
+						<div class="flex items-start justify-between gap-2">
+							<div class="min-w-0">
+								<div class="flex items-center gap-2">
+									<span class="text-sm font-semibold text-gray-900">{{ receipt.name }}</span>
+									<StatusBadge :variant="statusVariant(receipt.status)" size="xs" :text="receipt.status" />
+								</div>
+								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receipt.supplier_name }}</p>
+								<p class="text-xs text-gray-400 mt-0.5">
+									{{ formatDate(receipt.posting_date) }}
+								</p>
+								<p v-if="receipt.docstatus === 1" class="text-xs text-gray-400 mt-0.5">
+									{{ __("Billed {0}%", [Math.round(receipt.per_billed || 0)]) }}
+								</p>
+							</div>
+							<span class="text-sm font-bold text-gray-900 whitespace-nowrap">
+								{{ formatMoney(receipt.grand_total, receipt.currency) }}
+							</span>
+						</div>
+
+						<div class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
+							<button
+								v-if="receipt.docstatus === 1 && canCancelPR"
+								type="button"
+								data-test="cancel-receipt"
+								class="px-2 py-1 text-xs rounded text-red-600 hover:bg-red-50"
+								@click="cancelReceipt(receipt)"
+							>
+								{{ __("Cancel") }}
+							</button>
+							<button
+								type="button"
+								class="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
+								@click="openReceiptInErpnext(receipt)"
+							>
+								{{ __("Open in ERPNext") }}
+							</button>
+						</div>
+					</div>
 				</div>
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto">
 					<div
@@ -54,6 +125,12 @@
 								<div class="flex items-center gap-2">
 									<span class="text-sm font-semibold text-gray-900">{{ order.name }}</span>
 									<StatusBadge :variant="statusVariant(order.status)" size="xs" :text="order.status" />
+									<StatusBadge
+										v-if="order.is_internal_supplier && order.inter_company_order_reference"
+										variant="gray"
+										size="xs"
+										:text="__('Factory SO')"
+									/>
 								</div>
 								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
 								<p class="text-xs text-gray-400 mt-0.5">
@@ -83,6 +160,20 @@
 								{{ __("Submit") }}
 							</button>
 							<button
+								v-if="
+									order.docstatus === 1 &&
+									order.per_received < 100 &&
+									!order.is_internal_supplier &&
+									canReceivePR
+								"
+								type="button"
+								data-test="receive-button"
+								class="px-2 py-1 text-xs rounded text-purple-600 hover:bg-purple-50"
+								@click="openReceive(order)"
+							>
+								{{ __("Receive") }}
+							</button>
+							<button
 								v-if="order.docstatus === 1 && canCancelPO"
 								type="button"
 								class="px-2 py-1 text-xs rounded text-red-600 hover:bg-red-50"
@@ -99,6 +190,74 @@
 							</button>
 						</div>
 					</div>
+				</div>
+			</div>
+
+			<!-- RECEIVE VIEW -->
+			<div v-else-if="view === 'receive'" class="flex flex-col gap-3">
+				<div class="flex items-end justify-between gap-3">
+					<div class="min-w-0">
+						<p class="text-sm font-semibold text-gray-900 truncate">
+							{{ receive.supplier_name }}
+						</p>
+						<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receive.supplier }}</p>
+					</div>
+					<div>
+						<label for="pr-posting-date" class="block text-xs font-medium text-gray-600 mb-1">
+							{{ __("Posting Date") }}
+						</label>
+						<input
+							id="pr-posting-date"
+							v-model="receive.posting_date"
+							type="date"
+							data-test="receive-posting-date"
+							class="px-3 py-2 text-sm border border-gray-300 rounded-lg"
+						/>
+					</div>
+				</div>
+
+				<div v-if="receive.items.length" class="overflow-x-auto">
+					<table class="w-full text-sm" data-test="receive-table">
+						<thead>
+							<tr class="text-xs text-gray-500 uppercase">
+								<th class="py-1 text-start">{{ __("Item") }}</th>
+								<th class="py-1 text-start w-16">{{ __("Ordered") }}</th>
+								<th class="py-1 text-start w-16">{{ __("Received") }}</th>
+								<th class="py-1 text-start w-16">{{ __("Remaining") }}</th>
+								<th class="py-1 text-start w-20">{{ __("Qty") }}</th>
+								<th class="py-1 text-end w-24">{{ __("Rate") }}</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr
+								v-for="row in receive.items"
+								:key="row.purchase_order_item"
+								class="border-t border-gray-100"
+							>
+								<td class="py-1.5 pe-2">
+									<div class="truncate max-w-[180px]">{{ row.item_name }}</div>
+									<div class="text-xs text-gray-400">{{ row.uom }}</div>
+								</td>
+								<td class="py-1.5 pe-2">{{ row.ordered_qty }}</td>
+								<td class="py-1.5 pe-2">{{ row.received_qty }}</td>
+								<td class="py-1.5 pe-2">{{ row.pending_qty }}</td>
+								<td class="py-1.5 pe-2">
+									<input
+										v-model.number="row.qty"
+										data-test="receive-qty"
+										type="number"
+										min="0"
+										step="any"
+										:aria-label="`${row.item_name} — ${__('Qty')}`"
+										class="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+									/>
+								</td>
+								<td class="py-1.5 text-end whitespace-nowrap">
+									{{ formatMoney(row.rate, receive.currency) }}
+								</td>
+							</tr>
+						</tbody>
+					</table>
 				</div>
 			</div>
 
@@ -259,6 +418,17 @@
 					</Button>
 				</div>
 			</div>
+			<div v-else-if="view === 'receive'" class="flex justify-between items-center w-full">
+				<Button variant="subtle" @click="view = 'list'">{{ __("Back") }}</Button>
+				<div class="flex gap-2">
+					<Button variant="subtle" :loading="saving" @click="saveReceipt(false)">
+						{{ __("Save Draft") }}
+					</Button>
+					<Button v-if="canSubmitPR" variant="solid" :loading="saving" @click="saveReceipt(true)">
+						{{ __("Submit Receipt") }}
+					</Button>
+				</div>
+			</div>
 			<div v-else class="flex justify-end w-full">
 				<Button variant="subtle" @click="show = false">{{ __("Close") }}</Button>
 			</div>
@@ -299,10 +469,24 @@ const { hasPermission: canCancelPO } = usePermissionCheck(
 	"Purchase Order",
 	"cancel",
 )
+const { hasPermission: canReceivePR } = usePermissionCheck(
+	"Purchase Receipt",
+	"create",
+)
+const { hasPermission: canSubmitPR } = usePermissionCheck(
+	"Purchase Receipt",
+	"submit",
+)
+const { hasPermission: canCancelPR } = usePermissionCheck(
+	"Purchase Receipt",
+	"cancel",
+)
 
 const API = "pos_next.api.purchase_orders"
+const PR_API = "pos_next.api.purchase_receipts"
 
 const view = ref("list")
+const showReceipts = ref(false)
 
 // AutocompleteSelect only fires @search while typing; without a preload the
 // dropdowns open empty and look broken. Prime the top options on form entry.
@@ -337,6 +521,8 @@ const STATUS_VARIANTS = {
 
 const orders = ref([])
 const loadingOrders = ref(false)
+const receipts = ref([])
+const loadingReceipts = ref(false)
 const searchTerm = ref("")
 const statusFilter = ref("")
 let listTimer = null
@@ -348,6 +534,7 @@ watch(
 		show.value = val
 		if (val) {
 			view.value = "list"
+			showReceipts.value = false
 			loadOrders()
 		} else {
 			clearTimeout(listTimer)
@@ -356,13 +543,14 @@ watch(
 	{ immediate: true },
 )
 
-const dialogTitle = computed(() =>
-	view.value === "form"
-		? form.value.name
+const dialogTitle = computed(() => {
+	if (view.value === "form")
+		return form.value.name
 			? __("Edit Purchase Order")
 			: __("New Purchase Order")
-		: __("Purchase Orders"),
-)
+	if (view.value === "receive") return __("Receive Goods")
+	return showReceipts.value ? __("Purchase Receipts") : __("Purchase Orders")
+})
 
 function statusVariant(status) {
 	return STATUS_VARIANTS[status] || "gray"
@@ -387,7 +575,34 @@ async function loadOrders() {
 
 function onListSearch() {
 	clearTimeout(listTimer)
-	listTimer = setTimeout(loadOrders, 300)
+	listTimer = setTimeout(loadList, 300)
+}
+
+function loadList() {
+	return showReceipts.value ? loadReceipts() : loadOrders()
+}
+
+async function loadReceipts() {
+	loadingReceipts.value = true
+	try {
+		const res = await call(`${PR_API}.get_purchase_receipts`, {
+			pos_profile: props.posProfile,
+			search_term: searchTerm.value || null,
+			limit: 50,
+		})
+		receipts.value = res?.receipts || []
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	} finally {
+		loadingReceipts.value = false
+	}
+}
+
+function toggleReceipts() {
+	showReceipts.value = !showReceipts.value
+	searchTerm.value = ""
+	statusFilter.value = ""
+	loadList()
 }
 
 function setStatus(value) {
@@ -418,6 +633,103 @@ async function cancelOrder(order) {
 
 function openInErpnext(order) {
 	window.open(`/app/purchase-order/${order.name}`, "_blank")
+}
+
+function openReceiptInErpnext(receipt) {
+	window.open(`/app/purchase-receipt/${receipt.name}`, "_blank")
+}
+
+async function cancelReceipt(receipt) {
+	if (!window.confirm(__("Cancel Purchase Receipt {0}?", [receipt.name]))) return
+	try {
+		const res = await call(`${PR_API}.cancel_purchase_receipt`, { name: receipt.name })
+		showSuccess(__("Purchase Receipt {0} cancelled", [res?.name || receipt.name]))
+		await loadReceipts()
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
+}
+
+// ---------- receive view ----------
+const receive = ref({
+	po_name: null,
+	supplier: "",
+	supplier_name: "",
+	posting_date: "",
+	company: "",
+	currency: "",
+	set_warehouse: "",
+	items: [],
+})
+
+async function openReceive(order) {
+	try {
+		const d = await call(`${PR_API}.get_purchase_receipt_draft`, {
+			po_name: order.name,
+		})
+		receive.value = {
+			po_name: order.name,
+			supplier: d?.supplier || "",
+			supplier_name: d?.supplier_name || order.supplier_name,
+			posting_date: d?.posting_date || localDate(),
+			company: d?.company || props.company,
+			currency: d?.currency || props.currency || "",
+			set_warehouse: d?.set_warehouse || "",
+			// default each row to what is still owed; the mapper only returns
+			// rows with a pending qty
+			items: (d?.items || []).map((row) => ({ ...row, qty: row.pending_qty })),
+		}
+		view.value = "receive"
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
+}
+
+async function saveReceipt(submitAfter) {
+	// rows left at 0 are "not receiving this now", not "receive nothing" —
+	// drop them; the mapper links (purchase_order / purchase_order_item) ride
+	// along on every row that is sent
+	const items = receive.value.items
+		.filter((row) => Number(row.qty) > 0)
+		.map((row) => ({
+			item_code: row.item_code,
+			qty: Number(row.qty),
+			rate: row.rate,
+			uom: row.uom,
+			warehouse: row.warehouse,
+			purchase_order: row.purchase_order,
+			purchase_order_item: row.purchase_order_item,
+		}))
+	if (!items.length) {
+		showError(__("At least one item is required"))
+		return
+	}
+	saving.value = true
+	try {
+		const res = await call(`${PR_API}.save_purchase_receipt`, {
+			data: JSON.stringify({
+				supplier: receive.value.supplier,
+				posting_date: receive.value.posting_date,
+				company: receive.value.company,
+				set_warehouse: receive.value.set_warehouse || null,
+				currency: receive.value.currency || null,
+				items,
+			}),
+			submit: submitAfter ? 1 : 0,
+		})
+		showSuccess(
+			submitAfter
+				? __("Purchase Receipt {0} submitted", [res?.name])
+				: __("Purchase Receipt {0} saved", [res?.name]),
+		)
+		view.value = "list"
+		showReceipts.value = false
+		await loadOrders()
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	} finally {
+		saving.value = false
+	}
 }
 
 // ---------- form view ----------

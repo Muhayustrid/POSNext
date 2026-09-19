@@ -23,7 +23,7 @@ vi.hoisted(() => {
 const mocks = vi.hoisted(() => ({
 	call: vi.fn(),
 	toast: { success: vi.fn(), error: vi.fn() },
-	perms: { submit: true, cancel: true },
+	perms: { submit: true, cancel: true, create: true },
 }))
 
 vi.mock("@/utils/apiWrapper", async (importOriginal) => ({
@@ -105,6 +105,77 @@ const DRAFT_ORDER = {
 	docstatus: 0,
 }
 
+const SUBMITTED_ORDER = {
+	...DRAFT_ORDER,
+	name: "PO-2026-00002",
+	status: "To Receive and Bill",
+	docstatus: 1,
+	per_received: 0,
+}
+
+	const FULLY_RECEIVED_ORDER = {
+		...SUBMITTED_ORDER,
+		name: "PO-2026-00003",
+		status: "To Bill",
+		per_received: 100,
+	}
+
+	const INTERNAL_ORDER = {
+		...SUBMITTED_ORDER,
+		name: "PO-2026-00004",
+		is_internal_supplier: 1,
+		inter_company_order_reference: "SO-2026-00001",
+	}
+
+const RECEIPT = {
+	name: "PR-2026-00001",
+	supplier: "SUP-1",
+	supplier_name: "Roti Ltd",
+	posting_date: "2026-09-19",
+	status: "To Bill",
+	docstatus: 1,
+	grand_total: 150000,
+	currency: "IDR",
+	per_billed: 40,
+	company: "Test Co",
+	modified: "2026-09-19 10:00:00",
+}
+
+const PR_DRAFT = {
+	supplier: "SUP-1",
+	supplier_name: "Roti Ltd",
+	posting_date: "2026-09-19",
+	company: "Test Co",
+	currency: "IDR",
+	set_warehouse: "WH-1",
+	items: [
+		{
+			item_code: "ITEM-1",
+			item_name: "Roti Tawar",
+			purchase_order: "PO-2026-00002",
+			purchase_order_item: "POI-1",
+			ordered_qty: 10,
+			received_qty: 4,
+			pending_qty: 6,
+			uom: "Nos",
+			rate: 100,
+			warehouse: "WH-1",
+		},
+		{
+			item_code: "ITEM-2",
+			item_name: "Brownis",
+			purchase_order: "PO-2026-00002",
+			purchase_order_item: "POI-2",
+			ordered_qty: 5,
+			received_qty: 0,
+			pending_qty: 5,
+			uom: "Nos",
+			rate: 50,
+			warehouse: "WH-1",
+		},
+	],
+}
+
 function mountOpen() {
 	return mount(PurchaseOrderDialog, {
 		props: {
@@ -171,6 +242,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.toast.error.mockClear()
 		mocks.perms.submit = true
 		mocks.perms.cancel = true
+		mocks.perms.create = true
 	})
 
 	afterEach(() => {
@@ -436,5 +508,195 @@ describe("PurchaseOrderDialog", () => {
 		expect(button(wrapper, "Submit")).toBeDefined()
 		await button(wrapper, "New").trigger("click")
 		expect(button(wrapper, "Save & Submit")).toBeDefined()
+	})
+
+	// ---------- purchase receipts ----------
+
+	function mockPrFlow() {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders")) return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_receipt_draft")) return PR_DRAFT
+			return {}
+		})
+	}
+
+	async function openReceiveView(wrapper) {
+		await wrapper.find('[data-test="receive-button"]').trigger("click")
+		await flushPromises()
+	}
+
+	it("shows Receive only on partially received submitted POs, gated by PR create permission", async () => {
+		mocks.call.mockResolvedValue({
+			orders: [DRAFT_ORDER, SUBMITTED_ORDER, FULLY_RECEIVED_ORDER],
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		// one button: on the submitted PO with per_received < 100 — not on the
+		// draft, not on the fully received one (gating is per_received, not status)
+		const buttons = wrapper.findAll('[data-test="receive-button"]')
+		expect(buttons).toHaveLength(1)
+		expect(wrapper.text()).toContain("PO-2026-00002")
+
+		mocks.perms.create = false
+		await wrapper.setProps({ modelValue: false })
+		await flushPromises()
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(0)
+	})
+
+	it("hides Receive on internal supplier POs and badges them once the factory SO exists", async () => {
+		// internal POs are received from the factory's Delivery Note, never from
+		// the POS — even while per_received < 100
+		mocks.call.mockResolvedValue({
+			orders: [SUBMITTED_ORDER, INTERNAL_ORDER],
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(1)
+		expect(wrapper.text()).toContain("Factory SO")
+
+		// an internal PO whose factory SO hasn't been made yet: no Receive, no badge
+		const notYetLinked = { ...INTERNAL_ORDER, name: "PO-2026-00005", inter_company_order_reference: null }
+		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER, notYetLinked] })
+		await wrapper.setProps({ modelValue: false })
+		await flushPromises()
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(1)
+		expect(wrapper.text()).not.toContain("Factory SO")
+	})
+
+	it("Receive loads the draft and prefills qty with the pending qty", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_receipts.get_purchase_receipt_draft",
+			{ po_name: "PO-2026-00002" },
+		)
+		expect(wrapper.find('[data-test="receive-table"]').exists()).toBe(true)
+		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
+		expect(qtyInputs).toHaveLength(2)
+		expect(qtyInputs[0].element.value).toBe("6")
+		expect(qtyInputs[1].element.value).toBe("5")
+		expect(wrapper.find('[data-test="receive-posting-date"]').element.value).toBe(
+			"2026-09-19",
+		)
+	})
+
+	it("submits only rows with qty > 0 carrying the PO links, with the submit flag", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
+		await qtyInputs[0].setValue(3)
+		await qtyInputs[1].setValue(0) // not receiving this row now
+
+		mocks.call.mockImplementation(async (method) =>
+			method.includes("save_purchase_receipt") ? { name: "PR-2026-00009" } : {},
+		)
+		await button(wrapper, "Submit Receipt").trigger("click")
+		await flushPromises()
+
+		const saveCall = mocks.call.mock.calls.find(([m]) =>
+			m.includes("save_purchase_receipt"),
+		)
+		expect(saveCall[0]).toBe(
+			"pos_next.api.purchase_receipts.save_purchase_receipt",
+		)
+		expect(saveCall[1]).toEqual(expect.objectContaining({ submit: 1 }))
+		const data = JSON.parse(saveCall[1].data)
+		expect(data.supplier).toBe("SUP-1")
+		expect(data.posting_date).toBe("2026-09-19")
+		expect(data.items).toEqual([
+			{
+				item_code: "ITEM-1",
+				qty: 3,
+				rate: 100,
+				uom: "Nos",
+				warehouse: "WH-1",
+				purchase_order: "PO-2026-00002",
+				purchase_order_item: "POI-1",
+			},
+		])
+		expect(mocks.toast.success).toHaveBeenCalledWith(
+			"Purchase Receipt PR-2026-00009 submitted",
+		)
+		// back on the PO list, refreshed
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_orders",
+			expect.anything(),
+		)
+	})
+
+	it("surfaces the backend PR save error verbatim", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("save_purchase_receipt"))
+				throw Object.assign(new Error("Request failed"), {
+					messages: ["Cannot receive more than ordered quantity"],
+					httpStatus: 417,
+				})
+			return {}
+		})
+		await button(wrapper, "Save Draft").trigger("click")
+		await flushPromises()
+
+		expect(mocks.toast.error).toHaveBeenCalledWith(
+			"Cannot receive more than ordered quantity",
+		)
+		expect(mocks.toast.success).not.toHaveBeenCalled()
+	})
+
+	it("Receipts segment lists receipts and gates Cancel behind the PR cancel permission", async () => {
+		const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders")) return { orders: [] }
+			if (method.includes("get_purchase_receipts")) return { receipts: [RECEIPT] }
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		await wrapper.find('[data-test="receipts-toggle"]').trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_receipts.get_purchase_receipts",
+			expect.objectContaining({ pos_profile: "POS-1" }),
+		)
+		expect(wrapper.text()).toContain("PR-2026-00001")
+		expect(wrapper.text()).toContain("Billed 40%")
+		expect(wrapper.find('[data-test="cancel-receipt"]').exists()).toBe(true)
+
+		await wrapper.find('[data-test="cancel-receipt"]').trigger("click")
+		await flushPromises()
+		expect(confirmSpy).toHaveBeenCalled()
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_receipts.cancel_purchase_receipt",
+			{ name: "PR-2026-00001" },
+		)
+
+		// without the cancel permission the button is gone
+		mocks.perms.cancel = false
+		await wrapper.setProps({ modelValue: false })
+		await flushPromises()
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		await wrapper.find('[data-test="receipts-toggle"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="cancel-receipt"]').exists()).toBe(false)
+		confirmSpy.mockRestore()
 	})
 })
