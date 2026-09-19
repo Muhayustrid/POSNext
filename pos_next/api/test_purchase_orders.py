@@ -433,6 +433,8 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 
 	def test_permission_denied_without_purchasing_role(self):
 		name = self._save()["name"]
+		# submitted while Administrator so cancel has a submitted doc to act on
+		submit_purchase_order(name)
 		frappe.set_user(self.user)
 		try:
 			with self.assertRaises(frappe.PermissionError):
@@ -441,5 +443,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				get_purchase_order(name)
 			with self.assertRaises(frappe.PermissionError):
 				submit_purchase_order(name)
+			with self.assertRaises(frappe.PermissionError):
+				cancel_purchase_order(name)
 		finally:
 			frappe.set_user(ADMIN)
