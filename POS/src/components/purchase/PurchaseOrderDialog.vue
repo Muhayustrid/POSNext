@@ -307,6 +307,15 @@ const { hasPermission: canCancelPO } = usePermissionCheck(
 const API = "pos_next.api.purchase_orders"
 
 const view = ref("list")
+
+// AutocompleteSelect only fires @search while typing; without a preload the
+// dropdowns open empty and look broken. Prime the top options on form entry.
+watch(view, (v) => {
+	if (v === "form") {
+		onSupplierSearch("")
+		onItemSearch("")
+	}
+})
 const show = ref(props.modelValue)
 watch(show, (val) => emit("update:modelValue", val))
 

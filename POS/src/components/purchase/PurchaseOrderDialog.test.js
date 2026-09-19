@@ -212,6 +212,29 @@ describe("PurchaseOrderDialog", () => {
 		expect(wrapper.text()).toContain("Test Co")
 	})
 
+	it("entering the form preloads supplier and item options", async () => {
+		vi.useFakeTimers()
+		mocks.call.mockResolvedValue({
+			suppliers: [],
+			items: [],
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		await button(wrapper, "New").trigger("click")
+		await vi.advanceTimersByTimeAsync(400)
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.search_suppliers",
+			expect.objectContaining({ search_term: null }),
+		)
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.search_purchase_items",
+			expect.objectContaining({ search_term: null }),
+		)
+		vi.useRealTimers()
+	})
+
 	it("supplier search calls search_suppliers with the term after debounce", async () => {
 		vi.useFakeTimers()
 		mocks.call.mockResolvedValue({ suppliers: [] })
