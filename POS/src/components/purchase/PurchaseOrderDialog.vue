@@ -142,15 +142,6 @@
 					</div>
 				</div>
 
-				<p class="text-xs text-gray-500">
-					{{
-						__("Company: {0} | Warehouse: {1}", [
-							props.company || "-",
-							form.set_warehouse || props.warehouse || "-",
-						])
-					}}
-				</p>
-
 				<div
 					v-if="form.taxes_and_charges"
 					class="flex items-center justify-between px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg"

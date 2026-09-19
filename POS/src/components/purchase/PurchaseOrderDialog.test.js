@@ -209,7 +209,6 @@ describe("PurchaseOrderDialog", () => {
 			wrapper.find('input[placeholder="Search supplier..."]').exists(),
 		).toBe(true)
 		expect(wrapper.text()).toContain("Transaction Date")
-		expect(wrapper.text()).toContain("Test Co")
 	})
 
 	it("entering the form preloads supplier and item options", async () => {
@@ -264,7 +263,20 @@ describe("PurchaseOrderDialog", () => {
 			.findAll("input")
 			.find((i) => i.attributes("placeholder") === "Search supplier...")
 		expect(supplierInput.element.value).toBe("SUP-DEFAULT")
-		expect(wrapper.text()).toContain("WH-PURCH")
+
+		// the caption is gone; the warehouse default rides the save payload instead
+		await fillForm(wrapper)
+		mocks.call.mockImplementation(async (method) =>
+			method.includes("save_purchase_order") ? { name: "PO-2026-00003" } : {},
+		)
+		await button(wrapper, "Save Draft").trigger("click")
+		await flushPromises()
+
+		const saveCall = mocks.call.mock.calls.find(([m]) =>
+			m.includes("save_purchase_order"),
+		)
+		const data = JSON.parse(saveCall[1].data)
+		expect(data.set_warehouse).toBe("WH-PURCH")
 	})
 
 	it("supplier search calls search_suppliers with the term after debounce", async () => {
