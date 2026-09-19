@@ -74,7 +74,8 @@
 					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
 				/>
 
-				<table class="w-full text-sm">
+				<div class="overflow-x-auto -mx-1 px-1">
+					<table class="w-full text-sm">
 					<thead>
 						<tr class="text-start text-xs text-gray-500 uppercase">
 							<th class="py-1 text-start">{{ __("Material") }}</th>
@@ -117,6 +118,7 @@
 						</tr>
 					</tbody>
 				</table>
+				</div>
 
 				<div class="mt-4 flex justify-end gap-2">
 					<Button variant="subtle" @click="show = false">{{ __("Cancel") }}</Button>
@@ -201,15 +203,15 @@ const DialogHost = defineComponent({
 });
 
 const show = ref(props.modelValue);
-// immediate: embedded mode mounts with modelValue already true and must load;
-// standalone always mounts closed (v=false) so the first run is a no-op there.
+// Non-immediate: embedded mode mounts with modelValue already true, but the
+// initial load must run after every ref below is declared — an immediate
+// watcher here hit loadRecipes() mid-setup (TDZ) and crashed the whole app.
 watch(
 	() => props.modelValue,
 	(v) => {
 		show.value = v;
 		if (v) loadRecipes();
 	},
-	{ immediate: true },
 );
 watch(show, (v) => emit("update:modelValue", v));
 
@@ -333,4 +335,8 @@ function submit() {
 function batchQty(row) {
 	return row.batches.find((b) => b.batch_no === row.batch_no)?.qty ?? "";
 }
+
+// Initial load for embedded mode (mounted with modelValue already true) —
+// kept at the end of setup so every ref loadRecipes touches exists.
+if (props.modelValue) loadRecipes();
 </script>
