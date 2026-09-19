@@ -119,20 +119,22 @@
 
 				<div class="grid grid-cols-2 gap-3">
 					<div>
-						<label class="block text-xs font-medium text-gray-600 mb-1">
+						<label for="po-transaction-date" class="block text-xs font-medium text-gray-600 mb-1">
 							{{ __("Transaction Date") }}
 						</label>
 						<input
+							id="po-transaction-date"
 							v-model="form.transaction_date"
 							type="date"
 							class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
 						/>
 					</div>
 					<div>
-						<label class="block text-xs font-medium text-gray-600 mb-1">
+						<label for="po-schedule-date" class="block text-xs font-medium text-gray-600 mb-1">
 							{{ __("Required By") }}
 						</label>
 						<input
+							id="po-schedule-date"
 							v-model="form.schedule_date"
 							type="date"
 							class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
@@ -197,6 +199,7 @@
 										type="number"
 										min="0"
 										step="any"
+										:aria-label="`${row.item_name} — ${__('Qty')}`"
 										class="w-full px-2 py-1 text-sm border border-gray-300 rounded"
 									/>
 								</td>
@@ -207,6 +210,7 @@
 										type="number"
 										min="0"
 										step="any"
+										:aria-label="`${row.item_name} — ${__('Rate')}`"
 										class="w-full px-2 py-1 text-sm border border-gray-300 rounded"
 									/>
 								</td>
@@ -234,8 +238,11 @@
 				</div>
 
 				<div>
-					<label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Remarks") }}</label>
+					<label for="po-remarks" class="block text-xs font-medium text-gray-600 mb-1">{{
+						__("Remarks")
+					}}</label>
 					<textarea
+						id="po-remarks"
 						v-model="form.remarks"
 						rows="2"
 						class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
@@ -337,6 +344,8 @@ watch(
 		if (val) {
 			view.value = "list"
 			loadOrders()
+		} else {
+			clearTimeout(listTimer)
 		}
 	},
 	{ immediate: true },
@@ -493,7 +502,12 @@ function onSupplierSearch(term) {
 
 async function onSupplierSelect(name) {
 	form.value.supplier = name || ""
-	if (!name) return
+	if (!name) {
+		// clear selection must not leave the previous supplier's defaults behind
+		form.value.currency = props.currency || ""
+		form.value.taxes_and_charges = ""
+		return
+	}
 	try {
 		const d = await call(`${API}.get_supplier_details`, {
 			supplier: name,
