@@ -103,6 +103,39 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		item = cls._make_item()
 		cls.item = item.name
 		cls.item_name = item.item_name
+		cls.stock_uom = item.stock_uom
+
+		# the production site carries a per-item custom default UOM
+		# (custom_default_uom_warehouse) — recreate it locally so the fallback
+		# chain is testable, plus a convertible Box UOM on the fixture item.
+		# create_custom_fields (not a plain insert): something in this bench
+		# recreates the same field on Item inserts, and the helper is idempotent.
+		from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+		create_custom_fields(
+			{
+				"Item": [
+					{
+						"fieldname": "custom_default_uom_warehouse",
+						"label": "Default Purchase UOM",
+						"fieldtype": "Link",
+						"options": "UOM",
+						"insert_after": "stock_uom",
+					}
+				]
+			}
+		)
+		cls.custom_uom_field = "Item-custom_default_uom_warehouse"
+		cls.uom_box = f"PR Box {cls._uniq()}"
+		frappe.get_doc({"doctype": "UOM", "uom_name": cls.uom_box}).insert()
+		item = frappe.get_doc("Item", cls.item)
+		item.append("uoms", {"uom": cls.uom_box, "conversion_factor": 10})
+		item.save()
+		item_uoms = set(frappe.get_all("UOM Conversion Detail", filters={"parent": cls.item}, pluck="uom"))
+		cls.uom_invalid = next(
+			(u for u in ("Nos", "Meter", "Kg", "Pcs") if frappe.db.exists("UOM", u) and u not in item_uoms),
+			None,
+		)
 
 		# dedicated item for price lookups: POs saved with explicit rates make
 		# ERPNext auto-insert Item Prices, so the shared item must not carry one
@@ -194,6 +227,14 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 			("Purchase Taxes and Charges Template", getattr(cls, "tax_template", None)),
 			("Item", getattr(cls, "item", None)),
 			("Item", getattr(cls, "priced_item", None)),
+			# tolerant teardown — the bench's mystery recreator may own it too
+			(
+				"Custom Field",
+				frappe.db.get_value(
+					"Custom Field", {"dt": "Item", "fieldname": "custom_default_uom_warehouse"}, "name"
+				),
+			),
+			("UOM", getattr(cls, "uom_box", None)),
 			("Supplier", getattr(cls, "supplier", None)),
 			("User", getattr(cls, "user", None)),
 			("Fiscal Year", getattr(cls, "fiscal_year", None)),
@@ -460,6 +501,82 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 					},
 				)
 
+	def test_purchase_item_details_default_uom(self):
+		# no custom default set -> the stock UOM, and the item's UOMs ride along
+		details = get_purchase_item_details(self.item)
+		self.assertEqual(details["default_uom"], self.stock_uom)
+		self.assertEqual(details["uom"], self.stock_uom)
+		self.assertIn(self.uom_box, {d["uom"] for d in details["uoms"]})
+
+		# the per-item custom default wins and prices in that UOM already
+		frappe.db.set_value("Item", self.item, "custom_default_uom_warehouse", self.uom_box)
+		try:
+			details = get_purchase_item_details(self.item)
+			self.assertEqual(details["default_uom"], self.uom_box)
+			self.assertEqual(details["uom"], self.uom_box)
+			self.assertEqual(flt(details["conversion_factor"]), 10)
+
+			# an explicit cashier pick overrides the custom default
+			details = get_purchase_item_details(self.item, uom=self.stock_uom)
+			self.assertEqual(details["uom"], self.stock_uom)
+
+			# a custom default the item can't convert falls back to the stock UOM
+			if self.uom_invalid:
+				frappe.db.set_value("Item", self.item, "custom_default_uom_warehouse", self.uom_invalid)
+				details = get_purchase_item_details(self.item)
+				self.assertEqual(details["default_uom"], self.stock_uom)
+		finally:
+			frappe.db.set_value("Item", self.item, "custom_default_uom_warehouse", None)
+
+	def test_pos_settings_price_list_drives_the_po(self):
+		if not self.pos_profile:
+			self.skipTest("no POS Profile on this site")
+		pl = (
+			frappe.get_doc(
+				{
+					"doctype": "Price List",
+					"price_list_name": f"POS PO Test PL {self._uniq()}",
+					"buying": 1,
+					"selling": 0,
+					"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				}
+			)
+			.insert()
+			.name
+		)
+		settings_name = frappe.db.get_value("POS Settings", {"pos_profile": self.pos_profile}, "name")
+		created = False
+		orig = None
+		try:
+			if settings_name:
+				orig = frappe.db.get_value(
+					"POS Settings",
+					settings_name,
+					["enabled", "po_default_price_list"],
+					as_dict=True,
+				)
+			else:
+				settings_name = (
+					frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.pos_profile}).insert().name
+				)
+				created = True
+			frappe.db.set_value("POS Settings", settings_name, {"enabled": 1, "po_default_price_list": pl})
+
+			self.assertEqual(get_po_defaults(self.pos_profile)["price_list"], pl)
+			# the payload carries no price list — the setting drives the PO
+			result = self._save(self._data(), pos_profile=self.pos_profile)
+			self.assertEqual(frappe.db.get_value("Purchase Order", result["name"], "buying_price_list"), pl)
+		finally:
+			if created and settings_name:
+				frappe.delete_doc("POS Settings", settings_name, force=1)
+			elif settings_name and orig:
+				frappe.db.set_value(
+					"POS Settings",
+					settings_name,
+					{"enabled": orig.enabled, "po_default_price_list": orig.po_default_price_list},
+				)
+			frappe.delete_doc("Price List", pl, force=1)
+
 	def test_search_suppliers_and_purchase_items(self):
 		suppliers = search_suppliers(self.supplier_name)["suppliers"]
 		match = next(s for s in suppliers if s["name"] == self.supplier)
@@ -492,6 +609,8 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				"item_name",
 				"uom",
 				"stock_uom",
+				"default_uom",
+				"uoms",
 				"conversion_factor",
 				"price_list_rate",
 				"rate",
@@ -501,6 +620,9 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		self.assertEqual(details["item_code"], self.priced_item)
 		self.assertEqual(details["uom"], "Unit")
 		self.assertEqual(details["stock_uom"], "Unit")
+		# no custom default on this item -> the stock UOM; conversion list rides along
+		self.assertEqual(details["default_uom"], "Unit")
+		self.assertIn("Unit", {d["uom"] for d in details["uoms"]})
 		self.assertEqual(flt(details["conversion_factor"]), 1)
 		self.assertEqual(flt(details["price_list_rate"]), 10)
 		# standalone get_item_details leaves rate at 0 — the PO fills it on save

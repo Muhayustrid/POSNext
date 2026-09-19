@@ -58,6 +58,9 @@ def get_po_defaults(pos_profile=None):
 		"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name") if supplier else None,
 		"warehouse": _po_setting(pos_profile, "po_default_warehouse")
 		or _profile_value(pos_profile, "warehouse"),
+		# buying price list for POS Purchase Orders; empty = the supplier's own
+		# default applies (native set_missing_values)
+		"price_list": _po_setting(pos_profile, "po_default_price_list"),
 		# when on, the POS hides the Receive button until a pending Delivery
 		# Note exists for the order (intercompany flow)
 		"receive_requires_delivery_note": cint(_po_setting(pos_profile, "po_receive_requires_delivery_note")),
@@ -125,9 +128,28 @@ def get_supplier_details(supplier, pos_profile=None):
 	}
 
 
+def _default_purchase_uom(item_code, stock_uom):
+	"""The site's per-item custom default UOM when it exists and the item can
+	actually use it; otherwise None (caller falls back to the stock UOM)."""
+	if not frappe.get_meta("Item").has_field("custom_default_uom_warehouse"):
+		return None
+	custom_uom = frappe.db.get_value("Item", item_code, "custom_default_uom_warehouse")
+	if not custom_uom or custom_uom == stock_uom:
+		return None
+	valid = frappe.get_all("UOM Conversion Detail", filters={"parent": item_code, "uom": custom_uom}, limit=1)
+	return custom_uom if valid else None
+
+
 @frappe.whitelist()
 def get_purchase_item_details(
-	item_code, supplier=None, pos_profile=None, qty=1, transaction_date=None, warehouse=None
+	item_code,
+	supplier=None,
+	pos_profile=None,
+	qty=1,
+	transaction_date=None,
+	warehouse=None,
+	uom=None,
+	price_list=None,
 ):
 	_check_guest()
 	company = _resolve_company(pos_profile)
@@ -143,16 +165,35 @@ def get_purchase_item_details(
 		"qty": flt(qty) or 1,
 		"set_warehouse": warehouse,
 	}
+	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
+	# resolve the row's UOM up front — the cashier's remembered pick, else the
+	# per-item custom default — so get_item_details prices in that UOM
+	chosen_uom = uom or _default_purchase_uom(item_code, stock_uom)
+	if chosen_uom:
+		ctx["uom"] = chosen_uom
 	# get_item_details never resolves the party price list itself — that is the
-	# caller's job (the PO does it via set_missing_values) — so seed it here
-	if supplier:
-		ctx["buying_price_list"] = frappe.db.get_value("Supplier", supplier, "default_price_list")
+	# caller's job (the PO does it via set_missing_values) — so seed it here:
+	# the POS Settings default wins over the supplier's
+	ctx["buying_price_list"] = (
+		price_list
+		or _po_setting(pos_profile, "po_default_price_list")
+		or (frappe.db.get_value("Supplier", supplier, "default_price_list") if supplier else None)
+	)
 	details = get_item_details(ctx)
+	item_uoms = frappe.get_all(
+		"UOM Conversion Detail",
+		filters={"parent": item_code},
+		fields=["uom", "conversion_factor"],
+		order_by="idx",
+	)
 	return {
 		"item_code": details.get("item_code"),
 		"item_name": details.get("item_name"),
 		"uom": details.get("uom"),
 		"stock_uom": details.get("stock_uom"),
+		# what a fresh row should default to when the cashier sent no pick
+		"default_uom": chosen_uom or stock_uom,
+		"uoms": [{"uom": d.uom, "conversion_factor": d.conversion_factor} for d in item_uoms],
 		"conversion_factor": details.get("conversion_factor"),
 		"price_list_rate": details.get("price_list_rate"),
 		"rate": details.get("rate"),
@@ -260,6 +301,11 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 		if not doc.taxes_and_charges:
 			doc.set("taxes", [])
 	doc.terms = data.get("remarks")
+	# explicit price list wins over the supplier's own default; set before
+	# set_missing_values so the native fill respects it
+	buying_price_list = data.get("buying_price_list") or _po_setting(pos_profile, "po_default_price_list")
+	if buying_price_list:
+		doc.buying_price_list = buying_price_list
 
 	doc.set("items", [])
 	for row in items:

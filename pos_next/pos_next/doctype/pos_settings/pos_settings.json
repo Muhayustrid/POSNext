@@ -804,6 +804,13 @@
    "options": "Warehouse"
   },
   {
+   "description": "Buying price list for POS Purchase Orders (empty = the supplier's default price list applies)",
+   "fieldname": "po_default_price_list",
+   "fieldtype": "Link",
+   "label": "Default Buying Price List",
+   "options": "Price List"
+  },
+  {
    "default": "0",
    "description": "Only show the POS Receive button on a Purchase Order once the supplier's Delivery Note exists (intercompany flow)",
    "fieldname": "po_receive_requires_delivery_note",
@@ -824,7 +831,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 21:00:00.000000",
+ "modified": "2026-09-19 22:30:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

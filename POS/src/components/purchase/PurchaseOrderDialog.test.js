@@ -200,7 +200,7 @@ function button(wrapper, text) {
 }
 
 // Fill the form until it is saveable: supplier selected + one item row at qty 3.
-async function fillForm(wrapper) {
+	async function fillForm(wrapper) {
 	mocks.call.mockImplementation(async (method) => {
 		if (method.includes("get_supplier_details"))
 			return {
@@ -215,6 +215,11 @@ async function fillForm(wrapper) {
 				item_name: "Roti Tawar",
 				uom: "Nos",
 				stock_uom: "Nos",
+				default_uom: "Nos",
+				uoms: [
+					{ uom: "Nos", conversion_factor: 1 },
+					{ uom: "Box", conversion_factor: 10 },
+				],
 				conversion_factor: 1,
 				price_list_rate: 100,
 				rate: 90,
@@ -243,6 +248,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.perms.submit = true
 		mocks.perms.cancel = true
 		mocks.perms.create = true
+		localStorage.clear()
 	})
 
 	afterEach(() => {
@@ -373,7 +379,7 @@ describe("PurchaseOrderDialog", () => {
 		)
 	})
 
-	it("picking an item prices it and amount follows qty * rate", async () => {
+	it("picking an item prices it silently — qty and UOM only, no money shown", async () => {
 		mocks.call.mockResolvedValue({ orders: [] })
 		const wrapper = mountOpen()
 		await flushPromises()
@@ -382,7 +388,6 @@ describe("PurchaseOrderDialog", () => {
 
 		const table = wrapper.find('[data-test="items-table"]')
 		expect(table.text()).toContain("Roti Tawar")
-		// price_list_rate (100) wins over rate (90); qty edited to 3 -> 300
 		expect(mocks.call).toHaveBeenCalledWith(
 			"pos_next.api.purchase_orders.get_purchase_item_details",
 			expect.objectContaining({
@@ -391,7 +396,77 @@ describe("PurchaseOrderDialog", () => {
 				warehouse: "WH-1",
 			}),
 		)
-		expect(table.text()).toContain("300")
+		// rate still rides the row state (sent on save) but nothing money-ish
+		// is rendered — no rate input, no amount, no total
+		expect(wrapper.find('[data-test="item-rate"]').exists()).toBe(false)
+		expect(table.text()).not.toContain("300")
+		expect(wrapper.text()).not.toContain("Total")
+
+		// the row UOM is a selector over the item's UOMs, defaulting to the
+		// backend's default UOM
+		const uomSelect = wrapper.find('[data-test="item-uom"]')
+		expect(uomSelect.exists()).toBe(true)
+		expect(uomSelect.element.value).toBe("Nos")
+		expect([...uomSelect.element.options].map((o) => o.value)).toEqual(["Nos", "Box"])
+	})
+
+	it("changing the UOM re-prices in it and remembers the pick per item", async () => {
+		mocks.call.mockResolvedValue({ orders: [] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New").trigger("click")
+		await fillForm(wrapper)
+
+		const uomSelect = wrapper.find('[data-test="item-uom"]')
+		await uomSelect.setValue("Box")
+		await flushPromises()
+
+		// re-fetch prices the row in the chosen UOM…
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_item_details",
+			expect.objectContaining({ item_code: "ITEM-1", uom: "Box" }),
+		)
+		// …and the pick is remembered in this browser for the next PO
+		expect(JSON.parse(localStorage.getItem("posNext.poUom"))).toEqual({ "ITEM-1": "Box" })
+
+		// a fresh pick for the same item starts from the remembered UOM
+		await autocomplete(wrapper, "Search item...").vm.$emit("update:modelValue", "ITEM-1")
+		await flushPromises()
+		const lastFetch = mocks.call.mock.calls
+			.filter(([m]) => m.includes("get_purchase_item_details"))
+			.at(-1)
+		expect(lastFetch[1]).toEqual(expect.objectContaining({ uom: "Box" }))
+	})
+
+	it("the POS Settings price list rides the item fetch and the save payload", async () => {
+		mocks.call.mockImplementation((method) => {
+			if (method.includes("get_po_defaults"))
+				return Promise.resolve({
+					supplier: null,
+					supplier_name: null,
+					warehouse: "WH-1",
+					price_list: "PL-IC",
+				})
+			return Promise.resolve({ orders: [] })
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New").trigger("click")
+		await fillForm(wrapper)
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_item_details",
+			expect.objectContaining({ price_list: "PL-IC" }),
+		)
+
+		mocks.call.mockImplementation(async (method) =>
+			method.includes("save_purchase_order") ? { name: "PO-2026-00004" } : {},
+		)
+		await button(wrapper, "Save Draft").trigger("click")
+		await flushPromises()
+
+		const saveCall = mocks.call.mock.calls.find(([m]) => m.includes("save_purchase_order"))
+		expect(JSON.parse(saveCall[1].data).buying_price_list).toBe("PL-IC")
 	})
 
 	it("Save Draft posts the full payload with submit: 0", async () => {
@@ -422,6 +497,8 @@ describe("PurchaseOrderDialog", () => {
 		expect(data.supplier).toBe("SUP-1")
 		expect(data.company).toBe("Test Co")
 		expect(data.set_warehouse).toBe("WH-1")
+		// no POS Settings price list configured -> null (supplier default applies)
+		expect(data.buying_price_list).toBeNull()
 		expect(data.name).toBeUndefined()
 		expect(data.items).toEqual([
 			{ item_code: "ITEM-1", qty: 3, rate: 100, uom: "Nos" },
