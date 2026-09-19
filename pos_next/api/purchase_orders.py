@@ -146,6 +146,7 @@ def _po_summary(doc):
 		"currency": doc.currency,
 		"net_total": doc.net_total,
 		"total_taxes_and_charges": doc.total_taxes_and_charges,
+		"taxes_and_charges": doc.taxes_and_charges,
 		"grand_total": doc.grand_total,
 		# PO v16 has no remarks field — the payload remarks ride the native terms field
 		"remarks": doc.terms,

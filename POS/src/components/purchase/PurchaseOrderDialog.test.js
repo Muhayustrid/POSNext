@@ -312,6 +312,36 @@ describe("PurchaseOrderDialog", () => {
 		expect(mocks.toast.success).not.toHaveBeenCalled()
 	})
 
+	it("Edit prefills the tax template from the loaded order", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.endsWith("get_purchase_order"))
+				return {
+					name: "PO-2026-00001",
+					supplier: "SUP-1",
+					transaction_date: "2026-09-19",
+					schedule_date: "2026-09-20",
+					currency: "IDR",
+					taxes_and_charges: "T1",
+					remarks: "",
+					items: [],
+				}
+			return { orders: [DRAFT_ORDER] }
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		await button(wrapper, "Edit").trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_order",
+			{ name: "PO-2026-00001" },
+		)
+		// the loaded template must prefill the form, or the full-payload save
+		// would clear it
+		expect(wrapper.text()).toContain("Tax Template: T1")
+	})
+
 	it("gates the submit actions behind the submit permission", async () => {
 		mocks.perms.submit = false
 		mocks.call.mockResolvedValue({ orders: [DRAFT_ORDER] })

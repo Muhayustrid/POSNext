@@ -454,15 +454,15 @@ function openNew() {
 async function openEdit(order) {
 	try {
 		const d = await call(`${API}.get_purchase_order`, { name: order.name })
-		// _po_summary carries no taxes_and_charges, so the template field stays
-		// untouched server-side on the update path (backend only overwrites when set)
 		form.value = {
 			name: d?.name || null,
 			supplier: d?.supplier || "",
 			transaction_date: d?.transaction_date || localDate(),
 			schedule_date: d?.schedule_date || localDate(1),
 			currency: d?.currency || props.currency || "",
-			taxes_and_charges: "",
+			// prefill the loaded template — an empty value here is the explicit
+			// remove-tax signal, not "leave untouched"
+			taxes_and_charges: d?.taxes_and_charges || "",
 			remarks: d?.remarks || "",
 			items: (d?.items || []).map((i) => ({
 				item_code: i.item_code,

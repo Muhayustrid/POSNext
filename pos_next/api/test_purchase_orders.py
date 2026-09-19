@@ -310,6 +310,8 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 
 		# update: template set → rows expanded by set_missing_values
 		name = self._save(self._data(taxes_and_charges=self.tax_template))["name"]
+		# summary must round-trip the template so the POS edit flow can prefill it
+		self.assertEqual(get_purchase_order(name)["taxes_and_charges"], self.tax_template)
 		doc = frappe.get_doc("Purchase Order", name)
 		self.assertEqual(doc.taxes_and_charges, self.tax_template)
 		self.assertTrue(doc.taxes)
@@ -320,6 +322,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		doc.reload()
 		self.assertIsNone(doc.taxes_and_charges)
 		self.assertEqual(doc.taxes, [])
+		self.assertIsNone(get_purchase_order(name)["taxes_and_charges"])
 
 	def test_edit_non_draft_throws(self):
 		name = self._save(submit=1)["name"]
