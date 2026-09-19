@@ -137,6 +137,34 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		cls.user = f"po.proxy.{cls._uniq()}@example.com"
 		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PO Proxy Tester"}).insert()
 
+		cls.tax_template = None
+		tax_account = frappe.db.get_value(
+			"Account", {"company": cls.company, "account_type": "Tax", "is_group": 0, "disabled": 0}, "name"
+		)
+		if tax_account:
+			cls.tax_template = (
+				frappe.get_doc(
+					{
+						"doctype": "Purchase Taxes and Charges Template",
+						"title": f"POS PO Test Tax {cls._uniq()}",
+						"company": cls.company,
+						"is_default": 0,
+						"taxes": [
+							{
+								"category": "Total",
+								"add_deduct_tax": "Add",
+								"charge_type": "On Net Total",
+								"account_head": tax_account,
+								"rate": 5,
+								"description": "POS PO test tax",
+							}
+						],
+					}
+				)
+				.insert()
+				.name
+			)
+
 	@classmethod
 	def _make_item(cls):
 		return frappe.get_doc(
@@ -162,6 +190,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 			if frappe.db.exists("Item Price", name):
 				frappe.delete_doc("Item Price", name, force=1)
 		for doctype, name in [
+			("Purchase Taxes and Charges Template", getattr(cls, "tax_template", None)),
 			("Item", getattr(cls, "item", None)),
 			("Item", getattr(cls, "priced_item", None)),
 			("Supplier", getattr(cls, "supplier", None)),
@@ -268,6 +297,29 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 	def test_malformed_json_payload_throws_cleanly(self):
 		with self.assertRaises(ValidationError):
 			save_purchase_order("{not json")
+
+	def test_tax_template_explicit_set_and_clear_on_full_payload(self):
+		if not self.tax_template:
+			self.skipTest("no tax account for a template fixture on this site")
+
+		# create path: empty template means no template and no tax rows
+		result = self._save(self._data(taxes_and_charges=""))
+		doc = frappe.get_doc("Purchase Order", result["name"])
+		self.assertIsNone(doc.taxes_and_charges)
+		self.assertEqual(doc.taxes, [])
+
+		# update: template set → rows expanded by set_missing_values
+		name = self._save(self._data(taxes_and_charges=self.tax_template))["name"]
+		doc = frappe.get_doc("Purchase Order", name)
+		self.assertEqual(doc.taxes_and_charges, self.tax_template)
+		self.assertTrue(doc.taxes)
+
+		# update with present-but-empty template: cleared, stale rows dropped,
+		# and the save's set_missing_values must not re-expand them
+		self._save(self._data(name=name, taxes_and_charges=""))
+		doc.reload()
+		self.assertIsNone(doc.taxes_and_charges)
+		self.assertEqual(doc.taxes, [])
 
 	def test_edit_non_draft_throws(self):
 		name = self._save(submit=1)["name"]

@@ -172,9 +172,11 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 
 	The update path (payload carries `name`) expects the FULL payload: omitted
 	optional fields (transaction_date, schedule_date, company, set_warehouse,
-	currency, taxes_and_charges, remarks...) are reset to their defaults, and
-	the items table is replaced wholesale. `remarks` is stored in the native
-	`terms` field (PO has no remarks field in ERPNext v16).
+	currency, remarks...) are reset to their defaults, and the items table is
+	replaced wholesale. `taxes_and_charges` is honored whenever present —
+	passing "" / null explicitly clears the template and its rows — and is left
+	untouched when the key is absent. `remarks` is stored in the native `terms`
+	field (PO has no remarks field in ERPNext v16).
 	"""
 	_check_guest()
 	data = _parse(data) or {}
@@ -207,8 +209,13 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 		doc.currency = data.get("currency")
 	if data.get("conversion_rate"):
 		doc.conversion_rate = flt(data.get("conversion_rate"))
-	if data.get("taxes_and_charges"):
-		doc.taxes_and_charges = data.get("taxes_and_charges")
+	if "taxes_and_charges" in data:
+		# full payload: present-but-empty explicitly clears the template, so the
+		# dialog's remove-tax action works — set_missing_values only expands rows
+		# for a truthy template, so a cleared template stays clear through save
+		doc.taxes_and_charges = data.get("taxes_and_charges") or None
+		if not doc.taxes_and_charges:
+			doc.set("taxes", [])
 	doc.terms = data.get("remarks")
 
 	doc.set("items", [])
