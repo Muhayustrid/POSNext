@@ -335,7 +335,11 @@
 						<div
 							v-if="uiStore.isDesktop || uiStore.mobileActiveTab === 'items'"
 							:style="{
-								width: uiStore.isDesktop ? uiStore.leftPanelWidth + 'px' : '100%',
+								width: uiStore.isDesktop
+									? uiStore.leftPanelWidth
+										? uiStore.leftPanelWidth + 'px'
+										: '56%'
+									: '100%',
 							}"
 							:class="[
 								'flex flex-col bg-white overflow-hidden',
@@ -385,10 +389,7 @@
 					<keep-alive>
 						<div
 							v-if="uiStore.isDesktop || uiStore.mobileActiveTab === 'cart'"
-							:class="[
-								'flex flex-col bg-gray-50 overflow-hidden',
-								uiStore.isDesktop ? 'flex-1' : 'flex-1',
-							]"
+							class="flex flex-col bg-gray-50 overflow-hidden flex-1"
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
@@ -1295,13 +1296,15 @@ const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_t
 let resizeState = null;
 let bodyStyleSnapshot = null;
 
+// Shared resize handler at setup scope so onUnmounted removes the same reference
+const handleWindowResize = () => {
+	uiStore.setWindowWidth(window.innerWidth);
+	updateLayoutBounds();
+};
+
 onMounted(async () => {
 	// Window resize listeners (passive for better performance)
-	const handleResize = () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	};
-	window.addEventListener("resize", handleResize, { passive: true });
+	window.addEventListener("resize", handleWindowResize, { passive: true });
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
@@ -1568,7 +1571,10 @@ watch(
 		uiStore.showDraftDialog = false;
 		uiStore.showHistoryDialog = false;
 		uiStore.showReturnDialog = false;
-	}
+	},
+	// The main container renders under v-if="hasOpenShift"; measure it only
+	// after the DOM patch, otherwise containerRef is still null here.
+	{ flush: "post" },
 );
 
 // Shift schedule: warning toast before the deadline, forced closing after it.
@@ -1768,10 +1774,7 @@ watch(
 );
 
 onUnmounted(() => {
-	window.removeEventListener("resize", () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	});
+	window.removeEventListener("resize", handleWindowResize);
 	stopResize();
 
 	// Stop periodic stock sync on unmount
@@ -2990,8 +2993,10 @@ async function handleSyncAll() {
 
 // Resizable layout helpers
 function updateLayoutBounds() {
-	if (!containerRef.value) return;
-	const containerWidth = containerRef.value.offsetWidth;
+	// The container spans the app width, so before it mounts (or while hidden,
+	// where offsetWidth is 0) the window width is a close enough estimate —
+	// the next real measurement clamps the exact value.
+	const containerWidth = containerRef.value?.offsetWidth || window.innerWidth;
 	uiStore.updateLayoutBounds(containerWidth);
 }
 
@@ -3081,6 +3086,8 @@ function stopResize(event) {
 	resizeState = null;
 	restoreBodyStyles();
 	updateLayoutBounds();
+	// Remember the cashier's chosen split for the next session
+	uiStore.saveLeftPanelWidth();
 }
 
 function restoreBodyStyles() {
