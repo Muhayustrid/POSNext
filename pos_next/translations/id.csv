@@ -1642,3 +1642,8 @@
 "Cancel Purchase Receipt {0}?","Batalkan Penerimaan Pembelian {0}?",""
 "Factory SO","SO Pabrik",""
 "Purchase Receipts for internal supplier {0} are created from the Delivery Note","Penerimaan untuk pemasok internal {0} dibuat dari Delivery Note",""
+"Purchase Order {0} is not from an internal supplier","Purchase Order {0} bukan dari pemasok internal",""
+"No Sales Order has been created for Purchase Order {0} yet","Sales Order untuk Purchase Order {0} belum dibuat",""
+"No pending Delivery Note to receive against Purchase Order {0}","Belum ada Delivery Note yang bisa diterima untuk Purchase Order {0}",""
+"Delivery Note {0} is not submitted","Delivery Note {0} belum disubmit",""
+"From Delivery Note: {0}","Dari Delivery Note: {0}",""

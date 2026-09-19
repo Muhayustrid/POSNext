@@ -163,7 +163,7 @@
 								v-if="
 									order.docstatus === 1 &&
 									order.per_received < 100 &&
-									!order.is_internal_supplier &&
+									(!poDefaults?.receive_requires_delivery_note || order.delivery_ready) &&
 									canReceivePR
 								"
 								type="button"
@@ -201,6 +201,12 @@
 							{{ receive.supplier_name }}
 						</p>
 						<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receive.supplier }}</p>
+						<p
+							v-if="receive.inter_company_reference"
+							class="text-xs text-gray-400 mt-0.5 truncate"
+						>
+							{{ __("From Delivery Note: {0}", [receive.inter_company_reference]) }}
+						</p>
 					</div>
 					<div>
 						<label for="pr-posting-date" class="block text-xs font-medium text-gray-600 mb-1">
@@ -527,6 +533,22 @@ const searchTerm = ref("")
 const statusFilter = ref("")
 let listTimer = null
 
+// POS Settings defaults (per profile) — one fetch per dialog session; also
+// drives the Receive gate (receive_requires_delivery_note). Declared above
+// the open watcher: the watcher fires immediately during setup.
+const poDefaults = ref(null)
+
+async function loadPoDefaults() {
+	if (poDefaults.value) return poDefaults.value
+	try {
+		poDefaults.value = await call(`${API}.get_po_defaults`, { pos_profile: props.posProfile })
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+		poDefaults.value = {}
+	}
+	return poDefaults.value
+}
+
 // immediate: also covers mounting with the dialog already open
 watch(
 	() => props.modelValue,
@@ -536,6 +558,9 @@ watch(
 			view.value = "list"
 			showReceipts.value = false
 			loadOrders()
+			// the Receive gate reads the POS Settings flag — have it ready by
+			// the time the list renders
+			loadPoDefaults()
 		} else {
 			clearTimeout(listTimer)
 		}
@@ -659,12 +684,20 @@ const receive = ref({
 	company: "",
 	currency: "",
 	set_warehouse: "",
+	// internal POs are received from the factory's Delivery Note — the DN
+	// reference rides the payload so the PR keeps the DN <-> PR cross links
+	inter_company_reference: null,
 	items: [],
 })
 
 async function openReceive(order) {
 	try {
-		const d = await call(`${PR_API}.get_purchase_receipt_draft`, {
+		// internal supplier POs draft from the factory DN, everyone else
+		// straight from the PO
+		const method = order.is_internal_supplier
+			? `${PR_API}.get_intercompany_receipt_draft`
+			: `${PR_API}.get_purchase_receipt_draft`
+		const d = await call(method, {
 			po_name: order.name,
 		})
 		receive.value = {
@@ -675,6 +708,7 @@ async function openReceive(order) {
 			company: d?.company || props.company,
 			currency: d?.currency || props.currency || "",
 			set_warehouse: d?.set_warehouse || "",
+			inter_company_reference: d?.inter_company_reference || null,
 			// default each row to what is still owed; the mapper only returns
 			// rows with a pending qty
 			items: (d?.items || []).map((row) => ({ ...row, qty: row.pending_qty })),
@@ -687,8 +721,8 @@ async function openReceive(order) {
 
 async function saveReceipt(submitAfter) {
 	// rows left at 0 are "not receiving this now", not "receive nothing" —
-	// drop them; the mapper links (purchase_order / purchase_order_item) ride
-	// along on every row that is sent
+	// drop them; the mapper links (purchase_order / purchase_order_item /
+	// delivery_note_item) ride along on every row that is sent
 	const items = receive.value.items
 		.filter((row) => Number(row.qty) > 0)
 		.map((row) => ({
@@ -699,6 +733,7 @@ async function saveReceipt(submitAfter) {
 			warehouse: row.warehouse,
 			purchase_order: row.purchase_order,
 			purchase_order_item: row.purchase_order_item,
+			delivery_note_item: row.delivery_note_item,
 		}))
 	if (!items.length) {
 		showError(__("At least one item is required"))
@@ -706,15 +741,18 @@ async function saveReceipt(submitAfter) {
 	}
 	saving.value = true
 	try {
+		const payload = {
+			supplier: receive.value.supplier,
+			posting_date: receive.value.posting_date,
+			company: receive.value.company,
+			set_warehouse: receive.value.set_warehouse || null,
+			currency: receive.value.currency || null,
+			items,
+		}
+		if (receive.value.inter_company_reference)
+			payload.inter_company_reference = receive.value.inter_company_reference
 		const res = await call(`${PR_API}.save_purchase_receipt`, {
-			data: JSON.stringify({
-				supplier: receive.value.supplier,
-				posting_date: receive.value.posting_date,
-				company: receive.value.company,
-				set_warehouse: receive.value.set_warehouse || null,
-				currency: receive.value.currency || null,
-				items,
-			}),
+			data: JSON.stringify(payload),
 			submit: submitAfter ? 1 : 0,
 		})
 		showSuccess(
@@ -763,19 +801,6 @@ const loadingItems = ref(false)
 const saving = ref(false)
 let supplierTimer = null
 let itemTimer = null
-let poDefaults = null
-
-// POS Settings defaults (per profile) — one fetch per dialog session
-async function loadPoDefaults() {
-	if (poDefaults) return poDefaults
-	try {
-		poDefaults = await call(`${API}.get_po_defaults`, { pos_profile: props.posProfile })
-	} catch (error) {
-		showError(parseError(error)?.message || serverErrorMessage(error))
-		poDefaults = {}
-	}
-	return poDefaults
-}
 
 // AutocompleteSelect only shows a label for options it has; make the
 // prefilled supplier selectable/displayable even before a search runs

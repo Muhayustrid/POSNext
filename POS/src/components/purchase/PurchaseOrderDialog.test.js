@@ -546,27 +546,99 @@ describe("PurchaseOrderDialog", () => {
 		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(0)
 	})
 
-	it("hides Receive on internal supplier POs and badges them once the factory SO exists", async () => {
-		// internal POs are received from the factory's Delivery Note, never from
-		// the POS — even while per_received < 100
+	it("badges internal supplier POs once the factory SO exists", async () => {
 		mocks.call.mockResolvedValue({
 			orders: [SUBMITTED_ORDER, INTERNAL_ORDER],
 		})
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(1)
+		// internal POs keep their Receive button too — only the draft source
+		// differs (see the routing test below)
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(2)
 		expect(wrapper.text()).toContain("Factory SO")
 
-		// an internal PO whose factory SO hasn't been made yet: no Receive, no badge
+		// an internal PO whose factory SO hasn't been made yet: no badge
 		const notYetLinked = { ...INTERNAL_ORDER, name: "PO-2026-00005", inter_company_order_reference: null }
 		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER, notYetLinked] })
 		await wrapper.setProps({ modelValue: false })
 		await flushPromises()
 		await wrapper.setProps({ modelValue: true })
 		await flushPromises()
-		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(1)
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(2)
 		expect(wrapper.text()).not.toContain("Factory SO")
+	})
+
+	it("hides Receive until a Delivery Note exists when the POS Settings gate is on", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_po_defaults"))
+				return {
+					supplier: null,
+					supplier_name: null,
+					warehouse: "WH-1",
+					receive_requires_delivery_note: 1,
+				}
+			if (method.includes("get_purchase_orders"))
+				return {
+					orders: [
+						{ ...SUBMITTED_ORDER, name: "PO-NO-DN" },
+						{ ...SUBMITTED_ORDER, name: "PO-WITH-DN", delivery_ready: true },
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		// only the order with a pending Delivery Note offers Receive
+		const buttons = wrapper.findAll('[data-test="receive-button"]')
+
+		expect(buttons).toHaveLength(1)
+		expect(buttons[0].text()).toBe("Receive")
+	})
+
+	it("routes internal POs to the Delivery Note draft and submits the DN links", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [INTERNAL_ORDER] }
+			if (method.includes("get_intercompany_receipt_draft"))
+				return {
+					...PR_DRAFT,
+					inter_company_reference: "MAT-DN-2026-00001",
+					items: [
+						{
+							...PR_DRAFT.items[0],
+							purchase_order: "PO-2026-00004",
+							delivery_note_item: "DNROW-1",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		await wrapper.find('[data-test="receive-button"]').trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_receipts.get_intercompany_receipt_draft",
+			{ po_name: "PO-2026-00004" },
+		)
+		expect(wrapper.text()).toContain("From Delivery Note: MAT-DN-2026-00001")
+
+		mocks.call.mockImplementation(async (method) =>
+			method.includes("save_purchase_receipt") ? { name: "PR-2026-00009" } : {},
+		)
+		await button(wrapper, "Submit Receipt").trigger("click")
+		await flushPromises()
+
+		const saveCall = mocks.call.mock.calls.find(([method]) => method.includes("save_purchase_receipt"))
+		const data = JSON.parse(saveCall[1].data)
+		// the DN reference and row links ride the payload so the PR keeps the
+		// DN <-> PR cross links
+		expect(data.inter_company_reference).toBe("MAT-DN-2026-00001")
+		expect(data.items[0].delivery_note_item).toBe("DNROW-1")
 	})
 
 	it("Receive loads the draft and prefills qty with the pending qty", async () => {

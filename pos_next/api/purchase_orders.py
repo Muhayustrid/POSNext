@@ -58,6 +58,9 @@ def get_po_defaults(pos_profile=None):
 		"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name") if supplier else None,
 		"warehouse": _po_setting(pos_profile, "po_default_warehouse")
 		or _profile_value(pos_profile, "warehouse"),
+		# when on, the POS hides the Receive button until a pending Delivery
+		# Note exists for the order (intercompany flow)
+		"receive_requires_delivery_note": cint(_po_setting(pos_profile, "po_receive_requires_delivery_note")),
 	}
 
 
@@ -179,7 +182,11 @@ def _po_summary(doc):
 		# fetched from the supplier master on save; internal POs are received via
 		# the selling company's Delivery Note, not the POS receive flow
 		"is_internal_supplier": cint(doc.is_internal_supplier),
-		"inter_company_order_reference": doc.inter_company_order_reference,
+		# v16 never backfills the PO-side field — the live link is the submitted
+		# selling-company SO carrying this PO as its inter_company_order_reference
+		"inter_company_order_reference": frappe.db.get_value(
+			"Sales Order", {"inter_company_order_reference": doc.name, "docstatus": 1}, "name"
+		),
 		"items": [
 			{
 				"name": row.name,
@@ -300,32 +307,57 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 	if search_term:
 		term = f"%{search_term.strip()}%"
 		or_filters = [["name", "like", term], ["supplier", "like", term], ["supplier_name", "like", term]]
-	return {
-		"orders": frappe.get_list(
-			"Purchase Order",
-			filters=filters,
-			or_filters=or_filters,
-			fields=[
-				"name",
-				"supplier",
-				"supplier_name",
-				"transaction_date",
-				"schedule_date",
-				"grand_total",
-				"currency",
-				"status",
-				"docstatus",
-				"per_received",
-				"per_billed",
-				"is_internal_supplier",
-				"inter_company_order_reference",
-				"company",
-				"modified",
-			],
-			order_by="modified desc",
-			limit_page_length=cint(limit) or 50,
+	orders = frappe.get_list(
+		"Purchase Order",
+		filters=filters,
+		or_filters=or_filters,
+		fields=[
+			"name",
+			"supplier",
+			"supplier_name",
+			"transaction_date",
+			"schedule_date",
+			"grand_total",
+			"currency",
+			"status",
+			"docstatus",
+			"per_received",
+			"per_billed",
+			"is_internal_supplier",
+			"company",
+			"modified",
+		],
+		order_by="modified desc",
+		limit_page_length=cint(limit) or 50,
+	)
+	# the PO-side reference field stays empty in v16 — resolve the live link
+	# from the submitted selling-company SO in one batch query
+	so_map = {
+		d.inter_company_order_reference: d.name
+		for d in frappe.get_all(
+			"Sales Order",
+			filters={
+				"inter_company_order_reference": ("in", [o["name"] for o in orders]),
+				"docstatus": 1,
+			},
+			fields=["name", "inter_company_order_reference"],
 		)
 	}
+	# a submitted DN row not fully received yet — this is what the receive
+	# gate (POS Setting) and the intercompany draft key off
+	delivery_ready = set()
+	if so_map:
+		for row in frappe.get_all(
+			"Delivery Note Item",
+			filters={"against_sales_order": ("in", list(so_map.values())), "docstatus": 1},
+			fields=["against_sales_order", "qty", "returned_qty", "received_qty"],
+		):
+			if flt(row.received_qty) < flt(row.qty) + flt(row.returned_qty):
+				delivery_ready.add(row.against_sales_order)
+	for order in orders:
+		order["inter_company_order_reference"] = so_map.get(order["name"])
+		order["delivery_ready"] = so_map.get(order["name"]) in delivery_ready
+	return {"orders": orders}
 
 
 @frappe.whitelist()
