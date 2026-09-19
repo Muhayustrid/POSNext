@@ -179,7 +179,11 @@ def _po_summary(doc):
 		# fetched from the supplier master on save; internal POs are received via
 		# the selling company's Delivery Note, not the POS receive flow
 		"is_internal_supplier": cint(doc.is_internal_supplier),
-		"inter_company_order_reference": doc.inter_company_order_reference,
+		# v16 never backfills the PO-side field — the live link is the submitted
+		# selling-company SO carrying this PO as its inter_company_order_reference
+		"inter_company_order_reference": frappe.db.get_value(
+			"Sales Order", {"inter_company_order_reference": doc.name, "docstatus": 1}, "name"
+		),
 		"items": [
 			{
 				"name": row.name,
@@ -300,32 +304,45 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 	if search_term:
 		term = f"%{search_term.strip()}%"
 		or_filters = [["name", "like", term], ["supplier", "like", term], ["supplier_name", "like", term]]
-	return {
-		"orders": frappe.get_list(
-			"Purchase Order",
-			filters=filters,
-			or_filters=or_filters,
-			fields=[
-				"name",
-				"supplier",
-				"supplier_name",
-				"transaction_date",
-				"schedule_date",
-				"grand_total",
-				"currency",
-				"status",
-				"docstatus",
-				"per_received",
-				"per_billed",
-				"is_internal_supplier",
-				"inter_company_order_reference",
-				"company",
-				"modified",
-			],
-			order_by="modified desc",
-			limit_page_length=cint(limit) or 50,
+	orders = frappe.get_list(
+		"Purchase Order",
+		filters=filters,
+		or_filters=or_filters,
+		fields=[
+			"name",
+			"supplier",
+			"supplier_name",
+			"transaction_date",
+			"schedule_date",
+			"grand_total",
+			"currency",
+			"status",
+			"docstatus",
+			"per_received",
+			"per_billed",
+			"is_internal_supplier",
+			"company",
+			"modified",
+		],
+		order_by="modified desc",
+		limit_page_length=cint(limit) or 50,
+	)
+	# the PO-side reference field stays empty in v16 — resolve the live link
+	# from the submitted selling-company SO in one batch query
+	so_map = {
+		d.inter_company_order_reference: d.name
+		for d in frappe.get_all(
+			"Sales Order",
+			filters={
+				"inter_company_order_reference": ("in", [o["name"] for o in orders]),
+				"docstatus": 1,
+			},
+			fields=["name", "inter_company_order_reference"],
 		)
 	}
+	for order in orders:
+		order["inter_company_order_reference"] = so_map.get(order["name"])
+	return {"orders": orders}
 
 
 @frappe.whitelist()
