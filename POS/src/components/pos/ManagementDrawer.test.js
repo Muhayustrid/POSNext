@@ -41,9 +41,11 @@ function installMatchMedia(matches = false) {
 	}
 }
 
-function visibleLabels(showProduction) {
+function visibleLabels(showProduction, showPurchaseOrder = false) {
 	return MANAGEMENT_MENU.filter(
-		(i) => !i.requiresProduction || showProduction,
+		(i) =>
+			(!i.requiresProduction || showProduction) &&
+			(!i.requiresPurchaseOrder || showPurchaseOrder),
 	).map((i) => i.label)
 }
 
@@ -90,12 +92,25 @@ describe("management menu parity (desktop rail vs mobile drawer)", () => {
 		expect(visibleLabels(false)).toEqual(labels)
 	})
 
-	function mountSlider(showProduction) {
-		return mountComponent(ManagementSlider, { showProduction })
+	it("purchase order item follows the same permission rule on both surfaces", () => {
+		const slider = mountSlider(false, true)
+		const drawer = mountDrawer(false, true)
+
+		const labels = sliderLabels(slider)
+		expect(labels).toContain("Purchase Order")
+		expect(drawerItemLabels()).toEqual(labels)
+		expect(visibleLabels(false, true)).toEqual(labels)
+
+		const hidden = mountSlider(false)
+		expect(sliderLabels(hidden)).not.toContain("Purchase Order")
+	})
+
+	function mountSlider(showProduction, showPurchaseOrder = false) {
+		return mountComponent(ManagementSlider, { showProduction, showPurchaseOrder })
 	}
 
-	function mountDrawer(showProduction) {
-		return mountComponent(ManagementDrawer, { showProduction })
+	function mountDrawer(showProduction, showPurchaseOrder = false) {
+		return mountComponent(ManagementDrawer, { showProduction, showPurchaseOrder })
 	}
 })
 

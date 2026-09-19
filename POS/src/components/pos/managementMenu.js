@@ -21,6 +21,13 @@ export const MANAGEMENT_MENU = [
 		activeClass: "bg-indigo-100 text-indigo-600",
 	},
 	{
+		id: "purchase-order",
+		icon: "truck",
+		label: "Purchase Order",
+		activeClass: "bg-cyan-100 text-cyan-600",
+		requiresPurchaseOrder: true,
+	},
+	{
 		id: "sales-recap",
 		icon: "clipboard",
 		label: "Sales Recap",
