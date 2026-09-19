@@ -9,16 +9,16 @@
 			class="fixed inset-0 bg-black bg-opacity-50 z-[300]"
 			@click.self="close"
 		>
-			<div class="fixed inset-0 flex items-center justify-center p-4">
+			<div class="fixed inset-0 flex items-center justify-center sm:p-4">
 				<div
 					role="dialog"
 					aria-modal="true"
 					:aria-label="activeLabel"
-					class="w-[95vw] h-[92vh] max-w-none bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col"
+					class="w-full h-full sm:w-[95vw] sm:h-[92vh] max-w-none bg-white sm:rounded-xl shadow-2xl overflow-hidden flex flex-col"
 				>
 					<!-- Header -->
 					<div
-						class="flex shrink-0 items-center justify-between px-5 py-4 border-b border-gray-200"
+						class="flex shrink-0 items-center justify-between px-4 py-3 sm:px-5 sm:py-4 border-b border-gray-200"
 					>
 						<div class="flex items-center gap-3 min-w-0">
 							<FeatherIcon
@@ -40,11 +40,12 @@
 						</button>
 					</div>
 
-					<!-- Menu chips (< lg) -->
-					<div
-						class="lg:hidden shrink-0 border-b border-gray-200 bg-white px-3 py-2"
-					>
-						<div class="flex items-center gap-2 overflow-x-auto">
+					<!-- Menu chips (< lg): wrapped, so every destination stays visible
+					     without horizontal scrolling on phones -->
+						<div
+							class="lg:hidden shrink-0 border-b border-gray-200 bg-white px-3 py-2"
+						>
+							<div class="flex flex-wrap items-center gap-2">
 							<button
 								v-for="item in visibleItems"
 								:key="item.id"

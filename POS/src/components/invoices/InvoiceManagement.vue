@@ -36,13 +36,19 @@
 							>
 								{{ __("Invoice Management") }}
 							</h2>
-							<nav class="flex gap-1" :aria-label="__('Tabs')">
+							<!-- Swipeable tab strip on narrow screens: tabs keep their
+							     full width and the nav scrolls horizontally instead of
+							     clipping the trailing tab (e.g. Returns on phones). -->
+							<nav
+								class="flex gap-1 overflow-x-auto"
+								:aria-label="__('Tabs')"
+							>
 								<button
 									v-for="tab in tabs"
 									:key="tab.id"
 									@click="activeTab = tab.id"
 									:class="[
-										'px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+										'px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors',
 										activeTab === tab.id
 											? 'text-blue-600 border-blue-600'
 											: 'text-gray-600 border-transparent hover:text-gray-900 hover:border-gray-300',
@@ -140,7 +146,7 @@
 						</div>
 
 						<!-- Tab Content -->
-						<div class="p-6">
+						<div class="p-4 sm:p-6">
 							<!-- Unpaid Tab -->
 							<div v-if="activeTab === 'partial'" class="flex flex-col gap-4">
 								<!-- Filter Buttons -->
@@ -427,34 +433,34 @@
 
 										<!-- Payment Summary -->
 										<div class="p-4">
-											<div class="grid grid-cols-3 gap-4 mb-4">
+											<div class="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
 												<div
-													class="text-center p-3 bg-blue-50 rounded-lg border border-blue-100"
+													class="text-center p-2 sm:p-3 bg-blue-50 rounded-lg border border-blue-100"
 												>
 													<div class="text-xs text-gray-600 mb-1">
 														{{ __("Total Amount") }}
 													</div>
-													<div class="text-lg font-bold text-gray-900">
+													<div class="text-base sm:text-lg font-bold text-gray-900">
 														{{ formatCurrency(invoice.grand_total) }}
 													</div>
 												</div>
 												<div
-													class="text-center p-3 bg-green-50 rounded-lg border border-green-100"
+													class="text-center p-2 sm:p-3 bg-green-50 rounded-lg border border-green-100"
 												>
 													<div class="text-xs text-gray-600 mb-1">
 														{{ __("Paid") }}
 													</div>
-													<div class="text-lg font-bold text-green-600">
+													<div class="text-base sm:text-lg font-bold text-green-600">
 														{{ formatCurrency(invoice.paid_amount) }}
 													</div>
 												</div>
 												<div
-													class="text-center p-3 bg-orange-50 rounded-lg border border-orange-100"
+													class="text-center p-2 sm:p-3 bg-orange-50 rounded-lg border border-orange-100"
 												>
 													<div class="text-xs text-gray-600 mb-1">
 														{{ __("Outstanding") }}
 													</div>
-													<div class="text-lg font-bold text-orange-600">
+													<div class="text-base sm:text-lg font-bold text-orange-600">
 														{{
 															formatCurrency(
 																invoice.outstanding_amount

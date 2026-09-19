@@ -84,14 +84,18 @@
 						</div>
 					</div>
 
-					<!-- Content: Split Layout -->
-					<div class="flex-1 flex overflow-hidden">
-						<!-- PROMOTIONS TAB -->
-						<template v-if="activeTab === 'promotions'">
-							<!-- LEFT SIDE: Promotion List & Navigation -->
-							<div class="w-80 flex-shrink-0 border-e bg-gray-50 flex flex-col">
-								<!-- Search & Filter -->
-								<div class="p-4 bg-white border-b flex flex-col gap-3">
+					<!-- Content: Split Layout (stacks vertically on < lg) -->
+						<div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+							<!-- PROMOTIONS TAB -->
+							<template v-if="activeTab === 'promotions'">
+								<!-- LEFT SIDE: Promotion List & Navigation -->
+								<div
+									class="w-full lg:w-80 flex-shrink-0 border-b lg:border-b-0 lg:border-e bg-gray-50 flex flex-col"
+								>
+									<!-- Search & Filter -->
+									<div
+										class="p-3 sm:p-4 bg-white border-b grid grid-cols-1 sm:grid-cols-2 gap-3"
+									>
 									<FormControl
 										type="text"
 										v-model="searchQuery"
@@ -119,7 +123,7 @@
 
 									<!-- Read-only notice -->
 									<div
-										class="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800"
+										class="sm:col-span-2 flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800"
 									>
 										<FeatherIcon
 											name="info"
@@ -136,7 +140,7 @@
 								</div>
 
 								<!-- Create New Button -->
-								<div class="p-4 bg-white border-b flex flex-col gap-2">
+								<div class="p-3 sm:p-4 bg-white border-b flex gap-2">
 									<Button
 										v-if="!PROMOTIONS_READ_ONLY && permissions.create"
 										@click="handleCreateNew"

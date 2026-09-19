@@ -39,17 +39,20 @@
 							>
 								{{ __("POS Settings") }}
 							</h2>
-							<nav class="flex gap-1" :aria-label="__('Tabs')">
-								<button
-									v-for="tab in [
-										{ id: 'stock', label: __('Stock Management') },
-										{ id: 'sales', label: __('Sales Management') },
-										{ id: 'printing', label: __('Printing') },
-									]"
-									:key="tab.id"
-									@click="activeTab = tab.id"
-									:class="[
-										'px-4 py-3 text-sm font-medium border-b-2 transition-colors',
+						<nav
+							class="flex gap-1 overflow-x-auto"
+							:aria-label="__('Tabs')"
+						>
+							<button
+								v-for="tab in [
+									{ id: 'stock', label: __('Stock Management') },
+									{ id: 'sales', label: __('Sales Management') },
+									{ id: 'printing', label: __('Printing') },
+								]"
+								:key="tab.id"
+								@click="activeTab = tab.id"
+								:class="[
+									'px-3 sm:px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors',
 										activeTab === tab.id
 											? 'text-blue-600 border-blue-600'
 											: 'text-gray-600 border-transparent hover:text-gray-900 hover:border-gray-300',

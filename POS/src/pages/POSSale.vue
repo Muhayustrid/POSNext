@@ -53,26 +53,6 @@
 						<span>{{ __("View Shift") }}</span>
 					</button>
 					<button
-						v-if="canProduction && !offlineStore.isOffline"
-						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors lg:hidden"
-						@click="openProduction()"
-					>
-						<svg
-							class="w-5 h-5 text-amber-600"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-							/>
-						</svg>
-						<span>{{ __("Production") }}</span>
-					</button>
-					<button
 						v-if="canAccessShiftActions"
 						@click="openDraftDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-3 transition-colors relative"
@@ -3127,18 +3107,8 @@ function handlePOSMenuSelected(id) {
 const { usePermissionCheck } = usePermissions();
 const { hasPermission: canProduction } = usePermissionCheck("POS Production Log", "create");
 
-function openProduction() {
-	if (offlineStore.isOffline) return;
-	openPOSMenu("production");
-}
-
 // Purchase Order
 const { hasPermission: canPurchaseOrder } = usePermissionCheck("Purchase Order", "create");
-
-function openPurchaseOrder() {
-	if (offlineStore.isOffline) return;
-	openPOSMenu("purchase-order");
-}
 
 function handleProductionCreated(result) {
 	showSuccess(__("Production complete: {0} × {1}", [result.production_item, result.qty]));
