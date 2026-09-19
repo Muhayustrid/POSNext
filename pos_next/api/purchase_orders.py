@@ -176,6 +176,10 @@ def _po_summary(doc):
 		"grand_total": doc.grand_total,
 		# PO v16 has no remarks field — the payload remarks ride the native terms field
 		"remarks": doc.terms,
+		# fetched from the supplier master on save; internal POs are received via
+		# the selling company's Delivery Note, not the POS receive flow
+		"is_internal_supplier": cint(doc.is_internal_supplier),
+		"inter_company_order_reference": doc.inter_company_order_reference,
 		"items": [
 			{
 				"name": row.name,
@@ -313,6 +317,8 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 				"docstatus",
 				"per_received",
 				"per_billed",
+				"is_internal_supplier",
+				"inter_company_order_reference",
 				"company",
 				"modified",
 			],

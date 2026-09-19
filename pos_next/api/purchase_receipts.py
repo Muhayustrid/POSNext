@@ -24,6 +24,23 @@ def _check_permission(perm, doc=None):
 		frappe.throw(_("No {0} permission on Purchase Receipt").format(_(perm)), frappe.PermissionError)
 
 
+def _refuse_internal_suppliers(suppliers):
+	# An intercompany receipt is born from the selling company's Delivery Note
+	# (make_inter_company_purchase_receipt); a POS receipt against the same PO
+	# would never update the DN and opens a double-receipt window.
+	internal = frappe.get_all(
+		"Supplier",
+		filters={"name": ("in", sorted({s for s in suppliers if s})), "is_internal_supplier": 1},
+		fields=["name"],
+	)
+	if internal:
+		frappe.throw(
+			_("Purchase Receipts for internal supplier {0} are created from the Delivery Note").format(
+				", ".join(d.name for d in internal)
+			)
+		)
+
+
 @frappe.whitelist()
 def get_purchase_receipt_draft(po_name):
 	"""Unsaved mapper output shaped for the POS receive form.
@@ -36,6 +53,7 @@ def get_purchase_receipt_draft(po_name):
 	po = frappe.get_doc("Purchase Order", po_name)
 	_check_po_permission("read", doc=po)
 	_check_permission("create")
+	_refuse_internal_suppliers({po.supplier})
 	po_items = {d.name: d for d in po.items}
 	pr = make_purchase_receipt(po_name)
 	return {
@@ -122,6 +140,18 @@ def save_purchase_receipt(data, submit=0):
 			frappe.throw(_("Only a Draft Purchase Receipt can be edited"))
 	else:
 		_check_permission("create")
+		# guard the create path even for hand-crafted payloads: any item linked
+		# to an internal supplier's PO belongs to the Delivery Note flow
+		po_names = sorted({row.get("purchase_order") for row in items if row.get("purchase_order")})
+		suppliers = {data.get("supplier")}
+		if po_names:
+			suppliers |= {
+				d.supplier
+				for d in frappe.get_all(
+					"Purchase Order", filters={"name": ("in", po_names)}, fields=["supplier"]
+				)
+			}
+		_refuse_internal_suppliers(suppliers)
 		doc = frappe.new_doc("Purchase Receipt")
 
 	doc.supplier = data.get("supplier")

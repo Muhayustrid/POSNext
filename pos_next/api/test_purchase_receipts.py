@@ -363,6 +363,45 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		with self.assertRaises(ValidationError):
 			get_purchase_receipt_draft(draft_po["name"])
 
+	def test_internal_supplier_po_refused(self):
+		# intercompany receipts are born from the selling company's Delivery
+		# Note — the POS receive flow must refuse them (double-receipt window)
+		po = self._po()
+		# flag the supplier AFTER the PO exists: the guard reads the live master,
+		# not the snapshot fetched onto the PO at save time
+		frappe.db.set_value("Supplier", self.supplier, "is_internal_supplier", 1)
+		try:
+			with self.assertRaises(ValidationError) as ctx:
+				get_purchase_receipt_draft(po["name"])
+			self.assertIn("Delivery Note", str(ctx.exception))
+			# the create path is guarded even for a hand-crafted payload — with
+			# PO links and on the bare supplier alone
+			hand_crafted = {
+				"supplier": self.supplier,
+				"posting_date": nowdate(),
+				"company": self.company,
+				"items": [
+					{
+						"item_code": self.item,
+						"qty": 1,
+						"rate": 25,
+						"uom": self.uom,
+						"warehouse": self.warehouse,
+						"purchase_order": po["name"],
+					}
+				],
+			}
+			with self.assertRaises(ValidationError):
+				save_purchase_receipt(hand_crafted)
+			hand_crafted["items"][0].pop("purchase_order")
+			with self.assertRaises(ValidationError):
+				save_purchase_receipt(hand_crafted)
+		finally:
+			frappe.db.set_value("Supplier", self.supplier, "is_internal_supplier", 0)
+		# with the flag gone the normal receive flow works again
+		draft = get_purchase_receipt_draft(po["name"])
+		self.assertEqual(flt(draft["items"][0]["pending_qty"]), 2)
+
 	def test_permission_denied_without_role(self):
 		po = self._po()
 		draft = get_purchase_receipt_draft(po["name"])

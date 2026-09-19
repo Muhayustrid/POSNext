@@ -113,12 +113,19 @@ const SUBMITTED_ORDER = {
 	per_received: 0,
 }
 
-const FULLY_RECEIVED_ORDER = {
-	...SUBMITTED_ORDER,
-	name: "PO-2026-00003",
-	status: "To Bill",
-	per_received: 100,
-}
+	const FULLY_RECEIVED_ORDER = {
+		...SUBMITTED_ORDER,
+		name: "PO-2026-00003",
+		status: "To Bill",
+		per_received: 100,
+	}
+
+	const INTERNAL_ORDER = {
+		...SUBMITTED_ORDER,
+		name: "PO-2026-00004",
+		is_internal_supplier: 1,
+		inter_company_order_reference: "SO-2026-00001",
+	}
 
 const RECEIPT = {
 	name: "PR-2026-00001",
@@ -537,6 +544,29 @@ describe("PurchaseOrderDialog", () => {
 		await wrapper.setProps({ modelValue: true })
 		await flushPromises()
 		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(0)
+	})
+
+	it("hides Receive on internal supplier POs and badges them once the factory SO exists", async () => {
+		// internal POs are received from the factory's Delivery Note, never from
+		// the POS — even while per_received < 100
+		mocks.call.mockResolvedValue({
+			orders: [SUBMITTED_ORDER, INTERNAL_ORDER],
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(1)
+		expect(wrapper.text()).toContain("Factory SO")
+
+		// an internal PO whose factory SO hasn't been made yet: no Receive, no badge
+		const notYetLinked = { ...INTERNAL_ORDER, name: "PO-2026-00005", inter_company_order_reference: null }
+		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER, notYetLinked] })
+		await wrapper.setProps({ modelValue: false })
+		await flushPromises()
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(1)
+		expect(wrapper.text()).not.toContain("Factory SO")
 	})
 
 	it("Receive loads the draft and prefills qty with the pending qty", async () => {

@@ -1640,3 +1640,5 @@
 "Purchase Receipt {0} submitted","Penerimaan Pembelian {0} disubmit",""
 "Purchase Receipt {0} cancelled","Penerimaan Pembelian {0} dibatalkan",""
 "Cancel Purchase Receipt {0}?","Batalkan Penerimaan Pembelian {0}?",""
+"Factory SO","SO Pabrik",""
+"Purchase Receipts for internal supplier {0} are created from the Delivery Note","Penerimaan untuk pemasok internal {0} dibuat dari Delivery Note",""

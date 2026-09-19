@@ -125,6 +125,12 @@
 								<div class="flex items-center gap-2">
 									<span class="text-sm font-semibold text-gray-900">{{ order.name }}</span>
 									<StatusBadge :variant="statusVariant(order.status)" size="xs" :text="order.status" />
+									<StatusBadge
+										v-if="order.is_internal_supplier && order.inter_company_order_reference"
+										variant="gray"
+										size="xs"
+										:text="__('Factory SO')"
+									/>
 								</div>
 								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
 								<p class="text-xs text-gray-400 mt-0.5">
@@ -154,7 +160,12 @@
 								{{ __("Submit") }}
 							</button>
 							<button
-								v-if="order.docstatus === 1 && order.per_received < 100 && canReceivePR"
+								v-if="
+									order.docstatus === 1 &&
+									order.per_received < 100 &&
+									!order.is_internal_supplier &&
+									canReceivePR
+								"
 								type="button"
 								data-test="receive-button"
 								class="px-2 py-1 text-xs rounded text-purple-600 hover:bg-purple-50"
