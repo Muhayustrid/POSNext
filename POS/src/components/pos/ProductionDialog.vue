@@ -1,5 +1,9 @@
 <template>
-	<Dialog v-model="show" :options="{ title: __('Production'), size: '4xl' }">
+	<DialogHost
+		v-model:show="show"
+		:embedded="embedded"
+		:options="{ title: __('Production'), size: '4xl' }"
+	>
 		<template #body-content>
 			<!-- STEP 1: pick recipe -->
 			<template v-if="!selectedRecipe">
@@ -129,29 +133,83 @@
 
 			<div v-if="errorMessage" class="mt-3 text-sm text-red-600">{{ errorMessage }}</div>
 		</template>
-	</Dialog>
+	</DialogHost>
 </template>
 
 <script setup>
 import { Button, Dialog, createResource } from "frappe-ui";
-import { computed, ref, watch } from "vue";
+import { computed, defineComponent, h, ref, watch } from "vue";
 
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
 	company: String,
 	currency: { type: String, default: "" },
+	embedded: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:modelValue", "production-created"]);
 
+// Standalone: renders the frappe-ui Dialog as today. Embedded: renders only
+// the dialog's slot content inside the app shell's container — the shell owns
+// the header and close.
+const DialogHost = defineComponent({
+	props: {
+		embedded: { type: Boolean, default: false },
+		show: { type: Boolean, default: false },
+		options: { type: Object, default: () => ({}) },
+	},
+	emits: ["update:show"],
+	setup(hostProps, { slots, emit: hostEmit }) {
+		return () =>
+				hostProps.embedded
+					? h("div", { class: "h-full min-h-0 flex flex-col" }, [
+							// Mirror the frappe Dialog body padding so content
+							// written for the dialog renders identically and the
+							// wizard steps scroll on their own.
+							h(
+								"div",
+								{
+									class: "flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6",
+								},
+								[slots["body-content"]?.()],
+							),
+							slots.actions
+								? h(
+										"div",
+										{
+											class: "shrink-0 px-4 pb-4 pt-3 sm:px-6 border-t border-gray-200",
+										},
+										[slots.actions?.()],
+									)
+								: null,
+						])
+				: h(
+						Dialog,
+						{
+							modelValue: hostProps.show,
+							"onUpdate:modelValue": (v) => hostEmit("update:show", v),
+							options: hostProps.options,
+						},
+						{
+							"body-title": slots["body-title"],
+							"body-content": slots["body-content"],
+							actions: slots.actions,
+						},
+					);
+	},
+});
+
 const show = ref(props.modelValue);
+// immediate: embedded mode mounts with modelValue already true and must load;
+// standalone always mounts closed (v=false) so the first run is a no-op there.
 watch(
 	() => props.modelValue,
 	(v) => {
 		show.value = v;
 		if (v) loadRecipes();
 	},
+	{ immediate: true },
 );
 watch(show, (v) => emit("update:modelValue", v));
 

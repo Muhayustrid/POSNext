@@ -1,18 +1,35 @@
 <template>
-	<!-- Full Page Overlay -->
+	<!-- Full Page Overlay (standalone) / embedded content view -->
 	<Transition name="fade">
 		<div
-			v-if="show"
-			class="fixed inset-0 bg-black bg-opacity-50 z-[300]"
-			@click.self="handleClose"
+			v-if="embedded || show"
+			:class="
+				embedded
+					? 'relative h-full min-h-0 flex flex-col'
+					: 'fixed inset-0 bg-black bg-opacity-50 z-[300]'
+			"
+			@click.self="!embedded && handleClose()"
 		>
 			<!-- Main Container -->
-			<div class="fixed inset-0 flex items-center justify-center p-4">
+			<div
+				:class="
+					embedded
+						? 'flex h-full min-h-0 flex-col'
+						: 'fixed inset-0 flex items-center justify-center p-4'
+				"
+			>
 				<div
-					class="w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col"
+					:class="
+						embedded
+							? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+							: 'w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col'
+					"
 				>
-					<!-- Header -->
-					<div class="flex items-center justify-between px-6 py-4 border-b">
+					<!-- Header (standalone only — the shell provides it when embedded) -->
+					<div
+						v-if="!embedded"
+						class="flex items-center justify-between px-6 py-4 border-b"
+					>
 						<div class="flex items-center gap-3">
 							<FeatherIcon name="tag" class="w-5 h-5 text-gray-700" />
 							<div>
@@ -34,7 +51,7 @@
 					</div>
 
 					<!-- Tabs -->
-					<div class="border-b bg-white px-6">
+					<div class="shrink-0 border-b border-gray-200 bg-white px-4 sm:px-6">
 						<div class="flex gap-1">
 							<button
 								@click="activeTab = 'promotions'"
@@ -1017,7 +1034,11 @@
 							v-if="activeTab === 'coupons'"
 							:company="company"
 							:currency="currency"
-							:permissions="permissions"
+							:permissions="
+								COUPONS_READ_ONLY
+									? { create: false, write: false, delete: false }
+									: permissions
+							"
 							@coupon-saved="handleCouponSaved"
 						/>
 					</div>
@@ -1106,6 +1127,9 @@ const { canCreatePromotion, canEditPromotion, canDeletePromotion } = usePOSPermi
 // Campaigns are managed via POS Offer (Desk) — this dialog is informational only.
 const PROMOTIONS_READ_ONLY = true
 
+// Coupons are issued by head office; cashiers only see the board listing them.
+const COUPONS_READ_ONLY = true
+
 const permissions = ref({
 	create: false,
 	write: false,
@@ -1114,6 +1138,7 @@ const permissions = ref({
 
 const props = defineProps({
 	modelValue: Boolean,
+	embedded: { type: Boolean, default: false },
 	posProfile: String,
 	company: String,
 	currency: {
@@ -1446,7 +1471,10 @@ watch(
 			loadData();
 			checkPermissions();
 		}
-	}
+	},
+	// immediate: embedded mode mounts with modelValue already true and must load;
+	// standalone mounts with false, which the guard no-ops.
+	{ immediate: true }
 );
 
 watch(show, (val) => {

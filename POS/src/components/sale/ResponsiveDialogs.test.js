@@ -260,7 +260,6 @@ describe("small-screen responsive contracts", () => {
 					StatusBadge: true,
 					UserMenu: true,
 					LanguageSwitcher: true,
-					ManagementDrawer: true,
 					FeatherIcon: true,
 				},
 			},
