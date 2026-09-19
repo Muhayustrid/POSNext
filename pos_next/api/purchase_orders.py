@@ -58,6 +58,9 @@ def get_po_defaults(pos_profile=None):
 		"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name") if supplier else None,
 		"warehouse": _po_setting(pos_profile, "po_default_warehouse")
 		or _profile_value(pos_profile, "warehouse"),
+		# when on, the POS hides the Receive button until a pending Delivery
+		# Note exists for the order (intercompany flow)
+		"receive_requires_delivery_note": cint(_po_setting(pos_profile, "po_receive_requires_delivery_note")),
 	}
 
 
@@ -340,8 +343,20 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 			fields=["name", "inter_company_order_reference"],
 		)
 	}
+	# a submitted DN row not fully received yet — this is what the receive
+	# gate (POS Setting) and the intercompany draft key off
+	delivery_ready = set()
+	if so_map:
+		for row in frappe.get_all(
+			"Delivery Note Item",
+			filters={"against_sales_order": ("in", list(so_map.values())), "docstatus": 1},
+			fields=["against_sales_order", "qty", "returned_qty", "received_qty"],
+		):
+			if flt(row.received_qty) < flt(row.qty) + flt(row.returned_qty):
+				delivery_ready.add(row.against_sales_order)
 	for order in orders:
 		order["inter_company_order_reference"] = so_map.get(order["name"])
+		order["delivery_ready"] = so_map.get(order["name"]) in delivery_ready
 	return {"orders": orders}
 
 

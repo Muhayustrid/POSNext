@@ -569,6 +569,34 @@ describe("PurchaseOrderDialog", () => {
 		expect(wrapper.text()).not.toContain("Factory SO")
 	})
 
+	it("hides Receive until a Delivery Note exists when the POS Settings gate is on", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_po_defaults"))
+				return {
+					supplier: null,
+					supplier_name: null,
+					warehouse: "WH-1",
+					receive_requires_delivery_note: 1,
+				}
+			if (method.includes("get_purchase_orders"))
+				return {
+					orders: [
+						{ ...SUBMITTED_ORDER, name: "PO-NO-DN" },
+						{ ...SUBMITTED_ORDER, name: "PO-WITH-DN", delivery_ready: true },
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		// only the order with a pending Delivery Note offers Receive
+		const buttons = wrapper.findAll('[data-test="receive-button"]')
+
+		expect(buttons).toHaveLength(1)
+		expect(buttons[0].text()).toBe("Receive")
+	})
+
 	it("routes internal POs to the Delivery Note draft and submits the DN links", async () => {
 		mocks.call.mockImplementation(async (method) => {
 			if (method.includes("get_purchase_orders"))

@@ -11,7 +11,7 @@ from frappe import ValidationError
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt, getdate, nowdate
 
-from pos_next.api.purchase_orders import save_purchase_order
+from pos_next.api.purchase_orders import get_purchase_orders, save_purchase_order
 from pos_next.api.purchase_receipts import (
 	cancel_purchase_receipt,
 	get_intercompany_receipt_draft,
@@ -579,6 +579,24 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 
 	def test_intercompany_receive_from_delivery_note(self):
 		po = self._ic_po()
+
+		def list_row():
+			return next(
+				o
+				for o in get_purchase_orders(pos_profile=self.pos_profile)["orders"]
+				if o["name"] == po["name"]
+			)
+
+		# the list carries the live SO link and the DN readiness the POS
+		# Receive gate keys off — skip silently on sites without a profile
+		if self.pos_profile:
+			row = list_row()
+			so_name = frappe.db.get_value(
+				"Sales Order", {"inter_company_order_reference": po["name"]}, "name"
+			)
+			self.assertEqual(row["inter_company_order_reference"], so_name)
+			self.assertTrue(row["delivery_ready"])  # a pending DN exists
+
 		draft = get_intercompany_receipt_draft(po["name"])
 		dn_name = draft["inter_company_reference"]
 		self.assertTrue(dn_name)
@@ -608,6 +626,10 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 			"Delivery Note Item", {"parent": dn_name}, ["name", "received_qty"], as_dict=True
 		)
 		self.assertEqual(flt(dn_item.received_qty), 2)
+
+		# DN fully received -> the list no longer flags delivery readiness
+		if self.pos_profile:
+			self.assertFalse(list_row()["delivery_ready"])
 
 		# fully received -> no pending DN draft anymore
 		with self.assertRaises(ValidationError) as ctx:

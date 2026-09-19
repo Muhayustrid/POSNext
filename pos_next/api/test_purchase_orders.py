@@ -406,14 +406,17 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				orig = frappe.db.get_value(
 					"POS Settings",
 					settings_name,
-					["enabled", "po_default_supplier", "po_default_warehouse"],
+					[
+						"enabled",
+						"po_default_supplier",
+						"po_default_warehouse",
+						"po_receive_requires_delivery_note",
+					],
 					as_dict=True,
 				)
 			else:
 				settings_name = (
-					frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.pos_profile})
-					.insert()
-					.name
+					frappe.get_doc({"doctype": "POS Settings", "pos_profile": self.pos_profile}).insert().name
 				)
 				created = True
 			frappe.db.set_value(
@@ -423,6 +426,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 					"enabled": 1,
 					"po_default_supplier": self.supplier,
 					"po_default_warehouse": target_warehouse,
+					"po_receive_requires_delivery_note": 1,
 				},
 			)
 
@@ -430,6 +434,8 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 			self.assertEqual(defaults["supplier"], self.supplier)
 			self.assertEqual(defaults["supplier_name"], self.supplier_name)
 			self.assertEqual(defaults["warehouse"], target_warehouse)
+			# the Receive-gate flag rides along for the POS button
+			self.assertEqual(defaults["receive_requires_delivery_note"], 1)
 
 			# payload omits supplier AND set_warehouse — settings drive the PO
 			result = self._save(
@@ -450,6 +456,7 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 						"enabled": orig.enabled,
 						"po_default_supplier": orig.po_default_supplier,
 						"po_default_warehouse": orig.po_default_warehouse,
+						"po_receive_requires_delivery_note": orig.po_receive_requires_delivery_note,
 					},
 				)
 

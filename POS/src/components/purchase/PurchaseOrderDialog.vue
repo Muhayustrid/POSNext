@@ -160,7 +160,12 @@
 								{{ __("Submit") }}
 							</button>
 							<button
-								v-if="order.docstatus === 1 && order.per_received < 100 && canReceivePR"
+								v-if="
+									order.docstatus === 1 &&
+									order.per_received < 100 &&
+									(!poDefaults?.receive_requires_delivery_note || order.delivery_ready) &&
+									canReceivePR
+								"
 								type="button"
 								data-test="receive-button"
 								class="px-2 py-1 text-xs rounded text-purple-600 hover:bg-purple-50"
@@ -528,6 +533,22 @@ const searchTerm = ref("")
 const statusFilter = ref("")
 let listTimer = null
 
+// POS Settings defaults (per profile) — one fetch per dialog session; also
+// drives the Receive gate (receive_requires_delivery_note). Declared above
+// the open watcher: the watcher fires immediately during setup.
+const poDefaults = ref(null)
+
+async function loadPoDefaults() {
+	if (poDefaults.value) return poDefaults.value
+	try {
+		poDefaults.value = await call(`${API}.get_po_defaults`, { pos_profile: props.posProfile })
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+		poDefaults.value = {}
+	}
+	return poDefaults.value
+}
+
 // immediate: also covers mounting with the dialog already open
 watch(
 	() => props.modelValue,
@@ -537,6 +558,9 @@ watch(
 			view.value = "list"
 			showReceipts.value = false
 			loadOrders()
+			// the Receive gate reads the POS Settings flag — have it ready by
+			// the time the list renders
+			loadPoDefaults()
 		} else {
 			clearTimeout(listTimer)
 		}
@@ -777,19 +801,6 @@ const loadingItems = ref(false)
 const saving = ref(false)
 let supplierTimer = null
 let itemTimer = null
-let poDefaults = null
-
-// POS Settings defaults (per profile) — one fetch per dialog session
-async function loadPoDefaults() {
-	if (poDefaults) return poDefaults
-	try {
-		poDefaults = await call(`${API}.get_po_defaults`, { pos_profile: props.posProfile })
-	} catch (error) {
-		showError(parseError(error)?.message || serverErrorMessage(error))
-		poDefaults = {}
-	}
-	return poDefaults
-}
 
 // AutocompleteSelect only shows a label for options it has; make the
 // prefilled supplier selectable/displayable even before a search runs
