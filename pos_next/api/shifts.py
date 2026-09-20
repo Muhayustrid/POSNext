@@ -12,6 +12,7 @@ from frappe.utils import cint, flt, get_datetime, getdate, nowdate, nowtime
 from pos_next.api.utilities import get_wallet_payment_modes
 from pos_next.services.sales_recap import (
 	build_recap,
+	period_hourly,
 	period_scope,
 	shift_hourly,
 	shift_recent,
@@ -509,6 +510,51 @@ def get_period_summary(pos_profile, from_date, to_date):
 	}
 	summary.update(build_recap(scope, cash_mode, pos_profile))
 	return summary
+
+
+@frappe.whitelist()
+@rate_limit(limit=30, seconds=60)
+def get_period_dashboard(pos_profile, from_date, to_date):
+	"""Period sales dashboard for one POS Profile, every cashier.
+
+	Same gate and dataset as get_period_summary (see
+	pos_next.services.sales_recap), extended with the dashboard-only
+	sections of get_shift_dashboard: ``hourly`` (net sales per hour / day /
+	month bucket, the one holding now flagged) and ``recent``. Shift-specific
+	fields (opening cash, cashier) are absent in this mode — the drawer is a
+	shift concept, payments here are takings only.
+
+	Security: only users listed on the POS Profile (POS Profile User) may read
+	it, like get_period_summary. Rate limited: free-range scans.
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	profile = frappe.db.get_value(
+		"POS Profile",
+		pos_profile,
+		("name", "company", "posa_cash_mode_of_payment"),
+		as_dict=True,
+	)
+	if not profile:
+		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
+	_check_profile_access(pos_profile)
+	from_date, to_date = _validate_period(from_date, to_date)
+
+	cash_mode = profile.posa_cash_mode_of_payment or "Cash"
+	scope = period_scope(pos_profile, from_date, to_date)
+	dashboard = {
+		"pos_profile": pos_profile,
+		"company": profile.company,
+		"company_currency": frappe.get_cached_value("Company", profile.company, "default_currency"),
+		"cash_mode_of_payment": cash_mode,
+		"generated_at": str(get_datetime()),
+		"period": {"from_date": str(from_date), "to_date": str(to_date)},
+	}
+	dashboard.update(build_recap(scope, cash_mode, pos_profile))
+	dashboard["hourly"] = period_hourly(scope, from_date, to_date)
+	dashboard["recent"] = shift_recent(scope, 10)
+	return dashboard
 
 
 def _check_profile_access(pos_profile):

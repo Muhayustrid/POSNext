@@ -8,6 +8,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from pos_next.api.shifts import (
+	get_period_dashboard,
 	get_period_summary,
 	get_session_summary,
 	get_shift_dashboard,
@@ -33,7 +34,11 @@ def _make_item(code, rate):
 	name = make_test_item(code, "Nos", is_stock_item=0)
 	item_code = frappe.db.get_value("Item", name, "item_code")
 	price_list = frappe.db.get_value("Price List", {"selling": 1}, "name")
-	manual_item_price(item_code, price_list, price_list_rate=rate)
+	# make_test_item may return an existing (renamed) item — never re-price it
+	if not frappe.db.exists(
+		"Item Price", {"item_code": item_code, "price_list": price_list, "price_list_rate": rate}
+	):
+		manual_item_price(item_code, price_list, price_list_rate=rate)
 	return item_code
 
 
@@ -49,8 +54,13 @@ class TestSessionSummary(IntegrationTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		cls.company = get_default_company()
-		cls.cash_mode = frappe.db.get_value(
-			"Mode of Payment", {"enabled": 1, "type": "Cash"}, "name"
+		# the recap designates change to the profile's cash mode, "Cash" by
+		# name — pick the same mode deterministically (the site has many
+		# Cash-type modes; an unordered first row breaks change bookkeeping)
+		cls.cash_mode = (
+			frappe.db.get_value(
+				"Mode of Payment", {"name": "Cash", "enabled": 1, "type": "Cash"}, "name"
+			)
 		) or frappe.db.get_value("Mode of Payment", {"enabled": 1}, "name")
 		# internal customers only transact with their 'Allowed To Transact With'
 		# companies (ERPNext check) — the shared site's first row is internal
@@ -82,6 +92,11 @@ class TestSessionSummary(IntegrationTestCase):
 					"require_refund_code": 0,
 				}
 			).insert(ignore_permissions=True)
+		else:
+			# a previous run may have left the gate on for this shared profile
+			frappe.db.set_value(
+				"POS Settings", {"pos_profile": cls.pos_profile}, "require_refund_code", 0
+			)
 		cls.debtors_account = frappe.db.get_value(
 			"Account",
 			{"company": cls.company, "account_type": "Receivable", "is_group": 0},
@@ -128,6 +143,19 @@ class TestSessionSummary(IntegrationTestCase):
 				{"mode_of_payment": cls.card_mode},
 			],
 		)
+		# a reused pm_profile may predate this run's cls.cash_mode choice —
+		# repoint its default row instead of appending a second default
+		if not frappe.db.exists(
+			"POS Payment Method",
+			{"parent": cls.pm_profile, "parenttype": "POS Profile", "mode_of_payment": cls.cash_mode},
+		):
+			pm_doc = frappe.get_doc("POS Profile", cls.pm_profile)
+			default_row = next((r for r in pm_doc.payments if r.default), None)
+			if default_row:
+				default_row.mode_of_payment = cls.cash_mode
+			else:
+				pm_doc.append("payments", {"mode_of_payment": cls.cash_mode, "default": 1})
+			pm_doc.save(ignore_permissions=True)
 		# period recaps are gated on POS Profile User membership
 		cls._ensure_profile_user(cls.pos_profile, cls.user)
 		cls._ensure_profile_user(cls.pos_profile, cls.second_cashier)
@@ -273,6 +301,9 @@ class TestSessionSummary(IntegrationTestCase):
 		inv.customer = cls.customer
 		inv.is_pos = 1
 		inv.posa_pos_opening_shift = shift
+		# the refund-code gate reads the invoice's own pos_profile; fixture
+		# invoices must carry it so the test profile's POS Settings apply
+		inv.pos_profile = frappe.db.get_value("POS Opening Shift", shift, "pos_profile")
 		if posting_date:
 			inv.set_posting_time = 1
 			inv.posting_date = posting_date
@@ -450,6 +481,7 @@ class TestSessionSummary(IntegrationTestCase):
 		inv.customer = self.customer
 		inv.is_pos = 1
 		inv.posa_pos_opening_shift = shift
+		inv.pos_profile = self.pos_profile
 		inv.is_return = 1
 		inv.append(
 			"items",
@@ -1005,6 +1037,7 @@ class TestSessionSummary(IntegrationTestCase):
 		inv.customer = self.customer
 		inv.is_pos = 1
 		inv.posa_pos_opening_shift = shift
+		inv.pos_profile = self.pos_profile
 		inv.is_return = 1
 		inv.append(
 			"items",
@@ -1036,6 +1069,85 @@ class TestSessionSummary(IntegrationTestCase):
 		frappe.set_user(self.other_user)  # never added to the profile's users
 		with self.assertRaises(frappe.PermissionError):
 			self._today_period()
+
+	def test_period_dashboard_gate_and_contract(self):
+		"""The dashboard variant of the period recap: same gate, same totals,
+		plus hourly buckets and the recent feed."""
+		today = frappe.utils.nowdate()
+		frappe.set_user(self.other_user)
+		with self.assertRaises(frappe.PermissionError):
+			get_period_dashboard(self.pos_profile, today, today)
+		frappe.set_user(self.user)
+
+		data = get_period_dashboard(self.pos_profile, today, today)
+
+		# period header, never shift-scoped fields
+		self.assertNotIn("opening_shift", data)
+		self.assertNotIn("cashier", data)
+		self.assertEqual(data["pos_profile"], self.pos_profile)
+		self.assertEqual(data["period"]["from_date"], str(today))
+		self.assertEqual(data["period"]["to_date"], str(today))
+		self.assertIn("company_currency", data)
+		self.assertIn("generated_at", data)
+
+		# totals agree with get_period_summary on the same window
+		summary = get_period_summary(self.pos_profile, today, today)
+		self.assertEqual(data["net_sales"], summary["net_sales"])
+		self.assertEqual(data["sales_count"], summary["sales_count"])
+
+		# single-day window: 24 hourly buckets, chronological, one current
+		hourly = data["hourly"]
+		self.assertEqual(len(hourly), 24)
+		starts = [h["start"] for h in hourly]
+		self.assertEqual(starts, sorted(starts))
+		self.assertEqual([h["is_current"] for h in hourly].count(True), 1)
+
+		# recent feed works with any scope
+		for row in data["recent"]:
+			for key in ("name", "posting_dt", "is_return", "amount", "payment_mode"):
+				self.assertIn(key, row)
+
+	def test_period_dashboard_day_buckets(self):
+		"""Multi-day windows bucket per day and land each invoice's money on
+		its own day (locks the SQL date-key ↔ python bucket-date merge)."""
+		today = frappe.utils.nowdate()
+		day1 = frappe.utils.add_days(today, -2)
+		day2 = frappe.utils.add_days(today, -1)
+		# own shift so the backdated invoices don't pollute shared-shift counts
+		shift = self._make_opening_shift(opening_cash=0)
+		self._make_invoice_on(
+			shift, [{"item": self.item_a, "qty": 1, "rate": 1100}], paid=1100,
+			posting_date=day1,
+		)
+		self._make_invoice_on(
+			shift, [{"item": self.item_a, "qty": 2, "rate": 1200}], paid=2400,
+			posting_date=day2,
+		)
+
+		data = get_period_dashboard(self.pos_profile, day1, today)
+		hourly = data["hourly"]
+		self.assertEqual(len(hourly), 3)
+		starts = [h["start"] for h in hourly]
+		self.assertEqual(starts, sorted(starts))
+		for h in hourly:
+			self.assertTrue(h["start"].endswith(" 00:00:00"))
+		by_day = {h["start"][:10]: h for h in hourly}
+		self.assertEqual(by_day[str(day1)]["net_sales"], 1100)
+		self.assertEqual(by_day[str(day2)]["net_sales"], 2400)
+
+	def test_period_dashboard_month_buckets(self):
+		"""Windows over 62 days bucket per calendar month, anchored on the 1st."""
+		today = frappe.utils.nowdate()
+		data = get_period_dashboard(
+			self.pos_profile, frappe.utils.add_days(today, -100), today
+		)
+		hourly = data["hourly"]
+		self.assertGreater(len(hourly), 2)
+		for h in hourly:
+			self.assertRegex(h["start"], r"^\d{4}-\d{2}-01 00:00:00$")
+		starts = [h["start"] for h in hourly]
+		self.assertEqual(starts, sorted(starts))
+		self.assertLessEqual([h["is_current"] for h in hourly].count(True), 1)
 
 	def test_period_validation_and_limits(self):
 		today = frappe.utils.nowdate()

@@ -258,7 +258,7 @@ const visibleItems = computed(() =>
 			(!item.requiresProduction || (props.canProduction && !props.isOffline)) &&
 			(!item.requiresPurchaseOrder ||
 				(props.canPurchaseOrder && !props.isOffline)) &&
-			(!item.requiresOpenShift || (props.openingShift && !props.isOffline)),
+			(!item.requiresOnline || !props.isOffline),
 	),
 )
 

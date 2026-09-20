@@ -1,11 +1,51 @@
 <template>
 	<div class="flex flex-col gap-4">
-		<!-- Menu gating hides this view without a shift; this is only a fallback -->
-		<div v-if="!openingShift" class="text-center py-8">
+		<!-- Menu gating hides this view offline; this is only a fallback -->
+		<div v-if="!openingShift && !posProfile" class="text-center py-8">
 			<p class="text-sm text-gray-500">{{ __("No open shift for this session.") }}</p>
 		</div>
 
 		<template v-else>
+			<!-- Mode selector: shift lens or a posting-date window over the whole
+			     profile. Always rendered so a window that failed to load can be
+			     changed. -->
+			<div class="flex flex-wrap items-center gap-1.5" data-test="mode-chips">
+				<button
+					v-for="preset in presets"
+					:key="preset.value"
+					type="button"
+					class="rounded-full px-2.5 py-1 text-xs transition-colors"
+					:class="
+						mode === preset.value
+							? 'bg-gray-900 text-white'
+							: 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+					"
+					:data-test="`mode-chip-${preset.value}`"
+					@click="mode = preset.value"
+				>
+					{{ preset.label }}
+				</button>
+				<template v-if="mode === 'custom'">
+					<input
+						v-model="customFrom"
+						type="date"
+						:max="customTo || undefined"
+						class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900"
+						:aria-label="__('From Date')"
+						data-test="period-from"
+					/>
+					<span class="text-xs text-gray-500">–</span>
+					<input
+						v-model="customTo"
+						type="date"
+						:min="customFrom || undefined"
+						class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900"
+						:aria-label="__('To Date')"
+						data-test="period-to"
+					/>
+				</template>
+			</div>
+
 			<!-- First-load skeleton: one full panel, no per-widget spinners -->
 			<div
 				v-if="loading && !dashboard"
@@ -40,6 +80,16 @@
 				</Button>
 			</div>
 
+			<!-- Custom range not complete yet -->
+			<p
+				v-else-if="!canLoad"
+				class="text-center py-8 text-sm text-gray-500"
+				role="status"
+				data-test="pick-dates-notice"
+			>
+				{{ __("Pick a from and to date to load the recap.") }}
+			</p>
+
 			<template v-else-if="dashboard">
 				<!-- Refresh failed but a snapshot exists: flag it, keep the numbers -->
 				<div
@@ -55,16 +105,24 @@
 				<!-- Toolbar band: shift context chips + manual refresh -->
 				<div class="flex flex-wrap items-center justify-between gap-3">
 					<div class="flex min-w-0 flex-wrap items-center gap-1.5" data-test="shift-chips">
-						<span :class="chipClass" data-test="chip-shift">{{ dashboard.opening_shift }}</span>
-						<span v-if="dashboard.period_start_date" :class="chipClass">
-							{{ __("Opened") }} {{ formatDateTime(dashboard.period_start_date) }}
-						</span>
-						<span v-if="shiftStore.shiftDuration" :class="chipClass" data-test="chip-duration">
-							{{ shiftStore.shiftDuration }}
-						</span>
-						<span v-if="dashboard.cashier" :class="chipClass">
-							{{ __("Cashier") }}: {{ dashboard.cashier }}
-						</span>
+						<template v-if="isShiftMode">
+							<span :class="chipClass" data-test="chip-shift">{{ dashboard.opening_shift }}</span>
+							<span v-if="dashboard.period_start_date" :class="chipClass">
+								{{ __("Opened") }} {{ formatDateTime(dashboard.period_start_date) }}
+							</span>
+							<span v-if="shiftStore.shiftDuration" :class="chipClass" data-test="chip-duration">
+								{{ shiftStore.shiftDuration }}
+							</span>
+							<span v-if="dashboard.cashier" :class="chipClass">
+								{{ __("Cashier") }}: {{ dashboard.cashier }}
+							</span>
+						</template>
+						<template v-else>
+							<span :class="chipClass" data-test="chip-period">{{ presetLabel }}</span>
+							<span v-if="dashboard.period" :class="chipClass" data-test="chip-period-range">
+								{{ formatDate(dashboard.period.from_date) }} – {{ formatDate(dashboard.period.to_date) }}
+							</span>
+						</template>
 						<span v-if="dashboard.pos_profile" :class="chipClass">{{ dashboard.pos_profile }}</span>
 					</div>
 					<div class="flex shrink-0 items-center gap-2">
@@ -128,11 +186,16 @@
 						</div>
 					</div>
 					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-cash">
-						<div class="text-xs text-gray-500">{{ __("Cash in Drawer") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
-							{{ formatMoney(dashboard.cash_expected) }}
+						<div class="text-xs text-gray-500">
+							{{ isShiftMode ? __("Cash in Drawer") : __("Cash Payments") }}
 						</div>
-						<div v-if="!dashboard.expense_supported" class="text-xs text-gray-500 mt-0.5">
+						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
+							{{ formatMoney(isShiftMode ? dashboard.cash_expected : dashboard.total_cash) }}
+						</div>
+						<div
+							v-if="isShiftMode && !dashboard.expense_supported"
+							class="text-xs text-gray-500 mt-0.5"
+						>
 							{{ __("Before expenses") }}
 						</div>
 					</div>
@@ -145,7 +208,7 @@
 					data-test="hourly-section"
 				>
 					<h3 id="sd-hourly-h" class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-						{{ __("Sales by Hour") }}
+						{{ __(trendHeading) }}
 					</h3>
 					<div v-if="hourlyBuckets.length" class="mt-3" data-test="hourly-chart">
 						<div class="flex items-stretch gap-1 sm:gap-2">
@@ -177,13 +240,13 @@
 									></div>
 								</div>
 								<div class="mt-1 text-center text-[10px] text-gray-400 tabular-nums">
-									<span v-if="b.showLabel">{{ b.hour }}</span>
+									<span v-if="b.showLabel">{{ b.label }}</span>
 								</div>
 							</div>
 						</div>
 					</div>
 					<p v-else class="mt-2 text-xs text-gray-500">{{ emptyText }}</p>
-					<p class="mt-2 text-xs text-gray-500">{{ __("Returns are netted into their hour.") }}</p>
+					<p v-if="bucketGranularity === 'hour'" class="mt-2 text-xs text-gray-500">{{ __("Returns are netted into their hour.") }}</p>
 				</section>
 
 				<!-- Payment methods -->
@@ -200,7 +263,11 @@
 							<div class="flex items-baseline justify-between gap-3 text-sm">
 								<span class="min-w-0 truncate text-gray-700">
 									{{ row.mode_of_payment }}
-									<span v-if="row.is_cash" class="text-xs text-gray-500" data-test="drawer-note">
+									<span
+										v-if="row.is_cash && isShiftMode"
+										class="text-xs text-gray-500"
+										data-test="drawer-note"
+									>
 										{{ __("in drawer") }} {{ formatMoney(dashboard.cash_expected) }}
 									</span>
 								</span>
@@ -313,6 +380,7 @@ import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
+import { periodRange } from "@/utils/salesRecap"
 import { Button, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
@@ -329,7 +397,34 @@ const props = defineProps({
 	currency: { type: String, default: "" },
 })
 
-const dashboardResource = createResource({
+// Two lenses on one dataset: the open shift (default) or a posting-date
+// window over the whole profile, every cashier included. Presets resolve to
+// explicit dates here; the server only ever sees from/to.
+const presets = computed(() => [
+	...(props.openingShift ? [{ value: "shift", label: __("This Shift") }] : []),
+	{ value: "today", label: __("Today") },
+	{ value: "yesterday", label: __("Yesterday") },
+	{ value: "last7", label: __("Last 7 Days") },
+	{ value: "month", label: __("This Month") },
+	{ value: "year", label: __("This Year") },
+	{ value: "custom", label: __("Custom Range") },
+])
+
+const mode = ref(props.openingShift ? "shift" : "today")
+const customFrom = ref("")
+const customTo = ref("")
+const isShiftMode = computed(() => mode.value === "shift")
+const presetLabel = computed(
+	() =>
+		presets.value.find((preset) => preset.value === mode.value)?.label || "",
+)
+const range = computed(() =>
+	isShiftMode.value
+		? null
+		: periodRange(mode.value, { from: customFrom.value, to: customTo.value }),
+)
+
+const shiftResource = createResource({
 	url: "pos_next.api.shifts.get_shift_dashboard",
 	makeParams() {
 		return { opening_shift: props.openingShift }
@@ -337,15 +432,36 @@ const dashboardResource = createResource({
 	auto: false,
 })
 
-const dashboard = computed(() => dashboardResource.data || null)
-const loading = computed(() => dashboardResource.loading)
-const error = computed(() => dashboardResource.error)
+const periodResource = createResource({
+	url: "pos_next.api.shifts.get_period_dashboard",
+	makeParams() {
+		return {
+			pos_profile: props.posProfile,
+			from_date: range.value?.from,
+			to_date: range.value?.to,
+		}
+	},
+	auto: false,
+})
+
+const activeResource = computed(() =>
+	isShiftMode.value ? shiftResource : periodResource,
+)
+const dashboard = computed(() => activeResource.value.data || null)
+const loading = computed(() => activeResource.value.loading)
+const error = computed(() => activeResource.value.error)
+// A custom window without both dates has nothing to fetch yet
+const canLoad = computed(() =>
+	isShiftMode.value
+		? Boolean(props.openingShift)
+		: Boolean(props.posProfile && range.value),
+)
 
 // Captured on every successful load (via a watch, so it also works when the
 // resource is filled outside .reload()); drives the "updated N min ago" label.
 const lastFetchedAt = ref(0)
 watch(
-	() => dashboardResource.data,
+	() => activeResource.value.data,
 	(data) => {
 		if (data) lastFetchedAt.value = Date.now()
 	},
@@ -360,23 +476,33 @@ const minutesAgo = computed(() => {
 	return Math.max(0, Math.floor((Date.now() - lastFetchedAt.value) / 60000))
 })
 
-// Manual refresh only — the dashboard never polls on its own.
+// Manual refresh only — the dashboard never polls on its own. Switching mode,
+// preset or custom dates refetches through the same watch.
 watch(
-	() => props.openingShift,
-	(shift) => {
-		if (shift) dashboardResource.reload()
+	[() => props.openingShift, mode, range],
+	([shift]) => {
+		if (!shift && isShiftMode.value) {
+			// the shift closed underneath us: fall back to the profile's day
+			mode.value = "today"
+			return
+		}
+		if (canLoad.value) activeResource.value.reload()
 	},
 	{ immediate: true },
 )
 
 function refresh() {
-	if (props.openingShift) dashboardResource.reload()
+	if (canLoad.value) activeResource.value.reload()
 }
 
 const chipClass = "rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
 
-const emptyText = __(
-	"No sales yet in this shift. Sales appear here after the first invoice.",
+const emptyText = computed(() =>
+	isShiftMode.value
+		? __(
+				"No sales yet in this shift. Sales appear here after the first invoice.",
+			)
+		: __("No sales in this period."),
 )
 
 const isEmpty = computed(
@@ -394,6 +520,32 @@ const returnsLabel = computed(() => {
 	return `${dashboard.value?.returns_count || 0} · ${total}`
 })
 
+// Bucket type follows the window, same rule as the backend: hours on a
+// single day, days up to 62, calendar months beyond.
+const bucketGranularity = computed(() => {
+	const period = dashboard.value?.period
+	if (!period) return "hour"
+	const span = Math.round(
+		(new Date(period.to_date) - new Date(period.from_date)) / 86400000,
+	)
+	return span === 0 ? "hour" : span <= 62 ? "day" : "month"
+})
+
+const trendHeading = computed(() => {
+	if (bucketGranularity.value === "day") return "Sales by Day"
+	if (bucketGranularity.value === "month") return "Sales by Month"
+	return "Sales by Hour"
+})
+
+function bucketLabel(start) {
+	const s = String(start || "")
+	if (bucketGranularity.value === "day")
+		return `${s.slice(8, 10)}/${s.slice(5, 7)}`
+	if (bucketGranularity.value === "month")
+		return `${s.slice(5, 7)}/${s.slice(2, 4)}`
+	return `${s.slice(11, 13)}:00`
+}
+
 const hourlyBuckets = computed(() => {
 	const buckets = dashboard.value?.hourly || []
 	const values = buckets.map((b) => Number.parseFloat(b.net_sales) || 0)
@@ -405,7 +557,7 @@ const hourlyBuckets = computed(() => {
 		const value = values[i]
 		return {
 			...b,
-			hour: `${String(b.start || "").slice(11, 13)}:00`,
+			label: bucketLabel(b.start),
 			showLabel: !thin || i % 2 === 0,
 			posHeight:
 				value > 0 && maxPos > 0
@@ -420,7 +572,7 @@ const hourlyBuckets = computed(() => {
 })
 
 function barTitle(bucket) {
-	return `${bucket.hour} · ${formatMoney(bucket.net_sales)} · ${Number.parseFloat(bucket.sales_count) || 0}`
+	return `${bucket.label} · ${formatMoney(bucket.net_sales)} · ${Number.parseFloat(bucket.sales_count) || 0}`
 }
 
 const paymentRows = computed(() => {

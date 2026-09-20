@@ -19,7 +19,7 @@ export const MANAGEMENT_MENU = [
 		label: __("Dashboard"),
 		activeClass: "bg-rose-100 text-rose-600",
 		group: "sales",
-		requiresOpenShift: true,
+		requiresOnline: true,
 	},
 	{
 		id: "invoices",

@@ -133,6 +133,12 @@ function dashboardResource() {
 	)
 }
 
+function periodDashboardResource() {
+	return resources.instances.find(
+		(i) => i.url === "pos_next.api.shifts.get_period_dashboard",
+	)
+}
+
 function mountDashboard(props = {}) {
 	resources.instances.length = 0
 	const wrapper = mount(ShiftDashboard, {
@@ -381,6 +387,161 @@ describe("ShiftDashboard", () => {
 		const { wrapper, entry } = mountDashboard({ openingShift: "" })
 		expect(entry.resource.reload).not.toHaveBeenCalled()
 		expect(wrapper.text()).toContain("No open shift for this session.")
+		wrapper.unmount()
+	})
+})
+
+describe("ShiftDashboard period mode", () => {
+	// One week of buckets keyed by posting day; same field names as the shift
+	// payload plus `period`, minus shift-scoped fields (opening_shift etc.).
+	const PERIOD = {
+		pos_profile: "Kasir 1",
+		company_currency: "IDR",
+		generated_at: "2026-09-20 09:00:00",
+		period: { from_date: "2026-09-13", to_date: "2026-09-20" },
+		net_sales: 300000,
+		sales_count: 6,
+		returns_count: 1,
+		returns_total: 20000,
+		average_sale: 50000,
+		total_qty: 12,
+		total_discount: 4000,
+		payments: [
+			{ mode_of_payment: "Cash", amount: 180000, is_cash: true, configured: true },
+			{ mode_of_payment: "QRIS", amount: 120000, is_cash: false, configured: true },
+		],
+		total_cash: 180000,
+		total_non_cash: 120000,
+		methods_grand_total: 300000,
+		items: [
+			{ item_code: "I1", item_name: "Kopi Susu", qty: 6, base_net_amount: 120000 },
+		],
+		hourly: [
+			{ start: "2026-09-13 00:00:00", net_sales: 100000, sales_count: 2, is_current: false },
+			{ start: "2026-09-14 00:00:00", net_sales: 200000, sales_count: 4, is_current: true },
+		],
+		recent: [
+			{
+				name: "INV-2026-0009",
+				posting_dt: "2026-09-14 08:15:00",
+				is_return: false,
+				outstanding_amount: 0,
+				amount: 50000,
+				payment_mode: "Cash",
+			},
+		],
+	}
+
+	async function mountPeriodData(overrides = {}) {
+		const { wrapper } = mountDashboard({ posProfile: "P1" })
+		await wrapper.find('[data-test="mode-chip-today"]').trigger("click")
+		const entry = periodDashboardResource()
+		entry.resource.data = { ...PERIOD, ...overrides }
+		entry.resource.loading = false
+		await flushPromises()
+		return wrapper
+	}
+
+	it("defaults to period mode with today's window when there is no shift", async () => {
+		const { wrapper } = mountDashboard({ openingShift: "", posProfile: "P1" })
+		const periodEntry = periodDashboardResource()
+		expect(periodEntry.resource.reload).toHaveBeenCalledTimes(1)
+		expect(dashboardResource().resource.reload).not.toHaveBeenCalled()
+		expect(periodEntry.opts.makeParams()).toEqual({
+			pos_profile: "P1",
+			from_date: expect.any(String),
+			to_date: expect.any(String),
+		})
+
+		periodEntry.resource.data = PERIOD
+		periodEntry.resource.loading = false
+		await flushPromises()
+		// no shift chip exists; the period header carries preset + dates
+		expect(wrapper.find('[data-test="chip-shift"]').exists()).toBe(false)
+		expect(wrapper.find('[data-test="chip-period"]').text()).toBe("Today")
+		expect(wrapper.find('[data-test="chip-period-range"]').text()).toContain(
+			"D:2026-09-20",
+		)
+		wrapper.unmount()
+	})
+
+	it("renders period chips and swaps the cash card to Cash Payments", async () => {
+		const wrapper = await mountPeriodData()
+		const chips = wrapper.findAll('[data-test="mode-chips"] button')
+		expect(chips.map((c) => c.text())).toEqual([
+			"This Shift",
+			"Today",
+			"Yesterday",
+			"Last 7 Days",
+			"This Month",
+			"This Year",
+			"Custom Range",
+		])
+		expect(wrapper.find('[data-test="chip-period"]').text()).toBe("Today")
+
+		const cash = wrapper.find('[data-test="kpi-cash"]')
+		expect(cash.text()).toContain("Cash Payments")
+		expect(cash.text()).toContain("180000 IDR")
+		expect(cash.text()).not.toContain("Cash in Drawer")
+		expect(cash.text()).not.toContain("Before expenses")
+		// KPIs come from the period payload
+		expect(wrapper.find('[data-test="kpi-net-sales"]').text()).toContain(
+			"300000 IDR",
+		)
+		wrapper.unmount()
+	})
+
+	it("renders day-bucket labels and hides the drawer annotation", async () => {
+		const wrapper = await mountPeriodData()
+		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("13/09")
+		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("14/09")
+
+		const cashRow = wrapper.findAll('[data-test="payment-row"]')[0]
+		expect(cashRow.find('[data-test="drawer-note"]').exists()).toBe(false)
+		// payments themselves still render with their share
+		expect(cashRow.text()).toContain("60%")
+		wrapper.unmount()
+	})
+
+	it("refetches the right endpoint when the mode switches", async () => {
+		const { wrapper, entry } = mountDashboard({ posProfile: "P1" })
+		expect(entry.resource.reload).toHaveBeenCalledTimes(1)
+		expect(periodDashboardResource().resource.reload).not.toHaveBeenCalled()
+
+		const chip = (value) => wrapper.find(`[data-test="mode-chip-${value}"]`)
+		await chip("today").trigger("click")
+		await flushPromises()
+		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(entry.resource.reload).toHaveBeenCalledTimes(1)
+
+		await chip("shift").trigger("click")
+		await flushPromises()
+		expect(entry.resource.reload).toHaveBeenCalledTimes(2)
+		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
+		wrapper.unmount()
+	})
+
+	it("applies a custom range once both dates are set", async () => {
+		const { wrapper } = mountDashboard({ posProfile: "P1" })
+		const periodEntry = periodDashboardResource()
+		await wrapper.find('[data-test="mode-chip-custom"]').trigger("click")
+		await flushPromises()
+		// incomplete custom range: nothing fetched, prompt shown, inputs out
+		expect(periodEntry.resource.reload).not.toHaveBeenCalled()
+		expect(wrapper.find('[data-test="pick-dates-notice"]').exists()).toBe(true)
+
+		await wrapper.find('[data-test="period-from"]').setValue("2026-09-13")
+		await flushPromises()
+		expect(periodEntry.resource.reload).not.toHaveBeenCalled() // still missing "to"
+
+		await wrapper.find('[data-test="period-to"]').setValue("2026-09-20")
+		await flushPromises()
+		expect(periodEntry.resource.reload).toHaveBeenCalledTimes(1)
+		expect(periodEntry.opts.makeParams()).toEqual({
+			pos_profile: "P1",
+			from_date: "2026-09-13",
+			to_date: "2026-09-20",
+		})
 		wrapper.unmount()
 	})
 })

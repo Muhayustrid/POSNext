@@ -62,17 +62,12 @@ function sidebarLabels(wrapper) {
 		.map((b) => b.text())
 }
 
-function availableLabels(
-	canProduction,
-	canPurchaseOrder,
-	isOffline = false,
-	openingShift = "",
-) {
+function availableLabels(canProduction, canPurchaseOrder, isOffline = false) {
 	return MANAGEMENT_MENU.filter(
 		(i) =>
 			(!i.requiresProduction || (canProduction && !isOffline)) &&
 			(!i.requiresPurchaseOrder || (canPurchaseOrder && !isOffline)) &&
-			(!i.requiresOpenShift || (openingShift && !isOffline)),
+			(!i.requiresOnline || !isOffline),
 	).map((i) => i.label)
 }
 
@@ -120,21 +115,24 @@ describe("POSMenuDialog menu", () => {
 		wrapper.unmount()
 	})
 
-	it("hides the dashboard without an open shift", () => {
+	it("shows the dashboard online without an open shift", () => {
 		const wrapper = mountShell({ open: true })
 		const labels = sidebarLabels(wrapper)
-		expect(labels).not.toContain("Dashboard")
-		expect(labels[0]).toBe("Invoice Management")
+		expect(labels).toContain("Dashboard")
+		expect(labels).toEqual(availableLabels(false, false))
+		// the burger landing still prefers Invoice Management
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
 		wrapper.unmount()
 	})
 
-	it("hides the dashboard while offline even with an open shift", () => {
+	it("hides the dashboard while offline, with or without an open shift", () => {
 		const wrapper = mountShell({
 			open: true,
 			openingShift: "OS-1",
 			isOffline: true,
 		})
 		expect(sidebarLabels(wrapper)).not.toContain("Dashboard")
+		expect(sidebarLabels(wrapper)).toEqual(availableLabels(false, false, true))
 		wrapper.unmount()
 	})
 
@@ -142,7 +140,7 @@ describe("POSMenuDialog menu", () => {
 		const wrapper = mountShell({ open: true, openingShift: "OS-1" })
 		const labels = sidebarLabels(wrapper)
 		expect(labels[0]).toBe("Dashboard")
-		expect(labels).toEqual(availableLabels(false, false, false, "OS-1"))
+		expect(labels).toEqual(availableLabels(false, false))
 		// sidebar order keeps Dashboard first, the burger landing stays Invoice Management
 		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
 		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(false)

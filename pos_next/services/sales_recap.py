@@ -15,10 +15,10 @@ without payment rows moved no money and are excluded from every money/count
 aggregate; change given back leaves the drawer in the designated cash mode.
 """
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 import frappe
-from frappe.utils import cint, flt, get_datetime
+from frappe.utils import cint, flt, get_datetime, getdate
 
 from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
@@ -163,6 +163,112 @@ def shift_hourly(scope, period_start):
 		}
 		for hour, bucket in enumerate(buckets)
 	]
+
+
+def period_buckets(from_date, to_date, now=None):
+	"""Bucket grid for a posting-date window, materialized so an hour / day /
+	month with no sales is still present in the payload (pure — no DB; see
+	period_hourly). One bucket type per window: 24 hours on a single day, one
+	per day up to 62 days, then calendar months clamped to the most recent 24.
+	``is_current`` marks only the bucket containing ``now`` — none, for a
+	window entirely in the past or future.
+	"""
+	start, end = getdate(from_date), getdate(to_date)
+	now = get_datetime(now) if now else get_datetime()
+	span = (end - start).days
+	if span == 0:
+		mode = "hour"
+		starts = [datetime.combine(start, time(hour)) for hour in range(24)]
+	elif span <= 62:
+		mode = "day"
+		starts = [
+			datetime.combine(start + timedelta(days=offset), time(0))
+			for offset in range(span + 1)
+		]
+	else:
+		mode = "month"
+		starts = []
+		year, month = start.year, start.month
+		while (year, month) <= (end.year, end.month):
+			starts.append(datetime(year, month, 1))
+			month += 1
+			if month > 12:
+				year, month = year + 1, 1
+		starts = starts[-24:]
+
+	def is_current(start):
+		if mode == "hour":
+			return start.date() == now.date() and start.hour == now.hour
+		if mode == "day":
+			return start.date() == now.date()
+		return (start.year, start.month) == (now.year, now.month)
+
+	return [{"start": start, "is_current": is_current(start)} for start in starts]
+
+
+def period_hourly(scope, from_date, to_date):
+	"""Net sales per bucket for the period dashboard.
+
+	Same invoice universe as the money aggregates (drawer filter applied), so
+	a no-drawer credit return doesn't print negative sales in a bucket whose
+	money never moved. Bucket type follows the window (see period_buckets):
+	elapsed hour on a single day — pathological pre-midnight timestamps fold
+	into bucket 0 — posting date up to 62 days, calendar month beyond. Zeros
+	included, chronological.
+	"""
+	buckets = period_buckets(from_date, to_date)
+	if not buckets:
+		return []
+
+	start, end = getdate(from_date), getdate(to_date)
+	span = (end - start).days
+	if span == 0:
+		group_expr = (
+			"TIMESTAMPDIFF(HOUR, %(day_start)s, TIMESTAMP(si.posting_date, si.posting_time))"
+		)
+	elif span <= 62:
+		group_expr = "si.posting_date"
+	else:
+		group_expr = "DATE_FORMAT(si.posting_date, '%%Y-%%m')"
+
+	by_key: dict = {}
+	for row in frappe.db.sql(
+		f"""
+		SELECT
+			{group_expr} AS bucket_index,
+			SUM(si.base_grand_total) AS net_sales,
+			SUM(CASE WHEN si.is_return = 0 THEN 1 ELSE 0 END) AS sales_count
+		FROM {sales_invoice_union(_HOURLY_COLUMNS, where=scope.where)}
+		WHERE {scope.where} AND {_NO_DRAWER_RETURN}
+		GROUP BY bucket_index
+		""",
+		dict(scope.values, day_start=datetime.combine(start, time(0))),
+		as_dict=True,
+	):
+		key = max(cint(row.bucket_index), 0) if span == 0 else row.bucket_index
+		acc = by_key.setdefault(key, {"net_sales": 0.0, "sales_count": 0})
+		acc["net_sales"] += flt(row.net_sales)
+		acc["sales_count"] += cint(row.sales_count)
+
+	out = []
+	for bucket in buckets:
+		key = (
+			bucket["start"].hour
+			if span == 0
+			else bucket["start"].date()
+			if span <= 62
+			else bucket["start"].strftime("%Y-%m")
+		)
+		acc = by_key.get(key, {})
+		out.append(
+			{
+				"start": bucket["start"].strftime("%Y-%m-%d %H:%M:%S"),
+				"net_sales": flt(acc.get("net_sales")),
+				"sales_count": acc.get("sales_count", 0),
+				"is_current": bucket["is_current"],
+			}
+		)
+	return out
 
 
 def shift_recent(scope, limit=10):
