@@ -43,8 +43,9 @@
 					v-if="isSearchMode"
 					class="py-4 px-4 border-b border-gray-200 bg-gray-50 rounded-lg relative mb-4"
 				>
-					<div class="relative">
-						<!-- Search Icon / Loading Spinner -->
+					<div class="flex items-start gap-2">
+						<div class="relative flex-1">
+							<!-- Search Icon / Loading Spinner -->
 						<div
 							class="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none"
 						>
@@ -106,6 +107,12 @@
 								/>
 							</svg>
 						</button>
+						</div>
+						<RefreshButton
+							:loading="searching"
+							class="mt-0.5"
+							@click="handleSearchInput"
+						/>
 					</div>
 
 					<!-- Search Hint -->
@@ -854,8 +861,10 @@
  * RTL Support: Fully compatible with right-to-left languages
  * Translations: All user-facing strings use __() for i18n
  */
-import { ref, computed, watch, nextTick, defineComponent, h } from "vue";
-import { call, Dialog } from "frappe-ui";
+import { ref, computed, watch, nextTick } from "vue";
+import { call } from "frappe-ui";
+import DialogHost from "@/components/common/DialogHost.js"
+import RefreshButton from "@/components/common/RefreshButton.vue"
 import { __ } from "@/utils/translation";
 import { formatCurrencyNumber } from "@/utils/currency";
 
@@ -885,55 +894,6 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue", "close"]);
 
-// Standalone: renders the frappe-ui Dialog as today. Embedded: renders only
-// the dialog's slot content inside the app shell's container — the shell owns
-// the header and close.
-const DialogHost = defineComponent({
-	props: {
-		embedded: { type: Boolean, default: false },
-		show: { type: Boolean, default: false },
-		options: { type: Object, default: () => ({}) },
-	},
-	emits: ["update:show"],
-	setup(hostProps, { slots, emit: hostEmit }) {
-		return () =>
-				hostProps.embedded
-					? h("div", { class: "h-full min-h-0 flex flex-col" }, [
-							// Mirror the frappe Dialog body padding so content
-							// written for the dialog (e.g. -mt-2 subtitles)
-							// renders identically and scrolls on its own.
-							h(
-								"div",
-								{
-									class: "flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6",
-								},
-								[slots["body-content"]?.()],
-							),
-							slots.actions
-								? h(
-										"div",
-										{
-											class: "shrink-0 px-4 pb-4 pt-3 sm:px-6 border-t border-gray-200",
-										},
-										[slots.actions?.()],
-									)
-								: null,
-						])
-				: h(
-						Dialog,
-						{
-							modelValue: hostProps.show,
-							"onUpdate:modelValue": (v) => hostEmit("update:show", v),
-							options: hostProps.options,
-						},
-						{
-							"body-title": slots["body-title"],
-							"body-content": slots["body-content"],
-							actions: slots.actions,
-						},
-					);
-	},
-});
 
 // v-model binding for Dialog
 const show = computed({

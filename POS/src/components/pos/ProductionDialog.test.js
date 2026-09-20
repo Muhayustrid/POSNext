@@ -26,9 +26,14 @@ vi.mock("frappe-ui", async () => {
 			return () => h("button", slots.default?.());
 		},
 	});
+	const FeatherIcon = defineComponent({
+		name: "FeatherIconStub",
+		props: ["name"],
+	});
 	return {
 		Dialog,
 		Button,
+		FeatherIcon,
 		createResource: (opts) => ({
 			submit: (params) => resourceHandlers.map[opts.url]?.(params, opts),
 		}),

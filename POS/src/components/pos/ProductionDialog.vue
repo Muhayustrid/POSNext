@@ -7,12 +7,15 @@
 		<template #body-content>
 			<!-- STEP 1: pick recipe -->
 			<template v-if="!selectedRecipe">
-				<input
-					v-model="search"
-					type="text"
-					:placeholder="__('Search recipe...')"
-					class="w-full mb-3 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-				/>
+				<div class="flex gap-2 mb-3">
+					<input
+						v-model="search"
+						type="text"
+						:placeholder="__('Search recipe...')"
+						class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+					/>
+					<RefreshButton :loading="loadingRecipes" @click="loadRecipes" />
+				</div>
 				<div v-if="loadingRecipes" class="py-10 text-center text-sm text-gray-500">
 					{{ __("Loading recipes...") }}
 				</div>
@@ -139,8 +142,10 @@
 </template>
 
 <script setup>
-import { Button, Dialog, createResource } from "frappe-ui";
-import { computed, defineComponent, h, ref, watch } from "vue";
+import { Button, createResource } from "frappe-ui";
+import { computed, ref, watch } from "vue";
+import DialogHost from "@/components/common/DialogHost.js"
+import RefreshButton from "@/components/common/RefreshButton.vue"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -152,55 +157,6 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue", "production-created"]);
 
-// Standalone: renders the frappe-ui Dialog as today. Embedded: renders only
-// the dialog's slot content inside the app shell's container — the shell owns
-// the header and close.
-const DialogHost = defineComponent({
-	props: {
-		embedded: { type: Boolean, default: false },
-		show: { type: Boolean, default: false },
-		options: { type: Object, default: () => ({}) },
-	},
-	emits: ["update:show"],
-	setup(hostProps, { slots, emit: hostEmit }) {
-		return () =>
-				hostProps.embedded
-					? h("div", { class: "h-full min-h-0 flex flex-col" }, [
-							// Mirror the frappe Dialog body padding so content
-							// written for the dialog renders identically and the
-							// wizard steps scroll on their own.
-							h(
-								"div",
-								{
-									class: "flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6",
-								},
-								[slots["body-content"]?.()],
-							),
-							slots.actions
-								? h(
-										"div",
-										{
-											class: "shrink-0 px-4 pb-4 pt-3 sm:px-6 border-t border-gray-200",
-										},
-										[slots.actions?.()],
-									)
-								: null,
-						])
-				: h(
-						Dialog,
-						{
-							modelValue: hostProps.show,
-							"onUpdate:modelValue": (v) => hostEmit("update:show", v),
-							options: hostProps.options,
-						},
-						{
-							"body-title": slots["body-title"],
-							"body-content": slots["body-content"],
-							actions: slots.actions,
-						},
-					);
-	},
-});
 
 const show = ref(props.modelValue);
 // Non-immediate: embedded mode mounts with modelValue already true, but the

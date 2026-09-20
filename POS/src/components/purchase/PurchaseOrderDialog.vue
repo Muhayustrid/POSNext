@@ -12,108 +12,44 @@
 						v-model="searchTerm"
 						type="text"
 						data-test="list-search"
-						:placeholder="
-							showReceipts
-								? __('Search receipt or supplier...')
-								: __('Search PO or supplier...')
-						"
+						:placeholder="__('Search PO or supplier...')"
 						class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
 						@input="onListSearch"
 					/>
+					<RefreshButton :loading="loadingOrders" @click="loadOrders" />
 					<Button variant="solid" data-test="new-button" @click="openNew">
 						{{ __("New") }}
 					</Button>
 				</div>
 
 				<div class="flex flex-wrap gap-1">
-					<template v-if="!showReceipts">
-						<button
-							v-for="chip in STATUS_CHIPS"
-							:key="chip.value"
-							type="button"
-							class="px-2.5 py-1 text-xs rounded-full border transition-colors"
-							:class="
-								statusFilter === chip.value
-									? 'bg-blue-600 text-white border-blue-600'
-									: 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-							"
-							@click="setStatus(chip.value)"
-						>
-							{{ __(chip.label) }}
-						</button>
-					</template>
 					<button
+						v-for="chip in STATUS_CHIPS"
+						:key="chip.value"
 						type="button"
-						data-test="receipts-toggle"
 						class="px-2.5 py-1 text-xs rounded-full border transition-colors"
 						:class="
-							showReceipts
+							statusFilter === chip.value
 								? 'bg-blue-600 text-white border-blue-600'
 								: 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
 						"
-						@click="toggleReceipts"
+						@click="setStatus(chip.value)"
 					>
-						{{ __("Receipts") }}
+						{{ __(chip.label) }}
 					</button>
 				</div>
 
 				<div
-					v-if="loadingOrders || loadingReceipts"
+					v-if="loadingOrders"
 					class="py-8 text-center text-sm text-gray-500"
 				>
 					{{ __("Loading...") }}
 				</div>
-				<div v-else-if="showReceipts && receipts.length === 0" class="py-8 text-center">
-					<p class="text-sm font-medium text-gray-900">{{ __("No purchase receipts") }}</p>
-				</div>
-				<div v-else-if="!showReceipts && orders.length === 0" class="py-8 text-center">
+				<div v-else-if="orders.length === 0" class="py-8 text-center">
 					<p class="text-sm font-medium text-gray-900">{{ __("No purchase orders") }}</p>
 					<p class="text-xs text-gray-500 mt-1">
 						{{ __("Create one with the New button") }}
 					</p>
-				</div>
-				<div v-else-if="showReceipts" class="flex flex-col gap-2 max-h-96 overflow-y-auto">
-					<div
-						v-for="receipt in receipts"
-						:key="receipt.name"
-						class="bg-white border border-gray-200 rounded-lg p-3"
-						:data-test="`receipt-${receipt.name}`"
-					>
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0">
-									<div class="flex items-center gap-2">
-										<span class="text-sm font-semibold text-gray-900">{{ receipt.name }}</span>
-										<StatusBadge :variant="statusVariant(receipt.status)" size="xs" :text="receipt.status" />
-									</div>
-									<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receipt.supplier_name }}</p>
-									<p class="text-xs text-gray-400 mt-0.5">
-										{{ formatDate(receipt.posting_date) }}
-									</p>
-									<p v-if="receipt.docstatus === 1" class="text-xs text-gray-400 mt-0.5">
-										{{ __("Billed {0}%", [Math.round(receipt.per_billed || 0)]) }}
-									</p>
-								</div>
-							</div>
-
-						<div class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
-							<button
-								v-if="receipt.docstatus === 1 && canCancelPR"
-								type="button"
-								data-test="cancel-receipt"
-								class="px-2 py-1 text-xs rounded text-red-600 hover:bg-red-50"
-								@click="cancelReceipt(receipt)"
-							>
-								{{ __("Cancel") }}
-							</button>
-							<button
-								type="button"
-								class="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
-								@click="openReceiptInErpnext(receipt)"
-							>
-								{{ __("Open in ERPNext") }}
-							</button>
-						</div>
-					</div>
 				</div>
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto">
 					<div
@@ -172,7 +108,7 @@
 								{{ __("Receive") }}
 							</button>
 							<button
-								v-if="order.docstatus === 1 && canCancelPO"
+								v-if="order.docstatus === 1 && canCancelPO && !isFactoryLinked(order)"
 								type="button"
 								class="px-2 py-1 text-xs rounded text-red-600 hover:bg-red-50"
 								@click="cancelOrder(order)"
@@ -435,8 +371,10 @@ import { useFormatters } from "@/composables/useFormatters"
 import { usePermissions } from "@/composables/usePermissions"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
 import { parseError } from "@/utils/errorHandler"
-import { Button, Dialog } from "frappe-ui"
-import { Comment, computed, defineComponent, h, ref, watch } from "vue"
+import { Button } from "frappe-ui"
+import { computed, ref, watch } from "vue"
+import DialogHost from "@/components/common/DialogHost.js"
+import RefreshButton from "@/components/common/RefreshButton.vue"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -449,61 +387,6 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue"])
 
-// Standalone: renders the frappe-ui Dialog as today. Embedded: renders only
-// the dialog's slot content inside the app shell's container — the shell owns
-// the header and close.
-const DialogHost = defineComponent({
-	props: {
-		embedded: { type: Boolean, default: false },
-		show: { type: Boolean, default: false },
-		options: { type: Object, default: () => ({}) },
-	},
-	emits: ["update:show"],
-	setup(hostProps, { slots, emit: hostEmit }) {
-		return () => {
-			if (!hostProps.embedded) {
-				return h(
-					Dialog,
-					{
-						modelValue: hostProps.show,
-						"onUpdate:modelValue": (v) => hostEmit("update:show", v),
-						options: hostProps.options,
-					},
-					{
-						"body-title": slots["body-title"],
-						"body-content": slots["body-content"],
-						actions: slots.actions,
-					},
-				)
-			}
-			// Mirror the frappe Dialog body padding so content
-			// written for the dialog renders identically and the
-			// form/list scrolls on its own; actions stay pinned.
-			// The footer is skipped when the actions slot renders
-			// nothing (e.g. the list view has no footer when embedded).
-			const actions = slots.actions?.() ?? []
-			const hasActions = actions.some((vnode) => vnode?.type !== Comment)
-			return h("div", { class: "h-full min-h-0 flex flex-col" }, [
-				h(
-					"div",
-					{
-						class: "flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6",
-					},
-					[slots["body-content"]?.()],
-				),
-				hasActions
-					? h(
-							"div",
-							{
-								class: "shrink-0 px-4 pb-4 pt-3 sm:px-6 border-t border-gray-200",
-							},
-							actions,
-						)
-					: null,
-			])
-		}
-	},
-});
 
 const { showSuccess, showError } = useToast()
 const { formatDate } = useFormatters()
@@ -524,16 +407,11 @@ const { hasPermission: canSubmitPR } = usePermissionCheck(
 	"Purchase Receipt",
 	"submit",
 )
-const { hasPermission: canCancelPR } = usePermissionCheck(
-	"Purchase Receipt",
-	"cancel",
-)
 
 const API = "pos_next.api.purchase_orders"
 const PR_API = "pos_next.api.purchase_receipts"
 
 const view = ref("list")
-const showReceipts = ref(false)
 
 // AutocompleteSelect only fires @search while typing; without a preload the
 // dropdowns open empty and look broken. Prime the top options on form entry.
@@ -568,8 +446,6 @@ const STATUS_VARIANTS = {
 
 const orders = ref([])
 const loadingOrders = ref(false)
-const receipts = ref([])
-const loadingReceipts = ref(false)
 const searchTerm = ref("")
 const statusFilter = ref("")
 let listTimer = null
@@ -597,7 +473,6 @@ watch(
 		show.value = val
 		if (val) {
 			view.value = "list"
-			showReceipts.value = false
 			loadOrders()
 			// the Receive gate reads the POS Settings flag — have it ready by
 			// the time the list renders
@@ -615,11 +490,18 @@ const dialogTitle = computed(() => {
 			? __("Edit Purchase Order")
 			: __("New Purchase Order")
 	if (view.value === "receive") return __("Receive Goods")
-	return showReceipts.value ? __("Purchase Receipts") : __("Purchase Orders")
+	return __("Purchase Orders")
 })
 
 function statusVariant(status) {
 	return STATUS_VARIANTS[status] || "gray"
+}
+
+// Same condition as the "Factory SO" badge: the live PO↔SO link resolves on
+// the selling-company SO side, and a factory-linked PO must not be cancelled
+// from the POS (the factory plans against it).
+function isFactoryLinked(order) {
+	return Boolean(order.is_internal_supplier && order.inter_company_order_reference)
 }
 
 async function loadOrders() {
@@ -641,34 +523,7 @@ async function loadOrders() {
 
 function onListSearch() {
 	clearTimeout(listTimer)
-	listTimer = setTimeout(loadList, 300)
-}
-
-function loadList() {
-	return showReceipts.value ? loadReceipts() : loadOrders()
-}
-
-async function loadReceipts() {
-	loadingReceipts.value = true
-	try {
-		const res = await call(`${PR_API}.get_purchase_receipts`, {
-			pos_profile: props.posProfile,
-			search_term: searchTerm.value || null,
-			limit: 50,
-		})
-		receipts.value = res?.receipts || []
-	} catch (error) {
-		showError(parseError(error)?.message || serverErrorMessage(error))
-	} finally {
-		loadingReceipts.value = false
-	}
-}
-
-function toggleReceipts() {
-	showReceipts.value = !showReceipts.value
-	searchTerm.value = ""
-	statusFilter.value = ""
-	loadList()
+	listTimer = setTimeout(loadOrders, 300)
 }
 
 function setStatus(value) {
@@ -699,21 +554,6 @@ async function cancelOrder(order) {
 
 function openInErpnext(order) {
 	window.open(`/app/purchase-order/${order.name}`, "_blank")
-}
-
-function openReceiptInErpnext(receipt) {
-	window.open(`/app/purchase-receipt/${receipt.name}`, "_blank")
-}
-
-async function cancelReceipt(receipt) {
-	if (!window.confirm(__("Cancel Purchase Receipt {0}?", [receipt.name]))) return
-	try {
-		const res = await call(`${PR_API}.cancel_purchase_receipt`, { name: receipt.name })
-		showSuccess(__("Purchase Receipt {0} cancelled", [res?.name || receipt.name]))
-		await loadReceipts()
-	} catch (error) {
-		showError(parseError(error)?.message || serverErrorMessage(error))
-	}
 }
 
 // ---------- receive view ----------
@@ -802,7 +642,6 @@ async function saveReceipt(submitAfter) {
 				: __("Purchase Receipt {0} saved", [res?.name]),
 		)
 		view.value = "list"
-		showReceipts.value = false
 		await loadOrders()
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))

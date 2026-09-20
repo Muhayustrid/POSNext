@@ -43,6 +43,14 @@ export const MANAGEMENT_MENU = [
 		requiresPurchaseOrder: true,
 	},
 	{
+		id: "purchase-receipt",
+		icon: "archive",
+		label: __("Purchase Receipt"),
+		activeClass: "bg-blue-100 text-blue-600",
+		group: "stock",
+		requiresPurchaseOrder: true,
+	},
+	{
 		id: "production",
 		icon: "tool",
 		label: __("Production"),

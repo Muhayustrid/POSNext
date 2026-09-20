@@ -52,7 +52,8 @@
 
 					<!-- Tabs -->
 					<div class="shrink-0 border-b border-gray-200 bg-white px-4 sm:px-6">
-						<div class="flex gap-1">
+						<div class="flex items-center justify-between gap-3">
+							<div class="flex gap-1">
 							<button
 								@click="activeTab = 'promotions'"
 								:class="[
@@ -81,6 +82,12 @@
 									<span>{{ __("Coupons") }}</span>
 								</div>
 							</button>
+							</div>
+							<RefreshButton
+								:loading="loading"
+								class="self-center"
+								@click="loadPromotions"
+							/>
 						</div>
 					</div>
 
@@ -1119,6 +1126,7 @@ import CouponManagement from "./CouponManagement.vue";
 import SelectInput from "../common/SelectInput.vue";
 import { Badge, Button, Card, FormControl, LoadingIndicator, createResource } from "frappe-ui";
 import { FeatherIcon } from "frappe-ui";
+import RefreshButton from "@/components/common/RefreshButton.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 

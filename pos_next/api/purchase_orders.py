@@ -424,5 +424,17 @@ def cancel_purchase_order(name):
 	_check_permission("cancel", doc=doc)
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted Purchase Order can be cancelled"))
+	# the live PO↔SO link lives on the selling-company SO side in v16 — a
+	# factory-linked PO feeds the factory's plan and must not be cancelled
+	# from the POS even when the UI hides the button
+	if doc.is_internal_supplier and frappe.db.exists(
+		"Sales Order",
+		{"inter_company_order_reference": doc.name, "docstatus": 1},
+	):
+		frappe.throw(
+			_("Purchase Order {0} is linked to a Sales Order and cannot be cancelled from the POS").format(
+				doc.name
+			)
+		)
 	doc.cancel()
 	return _po_summary(doc)

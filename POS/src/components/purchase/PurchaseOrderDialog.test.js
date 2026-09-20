@@ -89,7 +89,11 @@ vi.mock("frappe-ui", async () => {
 				])
 		},
 	})
-	return { Button, Dialog }
+	const FeatherIcon = defineComponent({
+		name: "FeatherIcon",
+		props: ["name"],
+	})
+	return { Button, Dialog, FeatherIcon }
 })
 
 import PurchaseOrderDialog from "./PurchaseOrderDialog.vue"
@@ -127,19 +131,6 @@ const SUBMITTED_ORDER = {
 		inter_company_order_reference: "SO-2026-00001",
 	}
 
-const RECEIPT = {
-	name: "PR-2026-00001",
-	supplier: "SUP-1",
-	supplier_name: "Roti Ltd",
-	posting_date: "2026-09-19",
-	status: "To Bill",
-	docstatus: 1,
-	grand_total: 150000,
-	currency: "IDR",
-	per_billed: 40,
-	company: "Test Co",
-	modified: "2026-09-19 10:00:00",
-}
 
 const PR_DRAFT = {
 	supplier: "SUP-1",
@@ -808,44 +799,4 @@ describe("PurchaseOrderDialog", () => {
 		expect(mocks.toast.success).not.toHaveBeenCalled()
 	})
 
-	it("Receipts segment lists receipts and gates Cancel behind the PR cancel permission", async () => {
-		const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
-		mocks.call.mockImplementation(async (method) => {
-			if (method.includes("get_purchase_orders")) return { orders: [] }
-			if (method.includes("get_purchase_receipts")) return { receipts: [RECEIPT] }
-			return {}
-		})
-		const wrapper = mountOpen()
-		await flushPromises()
-
-		await wrapper.find('[data-test="receipts-toggle"]').trigger("click")
-		await flushPromises()
-
-		expect(mocks.call).toHaveBeenCalledWith(
-			"pos_next.api.purchase_receipts.get_purchase_receipts",
-			expect.objectContaining({ pos_profile: "POS-1" }),
-		)
-		expect(wrapper.text()).toContain("PR-2026-00001")
-		expect(wrapper.text()).toContain("Billed 40%")
-		expect(wrapper.find('[data-test="cancel-receipt"]').exists()).toBe(true)
-
-		await wrapper.find('[data-test="cancel-receipt"]').trigger("click")
-		await flushPromises()
-		expect(confirmSpy).toHaveBeenCalled()
-		expect(mocks.call).toHaveBeenCalledWith(
-			"pos_next.api.purchase_receipts.cancel_purchase_receipt",
-			{ name: "PR-2026-00001" },
-		)
-
-		// without the cancel permission the button is gone
-		mocks.perms.cancel = false
-		await wrapper.setProps({ modelValue: false })
-		await flushPromises()
-		await wrapper.setProps({ modelValue: true })
-		await flushPromises()
-		await wrapper.find('[data-test="receipts-toggle"]').trigger("click")
-		await flushPromises()
-		expect(wrapper.find('[data-test="cancel-receipt"]').exists()).toBe(false)
-		confirmSpy.mockRestore()
-	})
 })

@@ -189,6 +189,15 @@
 								v-bind="$attrs"
 								@update:model-value="closeIfHidden"
 							/>
+							<PurchaseReceiptDialog
+								v-else-if="activeView === 'purchase-receipt'"
+								embedded
+								:model-value="true"
+								:pos-profile="posProfile"
+								class="h-full"
+								v-bind="$attrs"
+								@update:model-value="closeIfHidden"
+							/>
 						</div>
 					</div>
 				</div>
@@ -208,6 +217,7 @@ import SessionSummary from "@/components/sale/SessionSummary.vue"
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
 import ProductionDialog from "@/components/pos/ProductionDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
+import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
 
 defineOptions({ inheritAttrs: false })
 
