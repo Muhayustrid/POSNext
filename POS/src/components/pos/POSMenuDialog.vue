@@ -154,6 +154,16 @@
 									</div>
 								</div>
 							</template>
+							<template v-else-if="activeView === 'dashboard'">
+								<div class="h-full flex flex-col text-start">
+									<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
+										<ShiftDashboard
+											:opening-shift="openingShift"
+											:pos-profile="posProfile"
+										/>
+									</div>
+								</div>
+							</template>
 							<WarehouseAvailabilityDialog
 								v-else-if="activeView === 'products'"
 								embedded
@@ -214,6 +224,7 @@ import PromotionManagement from "@/components/sale/PromotionManagement.vue"
 import POSSettings from "@/components/settings/POSSettings.vue"
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue"
 import SessionSummary from "@/components/sale/SessionSummary.vue"
+import ShiftDashboard from "@/components/sale/ShiftDashboard.vue"
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
 import ProductionDialog from "@/components/pos/ProductionDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
@@ -246,7 +257,8 @@ const visibleItems = computed(() =>
 		(item) =>
 			(!item.requiresProduction || (props.canProduction && !props.isOffline)) &&
 			(!item.requiresPurchaseOrder ||
-				(props.canPurchaseOrder && !props.isOffline)),
+				(props.canPurchaseOrder && !props.isOffline)) &&
+			(!item.requiresOpenShift || (props.openingShift && !props.isOffline)),
 	),
 )
 
@@ -266,17 +278,23 @@ const activeLabel = computed(() =>
 	activeItem.value ? __(activeItem.value.label) : __("Menu"),
 )
 
-// initialView is one-shot per open: every false -> true transition re-reads it,
-// so reopening without one falls back to the first available item.
+// initialView is one-shot per open: every false -> true transition re-reads it.
+// Without (or with an unavailable) initialView, the burger keeps its
+// pre-dashboard landing: Invoice Management when visible, else the first
+// available item. Dashboard stays first in the sidebar order itself.
 watch(
 	() => props.open,
 	(open) => {
 		if (!open) return
 		const requested = props.initialView
-		activeView.value =
-			requested && visibleItems.value.some((i) => i.id === requested)
-				? requested
-				: (visibleItems.value[0]?.id ?? null)
+		if (requested && visibleItems.value.some((i) => i.id === requested)) {
+			activeView.value = requested
+			return
+		}
+		const fallback =
+			visibleItems.value.find((i) => i.id === "invoices") ||
+			visibleItems.value[0]
+		activeView.value = fallback?.id ?? null
 	},
 	{ immediate: true },
 )

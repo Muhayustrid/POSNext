@@ -290,7 +290,7 @@ describe("SessionSummary", () => {
 		expect(sales).toContain("16833.333 IDR") // average per order
 		expect(sales).toContain("After returns, tax included")
 		expect(sales).toContain("Submitted sales invoices (returns not counted)")
-		expect(sales).toContain("Total Sales ÷ Total Orders")
+		expect(sales).toContain("Gross Sales ÷ Total Orders")
 		expect(sales).toContain("52500 IDR") // gross sales secondary line
 	})
 

@@ -14,6 +14,14 @@ export const MENU_GROUPS = [
 
 export const MANAGEMENT_MENU = [
 	{
+		id: "dashboard",
+		icon: "bar-chart-2",
+		label: __("Dashboard"),
+		activeClass: "bg-rose-100 text-rose-600",
+		group: "sales",
+		requiresOpenShift: true,
+	},
+	{
 		id: "invoices",
 		icon: "file-text",
 		label: __("Invoice Management"),

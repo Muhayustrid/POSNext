@@ -7,7 +7,11 @@ import unittest
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from pos_next.api.shifts import get_period_summary, get_session_summary
+from pos_next.api.shifts import (
+	get_period_summary,
+	get_session_summary,
+	get_shift_dashboard,
+)
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
 	make_test_item,
@@ -403,7 +407,7 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(summary["net_sales"], self.NET)
 		# 2 + 2 - 2 + 1 + 2 (component rows count toward movement)
 		self.assertEqual(summary["total_qty"], 5)
-		self.assertEqual(summary["average_sale"], self.NET / 3)
+		self.assertEqual(summary["average_sale"], self.GROSS / 3)
 
 		# Cross-check against the authoritative closing builder
 		opening = frappe.get_doc("POS Opening Shift", self.opening_shift).as_dict()
@@ -626,6 +630,52 @@ class TestSessionSummary(IntegrationTestCase):
 	def test_missing_shift_throws(self):
 		with self.assertRaises(frappe.DoesNotExistError):
 			get_session_summary("_SESSUM_NO_SUCH_SHIFT")
+
+	# ── Shift dashboard (same gate and dataset, dashboard-only sections) ──────
+
+	def test_dashboard_missing_shift_throws(self):
+		with self.assertRaises(frappe.ValidationError):  # empty param
+			get_shift_dashboard(None)
+		with self.assertRaises(frappe.DoesNotExistError):
+			get_shift_dashboard("_SESSUM_NO_SUCH_SHIFT")
+
+	def test_dashboard_nonowner_denied(self):
+		frappe.set_user(self.other_user)
+		with self.assertRaises(frappe.PermissionError):
+			get_shift_dashboard(self.opening_shift)
+
+	def test_dashboard_contract_on_shared_fixture(self):
+		data = get_shift_dashboard(self.opening_shift)
+
+		# totals agree with the session summary on the same fixture
+		self.assertEqual(data["opening_shift"], self.opening_shift)
+		self.assertEqual(data["net_sales"], self.NET)
+		self.assertEqual(data["sales_count"], 3)
+		self.assertEqual(data["returns_total"], self.RETURN)
+		self.assertEqual(data["average_sale"], self.GROSS / 3)
+
+		hourly = data["hourly"]
+		self.assertTrue(hourly)
+		starts = [h["start"] for h in hourly]
+		self.assertEqual(starts, sorted(starts))
+		self.assertTrue(all(h["sales_count"] >= 0 for h in hourly))
+		self.assertEqual(
+			[h["is_current"] for h in hourly],
+			[False] * (len(hourly) - 1) + [True],
+		)
+
+		recent = data["recent"]
+		self.assertTrue(recent)
+		for row in recent:
+			for key in (
+				"name",
+				"posting_dt",
+				"is_return",
+				"outstanding_amount",
+				"amount",
+				"payment_mode",
+			):
+				self.assertIn(key, row)
 
 	def test_empty_shift_reports_zeros(self):
 		shift = self._make_opening_shift(opening_cash=25000)

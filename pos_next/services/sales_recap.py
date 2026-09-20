@@ -15,8 +15,10 @@ without payment rows moved no money and are excluded from every money/count
 aggregate; change given back leaves the drawer in the designated cash mode.
 """
 
+from datetime import timedelta
+
 import frappe
-from frappe.utils import cint, flt
+from frappe.utils import cint, flt, get_datetime
 
 from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
@@ -82,6 +84,26 @@ def period_scope(pos_profile, from_date, to_date):
 	)
 
 
+def hourly_buckets(period_start, now, max_hours=24):
+	"""Elapsed-hour buckets from shift start to now, materialized so an hour
+	with no sales is still present in the payload (pure — no DB; see
+	shift_hourly).
+
+	One bucket per whole hour elapsed plus the partial hour containing ``now``;
+	that final bucket is ``is_current`` and may be zero-length when ``now``
+	falls exactly on a boundary — never a trailing bucket beyond it. A shift
+	longer than max_hours (corrupt data) clamps to the most recent max_hours
+	buckets.
+	"""
+	start, end = get_datetime(period_start), get_datetime(now)
+	elapsed = max(0, int((end - start).total_seconds() // 3600))
+	first = max(0, elapsed + 1 - max_hours)
+	return [
+		{"start": start + timedelta(hours=hour), "is_current": hour == elapsed}
+		for hour in range(first, elapsed + 1)
+	]
+
+
 def build_recap(scope, cash_mode, pos_profile):
 	"""All recap sections for a scope; both endpoints share these keys."""
 	recap = {}
@@ -96,6 +118,106 @@ def build_recap(scope, cash_mode, pos_profile):
 	return recap
 
 
+def shift_hourly(scope, period_start):
+	"""Net sales per elapsed shift hour for the shift dashboard.
+
+	Same invoice universe as the money aggregates (drawer filter applied), so
+	a no-drawer credit return doesn't print negative sales in an hour whose
+	money never moved. Buckets come from hourly_buckets — zeros included,
+	chronological, current hour flagged; hours outside a clamped (over-24h)
+	window fall off the chart rather than being backdated into it. Negative
+	bucket indexes (invoices timestamped before the shift start in
+	pathological data) fold into bucket 0 so no money silently disappears.
+	"""
+	start = get_datetime(period_start)
+	buckets = hourly_buckets(period_start, get_datetime())
+	# hour offset of the first materialized bucket (the helper clamps long
+	# shifts to their most recent 24 hours)
+	first_index = int((buckets[0]["start"] - start).total_seconds() // 3600)
+	by_hour: dict = {}
+	for row in frappe.db.sql(
+		f"""
+		SELECT
+			TIMESTAMPDIFF(HOUR, %(start)s, TIMESTAMP(si.posting_date, si.posting_time)) AS hour_index,
+			SUM(si.base_grand_total) AS net_sales,
+			SUM(CASE WHEN si.is_return = 0 THEN 1 ELSE 0 END) AS sales_count
+		FROM {sales_invoice_union(_HOURLY_COLUMNS, where=scope.where)}
+		WHERE {scope.where} AND {_NO_DRAWER_RETURN}
+		GROUP BY hour_index
+		""",
+		dict(scope.values, start=start),
+		as_dict=True,
+	):
+		index = max(cint(row.hour_index), 0)
+		if index < first_index:
+			continue
+		acc = by_hour.setdefault(index, {"net_sales": 0.0, "sales_count": 0})
+		acc["net_sales"] += flt(row.net_sales)
+		acc["sales_count"] += cint(row.sales_count)
+	return [
+		{
+			"start": bucket["start"].strftime("%Y-%m-%d %H:%M:%S"),
+			"net_sales": flt(by_hour.get(first_index + hour, {}).get("net_sales")),
+			"sales_count": by_hour.get(first_index + hour, {}).get("sales_count", 0),
+			"is_current": bucket["is_current"],
+		}
+		for hour, bucket in enumerate(buckets)
+	]
+
+
+def shift_recent(scope, limit=10):
+	"""Most recent invoices of the shift for the dashboard feed.
+
+	Deliberately without the drawer filter: a no-drawer credit return moved no
+	money (every aggregate skips it) but the cashier still sees it listed.
+	payment_mode is the invoice's first payment row (smallest idx) or None —
+	fetched for all rows in one query, never per invoice.
+	"""
+	invoices = frappe.db.sql(
+		f"""
+		SELECT
+			si.name,
+			TIMESTAMP(si.posting_date, si.posting_time) AS posting_dt,
+			si.is_return,
+			si.outstanding_amount,
+			si.base_grand_total
+		FROM {sales_invoice_union(_RECENT_COLUMNS, where=scope.where)}
+		WHERE {scope.where}
+		ORDER BY si.posting_date DESC, si.posting_time DESC, si.creation DESC
+		LIMIT {cint(limit)}
+		""",
+		scope.values,
+		as_dict=True,
+	)
+	if not invoices:
+		return []
+
+	first_mode = {}
+	for row in frappe.db.sql(
+		"""
+		SELECT parent, mode_of_payment
+		FROM `tabSales Invoice Payment`
+		WHERE parent IN %(names)s AND parenttype IN ('POS Invoice', 'Sales Invoice')
+		ORDER BY idx ASC
+		""",
+		{"names": [invoice.name for invoice in invoices]},
+		as_dict=True,
+	):
+		first_mode.setdefault(row.parent, row.mode_of_payment)
+
+	return [
+		{
+			"name": invoice.name,
+			"posting_dt": str(invoice.posting_dt),
+			"is_return": bool(invoice.is_return),
+			"outstanding_amount": flt(invoice.outstanding_amount),
+			"amount": flt(invoice.base_grand_total),
+			"payment_mode": first_mode.get(invoice.name),
+		}
+		for invoice in invoices
+	]
+
+
 # Columns the recap queries read off the invoice union / item union.
 _INVOICE_COLUMNS = (
 	"si.name, si.docstatus, si.is_return, si.currency, si.grand_total,"
@@ -107,6 +229,11 @@ _ITEM_COLUMNS = (
 	"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
 	" sii.base_net_amount, sii.price_list_rate, sii.rate, sii.pos_package_role"
 )
+
+# Dashboard rollups read the posting timestamp the shared projection doesn't
+# carry; local column lists keep _INVOICE_COLUMNS (and its consumers) stable.
+_HOURLY_COLUMNS = _INVOICE_COLUMNS + ", si.posting_date, si.posting_time"
+_RECENT_COLUMNS = _INVOICE_COLUMNS + ", si.posting_date, si.posting_time, si.creation"
 
 
 def _invoice_from(scope):
@@ -182,7 +309,9 @@ def _aggregate_totals(scope):
 	result = {key: flt(row.get(key) or 0) for key in row}
 	result["invoice_count"] = cint(invoice_count)
 	sales_count = int(result.get("sales_count") or 0)
-	result["average_sale"] = flt(result.get("net_sales")) / sales_count if sales_count else 0
+	# gross over the sales-only count: netting returns into the numerator while
+	# the denominator counts sales alone understates the basket (or flips sign)
+	result["average_sale"] = flt(result.get("gross_sales")) / sales_count if sales_count else 0
 	result["currency_breakdown"] = [{"currency": r.currency, "amount": flt(r.amount)} for r in currencies]
 	return result
 

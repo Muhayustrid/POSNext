@@ -200,7 +200,7 @@
 						<div class="text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
 							{{ formatMoney(summary.average_sale) }}
 						</div>
-						<div class="text-xs text-gray-500 mt-0.5">{{ __("Total Sales ÷ Total Orders") }}</div>
+						<div class="text-xs text-gray-500 mt-0.5">{{ __("Gross Sales ÷ Total Orders") }}</div>
 					</div>
 				</div>
 				<div

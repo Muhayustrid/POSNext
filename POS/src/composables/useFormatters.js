@@ -49,7 +49,12 @@ function formatTime(time) {
 
 	// If it's a time string (contains colon), extract HH:MM
 	if (typeof time === "string" && time.includes(":")) {
-		const parts = time.split(":");
+		// A datetime string ("2026-09-20 14:23:00.123456") carries a date
+		// prefix — drop it or the year parses as the hour.
+		const timePart = time.includes(" ")
+			? time.slice(time.lastIndexOf(" ") + 1)
+			: time;
+		const parts = timePart.split(":");
 		if (parts.length >= 2) {
 			const hours = Number.parseInt(parts[0], 10);
 			const minutes = parts[1];
@@ -79,7 +84,9 @@ function formatDate(date) {
 	if (!date) return "";
 
 	if (typeof date === "string") {
-		const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+		// Not $-anchored: datetime strings take the safe string path too
+		// (new Date("YYYY-MM-DD HH:MM:SS") is Invalid Date on Safari).
+		const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
 		if (match) {
 			const [, year, month, day] = match;
 			return `${day}/${month}/${year.slice(-2)}`;

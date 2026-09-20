@@ -10,7 +10,13 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import cint, flt, get_datetime, getdate, nowdate, nowtime
 
 from pos_next.api.utilities import get_wallet_payment_modes
-from pos_next.services.sales_recap import build_recap, period_scope, shift_scope
+from pos_next.services.sales_recap import (
+	build_recap,
+	period_scope,
+	shift_hourly,
+	shift_recent,
+	shift_scope,
+)
 
 
 @frappe.whitelist()
@@ -392,6 +398,65 @@ def get_session_summary(opening_shift):
 	summary.update(_closing_time_info(shift))
 	summary.update(build_recap(shift_scope(opening_shift), cash_mode, shift.pos_profile))
 	return summary
+
+
+@frappe.whitelist()
+def get_shift_dashboard(opening_shift):
+	"""Shift-scoped sales dashboard for an active POS session.
+
+	Same dataset and money semantics as get_session_summary (see
+	pos_next.services.sales_recap), extended with two dashboard-only
+	sections: ``hourly`` (net sales per elapsed shift hour, current hour
+	flagged) and ``recent`` (latest invoices, credit returns included).
+
+	Security: only the shift owner (or a user with POS Opening Shift read
+	access) may view it; the shift itself pins company/profile, so no
+	cross-company access via arbitrary IDs.
+	"""
+	if not opening_shift:
+		frappe.throw(_("Opening shift is required"))
+
+	shift = frappe.db.get_value(
+		"POS Opening Shift",
+		opening_shift,
+		["name", "user", "pos_profile", "company", "period_start_date", "status", "pos_schedule_deadline"],
+		as_dict=True,
+	)
+	if not shift:
+		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
+
+	if (
+		shift.user != frappe.session.user
+		and not frappe.has_permission("POS Opening Shift", "read", doc=opening_shift)
+	):
+		# doc= enforces per-document user permissions (e.g. company scope),
+		# matching what Desk would enforce on this exact shift
+		frappe.throw(_("You can only view your own session summary"), frappe.PermissionError)
+
+	company_currency = frappe.get_cached_value("Company", shift.company, "default_currency")
+	profile_row = frappe.db.get_value(
+		"POS Profile",
+		shift.pos_profile,
+		("posa_cash_mode_of_payment", "pos_profile_group"),
+		as_dict=True,
+	)
+	cash_mode = profile_row.posa_cash_mode_of_payment or "Cash"
+
+	scope = shift_scope(opening_shift)
+	dashboard = {
+		"opening_shift": opening_shift,
+		"pos_profile": shift.pos_profile,
+		"cashier": _cashier_full_name(shift.user),
+		"company": shift.company,
+		"company_currency": company_currency,
+		"cash_mode_of_payment": cash_mode,
+		"period_start_date": str(shift.period_start_date),
+		"generated_at": str(get_datetime()),
+	}
+	dashboard.update(build_recap(scope, cash_mode, shift.pos_profile))
+	dashboard["hourly"] = shift_hourly(scope, shift.period_start_date)
+	dashboard["recent"] = shift_recent(scope)
+	return dashboard
 
 
 # Longest posting-date window one recap may cover: a full (leap) year.
