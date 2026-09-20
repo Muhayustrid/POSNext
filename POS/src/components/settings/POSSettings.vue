@@ -328,7 +328,7 @@
 														class="text-xs text-blue-800 leading-relaxed"
 														:inner="
 															__(
-																'&lt;strong&gt;Note:&lt;strong&gt; When enabled, the system will allow sales even when stock quantity is zero or negative. This is useful for handling stock sync delays or backorders. All transactions are tracked in the stock ledger.'
+																'&lt;strong&gt;Note:&lt;/strong&gt; When enabled, the system will allow sales even when stock quantity is zero or negative. This is useful for handling stock sync delays or backorders. All transactions are tracked in the stock ledger.'
 															)
 														"
 													/>
@@ -436,10 +436,10 @@
 																:inner="
 																	stockSyncStatus.enabled
 																		? __(
-																				'&lt;strong&gt;Status:&lt;strong&gt; Running'
+																				'&lt;strong&gt;Status:&lt;/strong&gt; Running'
 																		  )
 																		: __(
-																				'&lt;strong&gt;Status:&lt;strong&gt; Stopped'
+																				'&lt;strong&gt;Status:&lt;/strong&gt; Stopped'
 																		  )
 																"
 															/>
@@ -447,7 +447,7 @@
 																:tag="'p'"
 																:inner="
 																	__(
-																		'&lt;strong&gt;Items Tracked:&lt;strong&gt; {0}',
+																		'&lt;strong&gt;Items Tracked:&lt;/strong&gt; {0}',
 																		[
 																			stockSyncStatus.itemCount ||
 																				0,
@@ -460,7 +460,7 @@
 																:inner="
 																	stockSyncStatus.warehouse
 																		? __(
-																				'&lt;strong&gt;Warehouse:&lt;strong&gt; {0}',
+																				'&lt;strong&gt;Warehouse:&lt;/strong&gt; {0}',
 																				[
 																					stockSyncStatus.warehouse,
 																				]
@@ -473,7 +473,7 @@
 																:inner="
 																	stockSyncStatus.lastSync
 																		? __(
-																				'&lt;strong&gt;Last Sync:&lt;strong&gt; {0}',
+																				'&lt;strong&gt;Last Sync:&lt;/strong&gt; {0}',
 																				[
 																					formatSyncTime(
 																						stockSyncStatus.lastSync
@@ -481,7 +481,7 @@
 																				]
 																		  )
 																		: __(
-																				'&lt;strong&gt;Last Sync:&lt;strong&gt; Never'
+																				'&lt;strong&gt;Last Sync:&lt;/strong&gt; Never'
 																		  )
 																"
 															/>
@@ -1601,7 +1601,7 @@
 												<router-link to="/direct-print" class="font-semibold underline">
 													{{ __("Direct Print") }}
 												</router-link>
-												{{ __('.') }}
+												.
 											</p>
 										</div>
 									</div>
@@ -1783,9 +1783,9 @@ const eodSubsectionClasses = computed(() => getSubsectionClasses("gray"));
 
 // Printing options
 const printDriverOptions = [
-	{ label: "Browser", value: "browser" },
-	{ label: "QZ Tray", value: "qz" },
-	{ label: "iMin", value: "imin" },
+	{ label: __("Browser"), value: "browser" },
+	{ label: __("QZ Tray"), value: "qz" },
+	{ label: __("iMin"), value: "imin" },
 ];
 const printModeOptions = [
 	{ label: __("Off"), value: "Off" },
@@ -1793,9 +1793,9 @@ const printModeOptions = [
 	{ label: __("Auto"), value: "Auto" },
 ];
 const paperWidthOptions = [
-	{ label: "58mm (384 dots)", value: "58mm" },
-	{ label: "80mm (576 dots)", value: "80mm" },
-	{ label: "Custom", value: "custom" },
+	{ label: __("58mm (384 dots)"), value: "58mm" },
+	{ label: __("80mm (576 dots)"), value: "80mm" },
+	{ label: __("Custom"), value: "custom" },
 ];
 
 // iMin access trigger — the same bait the Direct Print page performs on
@@ -1810,7 +1810,7 @@ async function requestIminAccess() {
 	iminAccess.value = null;
 	try {
 		const loaded = await ensureIminSdk();
-		if (!loaded) throw new Error("iMin SDK gagal dimuat");
+		if (!loaded) throw new Error(__("iMin SDK gagal dimuat"));
 		const driver = getTransport().getDriver("imin");
 		const s = await driver.getStatus();
 		iminAccess.value = {

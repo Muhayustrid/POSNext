@@ -1,4 +1,5 @@
 import { logger } from "@/utils/logger"
+import { __ } from "@/utils/translation"
 import { getTransport } from "./print/transport"
 import { silentPrintDoc } from "./printInvoice"
 
@@ -60,7 +61,7 @@ export async function printEODReport(closingShiftName, posProfile) {
 			"width=800,height=600",
 		)
 		if (!printWindow) {
-			throw new Error("Popup blocked — check your browser settings.")
+			throw new Error(__("Popup blocked — check your browser settings."))
 		}
 		return { method: "printview", success: true }
 	}

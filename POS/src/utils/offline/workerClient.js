@@ -6,6 +6,7 @@
 
 import { logger } from "../logger";
 import { offlineState } from "./offlineState";
+import { __ } from "@/utils/translation";
 
 const log = logger.create("OfflineWorker");
 
@@ -248,7 +249,7 @@ class OfflineWorkerClient {
 		this.healthCheckActive = false;
 
 		// Reject all pending messages
-		this.rejectAllPending(`Worker crashed: ${reason}`);
+		this.rejectAllPending(__("Worker crashed: {0}", [reason]));
 
 		// Terminate crashed worker
 		if (this.worker) {
@@ -322,7 +323,7 @@ class OfflineWorkerClient {
 				this.worker.postMessage({ type, payload, id });
 			} catch (error) {
 				this.pendingMessages.delete(id);
-				reject(new Error(`Failed to post message: ${error.message}`));
+				reject(new Error(__("Failed to post message: {0}", [error.message])));
 				return;
 			}
 
@@ -344,7 +345,10 @@ class OfflineWorkerClient {
 					} else {
 						reject(
 							new Error(
-								`Worker message timeout: ${type} (retries: ${currentRetries})`
+								__("Worker message timeout: {0} (retries: {1})", [
+									type,
+									currentRetries,
+								])
 							)
 						);
 					}
@@ -398,9 +402,9 @@ class OfflineWorkerClient {
 			case "CACHE_OFFERS":
 			case "CLEAR_OFFERS_CACHE":
 				// For write operations, throw error so caller knows to handle differently
-				throw new Error(`Worker unavailable: Cannot perform ${type}`);
+				throw new Error(__("Worker unavailable: Cannot perform {0}", [type]));
 			default:
-				throw new Error(`Worker unavailable: Unknown operation ${type}`);
+				throw new Error(__("Worker unavailable: Unknown operation {0}", [type]));
 		}
 	}
 

@@ -548,13 +548,13 @@ watch(show, (val) => emit("update:modelValue", val))
 
 // ---------- list view ----------
 const STATUS_CHIPS = [
-	{ value: "", label: "All" },
-	{ value: "Draft", label: "Draft" },
-	{ value: "To Receive and Bill", label: "To Receive and Bill" },
-	{ value: "To Receive", label: "To Receive" },
-	{ value: "To Bill", label: "To Bill" },
-	{ value: "Completed", label: "Completed" },
-	{ value: "Cancelled", label: "Cancelled" },
+	{ value: "", label: __("All") },
+	{ value: "Draft", label: __("Draft") },
+	{ value: "To Receive and Bill", label: __("To Receive and Bill") },
+	{ value: "To Receive", label: __("To Receive") },
+	{ value: "To Bill", label: __("To Bill") },
+	{ value: "Completed", label: __("Completed") },
+	{ value: "Cancelled", label: __("Cancelled") },
 ]
 
 const STATUS_VARIANTS = {

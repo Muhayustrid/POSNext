@@ -8,7 +8,7 @@
 						v-if="buildLabel"
 						class="ml-2 align-middle text-[10px] font-normal text-gray-400"
 						:title="__('Build executed by this page — if it is old, the service worker served a stale bundle')"
-					>build {{ buildLabel }}</span>
+					>{{ __("build {0}", [buildLabel]) }}</span>
 				</h1>
 				<div class="flex items-center gap-2">
 					<Badge v-if="currentDriver" :theme="statusOk ? 'green' : 'orange'">
@@ -183,7 +183,7 @@
 						<Input
 							id="direct-print-host"
 							v-model="cfg.host"
-							:placeholder="__('127.0.0.1')"
+							placeholder="127.0.0.1"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Hostname or IP for the iMin service. Port is fixed to 8081.") }}
@@ -242,7 +242,7 @@
 							id="direct-print-custom-dots"
 							v-model="customDotsText"
 							type="number"
-							:placeholder="__('384')"
+							placeholder="384"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Multiple of 8, 8–576. Snapped down to the nearest multiple of 8.") }}
@@ -279,7 +279,7 @@
 							v-model="copyDelayText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('800')"
+							placeholder="800"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Tear-off pause so the first copy can be removed. Default 800.") }}
@@ -316,7 +316,7 @@
 							v-model="feedDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('160')"
+							placeholder="160"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -336,7 +336,7 @@
 							v-model="tailDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('24')"
+							placeholder="24"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -356,7 +356,7 @@
 							v-model="fontScaleText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('100')"
+							placeholder="100"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -376,7 +376,7 @@
 							v-model="crewFontScaleText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('100')"
+							placeholder="100"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -396,7 +396,7 @@
 							v-model="lineSpacingText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('100')"
+							placeholder="100"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -416,7 +416,7 @@
 							v-model="sideMarginDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('16')"
+							placeholder="16"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -436,7 +436,7 @@
 							v-model="topMarginDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('0')"
+							placeholder="0"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -456,7 +456,7 @@
 							v-model="queueGapDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('40')"
+							placeholder="40"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{
@@ -493,7 +493,7 @@
 									String(effectiveCfg.sideMarginDots),
 									String(effectiveCfg.topMarginDots),
 									String(effectiveCfg.queueGapDots),
-									effectiveCfg.crewSlipEnabled ? "On" : "Off",
+									effectiveCfg.crewSlipEnabled ? __("On") : __("Off"),
 								],
 							)
 						}}
@@ -657,7 +657,7 @@
 							v-model="eodCopyDelayText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('800')"
+							placeholder="800"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Tear-off pause between closing copies. Default 800.") }}
@@ -673,7 +673,7 @@
 							v-model="eodFeedDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('160')"
+							placeholder="160"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Distance the paper moves after the copy, 0.125 mm per dot. 160 = 20 mm.") }}
@@ -689,7 +689,7 @@
 							v-model="eodTailDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('24')"
+							placeholder="24"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Blank space inside the image below the last line. 24 = 3 mm.") }}
@@ -705,7 +705,7 @@
 							v-model="eodFontScaleText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('100')"
+							placeholder="100"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Separate from the receipt knob: the closing report is read at the desk, not handed over. 60–250.") }}
@@ -721,7 +721,7 @@
 							v-model="eodLineSpacingText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('100')"
+							placeholder="100"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Vertical density of the closing report. 100 = as authored. 50–150.") }}
@@ -737,7 +737,7 @@
 							v-model="eodSideMarginDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('16')"
+							placeholder="16"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Blank space on the left and right of every line, in dots. 0–64.") }}
@@ -753,7 +753,7 @@
 							v-model="eodTopMarginDotsText"
 							type="text"
 							inputmode="numeric"
-							:placeholder="__('0')"
+							placeholder="0"
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Blank space above the closing report content, in dots. 0 keeps the format's own top padding. 0–128.") }}
@@ -1087,7 +1087,7 @@ const paperOptions = computed(() => {
 		label: PAPER_PROFILES[k].label,
 		value: k,
 	}))
-	return [...base, { label: "custom", value: "custom" }]
+	return [...base, { label: __("custom"), value: "custom" }]
 })
 
 const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
@@ -1096,9 +1096,9 @@ const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
 }))
 
 const crewOptions = [
-	{ label: "Server default", value: "" },
-	{ label: "On", value: "1" },
-	{ label: "Off", value: "0" },
+	{ label: __("Server default"), value: "" },
+	{ label: __("On"), value: "1" },
+	{ label: __("Off"), value: "0" },
 ]
 const crewSlipChoice = ref("") // "" | "1" | "0"
 
@@ -1348,7 +1348,7 @@ async function onSaveReceiptConfig() {
 			customDots = n
 		}
 		const copyDelayMs = parseNumericField(
-			"Delay between copies",
+			__("Delay between copies"),
 			copyDelayText.value,
 			{
 				min: 0,
@@ -1356,23 +1356,23 @@ async function onSaveReceiptConfig() {
 				dflt: 800,
 			},
 		)
-		const feedDots = parseNumericField("Paper advance", feedDotsText.value, {
+		const feedDots = parseNumericField(__("Paper advance"), feedDotsText.value, {
 			min: 8,
 			max: 500,
 			dflt: DEFAULT_FEED_DOTS,
 		})
-		const tailDots = parseNumericField("Tail spacer", tailDotsText.value, {
+		const tailDots = parseNumericField(__("Tail spacer"), tailDotsText.value, {
 			min: 0,
 			max: 200,
 			dflt: DEFAULT_TAIL_DOTS,
 		})
-		const fontScale = parseNumericField("Font scale", fontScaleText.value, {
+		const fontScale = parseNumericField(__("Font scale"), fontScaleText.value, {
 			min: 60,
 			max: 250,
 			dflt: 100,
 		})
 		const crewFontScale = parseNumericField(
-			"Crew copy font scale",
+			__("Crew copy font scale"),
 			crewFontScaleText.value,
 			{
 				min: 60,
@@ -1381,7 +1381,7 @@ async function onSaveReceiptConfig() {
 			},
 		)
 		const lineSpacing = parseNumericField(
-			"Line spacing",
+			__("Line spacing"),
 			lineSpacingText.value,
 			{
 				min: 50,
@@ -1390,7 +1390,7 @@ async function onSaveReceiptConfig() {
 			},
 		)
 		const sideMarginDots = parseNumericField(
-			"Side margin",
+			__("Side margin"),
 			sideMarginDotsText.value,
 			{
 				min: 0,
@@ -1399,7 +1399,7 @@ async function onSaveReceiptConfig() {
 			},
 		)
 		const topMarginDots = parseNumericField(
-			"Top margin",
+			__("Top margin"),
 			topMarginDotsText.value,
 			{
 				min: 0,
@@ -1408,7 +1408,7 @@ async function onSaveReceiptConfig() {
 			},
 		)
 		const queueGapDots = parseNumericField(
-			"Queue number gap",
+			__("Queue number gap"),
 			queueGapDotsText.value,
 			{
 				min: 0,
@@ -1452,7 +1452,7 @@ async function onSaveEodConfig() {
 		// Same ranges as the resolver's own clamps, so a saved value never
 		// differs from the value the print actually used.
 		const eodCopyDelayMs = parseNumericField(
-			"EOD delay between copies",
+			__("EOD delay between copies"),
 			eodCopyDelayText.value,
 			{
 				min: 0,
@@ -1461,7 +1461,7 @@ async function onSaveEodConfig() {
 			},
 		)
 		const eodFeedDots = parseNumericField(
-			"EOD paper advance",
+			__("EOD paper advance"),
 			eodFeedDotsText.value,
 			{
 				min: 8,
@@ -1470,7 +1470,7 @@ async function onSaveEodConfig() {
 			},
 		)
 		const eodTailDots = parseNumericField(
-			"EOD tail spacer",
+			__("EOD tail spacer"),
 			eodTailDotsText.value,
 			{
 				min: 0,
@@ -1479,7 +1479,7 @@ async function onSaveEodConfig() {
 			},
 		)
 		const eodFontScale = parseNumericField(
-			"EOD font scale",
+			__("EOD font scale"),
 			eodFontScaleText.value,
 			{
 				min: 60,
@@ -1488,7 +1488,7 @@ async function onSaveEodConfig() {
 			},
 		)
 		const eodLineSpacing = parseNumericField(
-			"EOD line spacing",
+			__("EOD line spacing"),
 			eodLineSpacingText.value,
 			{
 				min: 50,
@@ -1497,7 +1497,7 @@ async function onSaveEodConfig() {
 			},
 		)
 		const eodSideMarginDots = parseNumericField(
-			"EOD side margin",
+			__("EOD side margin"),
 			eodSideMarginDotsText.value,
 			{
 				min: 0,
@@ -1506,7 +1506,7 @@ async function onSaveEodConfig() {
 			},
 		)
 		const eodTopMarginDots = parseNumericField(
-			"EOD top margin",
+			__("EOD top margin"),
 			eodTopMarginDotsText.value,
 			{
 				min: 0,

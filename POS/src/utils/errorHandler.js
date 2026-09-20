@@ -125,8 +125,11 @@ export function parseError(error) {
 		if (match) {
 			const [, quantity, itemName, warehouse] = match;
 			const qty = Number.parseFloat(quantity);
-			const unit = qty === 1 ? "unit" : "units";
-			context.message = `Not enough stock for "${itemName}".\n\nYou need ${qty} ${unit} but the warehouse "${warehouse}" doesn't have enough available.\n\nPlease reduce the quantity or check another warehouse.`;
+			const unit = qty === 1 ? __("unit") : __("units");
+			context.message = __(
+				"Not enough stock for \"{0}\".\n\nYou need {1} {2} but the warehouse \"{3}\" doesn't have enough available.\n\nPlease reduce the quantity or check another warehouse.",
+				[itemName, qty, unit, warehouse]
+			);
 		} else if (!context.message || context.message === "An unexpected error occurred") {
 			context.message = __(
 				"Not enough stock available in the warehouse.\n\nPlease reduce the quantity or check stock availability."

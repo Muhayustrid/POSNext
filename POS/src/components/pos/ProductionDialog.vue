@@ -250,7 +250,7 @@ const recipesResource = createResource({
 		loadingRecipes.value = false;
 	},
 	onError(err) {
-		errorMessage.value = err?.messages?.join("\n") || err || "Failed to load recipes";
+		errorMessage.value = err?.messages?.join("\n") || err || __("Failed to load recipes");
 		loadingRecipes.value = false;
 	},
 });
@@ -317,7 +317,7 @@ const createResource$ = createResource({
 	},
 	onError(err) {
 		submitting.value = false;
-		errorMessage.value = err?.messages?.join("\n") || err || "Production failed";
+		errorMessage.value = err?.messages?.join("\n") || err || __("Production failed");
 	},
 });
 

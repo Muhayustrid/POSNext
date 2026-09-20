@@ -7,6 +7,7 @@
  *   80mm paper -> 72mm effective print width -> 576 dots.
  * The full paper width is never the print area; the content budget is dots.
  */
+import { __ } from "@/utils/translation"
 
 export const DOTS_PER_MM = 8
 export const MAX_DOTS = 576
@@ -28,15 +29,15 @@ export function dotsForPaper(paper, customDots) {
 	if (paper === "custom") {
 		const raw = Number(customDots ?? 384)
 		if (!Number.isFinite(raw) || raw <= 0) {
-			throw new Error(`Invalid custom dot count: ${customDots}`)
+			throw new Error(__("Invalid custom dot count: {0}", { 0: customDots }))
 		}
 		const snapped = Math.min(MAX_DOTS, Math.floor(raw / 8) * 8)
 		if (snapped < 8)
-			throw new Error(`Custom dot count too small: ${customDots}`)
+			throw new Error(__("Custom dot count too small: {0}", { 0: customDots }))
 		return snapped
 	}
 
 	if (!Object.hasOwn(PAPER_PROFILES, paper))
-		throw new Error(`Unknown paper profile: ${paper}`)
+		throw new Error(__("Unknown paper profile: {0}", { 0: paper }))
 	return PAPER_PROFILES[paper].dots
 }

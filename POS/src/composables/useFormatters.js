@@ -3,6 +3,7 @@
  * Provides common formatting functions for use across all components
  */
 import { formatCurrencyNumber } from "@/utils/currency";
+import { __ } from "@/utils/translation";
 
 /**
  * Format currency values (Indonesian grouping, no decimals)
@@ -54,7 +55,7 @@ function formatTime(time) {
 			const minutes = parts[1];
 			if (Number.isNaN(hours)) return time;
 
-			const period = hours >= 12 ? "PM" : "AM";
+			const period = hours >= 12 ? __("PM") : __("AM");
 			const displayHours = hours % 12 || 12;
 			return `${displayHours}:${minutes} ${period}`;
 		}

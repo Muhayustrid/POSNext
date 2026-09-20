@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn().mockResolvedValue({}) }))
 vi.mock("@/utils/logger", () => ({
-	logger: { create: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) },
+	logger: {
+		create: () => ({
+			debug: vi.fn(),
+			warn: vi.fn(),
+			info: vi.fn(),
+			error: vi.fn(),
+		}),
+	},
 }))
 
 function okDriver(id) {

@@ -1830,7 +1830,7 @@
 									'text-lg font-semibold rounded-lg bg-orange-50 border-2 border-orange-200 hover:border-orange-400 hover:bg-orange-100 text-orange-600 transition-all active:scale-95',
 								]"
 							>
-								C
+								{{ __("C") }}
 							</button>
 
 							<!-- Row 3: 1, 2, 3, Add (spans 2 rows) -->

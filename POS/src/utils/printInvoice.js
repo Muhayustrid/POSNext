@@ -192,7 +192,9 @@ export function buildReceiptHTML(invoiceData) {
 							</div>
 							${
 								hasDiscount
-									? `<div class="item-discount"><span>Discount ${
+									? `<div class="item-discount"><span>${__(
+											"Discount ",
+										)}${
 											item.discount_percentage
 												? `(${Number(item.discount_percentage).toFixed(2)}%)`
 												: ""
@@ -277,7 +279,7 @@ export function buildReceiptHTML(invoiceData) {
 					${
 						invoiceData.discount_amount
 							? `
-					<div class="total-row" style="color: #28a745;"><span>Additional Discount${
+					<div class="total-row" style="color: #28a745;"><span>${__("Additional Discount")}${
 						invoiceData.additional_discount_percentage
 							? ` (${Number(invoiceData.additional_discount_percentage).toFixed(
 									1,
@@ -336,7 +338,7 @@ export function buildReceiptHTML(invoiceData) {
 					${
 						invoiceData.footer
 							? ""
-							: `<div style="font-size: 10px;">Powered by <a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>`
+							: `<div style="font-size: 10px;">${__("Powered by ")}<a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>`
 					}
 				</div>
 			</div>`
@@ -448,7 +450,7 @@ export async function printInvoice(
 			"width=800,height=600",
 		)
 		if (!printWindow) {
-			throw new Error("Popup blocked — check your browser settings.")
+			throw new Error(__("Popup blocked — check your browser settings."))
 		}
 		return true
 	} catch (error) {
@@ -491,7 +493,7 @@ export async function printInvoiceByName(
 	const invoiceDoc = await call("pos_next.api.invoices.get_invoice", {
 		invoice_name: invoiceName,
 	})
-	if (!invoiceDoc) throw new Error("Invoice not found")
+	if (!invoiceDoc) throw new Error(__("Invoice not found"))
 
 	const settings = await resolvePrintSettings(
 		invoiceDoc.pos_profile,

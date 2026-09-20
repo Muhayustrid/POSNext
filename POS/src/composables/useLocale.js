@@ -37,15 +37,9 @@ export const SUPPORTED_LOCALES = {
 		countryCode: "us",
 		dir: "ltr",
 	},
-	ar: {
-		name: "Arabic",
-		nativeName: "العربية",
-		countryCode: "eg",
-		dir: "rtl",
-	},
 	id: {
 		name: "Indonesian",
-		nativeName: "Bahasa",
+		nativeName: "Indonesia",
 		countryCode: "id",
 		dir: "ltr",
 	},

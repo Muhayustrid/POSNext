@@ -2,6 +2,8 @@ import { call as frappeCall } from "frappe-ui";
 
 import { forceRefreshCSRFToken, isCSRFApiError } from "./csrf";
 
+import { __ } from "@/utils/translation";
+
 // Wrapped call function with CSRF auto-refresh
 export async function call(method, params) {
 	try {
@@ -30,7 +32,10 @@ export async function call(method, params) {
  * message (already passed through frappe's `_()` in the user's language)
  * lives on `error.messages`.
  */
-export function serverErrorMessage(error, fallback = "Something went wrong. Please try again.") {
+export function serverErrorMessage(
+	error,
+	fallback = __("Something went wrong. Please try again.")
+) {
 	const messages = Array.isArray(error?.messages) ? error.messages.filter(Boolean) : [];
 	if (messages.length) return messages.join(" ");
 	return fallback;

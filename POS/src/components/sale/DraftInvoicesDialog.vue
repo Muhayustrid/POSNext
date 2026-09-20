@@ -271,8 +271,8 @@ function handlePrintDraft(draft) {
 			posting_date: draft.created_at,
 			customer_name: draft.customer?.customer_name || draft.customer?.name || draft.customer,
 			status: "Draft",
-			header: "Draft",
-			footer: "الفاتورة لم يتم تسجيلها في حسابات الجهة، وبالتالي لا يُعتد بها، ولا تتحمل الجهة أي مسؤولية عن أي أضرار قد تنتج عنها.",
+			header: __("Draft"),
+			footer: __("الفاتورة لم يتم تسجيلها في حسابات الجهة، وبالتالي لا يُعتد بها، ولا تتحمل الجهة أي مسؤولية عن أي أضرار قد تنتج عنها."),
 		};
 		printInvoiceCustom(invoiceData);
 	} catch (error) {

@@ -25,6 +25,7 @@
  * prohibition was correct only for SDK builds that really do auto-cut.
  */
 import { logger } from "@/utils/logger"
+import { __ } from "@/utils/translation"
 
 import { renderHTMLToBitmap } from "./receipt_renderer"
 import {
@@ -101,13 +102,13 @@ export function createIminDriver(deps = {}) {
 	async function ensurePrinter() {
 		if (printer) return printer
 		if (!deps.factory) {
-			throw new Error("iMin SDK not loaded (window.IminPrinter missing)")
+			throw new Error(__("iMin SDK not loaded (window.IminPrinter missing)"))
 		}
 		const p = deps.factory()
 		const host = loadPrinterHost()
 		if (host) p.address = host
 		const connected = await p.connect()
-		if (!connected) throw new Error("Could not connect to iMin print service")
+		if (!connected) throw new Error(__("Could not connect to iMin print service"))
 		p.initPrinter("SPI")
 		printer = p
 		return p
@@ -151,8 +152,8 @@ export function createIminDriver(deps = {}) {
 			const code = Number(status?.value)
 			if (code === 0) return
 			if (Date.now() > deadline) {
-				if (code === 8 || code === 7) throw new Error("Printer out of paper")
-				throw new Error(`Printer not connected (status ${code})`)
+				if (code === 8 || code === 7) throw new Error(__("Printer out of paper"))
+				throw new Error(__("Printer not connected (status {0})", { 0: code }))
 			}
 			await new Promise((r) => setTimeout(r, statusPollMs))
 		}
@@ -176,7 +177,7 @@ export function createIminDriver(deps = {}) {
 				const status = await callStatus(p)
 				const code = Number(status?.value)
 				const out = { ok: code === 0, code }
-				if (status?.timedOut) out.message = "no status reply (device busy?)"
+				if (status?.timedOut) out.message = __("no status reply (device busy?)")
 				return out
 			} catch (err) {
 				return { ok: false, code: -1, message: err.message }
@@ -324,7 +325,7 @@ export function createIminDriver(deps = {}) {
 		describe() {
 			return {
 				id: "imin",
-				label: "iMin Direct",
+				label: __("iMin Direct"),
 				detail: loadPrinterHost() || "127.0.0.1:8081",
 			}
 		},

@@ -239,7 +239,7 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 			),
 		)
 	}
-	body.push(DIVIDER, '<div class="footer">-- Akhir Laporan --</div>')
+	body.push(DIVIDER, `<div class="footer">${__("-- Akhir Laporan --")}</div>`)
 
 	return `<!DOCTYPE html>
 <html>

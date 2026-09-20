@@ -2,6 +2,7 @@ import qz from "qz-tray";
 import { ref } from "vue";
 import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
+import { __ } from "@/utils/translation";
 
 const log = logger.create("QZTray");
 
@@ -235,13 +236,13 @@ export async function printHTML(html, printerName, options = {}) {
 	if (!qz.websocket.isActive()) {
 		const ok = await connect();
 		if (!ok) {
-			throw new Error("QZ Tray is not available");
+			throw new Error(__("QZ Tray is not available"));
 		}
 	}
 
 	const printer = printerName || getSavedPrinterName();
 	if (!printer) {
-		throw new Error("No printer selected. Please select a printer in POS Settings.");
+		throw new Error(__("No printer selected. Please select a printer in POS Settings."));
 	}
 
 	const config = qz.configs.create(printer, {

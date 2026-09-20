@@ -9,6 +9,7 @@
  */
 import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
+import { __ } from "@/utils/translation"
 
 import { createBrowserDriver } from "./browser_client"
 import { createIminDriver } from "./imin_client"
@@ -121,7 +122,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 			paper_width: current.paper,
 			duration_ms: Date.now() - started,
 		})
-		throw new Error(errors.join(" | ") || "No print driver available")
+		throw new Error(errors.join(" | ") || __("No print driver available"))
 	}
 
 	return {

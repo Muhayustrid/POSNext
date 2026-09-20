@@ -15,7 +15,7 @@
 			<div class="w-16 flex-shrink-0 flex items-center justify-center">
 				<button
 					class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-md flex-shrink-0 hover:from-blue-600 hover:to-blue-700 active:scale-95 transition-all"
-					:aria-label="'POS Next'"
+					:aria-label="__('POS Next')"
 					:title="__('POS Next')"
 				>
 					<svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
@@ -37,7 +37,7 @@
 							<h1
 								class="text-xs sm:text-base font-bold text-gray-900 truncate flex-shrink"
 							>
-								{{ "POS Next" }}
+								{{ __("POS Next") }}
 							</h1>
 							<span
 								class="hidden sm:inline-flex relative items-center px-1 sm:px-2 py-0.5 text-[8px] sm:text-[10px] font-bold bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-md shadow-sm hover:shadow-md transition-shadow flex-shrink-0"

@@ -90,7 +90,7 @@
 														:tag="'p'"
 														:inner="
 															__(
-																'&lt;strong&gt;POS Profile:&lt;strong&gt; {0}',
+																'&lt;strong&gt;POS Profile:&lt;/strong&gt; {0}',
 																[currentProfile?.name]
 															)
 														"
@@ -99,7 +99,7 @@
 														:tag="'p'"
 														:inner="
 															__(
-																'&lt;strong&gt;Company:&lt;strong&gt;',
+																'&lt;strong&gt;Company:&lt;/strong&gt;',
 																[currentCompany?.name]
 															)
 														"
@@ -108,7 +108,7 @@
 														:tag="'p'"
 														:inner="
 															__(
-																'&lt;strong&gt;Opened:&lt;strong&gt;',
+																'&lt;strong&gt;Opened:&lt;/strong&gt;',
 																[
 																	formatDateTime(
 																		currentShift?.period_start_date

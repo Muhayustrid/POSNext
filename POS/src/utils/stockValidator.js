@@ -108,10 +108,13 @@ export async function getItemStock(itemCode, warehouse) {
  */
 export function formatStockError(itemName, requested, available, warehouse) {
 	if (available <= 0) {
-		return `"${itemName}" is out of stock in warehouse "${warehouse}".`;
+		return __("\"{0}\" is out of stock in warehouse \"{1}\".", [itemName, warehouse]);
 	}
 
 	const unit = requested === 1 ? "unit" : "units";
 	const availableUnit = available === 1 ? "unit" : "units";
-	return `Not enough stock for "${itemName}".\n\nYou requested ${requested} ${unit}, but only ${available} ${availableUnit} available in "${warehouse}".`;
+	return __(
+		"Not enough stock for \"{0}\".\n\nYou requested {1} {2}, but only {3} {4} available in \"{5}\".",
+		[itemName, requested, unit, available, availableUnit, warehouse]
+	);
 }

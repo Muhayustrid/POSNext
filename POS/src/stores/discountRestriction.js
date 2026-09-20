@@ -1,5 +1,6 @@
 import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
+import { __ } from "@/utils/translation";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
@@ -95,7 +96,7 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 	async function validateCode({ items = [], additionalDiscount = 0 } = {}) {
 		const value = (code.value || "").trim();
 		if (!value) {
-			return { valid: false, requires_code: true, message: "Discount code is required" };
+			return { valid: false, requires_code: true, message: __("Discount code is required") };
 		}
 		const discountedItems = items
 			.filter((item) => itemHasDiscount(item))
@@ -119,7 +120,7 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 			return {
 				valid: false,
 				requires_code: true,
-				message: "Could not validate the discount code. Please try again.",
+				message: __("Could not validate the discount code. Please try again."),
 			};
 		}
 	}
@@ -133,7 +134,7 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 	async function checkCode() {
 		const value = (code.value || "").trim();
 		if (!value) {
-			return { valid: false, requires_code: true, message: "Discount code is required" };
+			return { valid: false, requires_code: true, message: __("Discount code is required") };
 		}
 		try {
 			return await call("pos_next.api.discount_code.check_code", {
@@ -145,7 +146,7 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 			return {
 				valid: false,
 				requires_code: true,
-				message: "Could not validate the discount code. Please try again.",
+				message: __("Could not validate the discount code. Please try again."),
 			};
 		}
 	}

@@ -299,7 +299,7 @@
 						<TranslatedHTML
 							:inner="
 								__(
-									'This item template &lt;strong&gt;{0}&lt;strong&gt; has no variants created yet.',
+									'This item template &lt;strong&gt;{0}&lt;/strong&gt; has no variants created yet.',
 									[item?.item_name]
 								)
 							"
@@ -317,7 +317,7 @@
 								:tag="'li'"
 								:inner="
 									__(
-										'1. Go to &lt;strong&gt;Item Master&lt;strong&gt; → &lt;strong&gt;{0}&lt;strong&gt;',
+										'1. Go to &lt;strong&gt;Item Master&lt;/strong&gt; → &lt;strong&gt;{0}&lt;/strong&gt;',
 										[item?.item_code]
 									)
 								"
@@ -326,7 +326,7 @@
 								:tag="'li'"
 								:inner="
 									__(
-										'2. Click &lt;strong&gt;&quot;Make Variants&quot;&lt;strong&gt; button'
+										'2. Click &lt;strong&gt;&quot;Make Variants&quot;&lt;/strong&gt; button'
 									)
 								"
 							/>
@@ -334,7 +334,7 @@
 							<TranslatedHTML
 								:tag="'li'"
 								:inner="
-									__('4. Click &lt;strong&gt;&quot;Create&quot;&lt;strong&gt;')
+									__('4. Click &lt;strong&gt;&quot;Create&quot;&lt;/strong&gt;')
 								"
 							/>
 						</ol>

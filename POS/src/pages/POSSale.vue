@@ -3234,8 +3234,8 @@ async function runPrintInvoice(invoiceData) {
 	} catch (error) {
 		log.error("Error printing invoice:", error);
 		window.frappe?.msgprint({
-			title: "Error",
-			message: "Failed to print invoice",
+			title: __("Error"),
+			message: __("Failed to print invoice"),
 			indicator: "red",
 		});
 	}

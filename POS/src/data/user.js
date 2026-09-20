@@ -1,4 +1,5 @@
 import router from "@/router";
+import { __ } from "@/utils/translation";
 import { createResource } from "frappe-ui";
 import { computed, reactive } from "vue";
 
@@ -35,7 +36,7 @@ export const userData = reactive({
 			this.fullName ||
 			window.frappe?.session?.user_fullname ||
 			window.frappe?.session?.user ||
-			"User"
+			__("User")
 		);
 	},
 

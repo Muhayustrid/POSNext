@@ -1,4 +1,6 @@
 // Draft Invoice Management with IndexedDB
+import { __ } from "@/utils/translation";
+
 const DB_NAME = "pos_next_drafts";
 const DB_VERSION = 1;
 const STORE_NAME = "invoices";
@@ -83,7 +85,7 @@ export async function updateDraft(draftId, invoiceData) {
 			// Get existing draft
 			const existingDraft = await getDraftById(draftId);
 			if (!existingDraft) {
-				return reject(new Error("Draft not found"));
+				return reject(new Error(__("Draft not found")));
 			}
 
 			const sanitizedInvoiceData = sanitizeDraftData(invoiceData) || {};
@@ -148,7 +150,7 @@ export async function deleteDraft(draftId) {
 		try {
 			const draft = await getDraftById(draftId);
 			if (!draft) {
-				return reject(new Error("Draft not found"));
+				return reject(new Error(__("Draft not found")));
 			}
 
 			const transaction = database.transaction([STORE_NAME], "readwrite");

@@ -5,7 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn() }))
 vi.mock("@/utils/logger", () => ({
-	logger: { create: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) },
+	logger: {
+		create: () => ({
+			debug: vi.fn(),
+			warn: vi.fn(),
+			info: vi.fn(),
+			error: vi.fn(),
+		}),
+	},
 }))
 vi.mock("@/utils/offline/offlineReceiptCache", () => ({
 	getOfflineReceiptPayload: vi.fn().mockReturnValue(null),

@@ -14,6 +14,8 @@
  * attached. What it cannot show is the physical part: where the tear bar
  * actually falls relative to the last line. That still needs the device.
  */
+import { __ } from "@/utils/translation"
+
 import { renderHTMLToBitmap } from "./receipt_renderer"
 import { resolvePrintConfig } from "./receipt_layout"
 
@@ -81,7 +83,7 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 			index,
 			// Screen-only caption so the operator knows which sheet is which —
 			// the paper itself carries no banner.
-			label: index < r.copies ? `Copy ${index + 1}` : "CREW COPY",
+			label: index < r.copies ? __("Copy {0}", { 0: index + 1 }) : __("CREW COPY"),
 			// Copy 1 shows now; later sheets are revealed after their delay by
 			// the caller, so the tear-off pause between copies is visible.
 			visible: index === 0,
