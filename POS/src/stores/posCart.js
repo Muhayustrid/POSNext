@@ -1439,7 +1439,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		try {
 			const cartItem = findCartItem(itemCode, currentUom);
 			if (!cartItem) {
-				throw new Error("Item not found in cart");
+				throw new Error(__("Item not found in cart"));
 			}
 
 			// Handle UOM change with potential merge

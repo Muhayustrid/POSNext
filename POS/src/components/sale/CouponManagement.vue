@@ -667,7 +667,7 @@
 							class="text-sm text-gray-600 mb-1"
 							:inner="
 								__(
-									'Are you sure you want to delete &lt;strong&gt;&quot;{0}&quot;&lt;strong&gt;?',
+									'Are you sure you want to delete &lt;strong&gt;&quot;{0}&quot;&lt;/strong&gt;?',
 									[selectedCoupon?.coupon_code]
 								)
 							"

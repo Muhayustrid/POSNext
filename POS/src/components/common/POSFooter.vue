@@ -25,9 +25,10 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { call } from "@/utils/apiWrapper";
+import { __ } from "@/utils/translation";
 
 // Component state
-const footerText = ref("Powered by");
+const footerText = ref(__("Powered by"));
 const linkText = ref("BrainWise");
 const footerLink = ref("https://nexus.brainwise.me");
 const footerRoot = ref(null);

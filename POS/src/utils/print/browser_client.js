@@ -3,6 +3,8 @@
  * transport is invoked directly with an HTML string (e.g. Test Print). The
  * normal browser path still goes through printInvoice's /printview popup.
  */
+import { __ } from "@/utils/translation"
+
 export function createBrowserDriver() {
 	return {
 		id: "browser",
@@ -14,14 +16,14 @@ export function createBrowserDriver() {
 		},
 		async printHTML(html) {
 			const w = window.open("", "_blank", "width=380,height=600")
-			if (!w) throw new Error("Popup blocked — check browser settings")
+			if (!w) throw new Error(__("Popup blocked — check browser settings"))
 			w.document.write(html)
 			w.document.close()
 			w.onload = () => setTimeout(() => w.print(), 250)
 			return true
 		},
 		describe() {
-			return { id: "browser", label: "Browser", detail: "system print dialog" }
+			return { id: "browser", label: __("Browser"), detail: __("system print dialog") }
 		},
 	}
 }

@@ -492,11 +492,11 @@ function getPaymentSourceLabel(source) {
 	// Convert source to user-friendly label
 	switch (source) {
 		case "POS":
-			return "POS";
+			return __("POS");
 		case "POS Payment Entry":
-			return "POS";
+			return __("POS");
 		case "Payment Entry":
-			return "Back Office";
+			return __("Back Office");
 		default:
 			return source;
 	}

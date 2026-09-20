@@ -6,6 +6,8 @@
  */
 
 import { logger } from "./logger";
+
+import { __ } from "@/utils/translation";
 const log = logger.create("LowEndOptimizations");
 
 /**
@@ -335,7 +337,7 @@ export async function processArrayInChunks(array, processor, options = {}) {
 	for (let i = 0; i < total; i += chunkSize) {
 		// Check if cancelled
 		if (signal?.aborted) {
-			throw new Error("Processing cancelled");
+			throw new Error(__("Processing cancelled"));
 		}
 
 		// Process chunk

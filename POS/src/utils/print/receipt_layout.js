@@ -8,6 +8,8 @@
  * (printInvoice.js) via receiptStylesFor().
  */
 
+import { __ } from "@/utils/translation"
+
 import { DOTS_PER_MM, dotsForPaper } from "./paper"
 
 export const DEFAULT_TAIL_DOTS = 24
@@ -442,7 +444,7 @@ export function parseNumericField(label, raw, { min, max, dflt }) {
 	if (s === "") return dflt
 	const n = Number(s)
 	if (!Number.isFinite(n)) {
-		throw new Error(`${label} must be a number (got "${s}")`)
+		throw new Error(__("{0} must be a number (got \"{1}\")", { 0: label, 1: s }))
 	}
 	return Math.max(min, Math.min(Math.floor(n) === n ? n : Math.round(n), max))
 }

@@ -175,9 +175,12 @@
 					>
 						<button
 							@click="showInvoiceDetails = !showInvoiceDetails"
-							:aria-label="`${
-								showInvoiceDetails ? 'Hide' : 'Show'
-							} invoice details for ${invoiceCount} transactions`"
+							:aria-label="
+								__('{0} invoice details for {1} transactions', [
+									showInvoiceDetails ? __('Hide') : __('Show'),
+									invoiceCount,
+								])
+							"
 							:aria-expanded="showInvoiceDetails"
 							class="w-full px-3 py-3 md:px-6 md:py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
 						>
@@ -662,7 +665,12 @@
 												:disabled="
 													showSuccessReport || submitResource.loading
 												"
-												:aria-label="`Enter actual amount for ${payment.mode_of_payment}`"
+												:aria-label="
+													__(
+														'Enter actual amount for {0}',
+														[payment.mode_of_payment],
+													)
+												"
 												class="text-base md:text-lg"
 											/>
 											<div
@@ -1117,8 +1125,9 @@ async function loadClosingData() {
 		}
 	} catch (error) {
 		console.error("Error loading closing data:", error)
-		errorMessage.value =
-			"Unable to load shift data. Please check your connection and try again."
+		errorMessage.value = __(
+			"Unable to load shift data. Please check your connection and try again.",
+		)
 	}
 }
 
@@ -1209,8 +1218,9 @@ async function submitClosing() {
 		}
 	} catch (error) {
 		console.error("Error submitting closing shift:", error)
-		errorMessage.value =
-			"Failed to close shift. Please verify all amounts and try again."
+		errorMessage.value = __(
+			"Failed to close shift. Please verify all amounts and try again.",
+		)
 	}
 }
 
@@ -1264,12 +1274,14 @@ const isInEntryMode = computed(
 
 const reconciliationMessage = computed(() => {
 	if (isInEntryMode.value) {
-		return "Enter the actual counted amounts for each payment method"
+		return __("Enter the actual counted amounts for each payment method")
 	}
 	if (showSuccessReport.value && hideExpectedAmount.value) {
-		return "Shift closed successfully - Review the final reconciliation below"
+		return __(
+			"Shift closed successfully - Review the final reconciliation below",
+		)
 	}
-	return "Count your cash and enter actual amounts below"
+	return __("Count your cash and enter actual amounts below")
 })
 
 // Computed properties for real-time recalculation

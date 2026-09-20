@@ -1,3 +1,4 @@
+import { __ } from "@/utils/translation"
 import { connect, printHTML } from "@/utils/qzTray"
 
 export function createQzDriver() {
@@ -19,7 +20,7 @@ export function createQzDriver() {
 			return printHTML(html, printerName, options)
 		},
 		describe() {
-			return { id: "qz", label: "QZ Tray", detail: "desktop helper app" }
+			return { id: "qz", label: __("QZ Tray"), detail: __("desktop helper app") }
 		},
 	}
 }

@@ -251,6 +251,18 @@ export default defineConfig({
 	define: {
 		__BUILD_VERSION__: JSON.stringify(buildVersion),
 	},
+	// Vitest reads this block. frappe-ui ships uncompiled TS with extensionless
+	// relative imports, so it must be transformed (inlined) instead of being
+	// loaded by Node's native ESM resolver, which rejects "./resources" etc.
+	test: {
+		environment: "jsdom",
+		setupFiles: ["./src/test-setup.js"],
+		server: {
+			deps: {
+				inline: ["frappe-ui"],
+			},
+		},
+	},
 	optimizeDeps: {
 		include: ["feather-icons", "showdown", "highlight.js/lib/core", "interactjs", "qz-tray"],
 	},

@@ -1498,7 +1498,7 @@ function showWarehouseAvailability(item) {
 	warehouseDialogItem.value = {
 		itemCode: item.item_code,
 		itemName: item.item_name,
-		uom: item.uom || item.stock_uom || "Nos",
+		uom: item.uom || item.stock_uom || __("Nos", null, "UOM"),
 		company: settingsStore.company,
 	};
 	showWarehouseDialog.value = true;

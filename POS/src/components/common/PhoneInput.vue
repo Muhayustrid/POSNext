@@ -46,6 +46,7 @@
 <script setup>
 import CountryCodeSelector from "./CountryCodeSelector.vue";
 import { useCountryCodes } from "@/composables/useCountryCodes";
+import { __ } from "@/utils/translation";
 import { computed, ref, watch, onMounted } from "vue";
 
 const props = defineProps({
@@ -59,7 +60,7 @@ const props = defineProps({
 	},
 	placeholder: {
 		type: String,
-		default: "Enter phone number",
+		default: __("Enter phone number"),
 	},
 	required: {
 		type: Boolean,
@@ -101,7 +102,7 @@ const isValid = computed(() => {
 const errorMessage = computed(() => {
 	if (!phoneNumber.value) return "";
 	if (!isValid.value) {
-		return "Please enter a valid phone number (7-15 digits)";
+		return __("Please enter a valid phone number (7-15 digits)");
 	}
 	return "";
 });

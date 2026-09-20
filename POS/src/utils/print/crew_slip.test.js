@@ -4,7 +4,14 @@ import { describe, expect, it, vi } from "vitest"
 // (frappe-ui) and logger — mock both so the slip stays unit-testable in node.
 vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn() }))
 vi.mock("@/utils/logger", () => ({
-	logger: { create: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }) },
+	logger: {
+		create: () => ({
+			debug: vi.fn(),
+			warn: vi.fn(),
+			info: vi.fn(),
+			error: vi.fn(),
+		}),
+	},
 }))
 
 // Same trivial translation helper printInvoice.test.js installs. crew_slip
@@ -180,9 +187,7 @@ describe("buildCrewSlipHTML", () => {
 	})
 
 	it("prints the queue block before the title when pos_queue_number is set", () => {
-		const body = bodyOf(
-			buildCrewSlipHTML({ ...doc, pos_queue_number: 48 }, {}),
-		)
+		const body = bodyOf(buildCrewSlipHTML({ ...doc, pos_queue_number: 48 }, {}))
 		const queueStart = body.indexOf(">048<")
 		expect(queueStart).toBeGreaterThan(-1)
 		expect(body.indexOf("slip-title")).toBeGreaterThan(queueStart)

@@ -108,6 +108,7 @@
 <script setup>
 import { FeatherIcon } from "frappe-ui";
 import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from "vue";
+import { __ } from "@/utils/translation";
 
 defineOptions({
 	inheritAttrs: false,
@@ -140,11 +141,11 @@ const props = defineProps({
 	},
 	searchPlaceholder: {
 		type: String,
-		default: "Search...",
+		default: __("Search..."),
 	},
 	noResultsText: {
 		type: String,
-		default: "No results found",
+		default: __("No results found"),
 	},
 	maxDisplayed: {
 		type: Number,
