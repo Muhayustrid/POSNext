@@ -267,6 +267,46 @@ describe("PurchaseOrderDialog", () => {
 		)
 	})
 
+	it("expands an order to peek its items and caches the detail", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders")) return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					items: [
+						{ name: "row-1", item_code: "ITEM-1", item_name: "Roti Tawar", qty: 3, uom: "Pcs" },
+						{ name: "row-2", item_code: "ITEM-2", item_name: "Bolu Pandan", qty: 2, uom: "Box" },
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		expect(wrapper.text()).not.toContain("Roti Tawar")
+		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_order",
+			{ name: "PO-2026-00002" },
+		)
+		expect(wrapper.text()).toContain("Roti Tawar")
+		expect(wrapper.text()).toContain("3 Pcs")
+
+		// collapse, then expand again — served from cache, no second fetch
+		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).not.toContain("Roti Tawar")
+		mocks.call.mockClear()
+		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("Roti Tawar")
+		expect(mocks.call).not.toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_order",
+			expect.anything(),
+		)
+	})
+
 	it("New button switches to the form view", async () => {
 		mocks.call.mockResolvedValue({ orders: [DRAFT_ORDER] })
 		const wrapper = mountOpen()

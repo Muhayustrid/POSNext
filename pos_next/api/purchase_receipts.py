@@ -306,3 +306,11 @@ def cancel_purchase_receipt(name):
 		frappe.throw(_("Only a submitted Purchase Receipt can be cancelled"))
 	doc.cancel()
 	return _pr_summary(doc)
+
+
+@frappe.whitelist()
+def get_purchase_receipt(name):
+	_check_guest()
+	doc = frappe.get_doc("Purchase Receipt", name)
+	_check_permission("read", doc=doc)
+	return _pr_summary(doc)

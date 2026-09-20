@@ -55,28 +55,69 @@
 					<div
 						v-for="order in orders"
 						:key="order.name"
-						class="bg-white border border-gray-200 rounded-lg p-3"
+						class="bg-white border border-gray-200 rounded-lg p-3 cursor-pointer hover:border-gray-300 transition-colors"
+						:data-test="`po-${order.name}`"
+						@click="toggleOrder(order)"
 					>
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0">
-									<div class="flex items-center gap-2">
-										<span class="text-sm font-semibold text-gray-900">{{ order.name }}</span>
-										<StatusBadge :variant="statusVariant(order.status)" size="xs" :text="order.status" />
-										<StatusBadge
-											v-if="order.is_internal_supplier && order.inter_company_order_reference"
-											variant="gray"
-											size="xs"
-											:text="__('Factory SO')"
-										/>
-									</div>
-									<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
-									<p class="text-xs text-gray-400 mt-0.5">
-										{{ formatDate(order.transaction_date) }}
-									</p>
+						<div class="flex items-start justify-between gap-2">
+							<div class="min-w-0">
+								<div class="flex items-center gap-2">
+									<span class="text-sm font-semibold text-gray-900">{{ order.name }}</span>
+									<StatusBadge :variant="statusVariant(order.status)" size="xs" :text="order.status" />
+									<StatusBadge
+										v-if="order.is_internal_supplier && order.inter_company_order_reference"
+										variant="gray"
+										size="xs"
+										:text="__('Factory SO')"
+									/>
+								</div>
+								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
+								<p class="text-xs text-gray-400 mt-0.5">
+									{{ formatDate(order.transaction_date) }}
+								</p>
+							</div>
+							<FeatherIcon
+								name="chevron-down"
+								class="w-4 h-4 mt-1 text-gray-400 shrink-0 transition-transform"
+								:class="{ 'rotate-180': expandedOrder === order.name }"
+							/>
+						</div>
+
+						<!-- item peek: lazy-loaded once per order, cached for the session -->
+						<div
+							v-if="expandedOrder === order.name"
+							class="mt-2 pt-2 border-t border-gray-100"
+							@click.stop
+						>
+							<div
+								v-if="loadingDetail && !orderDetails[order.name]"
+								class="py-2 text-center text-xs text-gray-400"
+							>
+								{{ __("Loading...") }}
+							</div>
+							<div v-else-if="orderDetails[order.name]?.length" class="flex flex-col">
+								<div
+									v-for="row in orderDetails[order.name]"
+									:key="row.name"
+									class="flex items-center justify-between gap-3 py-1.5 text-xs"
+								>
+									<span class="min-w-0 truncate text-gray-700">
+										{{ row.item_name || row.item_code }}
+									</span>
+									<span class="shrink-0 font-medium text-gray-900">
+										{{ formatQty(row.qty) }} {{ row.uom }}
+									</span>
 								</div>
 							</div>
+							<p v-else class="py-2 text-center text-xs text-gray-400">
+								{{ __("No items") }}
+							</p>
+						</div>
 
-						<div class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100">
+						<div
+							class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-gray-100"
+							@click.stop
+						>
 							<button
 								v-if="order.docstatus === 0"
 								type="button"
@@ -371,7 +412,7 @@ import { useFormatters } from "@/composables/useFormatters"
 import { usePermissions } from "@/composables/usePermissions"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
 import { parseError } from "@/utils/errorHandler"
-import { Button } from "frappe-ui"
+import { Button, FeatherIcon } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
@@ -446,6 +487,10 @@ const STATUS_VARIANTS = {
 
 const orders = ref([])
 const loadingOrders = ref(false)
+// expand-to-peek: item rows are fetched once per order and cached
+const expandedOrder = ref(null)
+const orderDetails = ref({})
+const loadingDetail = ref(false)
 const searchTerm = ref("")
 const statusFilter = ref("")
 let listTimer = null
@@ -530,6 +575,29 @@ function setStatus(value) {
 	if (statusFilter.value === value) return
 	statusFilter.value = value
 	loadOrders()
+}
+
+function formatQty(value) {
+	return Number(value || 0).toLocaleString("id-ID")
+}
+
+async function toggleOrder(order) {
+	if (expandedOrder.value === order.name) {
+		expandedOrder.value = null
+		return
+	}
+	expandedOrder.value = order.name
+	if (orderDetails.value[order.name]) return
+	loadingDetail.value = true
+	try {
+		const res = await call(`${API}.get_purchase_order`, { name: order.name })
+		orderDetails.value[order.name] = res?.items || []
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+		expandedOrder.value = null
+	} finally {
+		loadingDetail.value = false
+	}
 }
 
 async function submitOrder(order) {
