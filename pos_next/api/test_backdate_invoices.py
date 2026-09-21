@@ -625,6 +625,20 @@ class TestBackdateEntryFlow(FrappeTestCase):
 		row = next(r for r in context["shifts"] if r["name"] == self.shift.name)
 		self.assertEqual(row["closing_docstatus"], 1)
 		self.assertTrue(row["setting_on"])
+		# company comes back per shift and as a stable filter dropdown list
+		self.assertEqual(row["company"], self.profile.company)
+		self.assertIn(self.profile.company, context["companies"])
+		# the dropdown lists POS-Profile companies (outlets), nothing else
+		profile_companies = {
+			c for c in frappe.get_all("POS Profile", filters={"disabled": 0}, pluck="company") if c
+		}
+		self.assertTrue(set(context["companies"]) <= profile_companies)
+
+		# the company filter narrows the shift query itself
+		filtered = get_backdate_context(company=self.profile.company)
+		self.assertTrue(any(r["name"] == self.shift.name for r in filtered["shifts"]))
+		missed = get_backdate_context(company="Nonexistent Company " + self._uniq())
+		self.assertFalse(any(r["name"] == self.shift.name for r in missed["shifts"]))
 
 		frappe.db.set_value("POS Settings", self.settings_name, {"allow_change_posting_date": 0})
 		with self.assertRaises(frappe.ValidationError) as ctx:

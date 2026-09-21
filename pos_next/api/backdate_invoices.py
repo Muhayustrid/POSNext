@@ -70,14 +70,22 @@ def get_access(pos_profile=None):
 
 
 @frappe.whitelist()
-def get_backdate_context(pos_profile=None):
-	"""Closed shifts (with their submitted closing) that HO may reopen."""
+def get_backdate_context(pos_profile=None, company=None):
+	"""Closed shifts (with their submitted closing) that HO may reopen.
+
+	``company`` narrows the shift query (the 100-most-recent window is per
+	bench, so a secondary company needs the filter to be reliably represented).
+	``companies`` is always the distinct set across ALL closed shifts so the
+	Desk filter dropdown stays stable regardless of the window.
+	"""
 	if not has_backdate_role():
 		frappe.throw(_("Not permitted to enter backdated invoices"), frappe.PermissionError)
 
 	filters = {"docstatus": 1, "status": "Closed"}
 	if pos_profile:
 		filters["pos_profile"] = pos_profile
+	if company:
+		filters["company"] = company
 	shifts = frappe.get_all(
 		"POS Opening Shift",
 		filters=filters,
@@ -101,7 +109,18 @@ def get_backdate_context(pos_profile=None):
 			if row.pos_closing_shift
 			else None
 		)
-	return {"shifts": shifts, "today": nowdate()}
+	# companies come from POS Profiles (the outlets), not from closed shifts:
+	# a company whose outlets have no closed shift yet must still be offered —
+	# picking it explains itself via the empty-shift state. Companies without
+	# any POS Profile can never be backdated and stay out of the dropdown.
+	companies = frappe.get_all(
+		"POS Profile",
+		filters={"disabled": 0},
+		pluck="company",
+		group_by="company",
+		order_by="company asc",
+	)
+	return {"shifts": shifts, "companies": companies, "today": nowdate()}
 
 
 @frappe.whitelist()
