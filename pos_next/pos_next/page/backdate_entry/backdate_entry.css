@@ -1,22 +1,42 @@
-/* Desk page: HO backdate entry */
+/* Desk page: HO backdate entry.
+   Frame: centered column with page padding (the Desk shell itself has none),
+   cards give the surfaces, one spacing rhythm throughout. */
 
 .bd-root {
-	max-width: 860px;
+	max-width: 920px;
+	margin: 0 auto;
+	padding: 1rem 1.5rem 3.5rem;
 }
+
+/* --- surfaces --- */
 
 .bd-card {
 	background: var(--card-bg);
 	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 1rem;
-	margin-bottom: 0.75rem;
+	border-radius: var(--border-radius-lg, 12px);
+	box-shadow: var(--shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.05));
+	padding: 1.25rem 1.5rem;
 }
+
+.bd-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin-top: 1rem;
+}
+
+.bd-list > .bd-card {
+	margin-bottom: 0;
+}
+
+/* --- outlet / shift rows --- */
 
 .bd-row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 1rem;
+	padding: 1rem 1.25rem;
 }
 
 .bd-row-title {
@@ -26,10 +46,28 @@
 	flex-wrap: wrap;
 }
 
+.bd-row-title b {
+	font-weight: 600;
+	color: var(--heading-color, var(--text-color));
+}
+
 .bd-row-sub {
-	font-size: var(--text-xs);
+	font-size: var(--text-sm);
 	color: var(--text-muted);
-	margin-top: 0.25rem;
+	margin-top: 0.3rem;
+}
+
+/* the closing-shift id reads as a link, not as part of the muted meta line
+   (this theme's primary is near-black, so color alone is not enough) */
+.bd-row-sub a {
+	color: var(--primary);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.bd-row-side {
+	flex: 0 0 auto;
+	margin-left: auto;
 }
 
 .bd-muted {
@@ -40,18 +78,72 @@
 	text-align: center;
 }
 
+/* page-level hint above the outlet list: a quiet info banner */
 .bd-hint {
 	font-size: var(--text-sm);
 	color: var(--text-muted);
-	margin-bottom: 0.75rem;
+	background: color-mix(in srgb, var(--primary) 5%, var(--card-bg));
+	border-radius: var(--border-radius-md, 10px);
+	padding: 0.65rem 0.9rem;
+	margin-bottom: 1rem;
 }
+
+/* small helper line directly under a field */
+.bd-fieldhint {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin: 0.3rem 0 0;
+	line-height: 1.45;
+}
+
+.bd-fieldhint:not(:empty) {
+	margin-bottom: 0.3rem;
+}
+
+/* --- toolbars --- */
 
 .bd-toolbar {
 	display: flex;
 	align-items: center;
-	gap: 1rem;
-	margin-bottom: 0.75rem;
+	gap: 0.875rem;
 	flex-wrap: wrap;
+	margin-bottom: 0.25rem;
+}
+
+/* filter bar: fields stack label-over-control, so align their baselines */
+.bd-toolbar--filters {
+	align-items: flex-end;
+	gap: 1rem;
+}
+
+.bd-toolbar--head {
+	margin-bottom: 1rem;
+}
+
+.bd-toolbar-note {
+	margin-left: auto;
+}
+
+.bd-field {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 220px;
+	max-width: 340px;
+	min-width: 0;
+}
+
+.bd-context {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	font-size: var(--text-sm);
+	line-height: 1.4;
+	min-width: 0;
+}
+
+.bd-context b {
+	font-weight: 600;
+	color: var(--heading-color, var(--text-color));
 }
 
 .bd-label {
@@ -59,94 +151,318 @@
 	font-size: var(--text-xs);
 	font-weight: 600;
 	color: var(--text-muted);
-	margin-bottom: 0.25rem;
+	margin-bottom: 0.35rem;
 }
+
+/* --- controls --- */
 
 .bd-input,
 .bd-select {
 	width: 100%;
-	max-width: 340px;
 	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 0.4rem 0.6rem;
-	font-size: var(--text-sm);
+	border-radius: var(--border-radius-md, 10px);
+	padding: 0.55rem 0.7rem;
+	font-size: var(--text-md);
+	line-height: 1.35;
 	background: var(--card-bg);
+	color: var(--text-color);
 }
 
-.bd-input--qty {
-	max-width: 90px;
-	min-width: 70px;
+/* one clear focus state for every control and menu item */
+.bd-input:focus,
+.bd-select:focus,
+.bd-menu-item:focus {
+	outline: none;
+	border-color: var(--primary);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent);
 }
 
-.bd-grid2 {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-	gap: 0.75rem;
-	margin-bottom: 0.75rem;
-}
-
-.bd-seg {
-	display: flex;
-	gap: 0.25rem;
-}
-
-.bd-badge {
-	display: inline-block;
-	font-size: var(--text-xs);
-	border-radius: 999px;
-	padding: 0.1rem 0.6rem;
+.bd-input:disabled {
 	background: var(--control-bg);
 	color: var(--text-muted);
 }
 
-.bd-badge--on {
-	background: var(--bg-light-green);
-	color: var(--text-on-green, #1a7f37);
+.bd-input.bd-ok {
+	border-color: var(--success, #1a7f37);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--success, #1a7f37) 18%, transparent);
+}
+
+.bd-input--qty {
+	max-width: 96px;
+	min-width: 76px;
+	padding: 0.4rem 0.5rem;
+}
+
+.bd-grid2 {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 1rem;
+}
+
+.bd-grid2 > * {
+	min-width: 0;
+}
+
+/* segmented Sale/Return toggle: a pill track, state on aria-pressed (the
+   btn-primary class also flips, so both selectors must agree) */
+.bd-seg {
+	display: inline-flex;
+	gap: 4px;
+	padding: 4px;
+	background: var(--control-bg);
+	border-radius: var(--border-radius-full, 999px);
+	width: fit-content;
+}
+
+.bd-seg .btn,
+.bd-seg .btn.btn-default,
+.bd-seg .btn.btn-primary {
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+	border-radius: var(--border-radius-full, 999px);
+	padding: 0.4rem 1.25rem;
+	font-weight: 500;
+}
+
+.bd-seg .btn[aria-pressed="true"],
+.bd-seg .btn.btn-primary {
+	background: var(--card-bg);
+	color: var(--text-color);
+	font-weight: 600;
+	box-shadow: var(--shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+/* group the payment fields away from the item area */
+.bd-divider {
+	border: 0;
+	border-top: 1px solid var(--border-color);
+	margin: 1.5rem 0 0;
+}
+
+.bd-section-title {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--heading-color, var(--text-color));
+	margin: 1.1rem 0 0.65rem;
+}
+
+/* search sections that follow a section title */
+.bd-section-title + .bd-search-wrap,
+.bd-search-wrap + .bd-search-wrap,
+.bd-grid2 + .bd-search-wrap {
+	margin-top: 1rem;
+}
+
+/* the invoice search opening the return panel */
+[data-bd-panel] > .bd-search-wrap:first-child {
+	margin-top: 1.25rem;
+}
+
+/* selected customer / invoice */
+.bd-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	max-width: 100%;
+	background: color-mix(in srgb, var(--success, #1a7f37) 10%, transparent);
+	color: var(--text-color);
+	border: 1px solid color-mix(in srgb, var(--success, #1a7f37) 35%, transparent);
+	border-radius: var(--border-radius-full, 999px);
+	padding: 0.25rem 0.6rem;
+	font-size: var(--text-sm);
+}
+
+.bd-chip .bd-muted {
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.bd-chip-x {
+	border: 0;
+	background: none;
+	color: var(--text-muted);
+	font-size: var(--text-md);
+	line-height: 1;
+	padding: 0 0.15rem;
+	cursor: pointer;
+	border-radius: var(--border-radius);
+}
+
+.bd-chip-x:hover,
+.bd-chip-x:focus-visible {
+	color: var(--text-color);
+	outline: 2px solid var(--primary);
+	outline-offset: 1px;
+}
+
+/* --- tables --- */
+
+.bd-table-wrap {
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius-md, 10px);
+	overflow-x: auto;
+	margin-top: 0.9rem;
+	background: var(--card-bg);
 }
 
 .bd-table {
 	width: 100%;
 	font-size: var(--text-sm);
-	margin: 0.5rem 0;
+	border-collapse: collapse;
 }
 
 .bd-table th {
 	font-size: var(--text-xs);
-	text-transform: uppercase;
 	color: var(--text-muted);
+	font-weight: 600;
 	text-align: left;
-	padding: 0.25rem 0.5rem 0.25rem 0;
+	padding: 0.6rem 0.75rem 0.5rem;
+	background: var(--subtle-accent, var(--control-bg));
+	white-space: nowrap;
 }
 
 .bd-table td {
 	border-top: 1px solid var(--border-color);
-	padding: 0.3rem 0.5rem 0.3rem 0;
+	padding: 0.55rem 0.75rem;
+	vertical-align: middle;
+}
+
+.bd-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.bd-table td:first-child {
+	min-width: 9rem;
 }
 
 .bd-num {
 	text-align: right;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
 }
 
-.bd-total {
+.bd-amount {
 	font-weight: 600;
-	text-align: right;
-	margin: 0.25rem 0 0.75rem;
 }
+
+/* totals: a right-aligned receipt-style block */
+.bd-summary {
+	margin-left: auto;
+	margin-top: 0.75rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	min-width: 240px;
+}
+
+.bd-summary-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 1.5rem;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+}
+
+.bd-summary-row--total {
+	border-top: 1px solid var(--border-color);
+	padding-top: 0.45rem;
+	margin-top: 0.25rem;
+	font-size: var(--text-lg);
+	font-weight: 700;
+	color: var(--heading-color, var(--text-color));
+}
+
+.bd-summary-row--total span {
+	font-variant-numeric: tabular-nums;
+}
+
+.bd-empty {
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	border: 1px dashed var(--border-color);
+	border-radius: var(--border-radius-md, 10px);
+	padding: 1.1rem 1.25rem;
+	margin-top: 0.9rem;
+	text-align: center;
+}
+
+.bd-warn {
+	color: var(--text-on-orange, #9a6700);
+}
+
+.bd-ok-text {
+	color: var(--text-on-green, #1a7f37);
+}
+
+.bd-linklike {
+	border: 0;
+	background: none;
+	color: var(--primary);
+	font-size: var(--text-xs);
+	padding: 0;
+	margin-left: 0.5rem;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+/* --- actions --- */
 
 .bd-actions {
 	display: flex;
 	justify-content: flex-end;
-	gap: 0.5rem;
-	margin-top: 0.75rem;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: 1.5rem;
+	padding-top: 1.25rem;
+	border-top: 1px solid var(--border-color);
+}
+
+.bd-actions--center {
+	justify-content: center;
+	border-top: 0;
+	padding-top: 0.5rem;
+}
+
+.bd-actions .btn-primary {
+	min-width: 170px;
+}
+
+/* --- done view --- */
+
+.bd-done-card {
+	max-width: 560px;
+	margin: 2rem auto 0;
+	padding: 2.5rem 2rem;
+}
+
+.bd-done-icon {
+	width: 48px;
+	height: 48px;
+	margin: 0 auto 0.9rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--border-radius-full, 999px);
+	background: color-mix(in srgb, var(--success, #1a7f37) 12%, transparent);
+	color: var(--success, #1a7f37);
+}
+
+.bd-done-icon svg {
+	width: 24px;
+	height: 24px;
 }
 
 .bd-done {
 	font-size: var(--text-lg);
 	font-weight: 600;
+	color: var(--heading-color, var(--text-color));
 	margin-bottom: 0.5rem;
 }
 
-/* search dropdown */
+/* --- search dropdown --- */
+
 .bd-search-wrap {
 	position: relative;
 }
@@ -154,40 +470,120 @@
 .bd-menu {
 	position: absolute;
 	z-index: 20;
-	top: 100%;
+	top: calc(100% + 4px);
 	left: 0;
 	right: 0;
-	max-height: 260px;
+	min-width: 260px;
+	max-height: 280px;
 	overflow-y: auto;
 	background: var(--card-bg);
 	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	box-shadow: var(--shadow-md);
+	border-radius: var(--border-radius-md, 10px);
+	box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.12));
 }
 
 .bd-menu-item {
 	display: flex;
 	justify-content: space-between;
+	align-items: baseline;
 	gap: 0.75rem;
 	width: 100%;
 	text-align: left;
 	background: none;
 	border: 0;
-	border-bottom: 1px solid var(--border-color);
-	padding: 0.4rem 0.6rem;
+	padding: 0.55rem 0.75rem;
 	font-size: var(--text-sm);
+	color: var(--text-color);
+	cursor: pointer;
 }
 
-.bd-menu-item:last-child {
-	border-bottom: 0;
+.bd-menu-item > span:first-child {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
+.bd-menu-item > span.bd-muted {
+	flex: 0 0 auto;
+}
+
+.bd-menu-item.is-active,
 .bd-menu-item:hover {
 	background: var(--control-bg);
 }
 
+.bd-menu-item.is-active {
+	box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.bd-menu-note {
+	padding: 0.55rem 0.75rem;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+}
+
 .bd-code-row {
 	display: flex;
-	gap: 8px;
+	gap: 0.5rem;
 	align-items: center;
+	max-width: 460px;
+}
+
+.bd-code-row .bd-input {
+	flex: 1 1 auto;
+}
+
+/* --- small screens: stack everything into one column --- */
+
+@media (max-width: 640px) {
+	.bd-root {
+		padding: 0.75rem 1rem 2rem;
+	}
+
+	.bd-card {
+		padding: 1rem 1.1rem;
+	}
+
+	.bd-field {
+		max-width: none;
+	}
+
+	.bd-row {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 0.75rem;
+	}
+
+	.bd-row-side {
+		margin-left: 0;
+	}
+
+	.bd-row-side .btn {
+		width: 100%;
+	}
+
+	.bd-summary {
+		margin-left: 0;
+	}
+
+	.bd-actions {
+		flex-direction: column-reverse;
+		align-items: stretch;
+	}
+
+	.bd-actions .btn,
+	.bd-actions--center .btn {
+		width: 100%;
+		min-width: 0;
+	}
+
+	.bd-code-row {
+		flex-wrap: wrap;
+	}
+
+	.bd-code-row .bd-input {
+		flex: 1 1 100%;
+	}
 }

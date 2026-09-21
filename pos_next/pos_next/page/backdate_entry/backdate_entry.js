@@ -24,6 +24,8 @@ class BackdateEntry {
 		this.page = page;
 		this.shifts = [];
 		this.today = frappe.datetime.get_today();
+		this.company = "";
+		this.companies = [];
 		this.outlet = "";
 		// shifts reopened in this session — a fresh context only lists Closed
 		// shifts, so the in-memory row keeps them reachable ("Continue Entry").
@@ -60,6 +62,8 @@ class BackdateEntry {
 					entry_mode: this.entry_mode,
 					posting_date: this.posting_date,
 					customer: this.customer,
+					customer_label: this.customer_label,
+					invoice_label: this.invoice_label,
 					sale_rows: this.sale_rows,
 					payment_mode: this.payment_mode,
 					payment_amount: this.payment_amount,
@@ -75,7 +79,12 @@ class BackdateEntry {
 		try {
 			localStorage.setItem(
 				this._storage_key(),
-				JSON.stringify({ outlet: this.outlet, reopened: this.reopened, entry })
+				JSON.stringify({
+					company: this.company,
+					outlet: this.outlet,
+					reopened: this.reopened,
+					entry,
+				})
 			);
 		} catch (e) {
 			/* private mode / quota — persistence is best-effort */
@@ -101,6 +110,7 @@ class BackdateEntry {
 			return;
 		}
 		if (!saved) return;
+		this.company = saved.company || "";
 		this.outlet = saved.outlet || this.outlet;
 		this.reopened = saved.reopened || {};
 		if (!saved.entry || !saved.entry.shift) return;
@@ -108,12 +118,10 @@ class BackdateEntry {
 		this.shift = entry.shift;
 		this.view = "entry";
 		this.entry_mode = entry.entry_mode === "return" ? "return" : "sale";
-		this.posting_date =
-			entry.posting_date ||
-			this.shift.period_start_date ||
-			this.shift.posting_date ||
-			this.today;
+		this.posting_date = entry.posting_date || this._shift_start() || this.today;
 		this.customer = entry.customer || "";
+		this.customer_label = entry.customer_label || "";
+		this.invoice_label = entry.invoice_label || "";
 		this.sale_rows = entry.sale_rows || [];
 		this.payment_amount = entry.payment_amount || 0;
 		this.amount_touched = Boolean(entry.amount_touched);
@@ -127,7 +135,7 @@ class BackdateEntry {
 	}
 
 	refresh() {
-		if (this.view === "outlets") this._load_context();
+		if (this.view === "outlets") this._load_context(this.company);
 	}
 
 	// ------------------------------------------------------------------
@@ -147,37 +155,54 @@ class BackdateEntry {
 
 	_denied() {
 		this.$root.html(
-			`<div class="bd-card"><p class="bd-muted">${__("Not permitted to enter backdated invoices")}</p></div>`
+			`<div class="bd-card"><p class="bd-center bd-muted">${__("Not permitted to enter backdated invoices")}</p></div>`
 		);
+	}
+
+	// The "select an outlet" hint only belongs to the outlet list; during
+	// entry it would describe a step that is already done.
+	_set_hint(show) {
+		if (this.$hint) this.$hint.toggle(Boolean(show));
 	}
 
 	_setup() {
 		this.$root.html(`
-			<div class="bd-hint">${__(
+			<div class="bd-hint" data-bd-hint-root>${__(
 				"Select an outlet with a closed shift to reopen for backdate entry"
 			)}</div>
 			<div class="bd-body"></div>`);
 		this.$body = this.$root.find(".bd-body");
+		this.$hint = this.$root.find("[data-bd-hint-root]");
+		this._bind_global_menu_close();
 		if (this.view === "entry" && this.shift) {
 			// restored mid-entry (Desk navigation): resume the form, refresh
 			// the closed-shift list in the background for the Back view
 			this._render_entry();
 			this._load_support();
 			this._load_refund_gate();
-			this._load_context();
+			this._load_context(this.company);
 			return;
 		}
-		this._load_context();
+		this._load_context(this.company);
 	}
 
-	_load_context() {
+	_load_context(company) {
+		// while an outlets list is on screen, swap only its rows for the
+		// loading note so the filter dropdowns do not flash away
 		if (this.view !== "entry") {
-			this.$body.html(`<p class="bd-center bd-muted">${__("Loading...")}</p>`);
+			const $list = this.$body.find(".bd-list");
+			if ($list.length) {
+				$list.html(`<p class="bd-center bd-muted">${__("Loading...")}</p>`);
+			} else {
+				this.$body.html(`<p class="bd-center bd-muted">${__("Loading...")}</p>`);
+			}
 		}
 		frappe.call({
 			method: `${API}.get_backdate_context`,
+			args: company ? { company } : {},
 			callback: (r) => {
 				this.shifts = (r.message && r.message.shifts) || [];
+				this.companies = (r.message && r.message.companies) || this.companies;
 				this.today = (r.message && r.message.today) || this.today;
 				// a shift that has been closed again elsewhere returns to the
 				// Closed list — drop our stale reopened copy of it
@@ -198,9 +223,11 @@ class BackdateEntry {
 	_outlets() {
 		const map = new Map();
 		for (const shift of this.shifts.concat(Object.values(this.reopened))) {
+			if (this.company && shift.company !== this.company) continue;
 			if (!map.has(shift.pos_profile)) {
 				map.set(shift.pos_profile, {
 					pos_profile: shift.pos_profile,
+					company: shift.company || "",
 					setting_on: false,
 					shifts: [],
 				});
@@ -215,8 +242,11 @@ class BackdateEntry {
 	_render_outlets() {
 		this.view = "outlets";
 		this.shift = null;
+		this._set_hint(true);
+		// one company bench: nothing to choose, lock the filter to it
+		if (!this.company && this.companies.length === 1) this.company = this.companies[0];
 		const outlets = this._outlets();
-		if (!outlets.length) {
+		if (!this.companies.length && !outlets.length) {
 			this.$body.html(
 				`<div class="bd-card"><p class="bd-center bd-muted">${__(
 					"No closed shifts available for backdate entry"
@@ -225,8 +255,25 @@ class BackdateEntry {
 			return;
 		}
 		if (!outlets.find((o) => o.pos_profile === this.outlet)) {
-			this.outlet = outlets[0].pos_profile;
+			this.outlet = outlets.length ? outlets[0].pos_profile : "";
 		}
+		const company_options = (this.companies.length > 1 ? [""] : [])
+			.concat(this.companies)
+			.map(
+				(c) =>
+					`<option value="${frappe.utils.escape_html(c)}"${
+						c === this.company ? " selected" : ""
+					}>${c === "" ? __("All companies") : frappe.utils.escape_html(c)}</option>`
+			)
+			.join("");
+		// always show the scope; "All companies" only exists when there is a choice
+		const company_field =
+			this.companies.length >= 1
+				? `<div class="bd-field">
+						<label class="bd-label" for="bd-company">${__("Company")}</label>
+						<select class="bd-select" id="bd-company" data-bd-company>${company_options}</select>
+					</div>`
+				: "";
 		const options = outlets
 			.map(
 				(o) =>
@@ -235,32 +282,39 @@ class BackdateEntry {
 					}>${frappe.utils.escape_html(o.pos_profile)} (${o.shifts.length})</option>`
 			)
 			.join("");
-		const selected = outlets.find((o) => o.pos_profile === this.outlet);
-		const rows = selected.shifts.map((shift) => this._shift_row(shift)).join("");
-		const badge = selected.setting_on
-			? `<span class="bd-badge bd-badge--on">${__("Backdate entry enabled")}</span>`
-			: `<span class="bd-badge">${__("Backdate entry is disabled for this outlet")}</span>`;
+		const selected = outlets.find((o) => o.pos_profile === this.outlet) || null;
+		const rows = selected ? selected.shifts.map((shift) => this._shift_row(shift)).join("") : "";
+		const badge = selected
+			? selected.setting_on
+				? `<span class="indicator-pill green">${__("Backdate entry enabled")}</span>`
+				: `<span class="indicator-pill gray">${__("Backdate entry is disabled for this outlet")}</span>`
+			: "";
 		this.$body.html(`
-			<div class="bd-toolbar">
-				<label class="bd-label">${__("Outlet")}
-					<select class="bd-select" data-bd-outlet>${options}</select></label>
-				${badge}
+			<div class="bd-toolbar bd-toolbar--filters">
+				${company_field}
+				<div class="bd-field">
+					<label class="bd-label" for="bd-outlet">${__("Outlet")}</label>
+					<select class="bd-select" id="bd-outlet" data-bd-outlet>${options}</select>
+				</div>
+				${badge ? `<div class="bd-toolbar-note">${badge}</div>` : ""}
 			</div>
-			<div class="bd-list">${rows}</div>`);
+			<div class="bd-list">${
+				rows ||
+				`<div class="bd-card"><p class="bd-center bd-muted">${__(
+					"No closed shifts available for backdate entry"
+				)}</p></div>`
+			}</div>`);
 		this._bind_outlets(selected);
 	}
 
 	_shift_row(shift) {
-		const period = `${frappe.datetime.str_to_user(shift.period_start_date)}${
-			shift.period_end_date ? ` — ${frappe.datetime.str_to_user(shift.period_end_date)}` : ""
-		}`;
 		const closing = shift.pos_closing_shift
-			? ` · <a href="/app/pos-closing-shift/${encodeURIComponent(shift.pos_closing_shift)}" target="_blank">${frappe.utils.escape_html(
+			? ` · ${__("Closing")}: <a href="/app/pos-closing-shift/${encodeURIComponent(shift.pos_closing_shift)}" target="_blank">${frappe.utils.escape_html(
 					shift.pos_closing_shift
 				)}</a>`
 			: "";
 		const badge = shift._reopened
-			? ` <span class="bd-badge bd-badge--on">${__("Reopened")}</span>`
+			? ` <span class="indicator-pill blue">${__("Reopened")}</span>`
 			: "";
 		const button = shift._reopened
 			? `<button class="btn btn-primary btn-sm" data-bd-continue="${frappe.utils.escape_html(shift.name)}">${__(
@@ -277,7 +331,7 @@ class BackdateEntry {
 			<div class="bd-row-main">
 				<div class="bd-row-title"><b>${frappe.utils.escape_html(shift.name)}</b>${badge}
 					<span class="bd-muted">${__("Cashier")}: ${frappe.utils.escape_html(shift.user || "")}</span></div>
-				<div class="bd-row-sub">${period}${closing}</div>
+				<div class="bd-row-sub">${this._shift_period(shift)}${closing}</div>
 			</div>
 			<div class="bd-row-side">${button}</div>
 		</div>`;
@@ -285,6 +339,14 @@ class BackdateEntry {
 
 	_bind_outlets(selected) {
 		this.$body
+			.off("change", "[data-bd-company]")
+			.on("change", "[data-bd-company]", (e) => {
+				this.company = e.currentTarget.value;
+				this.outlet = "";
+				// refetch with the filter so the 100-most-recent window is
+				// scoped to the chosen company before the outlet list builds
+				this._load_context(this.company);
+			})
 			.off("change", "[data-bd-outlet]")
 			.on("change", "[data-bd-outlet]", (e) => {
 				this.outlet = e.currentTarget.value;
@@ -305,7 +367,7 @@ class BackdateEntry {
 	_confirm_reopen(shift) {
 		frappe.confirm(
 			__(
-				"This cancels the submitted closing shift {0}. The shift stays open until it is closed again — finish the backdate entries, then re-close it.",
+				"This cancels the submitted closing shift {0}. The shift stays open until it is closed again. Finish the backdate entries, then re-close it.",
 				[shift.pos_closing_shift]
 			),
 			() => {
@@ -340,8 +402,9 @@ class BackdateEntry {
 		this.shift = shift;
 		this.view = "entry";
 		this.entry_mode = "sale";
-		this.posting_date = shift.period_start_date || shift.posting_date || this.today;
+		this.posting_date = this._shift_start() || this.today;
 		this.customer = "";
+		this.customer_label = "";
 		this.sale_rows = [];
 		this.item_results = [];
 		this.payment_amount = 0;
@@ -349,6 +412,7 @@ class BackdateEntry {
 		this.invoice_results = [];
 		this.prepared_doc = null;
 		this.original_invoice = null;
+		this.invoice_label = "";
 		this.return_rows = [];
 		this.refund_amount = 0;
 		this.refund_touched = false;
@@ -365,7 +429,19 @@ class BackdateEntry {
 	}
 
 	_shift_start() {
-		return this.shift.period_start_date || this.shift.posting_date || "";
+		// period_start_date is a Datetime; date controls and filters want the
+		// yyyy-mm-dd part only (a raw datetime makes <input type="date"> invalid)
+		const raw = String(this.shift.period_start_date || "");
+		return (raw ? raw.split(" ")[0] : "") || this.shift.posting_date || "";
+	}
+
+	_shift_period(shift) {
+		const raw = String(shift.period_start_date || "");
+		const day = frappe.datetime.str_to_user(raw.split(" ")[0] || shift.posting_date || "");
+		const time = (raw.match(/ (\d{2}:\d{2})/) || [])[1] || "";
+		const end = shift.period_end_date ? frappe.datetime.str_to_user(shift.period_end_date) : "";
+		const span = end && end !== day ? `${day} – ${end}` : day;
+		return time ? `${span}, ${time}` : span;
 	}
 
 	_money(v) {
@@ -375,12 +451,17 @@ class BackdateEntry {
 	}
 
 	_render_entry() {
+		this._set_hint(false);
+		const context_bits = [
+			this.shift.company || "",
+			this.shift.name || "",
+			frappe.datetime.str_to_user(this._shift_start()),
+		].filter(Boolean);
 		this.$body.html(`
-			<div class="bd-toolbar">
-				<button class="btn btn-default btn-sm" data-bd-back>${__("Back")}</button>
-				<span class="bd-muted">${frappe.utils.escape_html(this.shift.pos_profile)} · ${frappe.utils.escape_html(
-					this.shift.name
-				)} · ${frappe.datetime.str_to_user(this._shift_start())}</span>
+			<div class="bd-toolbar bd-toolbar--head">
+				<button class="btn btn-default" data-bd-back>${__("Back")}</button>
+				<span class="bd-context"><b>${frappe.utils.escape_html(this.shift.pos_profile)}</b>
+					<span class="bd-muted">${frappe.utils.escape_html(context_bits.join(", "))}</span></span>
 			</div>
 			<div class="bd-card">
 				<div class="bd-grid2">
@@ -390,17 +471,17 @@ class BackdateEntry {
 							value="${frappe.utils.escape_html(this.posting_date)}"
 							min="${frappe.utils.escape_html(this._shift_start())}"
 							max="${frappe.utils.escape_html(this.today)}" />
-						<p class="bd-hint">${__("Defaults to the shift date ({0})", [
+						<p class="bd-fieldhint">${__("Defaults to the shift date ({0})", [
 							frappe.datetime.str_to_user(this._shift_start()),
 						])}</p>
 					</div>
 					<div>
-						<label class="bd-label">${__("Entry Type")}</label>
-						<div class="bd-seg">
+						<span class="bd-label">${__("Entry Type")}</span>
+						<div class="bd-seg" role="group" aria-label="${__("Entry Type")}">
 							<button type="button" class="btn btn-sm ${this.entry_mode === "sale" ? "btn-primary" : "btn-default"}"
-								data-bd-mode="sale">${__("Sale")}</button>
+								aria-pressed="${this.entry_mode === "sale"}" data-bd-mode="sale">${__("Sale")}</button>
 							<button type="button" class="btn btn-sm ${this.entry_mode === "return" ? "btn-primary" : "btn-default"}"
-								data-bd-mode="return">${__("Return")}</button>
+								aria-pressed="${this.entry_mode === "return"}" data-bd-mode="return">${__("Return")}</button>
 						</div>
 					</div>
 				</div>
@@ -411,11 +492,7 @@ class BackdateEntry {
 
 		this.$body
 			.off("click", "[data-bd-back]")
-			.on("click", "[data-bd-back]", () => {
-				// explicit exit — drop the saved entry, keep reopened shifts
-				this._clear_entry_state();
-				this._render_outlets();
-			})
+			.on("click", "[data-bd-back]", () => this._exit_entry())
 			.off("input", "[data-bd-posting-date]")
 			.on("input", "[data-bd-posting-date]", (e) => {
 				this.posting_date = e.currentTarget.value;
@@ -429,38 +506,70 @@ class BackdateEntry {
 		this._save_state();
 	}
 
+	// Leaving the form drops the draft; ask before losing typed rows
+	_exit_entry() {
+		const drafted =
+			this.sale_rows.length ||
+			(this.return_rows || []).some((row) => Number(row.return_qty) > 0) ||
+			this.prepared_doc;
+		if (!drafted) {
+			this._clear_entry_state();
+			this._render_outlets();
+			return;
+		}
+		frappe.confirm(
+			__("Discard the unsaved entry?"),
+			() => {
+				this._clear_entry_state();
+				this._render_outlets();
+			},
+			null,
+			__("Discard")
+		);
+	}
+
 	// --- SALE ---
 
 	_render_sale() {
 		this.$panel.html(`
 			<div class="bd-grid2">
 				<div class="bd-search-wrap">
-					<label class="bd-label">${__("Customer")}</label>
-					<input class="bd-input" type="search" autocomplete="off"
-						placeholder="${__("Search customer...")}" data-bd-customer />
-					<div class="bd-menu" data-bd-customer-menu hidden></div>
+					<label class="bd-label" for="bd-customer">${__("Customer")}</label>
+					<input class="bd-input" id="bd-customer" type="search" autocomplete="off" role="combobox"
+						aria-expanded="false" aria-controls="bd-customer-menu"
+						placeholder="${__("Search customer...")}" data-bd-customer
+						value="${frappe.utils.escape_html(this.customer_label || "")}" />
+					<div class="bd-menu" id="bd-customer-menu" role="listbox" data-bd-customer-menu hidden></div>
+					<p class="bd-fieldhint" data-bd-customer-state></p>
 				</div>
 				<div class="bd-search-wrap">
-					<label class="bd-label">${__("Items")}</label>
-					<input class="bd-input" type="search" autocomplete="off"
+					<label class="bd-label" for="bd-item">${__("Items")}</label>
+					<input class="bd-input" id="bd-item" type="search" autocomplete="off" role="combobox"
+						aria-expanded="false" aria-controls="bd-item-menu"
 						placeholder="${__("Search item...")}" data-bd-item />
-					<div class="bd-menu" data-bd-item-menu hidden></div>
+					<div class="bd-menu" id="bd-item-menu" role="listbox" data-bd-item-menu hidden></div>
 				</div>
 			</div>
 			<div data-bd-sale-rows></div>
+			<div class="bd-divider"></div>
+			<div class="bd-section-title">${__("Payment")}</div>
 			<div class="bd-grid2">
 				<div>
 					<label class="bd-label" for="bd-payment-mode">${__("Payment Mode")}</label>
 					<select class="bd-select" id="bd-payment-mode" data-bd-payment-mode></select>
 				</div>
 				<div>
-					<label class="bd-label" for="bd-payment-amount">${__("Amount")}</label>
+					<label class="bd-label" for="bd-payment-amount">${__("Paid Amount")}</label>
 					<input class="bd-input" id="bd-payment-amount" type="number" min="0" step="any"
 						data-bd-payment-amount value="${this.payment_amount || 0}" />
+					<p class="bd-fieldhint" data-bd-payment-hint></p>
 				</div>
 			</div>
-			<div class="bd-search-wrap" data-bd-sale-code-wrap ${this._sale_has_discount() ? "" : "hidden"}>
+			<div class="bd-search-wrap" data-bd-sale-code-wrap${this._sale_has_discount() ? "" : ' style="display:none"'}>
 				<label class="bd-label" for="bd-sale-code">${__("Confirmation Code (HQ)")} *</label>
+				<p class="bd-fieldhint">${__(
+					"A line has a discount, so a confirmation code from head office is required"
+				)}</p>
 				<div class="bd-code-row">
 					<input class="bd-input" id="bd-sale-code" type="text" autocomplete="off" maxlength="8"
 						placeholder="${__("Enter the code from head office")}" data-bd-refund-code
@@ -469,14 +578,80 @@ class BackdateEntry {
 					<button type="button" class="btn btn-sm btn-default" data-bd-verify-code
 						${this.refund_code_verified ? "disabled" : ""}>${this.refund_code_verified ? "✓" : __("Verify")}</button>
 				</div>
-				<p class="bd-hint" data-bd-refund-code-msg></p>
+				<p class="bd-fieldhint" data-bd-refund-code-msg></p>
 			</div>
 			<div class="bd-actions">
-				<button class="btn btn-primary btn-sm" data-bd-submit>${__("Submit Sale")}</button>
+				<button class="btn btn-primary" data-bd-submit>${__("Submit Sale")}</button>
 			</div>`);
 
 		this._render_sale_rows();
 		this._bind_sale();
+		this._render_customer_state();
+		this._render_refund_code_state();
+	}
+
+	// The row tables re-render on every keystroke; remember which row input
+	// had focus and put the caret back so multi-digit typing keeps working.
+	_focus_info() {
+		const el = document.activeElement;
+		if (!el || !el.dataset) return null;
+		const d = el.dataset;
+		if (d.bdQty != null) return { attr: "data-bd-qty", idx: d.bdQty };
+		if (d.bdDisc != null) return { attr: "data-bd-disc", idx: d.bdDisc };
+		if (d.bdReturnQty != null) return { attr: "data-bd-return-qty", idx: d.bdReturnQty };
+		return null;
+	}
+
+	_refocus(info) {
+		if (!info) return;
+		const el = this.$body.find(`[${info.attr}="${info.idx}"]`).get(0);
+		if (!el) return;
+		el.focus();
+		const pos = String(el.value || "").length;
+		try {
+			el.setSelectionRange(pos, pos);
+		} catch (e) {
+			/* number inputs reject selection APIs — focus alone is enough */
+		}
+	}
+
+	_sale_row_amount(row) {
+		return (
+			(Number(row.qty) || 0) *
+			(Number(row.rate) || 0) *
+			(1 - (Number(row.discount_percentage) || 0) / 100)
+		);
+	}
+
+	_sale_total() {
+		return this.sale_rows.reduce((sum, row) => sum + this._sale_row_amount(row), 0);
+	}
+
+	_sale_subtotal() {
+		return this.sale_rows.reduce((sum, row) => sum + (Number(row.qty) || 0) * (Number(row.rate) || 0), 0);
+	}
+
+	_sale_discount() {
+		return this._sale_subtotal() - this._sale_total();
+	}
+
+	_sale_summary() {
+		const discount = this._sale_discount();
+		return `<div class="bd-summary">
+				<div class="bd-summary-row"><span>${__("Subtotal")}</span><span>${this._money(
+					this._sale_subtotal()
+				)}</span></div>
+				${
+					discount > 0.004
+						? `<div class="bd-summary-row bd-summary-row--discount"><span>${__(
+								"Discount"
+							)}</span><span>-${this._money(discount)}</span></div>`
+						: ""
+				}
+				<div class="bd-summary-row bd-summary-row--total"><span>${__("Total")}</span><span>${this._money(
+					this._sale_total()
+				)}</span></div>
+			</div>`;
 	}
 
 	_render_sale_rows() {
@@ -485,36 +660,56 @@ class BackdateEntry {
 				(row, idx) => `<tr>
 				<td>${frappe.utils.escape_html(row.item_name)}</td>
 				<td><input type="number" min="0" step="any" class="bd-input bd-input--qty" data-bd-qty="${idx}"
-					value="${row.qty}" aria-label="${frappe.utils.escape_html(row.item_name)} — ${__("Qty")}" /></td>
+					value="${row.qty}" aria-label="${frappe.utils.escape_html(row.item_name)}, ${__("Qty")}" /></td>
 				<td class="bd-num">${this._money(row.rate)}</td>
 				<td><input type="number" min="0" max="100" step="any" class="bd-input bd-input--qty" data-bd-disc="${idx}"
-					value="${row.discount_percentage || 0}" aria-label="${frappe.utils.escape_html(row.item_name)} — ${__("Discount")} %" /></td>
-				<td><button type="button" class="btn btn-link btn-sm" data-bd-remove="${idx}">×</button></td>
+					value="${row.discount_percentage || 0}" aria-label="${frappe.utils.escape_html(row.item_name)}, ${__("Discount")} %" /></td>
+				<td class="bd-num bd-amount">${this._money(this._sale_row_amount(row))}</td>
+				<td><button type="button" class="btn btn-link btn-sm" data-bd-remove="${idx}"
+					aria-label="${frappe.utils.escape_html(row.item_name)}, ${__("Remove")}">×</button></td>
 			</tr>`
 			)
 			.join("");
-		const total = this.sale_rows.reduce(
-			(sum, row) =>
-				sum +
-				(Number(row.qty) || 0) *
-					(Number(row.rate) || 0) *
-					(1 - (Number(row.discount_percentage) || 0) / 100),
-			0
-		);
+		const focus = this._focus_info();
 		this.$body.find("[data-bd-sale-rows]").html(
 			this.sale_rows.length
-				? `<table class="bd-table">
+				? `<div class="bd-table-wrap"><table class="bd-table">
 					<thead><tr><th>${__("Item")}</th><th class="bd-num">${__("Qty")}</th>
-					<th class="bd-num">${__("Rate")}</th><th class="bd-num">${__("Discount")} %</th><th></th></tr></thead>
-					<tbody>${rows}</tbody></table>
-					<p class="bd-total">${__("Total")}: ${this._money(total)}</p>`
-				: ""
+					<th class="bd-num">${__("Rate")}</th><th class="bd-num">${__("Discount")} %</th>
+					<th class="bd-num">${__("Amount")}</th><th></th></tr></thead>
+					<tbody>${rows}</tbody></table></div>
+					${this._sale_summary()}`
+				: `<p class="bd-empty">${__("No items yet. Search an item and pick it from the results.")}</p>`
 		);
+		this._refocus(focus);
 		if (!this.amount_touched) {
-			this.payment_amount = total;
-			this.$body.find("[data-bd-payment-amount]").val(total);
+			this.payment_amount = this._sale_total();
+			this.$body.find("[data-bd-payment-amount]").val(this.payment_amount);
 		}
+		this._render_payment_hint();
 		this._save_state();
+	}
+
+	// Live check of the typed amount against the computed total. A difference
+	// can be intentional (change given in another mode) so it warns, not blocks.
+	_render_payment_hint() {
+		const $hint = this.$body.find("[data-bd-payment-hint]");
+		if (!$hint.length) return;
+		const total = this._sale_total();
+		const delta = (Number(this.payment_amount) || 0) - total;
+		if (!this.sale_rows.length) {
+			$hint.html("").hide();
+		} else if (Math.abs(delta) < 0.005) {
+			$hint.html(`${__("Total")}: ${this._money(total)}`).show().removeClass("bd-warn");
+		} else {
+			$hint
+				.html(
+					`${delta < 0 ? __("Less than the total by {0}", [this._money(-delta)]) : __("More than the total by {0}", [this._money(delta)])}
+					<button type="button" class="bd-linklike" data-bd-match-total>${__("Match total")}</button>`
+				)
+				.show()
+				.addClass("bd-warn");
+		}
 	}
 
 	_sale_has_discount() {
@@ -527,44 +722,95 @@ class BackdateEntry {
 		if ($wrap.length) $wrap.toggle(this._sale_has_discount());
 	}
 
+	// The customer chip makes the current selection visible; typing in the
+	// field without picking again clears it so a stale value is never used.
+	_render_customer_state() {
+		const $state = this.$body.find("[data-bd-customer-state]");
+		if (!$state.length) return;
+		if (this.customer && this.customer_label) {
+			$state
+				.html(
+					`<span class="bd-chip">${frappe.utils.escape_html(this.customer_label)}
+						<button type="button" class="bd-chip-x" data-bd-customer-clear aria-label="${__(
+							"Clear"
+						)}">×</button></span>`
+				)
+				.show();
+		} else if (this.$body.find("[data-bd-customer]").val()) {
+			$state.html(`<span class="bd-muted">${__("Press Enter or click a result to select")}</span>`).show();
+		} else {
+			$state.html("").hide();
+		}
+	}
+
 	_bind_sale() {
-		this._attach_search("[data-bd-customer]", "[data-bd-customer-menu]", (term, done) => {
-			frappe.call({
-				method: "pos_next.api.customers.get_customers",
-				args: { search_term: term || "", pos_profile: this.shift.pos_profile, limit: 20 },
-				callback: (r) =>
-					done(
-						(r.message || []).map((c) => ({
-							value: c.name,
-							label: c.customer_name || c.name,
-						}))
-					),
-			});
-		}, (pick) => {
-			this.customer = pick;
-			this._save_state();
-		});
-		this._attach_search("[data-bd-item]", "[data-bd-item-menu]", (term, done) => {
-			frappe.call({
-				method: "pos_next.api.items.get_items",
-				args: {
-					pos_profile: this.shift.pos_profile,
-					search_term: term || null,
-					start: 0,
-					limit: 20,
+		this._attach_search(
+			"[data-bd-customer]",
+			"[data-bd-customer-menu]",
+			(term, done) => {
+				frappe.call({
+					method: "pos_next.api.customers.get_customers",
+					args: { search_term: term || "", pos_profile: this.shift.pos_profile, limit: 20 },
+					callback: (r) =>
+						done(
+							(r.message || []).map((c) => ({
+								value: c.name,
+								label: c.customer_name || c.name,
+							}))
+						),
+				});
+			},
+			(pick) => {
+				this.customer = pick.value;
+				this.customer_label = pick.label;
+				this._render_customer_state();
+				this._save_state();
+			},
+			{
+				on_type: () => {
+					this.customer = "";
+					this.customer_label = "";
+					this._render_customer_state();
 				},
-				callback: (r) => {
-					this.item_results = r.message || [];
-					done(
-						this.item_results.map((i) => ({
-							value: i.item_code,
-							label: i.item_name,
-							subtitle: this._money(i.price_list_rate),
-						}))
-					);
-				},
+			}
+		);
+		this.$body
+			.off("click", "[data-bd-customer-clear]")
+			.on("click", "[data-bd-customer-clear]", () => {
+				this.customer = "";
+				this.customer_label = "";
+				this.$body.find("[data-bd-customer]").val("");
+				this._render_customer_state();
+				this._save_state();
 			});
-		}, (pick) => this._on_item_pick(pick));
+		this._attach_search(
+			"[data-bd-item]",
+			"[data-bd-item-menu]",
+			(term, done) => {
+				frappe.call({
+					method: "pos_next.api.items.get_items",
+					args: {
+						pos_profile: this.shift.pos_profile,
+						search_term: term || null,
+						start: 0,
+						limit: 20,
+					},
+					callback: (r) => {
+						this.item_results = r.message || [];
+						done(
+							this.item_results.map((i) => ({
+								value: i.item_code,
+								label: i.item_name,
+								subtitle: this._money(i.price_list_rate),
+							}))
+						);
+					},
+				});
+			},
+			(pick) => this._on_item_pick(pick.value),
+			// the field empties after each pick so the next search starts clean
+			{ clear_after_pick: true }
+		);
 
 		const modes = this.payment_modes
 			.map(
@@ -600,7 +846,13 @@ class BackdateEntry {
 			.on("input", "[data-bd-payment-amount]", (e) => {
 				this.amount_touched = true;
 				this.payment_amount = Number(e.currentTarget.value) || 0;
+				this._render_payment_hint();
 				this._save_state();
+			})
+			.off("click", "[data-bd-match-total]")
+			.on("click", "[data-bd-match-total]", () => {
+				this.amount_touched = false;
+				this._render_sale_rows();
 			})
 			.off("click", "[data-bd-submit]")
 			.on("click", "[data-bd-submit]", () => this._submit());
@@ -627,26 +879,32 @@ class BackdateEntry {
 	_render_return() {
 		this.$panel.html(`
 			<div class="bd-search-wrap">
-				<label class="bd-label">${__("Original Invoice (from this shift)")}</label>
-				<input class="bd-input" type="search" autocomplete="off"
-					placeholder="${__("Search invoice...")}" data-bd-invoice />
-				<div class="bd-menu" data-bd-invoice-menu hidden></div>
+				<label class="bd-label" for="bd-invoice">${__("Original Invoice (from this shift)")}</label>
+				<input class="bd-input" id="bd-invoice" type="search" autocomplete="off" role="combobox"
+					aria-expanded="false" aria-controls="bd-invoice-menu"
+					placeholder="${__("Search invoice...")}" data-bd-invoice
+					value="${frappe.utils.escape_html(this.invoice_label || "")}" />
+				<div class="bd-menu" id="bd-invoice-menu" role="listbox" data-bd-invoice-menu hidden></div>
+				<p class="bd-fieldhint" data-bd-invoice-info></p>
 			</div>
-			<p class="bd-hint" data-bd-invoice-info></p>
 			<div data-bd-return-rows></div>
+			<div class="bd-divider"></div>
+			<div class="bd-section-title">${__("Payment")}</div>
 			<div class="bd-grid2">
 				<div>
 					<label class="bd-label" for="bd-refund-mode">${__("Refund Mode")}</label>
 					<select class="bd-select" id="bd-refund-mode" data-bd-refund-mode></select>
 				</div>
 				<div>
-					<label class="bd-label" for="bd-refund-amount">${__("Amount")}</label>
+					<label class="bd-label" for="bd-refund-amount">${__("Refund Amount")}</label>
 					<input class="bd-input" id="bd-refund-amount" type="number" min="0" step="any"
 						data-bd-refund-amount value="${this.refund_amount || 0}" />
+					<p class="bd-fieldhint" data-bd-refund-hint></p>
 				</div>
 			</div>
-			<div class="bd-search-wrap" data-bd-refund-code-wrap ${this.refund_code_required ? "" : "hidden"}>
+			<div class="bd-search-wrap" data-bd-refund-code-wrap${this.refund_code_required ? "" : ' style="display:none"'}>
 				<label class="bd-label" for="bd-refund-code">${__("Confirmation Code (HQ)")} *</label>
+				<p class="bd-fieldhint">${__("A return requires a confirmation code from head office")}</p>
 				<div class="bd-code-row">
 					<input class="bd-input" id="bd-refund-code" type="text" autocomplete="off" maxlength="8"
 						placeholder="${__("Enter the code from head office")}" data-bd-refund-code
@@ -655,14 +913,45 @@ class BackdateEntry {
 					<button type="button" class="btn btn-sm btn-default" data-bd-verify-code
 						${this.refund_code_verified ? "disabled" : ""}>${this.refund_code_verified ? "✓" : __("Verify")}</button>
 				</div>
-				<p class="bd-hint" data-bd-refund-code-msg></p>
+				<p class="bd-fieldhint" data-bd-refund-code-msg></p>
 			</div>
 			<div class="bd-actions">
-				<button class="btn btn-primary btn-sm" data-bd-submit>${__("Submit Return")}</button>
+				<button class="btn btn-primary" data-bd-submit>${__("Submit Return")}</button>
 			</div>`);
 
+		this._render_invoice_summary();
 		this._render_return_rows();
 		this._bind_return();
+		this._render_refund_code_state();
+	}
+
+	_render_invoice_summary() {
+		const $info = this.$body.find("[data-bd-invoice-info]");
+		if (!$info.length) return;
+		if (!this.prepared_doc) {
+			$info.html("").hide();
+			return;
+		}
+		const inv = this.original_invoice || {};
+		$info
+			.html(
+				`<span class="bd-chip">${frappe.utils.escape_html(this.invoice_label || this.prepared_doc.name || "")}
+					<span class="bd-muted">${frappe.utils.escape_html(
+						this.prepared_doc.customer || inv.customer_name || ""
+					)}${inv.grand_total != null ? `, ${this._money(inv.grand_total)}` : ""}</span>
+					<button type="button" class="bd-chip-x" data-bd-invoice-clear aria-label="${__(
+						"Clear"
+					)}">×</button></span>`
+			)
+			.show();
+	}
+
+	_return_row_amount(row) {
+		return (Number(row.return_qty) > 0 ? Number(row.return_qty) : 0) * (Number(row.rate) || 0);
+	}
+
+	_return_total() {
+		return this.return_rows.reduce((sum, row) => sum + this._return_row_amount(row), 0);
 	}
 
 	_render_return_rows() {
@@ -674,59 +963,106 @@ class BackdateEntry {
 				<td class="bd-num">${row.remaining_qty}</td>
 				<td><input type="number" min="0" max="${row.remaining_qty}" step="any" class="bd-input bd-input--qty"
 					data-bd-return-qty="${idx}" value="${row.return_qty}"
-					aria-label="${frappe.utils.escape_html(row.item_name)} — ${__("Qty")}" /></td>
+					aria-label="${frappe.utils.escape_html(row.item_name)}, ${__("Return Qty")}" /></td>
+				<td class="bd-num">${this._money(this._return_row_amount(row))}</td>
 			</tr>`
 			)
 			.join("");
-		const total = this.return_rows.reduce(
-			(sum, row) =>
-				sum +
-				(Number(row.return_qty) > 0 ? Number(row.return_qty) : 0) *
-					(Number(row.rate) || 0),
-			0
-		);
+		const focus = this._focus_info();
 		this.$body.find("[data-bd-return-rows]").html(
-			this.return_rows.length
-				? `<table class="bd-table">
+			this.prepared_doc && this.return_rows.length
+				? `<div class="bd-table-wrap"><table class="bd-table">
 					<thead><tr><th>${__("Item")}</th><th class="bd-num">${__("Rate")}</th>
-					<th class="bd-num">${__("Remaining")}</th><th class="bd-num">${__("Return Qty")}</th></tr></thead>
-					<tbody>${rows}</tbody></table>
-					<p class="bd-total">${__("Refund")}: ${this._money(total)}</p>`
-				: ""
+					<th class="bd-num">${__("Remaining")}</th><th class="bd-num">${__("Return Qty")}</th>
+					<th class="bd-num">${__("Refund")}</th></tr></thead>
+					<tbody>${rows}</tbody></table></div>
+					<div class="bd-summary"><div class="bd-summary-row bd-summary-row--total">
+						<span>${__("Refund Total")}</span><span>${this._money(this._return_total())}</span>
+					</div></div>`
+				: `<p class="bd-empty">${__("Search and pick an invoice to load its items")}</p>`
 		);
+		this._refocus(focus);
 		if (!this.refund_touched) {
-			this.refund_amount = total;
-			this.$body.find("[data-bd-refund-amount]").val(total);
+			this.refund_amount = this._return_total();
+			this.$body.find("[data-bd-refund-amount]").val(this.refund_amount);
 		}
+		this._render_refund_hint();
 		this._save_state();
 	}
 
+	_render_refund_hint() {
+		const $hint = this.$body.find("[data-bd-refund-hint]");
+		if (!$hint.length) return;
+		const delta = (Number(this.refund_amount) || 0) - this._return_total();
+		if (!this.return_rows.length) {
+			$hint.html("").hide();
+		} else if (Math.abs(delta) < 0.005) {
+			$hint.html(`${__("Refund")}: ${this._money(this._return_total())}`).show().removeClass("bd-warn");
+		} else {
+			$hint
+				.html(
+					`${delta < 0 ? __("Less than the total by {0}", [this._money(-delta)]) : __("More than the total by {0}", [this._money(delta)])}
+					<button type="button" class="bd-linklike" data-bd-match-refund>${__("Match total")}</button>`
+				)
+				.show()
+				.addClass("bd-warn");
+		}
+	}
+
 	_bind_return() {
-		this._attach_search("[data-bd-invoice]", "[data-bd-invoice-menu]", (term, done) => {
-			frappe.call({
-				method: "pos_next.api.invoices.get_invoices",
-				args: {
-					pos_profile: this.shift.pos_profile,
-					search: term || null,
-					from_date: this._shift_start() || null,
-					to_date: this.today,
-					docstatus: 1,
-					start: 0,
-					limit: 20,
+		this._attach_search(
+			"[data-bd-invoice]",
+			"[data-bd-invoice-menu]",
+			(term, done) => {
+				frappe.call({
+					method: "pos_next.api.invoices.get_invoices",
+					args: {
+						pos_profile: this.shift.pos_profile,
+						search: term || null,
+						from_date: this._shift_start() || null,
+						to_date: this.today,
+						docstatus: 1,
+						start: 0,
+						limit: 20,
+					},
+					callback: (r) => {
+						// only the outlet's own sales inside the shift window are offered
+						this.invoice_results = (r.message || []).filter((inv) => !inv.is_return);
+						done(
+							this.invoice_results.map((inv) => ({
+								value: inv.name,
+								label: inv.name,
+								subtitle: `${inv.customer_name || ""}, ${this._money(inv.grand_total)}`,
+							}))
+						);
+					},
+				});
+			},
+			(pick) => this._on_invoice_pick(pick.value),
+			{
+				on_type: () => {
+					// typing a different invoice invalidates the loaded rows
+					this.prepared_doc = null;
+					this.original_invoice = null;
+					this.invoice_label = "";
+					this.return_rows = [];
+					this._render_invoice_summary();
+					this._render_return_rows();
 				},
-				callback: (r) => {
-					// only the outlet's own sales inside the shift window are offered
-					this.invoice_results = (r.message || []).filter((inv) => !inv.is_return);
-					done(
-						this.invoice_results.map((inv) => ({
-							value: inv.name,
-							label: inv.name,
-							subtitle: `${inv.customer_name || ""} · ${this._money(inv.grand_total)}`,
-						}))
-					);
-				},
+			}
+		);
+		this.$body
+			.off("click", "[data-bd-invoice-clear]")
+			.on("click", "[data-bd-invoice-clear]", () => {
+				this.prepared_doc = null;
+				this.original_invoice = null;
+				this.invoice_label = "";
+				this.return_rows = [];
+				this.$body.find("[data-bd-invoice]").val("");
+				this._render_invoice_summary();
+				this._render_return_rows();
+				this._save_state();
 			});
-		}, (pick) => this._on_invoice_pick(pick));
 
 		const modes = this.payment_modes
 			.map(
@@ -750,7 +1086,13 @@ class BackdateEntry {
 			.on("input", "[data-bd-refund-amount]", (e) => {
 				this.refund_touched = true;
 				this.refund_amount = Number(e.currentTarget.value) || 0;
+				this._render_refund_hint();
 				this._save_state();
+			})
+			.off("click", "[data-bd-match-refund]")
+			.on("click", "[data-bd-match-refund]", () => {
+				this.refund_touched = false;
+				this._render_return_rows();
 			})
 			.off("click", "[data-bd-submit]")
 			.on("click", "[data-bd-submit]", () => this._submit());
@@ -762,7 +1104,8 @@ class BackdateEntry {
 	_bind_confirmation_code() {
 		this.$body
 			.off("input", "[data-bd-refund-code]")
-			.on("input", "[data-bd-refund-code]", () => {
+			.on("input", "[data-bd-refund-code]", (e) => {
+				this.refund_code = e.currentTarget.value;
 				this.refund_code_verified = false;
 				this.refund_code_error = "";
 				this._render_refund_code_state();
@@ -814,12 +1157,18 @@ class BackdateEntry {
 	_render_refund_code_state() {
 		const $input = this.$body.find("[data-bd-refund-code]");
 		if (!$input.length) return;
-		$input.val(this.refund_code || "");
+		// only rewrite while typing would wipe the caret — write only on change
+		if ($input.val() !== (this.refund_code || "")) {
+			$input.val(this.refund_code || "");
+		}
 		$input.prop("disabled", this.refund_code_verified);
+		$input.toggleClass("bd-ok", this.refund_code_verified);
 		const $btn = this.$body.find("[data-bd-verify-code]");
 		$btn.prop("disabled", this.refund_code_verified);
 		$btn.text(this.refund_code_verified ? "✓" : __("Verify"));
-		this.$body.find("[data-bd-refund-code-msg]").text(this.refund_code_error || "");
+		const $msg = this.$body.find("[data-bd-refund-code-msg]");
+		$msg.text(this.refund_code_verified ? __("Code verified") : this.refund_code_error || "");
+		$msg.toggleClass("bd-ok-text", this.refund_code_verified && !this.refund_code_error);
 	}
 	_on_invoice_pick(name) {
 		frappe.call({
@@ -837,13 +1186,13 @@ class BackdateEntry {
 				this.original_invoice =
 					this.invoice_results.find((inv) => inv.name === name) || { name };
 				this.prepared_doc = doc;
+				this.invoice_label = doc.name || name;
 				// start at zero: rows are only returned when HO fills a quantity
 				this.return_rows = rows.map((item) =>
 					Object.assign({}, item, { return_qty: 0 })
 				);
-				this.$body.find("[data-bd-invoice-info]").text(
-					`${doc.name || name} · ${doc.customer || ""}`
-				);
+				this.$body.find("[data-bd-invoice]").val(this.invoice_label);
+				this._render_invoice_summary();
 				this._render_return_rows();
 			},
 		});
@@ -879,8 +1228,11 @@ class BackdateEntry {
 				const cust = r.message;
 				if (cust && cust.customer && !this.customer) {
 					this.customer = cust.customer;
+					this.customer_label = cust.customer_name || cust.customer;
 					const $input = this.$body.find("[data-bd-customer]");
-					if ($input.length) $input.val(cust.customer_name || cust.customer);
+					if ($input.length) $input.val(this.customer_label);
+					this._render_customer_state();
+					this._save_state();
 				}
 			},
 		});
@@ -1028,16 +1380,24 @@ class BackdateEntry {
 
 	_render_done() {
 		this.view = "done";
+		this._set_hint(false);
 		this.$body.html(`
-			<div class="bd-card bd-center">
+			<div class="bd-card bd-center bd-done-card">
+				<div class="bd-done-icon" aria-hidden="true">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+						stroke-linecap="round" stroke-linejoin="round">
+						<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+						<polyline points="22 4 12 14.01 9 11.01"></polyline>
+					</svg>
+				</div>
 				<div class="bd-done">${__("Invoice {0} submitted", [this.submitted_name])}</div>
 				<p class="bd-muted">${__(
-					"The backdate entry is recorded on shift {0}. Close the shift again so the closing report includes it — use the button below or the outlet's regular close-shift flow.",
+					"The backdate entry is recorded on shift {0}. Close the shift again so the closing report includes it. Use the button below or the outlet's regular close-shift flow.",
 					[this.shift.name]
 				)}</p>
-				<div class="bd-actions">
-					<button class="btn btn-default btn-sm" data-bd-again>${__("Enter Another Entry")}</button>
-					<button class="btn btn-primary btn-sm" data-bd-close-now>${__("Close Shift Now")}</button>
+				<div class="bd-actions bd-actions--center">
+					<button class="btn btn-default" data-bd-again>${__("Enter Another Entry")}</button>
+					<button class="btn btn-primary" data-bd-close-now>${__("Close Shift Now")}</button>
 				</div>
 			</div>`);
 		this.$body
@@ -1095,54 +1455,148 @@ class BackdateEntry {
 	}
 
 	// ------------------------------------------------------------------
-	// Minimal debounced search dropdown (customers / items / invoices)
+	// Debounced combobox search (customers / items / invoices): opens on
+	// focus and while typing, Arrow keys + Enter pick without the mouse,
+	// and loading / no-results states keep the menu from feeling dead.
+	// Events carry the shared ".bdsearch" namespace so re-attaching on the
+	// same DOM (support-data reload) replaces instead of stacking.
 	// ------------------------------------------------------------------
 
-	_attach_search(inputSel, menuSel, fetch, on_pick) {
+	_attach_search(inputSel, menuSel, fetch, on_pick, opts = {}) {
 		const $input = this.$body.find(inputSel);
 		const $menu = this.$body.find(menuSel);
+		const ev = ".bdsearch.m" + ++BackdateEntry._seq;
 		let timer = null;
-		const close = () => $menu.prop("hidden", true);
+		let request = 0; // ignore stale responses that resolve out of order
+		let items = [];
+		let active = -1;
+
+		$input.off(".bdsearch");
+		$menu.off(".bdsearch");
+
+		const close = () => {
+			$menu.prop("hidden", true);
+			$input.attr("aria-expanded", "false");
+			active = -1;
+		};
+		const render_note = (text) => {
+			items = [];
+			active = -1;
+			$menu.html(`<div class="bd-menu-note">${frappe.utils.escape_html(text)}</div>`);
+			$menu.prop("hidden", false);
+			$input.attr("aria-expanded", "true");
+		};
+		const render_items = (list) => {
+			items = list;
+			active = 0;
+			$menu
+				.html(
+					items
+						.map(
+							(item, i) =>
+								`<button type="button" class="bd-menu-item${i === 0 ? " is-active" : ""}" role="option"
+									data-value="${frappe.utils.escape_html(item.value)}" aria-selected="${i === 0}"><span>${frappe.utils.escape_html(item.label)}</span>
+									${item.subtitle ? `<span class="bd-muted">${frappe.utils.escape_html(item.subtitle)}</span>` : ""}</button>`
+						)
+						.join("")
+				)
+				.prop("hidden", false);
+			$input.attr("aria-expanded", "true");
+		};
+		const search = () => {
+			const term = $input.val();
+			const seq = ++request;
+			render_note(__("Searching..."));
+			fetch(term, (list) => {
+				if (seq !== request) return; // a newer keystroke already answered
+				if (!list.length) render_note(__("No results found"));
+				else render_items(list);
+			});
+		};
+		const schedule = () => {
+			clearTimeout(timer);
+			timer = setTimeout(search, 300);
+		};
+		const highlight = (i) => {
+			active = (i + items.length) % items.length;
+			$menu.find(".bd-menu-item").each(function (idx) {
+				$(this).toggleClass("is-active", idx === active).attr("aria-selected", idx === active);
+			});
+			const el = $menu.find(".bd-menu-item").get(active);
+			if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+		};
 		const pick = (item) => {
 			close();
-			$input.val(item.label);
-			(on_pick || ((value) => (this.customer = value)))(item.value);
+			// clearing keeps the next search clean; other fields show the pick
+			$input.val(opts.clear_after_pick ? "" : item.label);
+			on_pick(item);
 		};
+
 		$input
-			.off("input")
-			.on("input", () => {
-				clearTimeout(timer);
-				const term = $input.val();
-				timer = setTimeout(() => {
-					fetch(term, (items) => {
-						if (!items.length) return close();
-						$menu
-							.html(
-								items
-									.map(
-										(item) =>
-											`<button type="button" class="bd-menu-item" data-value="${frappe.utils.escape_html(
-												item.value
-											)}"><span>${frappe.utils.escape_html(item.label)}</span>
-											${item.subtitle ? `<span class="bd-muted">${frappe.utils.escape_html(item.subtitle)}</span>` : ""}</button>`
-									)
-									.join("")
-							)
-							.prop("hidden", false);
-					});
-				}, 300);
+			.on("input" + ev, () => {
+				if (opts.on_type) opts.on_type();
+				schedule();
 			})
-			.off("keydown")
-			.on("keydown", (e) => {
-				if (e.key === "Escape") close();
+			.on("focus" + ev, schedule)
+			.on("keydown" + ev, (e) => {
+				const open_now = !$menu.prop("hidden");
+				if (e.key === "Escape") {
+					if (open_now) {
+						close();
+						e.preventDefault();
+					}
+					return;
+				}
+				if (!open_now && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+					schedule();
+					e.preventDefault();
+					return;
+				}
+				if (!open_now) return;
+				if (e.key === "ArrowDown") {
+					highlight(active + 1);
+					e.preventDefault();
+				} else if (e.key === "ArrowUp") {
+					highlight(active - 1);
+					e.preventDefault();
+				} else if (e.key === "Enter") {
+					if (items[active]) pick(items[active]);
+					e.preventDefault();
+				}
+			})
+			.on("blur" + ev, () => {
+				// mousedown on a menu item blurs the input first; wait a tick so
+				// the pick click still lands
+				setTimeout(() => {
+					if (!$menu.find(document.activeElement).length) close();
+				}, 0);
 			});
 		$menu
-			.off("click", ".bd-menu-item")
-			.on("click", ".bd-menu-item", (e) => {
-				pick({ value: e.currentTarget.dataset.value, label: $(e.currentTarget).find("span").first().text() });
+			.on("click" + ev, ".bd-menu-item", (e) => {
+				const value = e.currentTarget.dataset.value;
+				pick(items.find((item) => item.value === value) || { value, label: $(e.currentTarget).find("span").first().text() });
+			})
+			.on("mousemove" + ev, ".bd-menu-item", (e) => {
+				const idx = $menu.find(".bd-menu-item").index(e.currentTarget);
+				if (idx !== active && idx > -1) highlight(idx);
 			});
-		$(document).off("click.bd-search").on("click.bd-search", (e) => {
-			if (!$(e.target).closest($input.parent()).length) close();
-		});
+	}
+
+	// One delegated closer for every open menu on the page; survives re-renders
+	_bind_global_menu_close() {
+		$(document)
+			.off("click.bdsearch")
+			.on("click.bdsearch", (e) => {
+				this.$body.find(".bd-menu:visible").each(function () {
+					const $menu = $(this);
+					const $input = $menu.prev("input");
+					if (!$(e.target).closest($menu.add($input)).length) {
+						$menu.prop("hidden", true);
+						$input.attr("aria-expanded", "false");
+					}
+				});
+			});
 	}
 }
+
+BackdateEntry._seq = 0;
