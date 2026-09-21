@@ -352,9 +352,7 @@ class HQSalesMonitor {
 			"</div>",
 			this._daily_rhythm_card(s),
 			this._outlet_performance_card(s),
-			'<div class="hq-minis">',
 			this._mini_cards(s),
-			"</div>",
 			'<div class="hq-charts">',
 			this._category_product_card(s, "a"),
 			this._category_product_card(s, "b"),
@@ -482,8 +480,8 @@ class HQSalesMonitor {
 		const vs = (today, last) =>
 			`<span class="hq-money">${HQ_UTILS.fmtMoney(today, ccy)}</span> ${__("vs")} <span class="hq-money">${HQ_UTILS.fmtMoney(last, ccy)}</span>`;
 
-		return `<div class="hq-rhythm">
-			<div class="hq-section-title">${__("Daily Rhythm")}
+		return `<div class="hq-card hq-rhythm">
+			<div class="hq-card-title">${__("Daily Rhythm")}
 				<span class="hq-period">${frappe.utils.escape_html(w.day || "")} · ${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")})</span></div>
 			<div class="hq-minis">
 			${cell(__("Sales"), this._signed_pct(growth[ccy]), vs(resultSales, lwSales))}
@@ -497,7 +495,7 @@ class HQSalesMonitor {
 				dailyTarget != null ? __("from monthly target") : __("not set yet")
 			)}
 			</div>
-			<div class="hq-kpi-sub hq-muted">${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((pwGrowth || {})[ccy])}${d.cutoff ? ` · ${__("cut at")} ${frappe.utils.escape_html(d.cutoff)}` : ""}</div>
+			<div class="hq-kpi-sub hq-muted" style="margin-top: 8px">${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((pwGrowth || {})[ccy])}${d.cutoff ? ` · ${__("cut at")} ${frappe.utils.escape_html(d.cutoff)}` : ""}</div>
 		</div>`;
 	}
 
