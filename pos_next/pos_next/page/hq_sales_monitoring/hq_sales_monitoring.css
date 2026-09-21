@@ -79,6 +79,11 @@
 	gap: 0 16px;
 }
 
+/* Daily rhythm block: section title + a minis strip + a quiet footnote. */
+.hq-rhythm {
+	margin-bottom: 12px;
+}
+
 .hq-charts {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -124,9 +129,7 @@
 	-webkit-overflow-scrolling: touch;
 }
 
-/* Monitoring matrices keep the row label visible while numbers scroll. */
-.hq-table--matrix th[scope="row"],
-.hq-table--matrix thead tr:first-child th:first-child,
+/* Outlet table keeps the row label visible while numbers scroll. */
 .hq-table--outlets td:first-child,
 .hq-table--outlets thead th:first-child {
 	position: sticky;
@@ -172,32 +175,16 @@
 	white-space: nowrap;
 }
 
-.hq-table--matrix thead tr:first-child th {
-	border-bottom: none;
-	padding-bottom: 0;
+/* Eight columns must fit a 1366px laptop without hiding the tail. */
+.hq-table--outlets th,
+.hq-table--outlets td {
+	padding-left: 7px;
+	padding-right: 7px;
 }
 
-.hq-table--matrix thead tr:nth-child(2) th {
-	padding-top: 2px;
-}
-
-.hq-table--matrix tbody th[scope="row"] {
-	font-weight: 600;
-	white-space: nowrap;
-	border-right: 1px solid var(--border-color, #f1f3f5);
-}
-
-.hq-table--matrix .hq-group {
-	text-align: center;
-	border-left: 1px solid var(--border-color, #f1f3f5);
-	text-transform: none;
-	font-size: 12px;
-	color: var(--heading-color, var(--text-color));
-	font-weight: 600;
-}
-
-.hq-table--matrix .hq-group + th {
-	border-left: 1px solid var(--border-color, #f1f3f5);
+/* Sub-lines under a figure may ellipsize rather than widen the column. */
+.hq-table--outlets .hq-item-code {
+	max-width: 150px;
 }
 
 .hq-num {
@@ -286,7 +273,7 @@
 .hq-bar {
 	display: inline-block;
 	vertical-align: middle;
-	width: 72px;
+	width: 58px;
 	height: 6px;
 	border-radius: 3px;
 	background: var(--control-bg, #edf0f3);

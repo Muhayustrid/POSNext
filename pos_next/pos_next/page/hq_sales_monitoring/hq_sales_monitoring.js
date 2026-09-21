@@ -350,14 +350,11 @@ class HQSalesMonitor {
 			this._apc_card(s),
 			this._achievement_card(s),
 			"</div>",
+			this._daily_rhythm_card(s),
 			this._outlet_performance_card(s),
-			`<div class="hq-section-title">${__("Monthly Monitoring")}
-				<span class="hq-period">${__("MTD")} ${frappe.utils.escape_html(s.windows.month_start)} - ${frappe.utils.escape_html(s.windows.day)}${s.daily.cutoff ? ` · ${__("cut at")} ${s.daily.cutoff}` : ""}</span></div>`,
-			this._monthly_table(s),
-			`<div class="hq-section-title">${__("Daily Monitoring")}
-				<span class="hq-period">${frappe.utils.escape_html(s.windows.day)}</span></div>`,
-			this._daily_table(s),
+			'<div class="hq-minis">',
 			this._mini_cards(s),
+			"</div>",
 			'<div class="hq-charts">',
 			this._category_product_card(s, "a"),
 			this._category_product_card(s, "b"),
@@ -451,66 +448,57 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Monthly Monitoring table (MTD) — rows Sales / TC / APC
+	// Daily rhythm strip — today vs the SAME weekday last week (the one
+	// comparison the range filters cannot align automatically) plus the
+	// pro-rated daily target pace. Replaces the old Monthly / Daily
+	// matrices whose figures duplicated the KPI row and the outlet table.
 	// ------------------------------------------------------------------
 
-	_monthly_table(s) {
-		const m = s.monthly || {};
+	_daily_rhythm_card(s) {
+		const d = s.daily;
+		if (!d || !d.totals) return "";
 		const t = s.targets || {};
 		const ccy = s.scope.default_currency;
-		const has = !!t.available;
-		const proj = (t.projection || {})[ccy] || {};
-		const targetSales = has ? (t.target_sales.by_currency || {})[ccy] : null;
-		const mtdSales = ((m.net_tax_incl || {}).by_currency || {})[ccy];
-		const apcTarget = has ? (t.apc_target || {})[ccy] : null;
-		const mtdApc = ((m.apc || {}).by_currency || {})[ccy];
+		const w = s.windows || {};
+		const lw = d.last_week_same || {};
+		const growth = d.growth_vs_last_week_pct || {};
+		const pwGrowth = d.growth_vs_prior_weekday_pct || {};
 
-		const salesRow = `
-			<tr><th scope="row">${__("Sales")} <span class="hq-muted">(${__("net incl. tax")})</span></th>
-			<td class="hq-num">${has ? this._money_cell(t.target_sales.by_currency, ccy) : this._na()}</td>
-			<td class="hq-num">${this._metric_text(m.net_tax_incl)}</td>
-			<td class="hq-num">${has ? this._pct_cell(t.achievement_sales_pct, ccy) : this._na()}</td>
-			<td class="hq-num">${has ? this._money_cell(t.surplus_sales, ccy, true) : this._na()}</td>
-			<td class="hq-num">${has && proj.projected_sales !== undefined ? this._money_cell({ [ccy]: proj.projected_sales }, ccy) : this._na()}</td>
-			<td class="hq-num">${has ? this._pct_cell({ [ccy]: proj.projected_achievement_pct }, ccy) : this._na()}</td>
-			<td class="hq-num">${has ? this._money_cell({ [ccy]: proj.projected_surplus }, ccy, true) : this._na()}</td></tr>`;
+		const resultSales = ((d.totals.net_tax_incl || {}).by_currency || {})[ccy];
+		const lwSales = ((lw.net_tax_incl || {}).by_currency || {})[ccy];
+		const resultApc = ((d.totals.apc || {}).by_currency || {})[ccy];
+		const lwApc = ((lw.apc || {}).by_currency || {})[ccy];
+		const orders = d.totals.orders ?? 0;
+		const lwOrders = lw.orders;
+		const tcGrowth = HQ_UTILS.growthPct(orders, lwOrders);
+		const apcGrowth = HQ_UTILS.growthPct(resultApc, lwApc);
+		const dailyTarget = t.available ? (t.daily_target_sales || {})[ccy] : null;
 
-		const orders = m.orders;
-		const tcRow = `
-			<tr><th scope="row">${__("TC")} <span class="hq-muted">(${__("transactions")})</span></th>
-			<td class="hq-num">${has ? t.target_transactions : this._na()}</td>
-			<td class="hq-num">${orders ?? 0}</td>
-			<td class="hq-num">${has ? this._pct_cell({ [ccy]: t.achievement_transactions_pct }, ccy) : this._na()}</td>
-			<td class="hq-num">${has && t.target_transactions != null ? this._signed(orders - t.target_transactions, "") : this._na()}</td>
-			<td class="hq-num">${has ? (t.projected_orders ?? this._na()) : this._na()}</td>
-			<td class="hq-num">${has ? this._pct_cell({ [ccy]: t.projected_achievement_transactions_pct }, ccy) : this._na()}</td>
-			<td class="hq-num">${has ? this._signed(t.projected_surplus_orders, "") : this._na()}</td></tr>`;
+		const cell = (label, value, sub) => `<div class="hq-mini">
+			<div class="hq-kpi-label">${label}</div>
+			<div class="hq-kpi-value">${value}</div>
+			<div class="hq-kpi-sub">${sub}</div>
+		</div>`;
+		const vs = (today, last) =>
+			`<span class="hq-money">${HQ_UTILS.fmtMoney(today, ccy)}</span> ${__("vs")} <span class="hq-money">${HQ_UTILS.fmtMoney(last, ccy)}</span>`;
 
-		const apcRow = `
-			<tr><th scope="row">${__("APC")} <span class="hq-muted">(${__("avg / transaction")})</span></th>
-			<td class="hq-num">${apcTarget != null ? this._money_cell({ [ccy]: apcTarget }, ccy) : this._na()}</td>
-			<td class="hq-num">${this._metric_text(m.apc)}</td>
-			<td class="hq-num">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(mtdApc, apcTarget))}</td>
-			<td class="hq-num">${mtdApc != null && apcTarget != null ? this._signed(mtdApc - apcTarget, ccy) : this._na()}</td>
-			<td class="hq-num">${this._metric_text(m.apc)}</td>
-			<td class="hq-num">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(mtdApc, apcTarget))}</td>
-			<td class="hq-num">${mtdApc != null && apcTarget != null ? this._signed(mtdApc - apcTarget, ccy) : this._na()}</td></tr>`;
-
-		const notice = has
-			? `<div class="hq-kpi-sub hq-muted">${frappe.utils.escape_html(t.projection_note || "")}
-				${frappe.utils.escape_html(t.apc_projection_note || "")}</div>`
-			: `<div class="hq-kpi-sub hq-muted">${frappe.utils.escape_html(t.notice || __("Monthly target not set"))}</div>`;
-
-		return `<div class="hq-card hq-card--table"><div class="hq-table-scroll">
-			<table class="hq-table hq-table--matrix">
-			<thead><tr>
-				<th></th><th class="hq-num">${__("Target")}</th><th class="hq-num">${__("MTD")}</th>
-				<th class="hq-num">${__("Achievement %")}</th><th class="hq-num">${__("Over / (Deficit)")}</th>
-				<th class="hq-num">${__("Monthlyized")}</th><th class="hq-num">${__("Projected Ach. %")}</th>
-				<th class="hq-num">${__("Projected Surplus")}</th>
-			</tr></thead>
-			<tbody>${salesRow}${tcRow}${apcRow}</tbody>
-			</table></div>${notice}</div>`;
+		return `<div class="hq-rhythm">
+			<div class="hq-section-title">${__("Daily Rhythm")}
+				<span class="hq-period">${frappe.utils.escape_html(w.day || "")} · ${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")})</span></div>
+			<div class="hq-minis">
+			${cell(__("Sales"), this._signed_pct(growth[ccy]), vs(resultSales, lwSales))}
+			${cell(__("TC"), this._signed_pct(tcGrowth), `${HQ_UTILS.fmtCount(orders)} ${__("vs")} ${HQ_UTILS.fmtCount(lwOrders ?? 0)}`)}
+			${cell(__("Avg Ticket"), this._signed_pct(apcGrowth), vs(resultApc, lwApc))}
+			${cell(
+				__("Daily Target"),
+				dailyTarget != null
+					? `<span class="hq-money">${HQ_UTILS.fmtMoney(dailyTarget, ccy)}</span> / ${__("day")}`
+					: this._na(),
+				dailyTarget != null ? __("from monthly target") : __("not set yet")
+			)}
+			</div>
+			<div class="hq-kpi-sub hq-muted">${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((pwGrowth || {})[ccy])}${d.cutoff ? ` · ${__("cut at")} ${frappe.utils.escape_html(d.cutoff)}` : ""}</div>
+		</div>`;
 	}
 
 	_signed(value, ccy) {
@@ -524,76 +512,6 @@ class HQSalesMonitor {
 		if (value === null || value === undefined) return this._na();
 		const n = Number(value);
 		return `<span class="hq-money">${n > 0 ? "+" : ""}${HQ_UTILS.fmtPct(n, 1)}</span>`;
-	}
-
-	// ------------------------------------------------------------------
-	// Daily Monitoring table — selected day (target / result / ach%)
-	// vs prior weekday (result / growth)
-	// ------------------------------------------------------------------
-
-	_daily_table(s) {
-		const d = s.daily;
-		if (!d || !d.totals) return "";
-		const t = s.targets || {};
-		const has = !!t.available;
-		const ccy = s.scope.default_currency;
-		const w = s.windows || {};
-		const dim = w.days_in_month;
-		const dailyTarget = has ? (t.daily_target_sales || {})[ccy] : null;
-		const tcTarget = has ? t.target_transactions : null;
-		const tcDailyTarget = tcTarget != null && dim ? tcTarget / dim : null;
-		const apcDailyTarget =
-			dailyTarget != null && tcDailyTarget ? dailyTarget / tcDailyTarget : null;
-
-		const resultSales = ((d.totals.net_tax_incl || {}).by_currency || {})[ccy];
-		const resultApc = ((d.totals.apc || {}).by_currency || {})[ccy];
-		// Main comparator (legacy HQ report): SAME weekday LAST week, same
-		// elapsed cutoff. Prior weekday stays as a secondary note.
-		const lw = d.last_week_same || {};
-		const lwSales = ((lw.net_tax_incl || {}).by_currency || {})[ccy];
-		const lwApc = ((lw.apc || {}).by_currency || {})[ccy];
-		const growth = d.growth_vs_last_week_pct || {};
-
-		const money = (v) => this._signed(v, ccy);
-		const orders = d.totals.orders ?? 0;
-		const lwOrders = lw.orders;
-		const tcGrowth = HQ_UTILS.growthPct(orders, lwOrders);
-		const apcGrowth = HQ_UTILS.growthPct(resultApc, lwApc);
-		const pwGrowth = d.growth_vs_prior_weekday_pct || {};
-
-		return `<div class="hq-card hq-card--table"><div class="hq-table-scroll">
-			<table class="hq-table hq-table--matrix">
-			<thead>
-			<tr><th></th>
-				<th colspan="3" class="hq-group">${frappe.utils.escape_html(w.day)}${d.cutoff ? ` (${__("cut at")} ${d.cutoff})` : ""}</th>
-				<th colspan="2" class="hq-group">${__("vs")} ${frappe.utils.escape_html(w.last_week_same)} <span class="hq-muted">(${__("same weekday last week")})</span></th></tr>
-			<tr><th></th>
-				<th class="hq-num">${__("Daily Target")}</th><th class="hq-num">${__("Result")}</th><th class="hq-num">${__("Ach. %")}</th>
-				<th class="hq-num">${__("Result")}</th><th class="hq-num">${__("Growth vs LW")}</th></tr>
-			</thead>
-			<tbody>
-			<tr><th scope="row">${__("Sales")} <span class="hq-muted">(${__("net incl. tax")})</span></th>
-				<td class="hq-num">${dailyTarget != null ? money(dailyTarget) : this._na()}</td>
-				<td class="hq-num">${this._metric_text(d.totals.net_tax_incl)}</td>
-				<td class="hq-num">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(resultSales, dailyTarget))}</td>
-				<td class="hq-num">${this._metric_text(lw.net_tax_incl)}</td>
-				<td class="hq-num">${this._signed_pct(growth[ccy])}</td></tr>
-			<tr><th scope="row">${__("TC")} <span class="hq-muted">(${__("transactions")})</span></th>
-				<td class="hq-num">${tcDailyTarget != null ? Math.round(tcDailyTarget * 10) / 10 : this._na()}</td>
-				<td class="hq-num">${orders}</td>
-				<td class="hq-num">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(orders, tcDailyTarget))}</td>
-				<td class="hq-num">${lwOrders ?? this._na()}</td>
-				<td class="hq-num">${this._signed_pct(tcGrowth)}</td></tr>
-			<tr><th scope="row">${__("APC")} <span class="hq-muted">(${__("avg / transaction")})</span></th>
-				<td class="hq-num">${apcDailyTarget != null ? money(apcDailyTarget) : this._na()}</td>
-				<td class="hq-num">${this._metric_text(d.totals.apc)}</td>
-				<td class="hq-num">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(resultApc, apcDailyTarget))}</td>
-				<td class="hq-num">${this._metric_text(lw.apc)}</td>
-				<td class="hq-num">${this._signed_pct(apcGrowth)}</td></tr>
-			</tbody>
-			</table></div>
-			<div class="hq-kpi-sub">${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((pwGrowth || {})[ccy])}</div>
-			<div class="hq-kpi-sub hq-muted">${frappe.utils.escape_html(t.daily_target_note || d.daily_target_note || "")}</div></div>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -755,20 +673,20 @@ class HQSalesMonitor {
 			: `${this._bar(t.achievement_sales_pct)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(t.achievement_sales_pct, 1)}</b>
 				${t.projected_sales != null ? `<div class="hq-item-code">${__("proj.")} <span class="hq-money">${HQ_UTILS.fmtMoney(t.projected_sales, ccy)}</span> · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}</div>` : ""}`;
 		const overallCell = o
-			? `<span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span> / <span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>
-				<div class="hq-item-code"><b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
+			? `<span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span>
+				<div class="hq-item-code"><span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span> · <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
 			: this._na();
 
-			return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
-				<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}</td>
-			<td class="hq-num">${targetCell}</td>
-			<td class="hq-num">${mtdCell}</td>
-			<td class="hq-num hq-ach">${achCell}</td>
-			<td class="hq-num">${overallCell}</td>
+		return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
+			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}</td>
 			<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span>
 				${r.share_pct != null ? `<div class="hq-item-code">${HQ_UTILS.fmtPct(r.share_pct)}</div>` : ""}</td>
 			<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
 			<td class="hq-num">${r.apc === null ? "N/A" : `<span class="hq-money">${HQ_UTILS.fmtMoney(r.apc, r.currency)}</span>`}</td>
+			<td class="hq-num">${targetCell}</td>
+			<td class="hq-num">${mtdCell}</td>
+			<td class="hq-num hq-ach">${achCell}</td>
+			<td class="hq-num">${overallCell}</td>
 		</tr>`;
 	}
 
@@ -785,16 +703,16 @@ class HQSalesMonitor {
 				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
 			</div>
 			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
-				<thead><tr>
-					<th>${__("Outlet (Company)")}</th>
-					<th class="hq-num">${__("Monthly Target")}</th>
-					<th class="hq-num">${__("MTD")}</th>
-					<th class="hq-num">${__("Achievement")}</th>
-					<th class="hq-num">${__("Balik Modal")}</th>
-					<th class="hq-num">${__("Net Sales")}</th>
-					<th class="hq-num">${__("TC")}</th>
-					<th class="hq-num">${__("Avg Ticket")}</th>
-				</tr></thead>
+			<thead><tr>
+				<th>${__("Outlet (Company)")}</th>
+				<th class="hq-num">${__("Net Sales")}</th>
+				<th class="hq-num">${__("TC")}</th>
+				<th class="hq-num">${__("Avg Ticket")}</th>
+				<th class="hq-num">${__("Monthly Target")}</th>
+				<th class="hq-num">${__("MTD")}</th>
+				<th class="hq-num">${__("Achievement")}</th>
+				<th class="hq-num">${__("Balik Modal")}</th>
+			</tr></thead>
 				<tbody>${rows || `<tr><td colspan="8" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
 			<div class="hq-pager">
