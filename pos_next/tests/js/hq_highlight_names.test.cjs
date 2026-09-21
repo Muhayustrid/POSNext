@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const pageDir = path.resolve(__dirname, '../../pos_next/page/hq_sales_monitoring');
 const source = fs.readFileSync(path.join(pageDir, 'hq_sales_monitoring.js'), 'utf8');
 const css = fs.readFileSync(path.join(pageDir, 'hq_sales_monitoring.css'), 'utf8');
-const method = source.slice(source.indexOf('_mini_cards(s) {'), source.indexOf('_sales_card(s) {'));
+const method = source.slice(source.indexOf('_mini_cards(s) {'), source.indexOf('_hero_card(s) {'));
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
 	'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);

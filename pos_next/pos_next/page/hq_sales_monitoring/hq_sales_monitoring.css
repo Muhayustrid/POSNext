@@ -1,8 +1,9 @@
-/* HQ Sales Monitoring — desk page styles (layout v3).
+/* HQ Sales Monitoring — desk page styles (layout v5).
    Surfaces, text and the accent follow Frappe's theme variables so the page
-   tracks light/dark and custom themes. Structure: scope strip, KPI row (one
-   dominant Sales card), Outlet Performance table, the monitoring matrices,
-   the mini strip, 2x2 chart grid, full-width peak hour and product ranking. */
+   tracks light/dark and custom themes. Structure: scope strip, ONE hero
+   metric block (Total Sales dominant, companions in a hairline row, daily
+   rhythm as footnote), Outlet Performance table, the mini strip, 2x2 chart
+   grid, full-width peak hour and product ranking. */
 
 #page-hq-sales-monitoring .page-form,
 .hq-monitor {
@@ -62,14 +63,45 @@
 	color: var(--text-muted);
 }
 
-/* KPI row: the Sales card gets double width — it is the page's primary
-   metric; Transactions / APC / Achievement are companions. */
-.hq-kpi-row {
-	display: grid;
-	grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
-	gap: 12px;
-	margin-bottom: 12px;
-	align-items: stretch;
+/* Hero block: Total Sales is the page's one dominant figure (28px); the
+   companions share a hairline row inside the same quiet tinted card. */
+.hq-hero {
+	background: var(--control-bg, #f6f9fd);
+	border-color: var(--border-color, #d8e4f2);
+}
+
+.hq-hero-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-bottom: 2px;
+}
+
+.hq-hero-head .hq-card-title {
+	margin-bottom: 0;
+}
+
+.hq-hero-value {
+	font-size: 28px;
+	font-weight: 650;
+	color: var(--heading-color, var(--text-color));
+	line-height: 1.2;
+	font-variant-numeric: tabular-nums;
+	letter-spacing: -0.02em;
+	margin: 2px 0 2px;
+}
+
+/* Companions are visibly secondary: smaller values inside the hero card. */
+.hq-hero .hq-mini .hq-kpi-value {
+	font-size: 16px;
+}
+
+.hq-hero .hq-minis {
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid var(--border-color, #dfe7ef);
 }
 
 /* Minis: ONE strip card, four equal slots split by thin left borders. */
@@ -97,7 +129,6 @@
 	box-shadow: var(--shadow-xs);
 }
 
-.hq-kpi-row .hq-card,
 .hq-charts .hq-card {
 	margin-bottom: 0;
 }
@@ -237,11 +268,74 @@
 	overflow-wrap: anywhere;
 }
 
-/* Quiet tinted surface for the two headline cards. */
-.hq-kpi--primary,
-.hq-kpi--ach {
-	background: var(--control-bg, #f6f9fd);
-	border-color: var(--border-color, #d8e4f2);
+/* Quiet explainer tooltip: "i" glyph, text on hover / keyboard focus.
+   The body stays in the DOM (and the page language); only its visibility
+   changes, so screen readers and touch-focus both reach it. */
+.hq-tip {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	vertical-align: middle;
+	color: var(--text-muted);
+	cursor: help;
+	border-radius: 999px;
+}
+
+.hq-tip svg {
+	width: 13px;
+	height: 13px;
+	stroke: currentColor;
+	stroke-width: 2;
+	fill: none;
+	stroke-linecap: round;
+}
+
+.hq-tip circle:not(:first-of-type) {
+	fill: currentColor;
+	stroke: none;
+}
+
+.hq-tip-body {
+	position: absolute;
+	left: 50%;
+	bottom: calc(100% + 6px);
+	transform: translateX(-50%);
+	width: max-content;
+	max-width: 240px;
+	background: var(--card-bg, #fff);
+	color: var(--text-color);
+	border: 1px solid var(--border-color, #d0d7de);
+	border-radius: var(--border-radius-md, 6px);
+	box-shadow: var(--shadow-xs);
+	padding: 6px 10px;
+	font-size: 11px;
+	font-weight: 400;
+	line-height: 1.5;
+	text-align: left;
+	white-space: normal;
+	z-index: 40;
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 0.12s ease;
+	pointer-events: none;
+}
+
+.hq-tip:hover .hq-tip-body,
+.hq-tip:focus-visible .hq-tip-body,
+.hq-tip:focus-within .hq-tip-body {
+	opacity: 1;
+	visibility: visible;
+}
+
+.hq-tip:focus-visible {
+	outline: 2px solid var(--primary, #2490ef);
+	outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hq-tip-body {
+		transition: none;
+	}
 }
 
 .hq-kpi-sub,
@@ -260,8 +354,35 @@
 	font-variant-numeric: tabular-nums;
 }
 
-.hq-empty {
-	margin: 12px 0;
+/* Empty cards stay compact: one quiet line, never the height of a chart. */
+.hq-empty-line {
+	margin: 2px 0 6px;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+/* Outlet rows revealed via "Show empty outlets" read as inert. */
+.hq-row--empty td {
+	color: var(--text-muted);
+}
+
+.hq-empty-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--text-muted);
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
+}
+
+.hq-empty-toggle input {
+	accent-color: var(--primary, #2490ef);
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	cursor: pointer;
 }
 
 /* Progress bars: inline in table cells, large in the achievement KPI. */
@@ -386,22 +507,42 @@
 	white-space: nowrap;
 }
 
-/* Neutral empty state: dashed ring, no fake arcs, reason centered. */
-.hq-donut-empty {
-	flex: 1 1 200px;
-	width: 190px;
-	max-width: 100%;
-	height: 190px;
-	border: 2px dashed var(--border-color, #d9dfe5);
-	border-radius: 50%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	text-align: center;
-	padding: 24px;
-	margin: 0 auto;
+/* Sub-donut share stats: one segment is a single figure, two sit side by
+   side; the ring shape starts at three segments. */
+.hq-stat-group {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	max-width: 380px;
+}
+
+.hq-stat-group--duo {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0 16px;
+}
+
+.hq-stat + .hq-stat {
+	border-left: 1px solid var(--border-color, #f1f3f5);
+	padding-left: 16px;
+}
+
+.hq-stat-label {
+	font-size: 11.5px;
 	color: var(--text-muted);
-	font-size: 12px;
+	margin-bottom: 4px;
+	overflow-wrap: anywhere;
+}
+
+.hq-stat-value {
+	font-size: 18px;
+	font-weight: 600;
+	color: var(--heading-color, var(--text-color));
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-stat-pct {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 2px;
 }
 
 .hq-item-code {
@@ -533,13 +674,9 @@
 	overflow-x: auto;
 }
 
-/* Mid width: KPIs drop to 2 columns, charts stack (the mini strip keeps its
-   four slots — they still fit). */
+/* Mid width: charts stack, mini strips (hero companions + Sorotan) fold to
+   2x2. */
 @media screen and (max-width: 1280px) {
-	.hq-kpi-row {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-
 	.hq-charts {
 		grid-template-columns: 1fr;
 	}
@@ -566,14 +703,14 @@
 	.hq-kpi-value {
 		font-size: 16px;
 	}
+
+	.hq-hero-value {
+		font-size: 22px;
+	}
 }
 
 /* Phone: everything single column, donut above legend, category rows wrap. */
 @media screen and (max-width: 480px) {
-	.hq-kpi-row {
-		grid-template-columns: 1fr;
-	}
-
 	/* Mini strip becomes 2x2; hairlines step aside for spacing. */
 	.hq-minis {
 		grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -100,6 +100,10 @@ class HQSalesMonitor {
 		this.outlet_page = 1;
 		this.category = "";
 		this.outlet_query = "";
+		// Outlet-table view toggle: empty outlets (no sales, no TC, no target)
+		// stay hidden until asked for. Session-only, never persisted.
+		this.show_empty_outlets = false;
+		this._autofilled = false;
 		// Peak-hour window (start inclusive, end exclusive; end <= start wraps
 		// past midnight) and the two independent category-card picks. Defaults
 		// are replaced by the user's last saved choices before the first load.
@@ -294,14 +298,21 @@ class HQSalesMonitor {
 				method: "pos_next.api.hq_monitoring.get_sales_monitoring",
 				args: this._args(),
 				freeze: true,
-				callback: (r) => {
-					if (!r.message) return resolve();
-					this.state = r.message;
-					this._drop_stale_categories();
-					this._sync_filter_options();
-					this._render();
-					resolve();
-				},
+			callback: (r) => {
+				if (!r.message) return resolve();
+				this.state = r.message;
+				this._drop_stale_categories();
+				// First load: default the Top Selling slots to the strongest
+				// categories, then fetch once more with those picks. A saved
+				// manual pick always wins (and is never overwritten here).
+				if (this._autofill_categories()) {
+					this.refresh().then(() => resolve());
+					return;
+				}
+				this._sync_filter_options();
+				this._render();
+				resolve();
+			},
 			});
 		});
 	}
@@ -319,6 +330,28 @@ class HQSalesMonitor {
 		});
 	}
 
+	// Once per session: an unpicked Top Selling slot defaults to the category
+	// with the highest net sales (slot b takes the runner-up, so the pair is
+	// an immediate comparison instead of an empty placeholder). Transient
+	// only — preferences are written solely by an explicit user selection.
+	_autofill_categories() {
+		if (this._autofilled) return false;
+		this._autofilled = true;
+		const top = ((this.state.category_top || {}).rows || [])
+			.filter((r) => r && Number(r.net_amount) > 0)
+			.map((r) => r.item_group);
+		let refetch = false;
+		if (!this.category_a && top[0]) {
+			this.category_a = top[0];
+			refetch = true;
+		}
+		if (!this.category_b && top[1]) {
+			this.category_b = top[1];
+			refetch = true;
+		}
+		return refetch;
+	}
+
 	_sync_filter_options() {
 		// The Link outlet filter is scoped through get_query (live, reads
 		// this.state); here only the subsidiaries toggle depends on scope.
@@ -326,9 +359,10 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Rendering — layout v2: scope strip, KPI row (range + aggregate MTD
-	// achievement), the per-outlet target table as the centrepiece, then the
-	// monitoring matrices, minis, charts, peak hour and product ranking.
+	// Rendering — layout v5: scope strip, ONE hero metric block (range
+	// figures + the daily-rhythm growth as a footnote), the per-outlet
+	// target table as the centrepiece, then the minis, charts, peak hour
+	// and product ranking.
 	// ------------------------------------------------------------------
 
 	_render() {
@@ -342,15 +376,7 @@ class HQSalesMonitor {
 		}
 		const parts = [
 			this._scope_line(s.scope),
-			`<div class="hq-section-title">${__("Selected Range")}
-				<span class="hq-period">${this._range_label(s)}</span></div>`,
-			'<div class="hq-kpi-row">',
-			this._sales_card(s),
-			this._transactions_card(s),
-			this._apc_card(s),
-			this._achievement_card(s),
-			"</div>",
-			this._daily_rhythm_card(s),
+			this._hero_card(s),
 			this._outlet_performance_card(s),
 			this._mini_cards(s),
 			'<div class="hq-charts">',
@@ -382,7 +408,7 @@ class HQSalesMonitor {
 		const label = companies > 3 ? `${companies} ${__("companies")}` : (scope.companies || []).join(", ");
 		return `<div class="hq-scope">${__("Scope")}: <b>${frappe.utils.escape_html(label)}</b>
 			· ${__("Base currency")}: <b>${scope.default_currency || "-"}</b>
-			${(scope.companies || []).length > 1 ? `· <span class="hq-muted">${__("each company in its own base currency; no cross-currency sum")}</span>` : ""}
+			${(scope.companies || []).length > 1 ? this._tip(__("each company in its own base currency; no cross-currency sum")) : ""}
 		</div>`;
 	}
 
@@ -446,57 +472,14 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Daily rhythm strip — today vs the SAME weekday last week (the one
-	// comparison the range filters cannot align automatically) plus the
-	// pro-rated daily target pace. Replaces the old Monthly / Daily
-	// matrices whose figures duplicated the KPI row and the outlet table.
+	// Quiet explainer: an "i" glyph whose text appears on hover / keyboard
+	// focus, replacing the permanent caption lines that used to sit under
+	// every figure. The text stays in the DOM (and in the page language).
 	// ------------------------------------------------------------------
 
-	_daily_rhythm_card(s) {
-		const d = s.daily;
-		if (!d || !d.totals) return "";
-		const t = s.targets || {};
-		const ccy = s.scope.default_currency;
-		const w = s.windows || {};
-		const lw = d.last_week_same || {};
-		const growth = d.growth_vs_last_week_pct || {};
-		const pwGrowth = d.growth_vs_prior_weekday_pct || {};
-
-		const resultSales = ((d.totals.net_tax_incl || {}).by_currency || {})[ccy];
-		const lwSales = ((lw.net_tax_incl || {}).by_currency || {})[ccy];
-		const resultApc = ((d.totals.apc || {}).by_currency || {})[ccy];
-		const lwApc = ((lw.apc || {}).by_currency || {})[ccy];
-		const orders = d.totals.orders ?? 0;
-		const lwOrders = lw.orders;
-		const tcGrowth = HQ_UTILS.growthPct(orders, lwOrders);
-		const apcGrowth = HQ_UTILS.growthPct(resultApc, lwApc);
-		const dailyTarget = t.available ? (t.daily_target_sales || {})[ccy] : null;
-
-		const cell = (label, value, sub) => `<div class="hq-mini">
-			<div class="hq-kpi-label">${label}</div>
-			<div class="hq-kpi-value">${value}</div>
-			<div class="hq-kpi-sub">${sub}</div>
-		</div>`;
-		const vs = (today, last) =>
-			`<span class="hq-money">${HQ_UTILS.fmtMoney(today, ccy)}</span> ${__("vs")} <span class="hq-money">${HQ_UTILS.fmtMoney(last, ccy)}</span>`;
-
-		return `<div class="hq-card hq-rhythm">
-			<div class="hq-card-title">${__("Daily Rhythm")}
-				<span class="hq-period">${frappe.utils.escape_html(w.day || "")} · ${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")})</span></div>
-			<div class="hq-minis">
-			${cell(__("Sales"), this._signed_pct(growth[ccy]), vs(resultSales, lwSales))}
-			${cell(__("TC"), this._signed_pct(tcGrowth), `${HQ_UTILS.fmtCount(orders)} ${__("vs")} ${HQ_UTILS.fmtCount(lwOrders ?? 0)}`)}
-			${cell(__("Avg Ticket"), this._signed_pct(apcGrowth), vs(resultApc, lwApc))}
-			${cell(
-				__("Daily Target"),
-				dailyTarget != null
-					? `<span class="hq-money">${HQ_UTILS.fmtMoney(dailyTarget, ccy)}</span> / ${__("day")}`
-					: this._na(),
-				dailyTarget != null ? __("from monthly target") : __("not set yet")
-			)}
-			</div>
-			<div class="hq-kpi-sub hq-muted" style="margin-top: 8px">${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((pwGrowth || {})[ccy])}${d.cutoff ? ` · ${__("cut at")} ${frappe.utils.escape_html(d.cutoff)}` : ""}</div>
-		</div>`;
+	_tip(text) {
+		const safe = frappe.utils.escape_html(text);
+		return `<span class="hq-tip" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"></circle><line x1="12" y1="10.6" x2="12" y2="16.6"></line><circle cx="12" cy="7.4" r="1.1"></circle></svg><span class="hq-tip-body">${safe}</span></span>`;
 	}
 
 	_signed(value, ccy) {
@@ -563,54 +546,90 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// KPI row: Total Sales / Transactions / APC / Achievement (MTD aggregate)
+	// Hero block — ONE card for the selected range: Total Sales is the
+	// dominant figure, the companions (TC / Avg Ticket / Achievement /
+	// Daily Target) share a hairline row, and the daily-rhythm growth is a
+	// quiet footnote. Every headline metric appears exactly once here; its
+	// only second appearance is per-outlet, in the performance table.
 	// ------------------------------------------------------------------
 
-	_sales_card(s) {
+	_hero_card(s) {
 		const r = s.range || {};
-		return `<div class="hq-card hq-kpi hq-kpi--primary hq-sales-toggle">
-			<div class="hq-kpi-label">${__("Total Sales")} <button type="button" class="hq-toggle" data-hq-toggle>${__("incl. taxes & charges")}</button></div>
-			<div class="hq-kpi-value hq-sales-incl">${this._metric_text(r.net_tax_incl)}</div>
-			<div class="hq-kpi-value hq-sales-pretax" hidden>${this._metric_text(r.net_pretax)}</div>
-			<div class="hq-kpi-sub">${__("Taxes & charges")}: ${this._metric_text(r.taxes)}
-				· ${__("Refunds")}: ${this._metric_text(r.refunds)}</div>
-		</div>`;
-	}
-
-	_transactions_card(s) {
-		const r = s.range || {};
-		return `<div class="hq-card hq-kpi">
-			<div class="hq-kpi-label">${__("Total Transactions")}</div>
-			<div class="hq-kpi-value">${HQ_UTILS.fmtCount(r.orders ?? 0)}</div>
-			<div class="hq-kpi-sub">${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)}
-				· <span class="hq-muted">${__("Pax")}: ${__("N/A")} (${__("no source field on POS invoices")})</span></div>
-		</div>`;
-	}
-
-	_apc_card(s) {
-		const r = s.range || {};
-		return `<div class="hq-card hq-kpi">
-			<div class="hq-kpi-label">${__("Avg per Transaction")}</div>
-			<div class="hq-kpi-value">${this._metric_text(r.apc)}</div>
-			<div class="hq-kpi-sub">${__("Net incl. tax ÷ orders")} · ${__("per currency, never merged")}</div>
-		</div>`;
-	}
-
-	_achievement_card(s) {
 		const t = s.targets || {};
 		const ccy = s.scope.default_currency;
 		const has = !!t.available;
+		const d = s.daily;
+		const w = s.windows || {};
+
+		// Daily rhythm: growth vs the SAME weekday last week (the one
+		// comparison the range filters cannot align automatically). Growth
+		// only — today's absolute figures already live in this card.
+		const lw = (d && d.last_week_same) || {};
+		const orders = (d && d.totals && d.totals.orders) || 0;
+		const tcGrowth = HQ_UTILS.growthPct(orders, lw.orders);
+		const apcGrowth = HQ_UTILS.growthPct(
+			((d && d.totals && d.totals.apc || {}).by_currency || {})[ccy],
+			((lw.apc || {}).by_currency || {})[ccy]
+		);
+		const rhythm =
+			d && d.totals
+				? `<div class="hq-kpi-sub hq-muted" style="margin-top: 8px">
+					${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")}): ${__("Sales")} ${this._signed_pct((d.growth_vs_last_week_pct || {})[ccy])}
+					· ${__("TC")} ${this._signed_pct(tcGrowth)} · ${__("Avg Ticket")} ${this._signed_pct(apcGrowth)}
+					· ${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((d.growth_vs_prior_weekday_pct || {})[ccy])}${d.cutoff ? ` · ${__("cut at")} ${frappe.utils.escape_html(d.cutoff)}` : ""}
+				</div>`
+				: "";
+
+		// Achievement (MTD aggregate) keeps its progress bar in the row.
 		const pct = has ? (t.achievement_sales_pct || {})[ccy] : null;
 		const target = has ? ((t.target_sales || {}).by_currency || {})[ccy] : null;
 		const mtd = ((s.monthly.net_tax_incl || {}).by_currency || {})[ccy];
-		const sub = has
+		const achSub = has
 			? `${__("MTD")} <span class="hq-money">${HQ_UTILS.fmtMoney(mtd ?? 0, ccy)}</span> / ${__("Target")} <span class="hq-money">${HQ_UTILS.fmtMoney(target ?? 0, ccy)}</span>`
 			: frappe.utils.escape_html(t.notice || __("Monthly target not set"));
-		return `<div class="hq-card hq-kpi hq-kpi--ach">
-			<div class="hq-kpi-label">${__("Achievement (MTD)")} <span class="hq-period">${frappe.utils.escape_html(s.windows.month_start || "")}</span></div>
-			<div class="hq-kpi-value">${pct == null ? this._na() : HQ_UTILS.fmtPct(pct, 1)}</div>
-			${this._bar(pct, "hq-bar--lg")}
+		const dailyTarget = has ? (t.daily_target_sales || {})[ccy] : null;
+
+		const slot = (label, value, sub) => `<div class="hq-mini">
+			<div class="hq-kpi-label">${label}</div>
+			<div class="hq-kpi-value">${value}</div>
 			<div class="hq-kpi-sub">${sub}</div>
+		</div>`;
+
+		return `<div class="hq-card hq-hero hq-sales-toggle">
+			<div class="hq-hero-head">
+				<div class="hq-card-title">${__("Total Sales")}
+					<button type="button" class="hq-toggle" data-hq-toggle>${__("incl. taxes & charges")}</button></div>
+				<span class="hq-period">${this._range_label(s)}</span>
+			</div>
+			<div class="hq-hero-value hq-sales-incl">${this._metric_text(r.net_tax_incl)}</div>
+			<div class="hq-hero-value hq-sales-pretax" hidden>${this._metric_text(r.net_pretax)}</div>
+			<div class="hq-kpi-sub">${__("Taxes & charges")}: ${this._metric_text(r.taxes)} · ${__("Refunds")}: ${this._metric_text(r.refunds)}</div>
+			<div class="hq-minis">
+			${slot(
+				__("Total Transactions"),
+				HQ_UTILS.fmtCount(r.orders ?? 0),
+				`${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)} ${this._tip(`${__("Pax")}: ${__("no source field on POS invoices")}`)}`
+			)}
+			${slot(
+				`${__("Avg per Transaction")} ${this._tip(`${__("Net incl. tax ÷ orders")} · ${__("per currency, never merged")}`)}`,
+				this._metric_text(r.apc),
+				"&nbsp;"
+			)}
+			${`<div class="hq-mini">
+				<div class="hq-kpi-label">${__("Achievement (MTD)")} <span class="hq-period">${frappe.utils.escape_html(w.month_start || "")}</span></div>
+				<div class="hq-kpi-value">${pct == null ? this._na() : HQ_UTILS.fmtPct(pct, 1)}</div>
+				${this._bar(pct, "hq-bar--lg")}
+				<div class="hq-kpi-sub">${achSub}</div>
+			</div>`}
+			${slot(
+				__("Daily Target"),
+				dailyTarget != null
+					? `<span class="hq-money">${HQ_UTILS.fmtMoney(dailyTarget, ccy)}</span> / ${__("day")}`
+					: this._na(),
+				dailyTarget != null ? __("from monthly target") : __("not set yet")
+			)}
+			</div>
+			${rhythm}
 		</div>`;
 	}
 
@@ -649,7 +668,20 @@ class HQSalesMonitor {
 				target: monthly[c],
 				overall: overall[c] || null,
 			}));
-		return ranked.concat(quiet);
+		const rows = ranked
+			.concat(quiet)
+			.map((r) => ({ ...r, empty: HQ_UTILS.isEmptyOutlet(r) }));
+		// Net sales descending — but currencies never merge into one ranking:
+		// base-currency rows lead, every other currency follows in its own
+		// descending block.
+		const ccy = (s.scope || {}).default_currency;
+		rows.sort((a, b) => {
+			const ac = a.currency === ccy ? 0 : 1;
+			const bc = b.currency === ccy ? 0 : 1;
+			if (ac !== bc) return ac - bc;
+			return (Number(b.net_tax_incl) || 0) - (Number(a.net_tax_incl) || 0);
+		});
+		return rows;
 	}
 
 	_outlet_row(r) {
@@ -675,7 +707,7 @@ class HQSalesMonitor {
 				<div class="hq-item-code"><span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span> · <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
 			: this._na();
 
-		return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
+		return `<tr data-hq-outlet-row${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
 			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}</td>
 			<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span>
 				${r.share_pct != null ? `<div class="hq-item-code">${HQ_UTILS.fmtPct(r.share_pct)}</div>` : ""}</td>
@@ -692,11 +724,15 @@ class HQSalesMonitor {
 		const rows = this._outlet_rows(s).map((r) => this._outlet_row(r)).join("");
 		return `<div class="hq-card hq-card--table hq-card--outlets">
 			<div class="hq-card-title">${__("Outlet Performance")}
+				${this._tip(__("Outlet = company; balik modal = cumulative sales vs overall target"))}
 				<span class="hq-period">${__("MTD targets")} · ${frappe.utils.escape_html(s.windows.month_start || "")} · ${__("range figures")}: ${this._range_label(s)}</span></div>
 			<div class="hq-rank-controls">
 				<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
 					placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.outlet_query)}" aria-label="${__("Search outlet")}"></div>
-				<span class="hq-kpi-sub hq-muted">${__("Outlet = company; balik modal = cumulative sales vs overall target")}</span>
+				<label class="hq-empty-toggle">
+					<input type="checkbox" data-hq-show-empty${this.show_empty_outlets ? " checked" : ""}>
+					${__("Show empty outlets")}
+				</label>
 				<button class="btn btn-xs btn-default" data-hq-goto-targets>${__("Manage Targets")}</button>
 				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
 			</div>
@@ -728,10 +764,14 @@ class HQSalesMonitor {
 
 	_apply_outlet_filter() {
 		const q = (this.outlet_query || "").toLowerCase();
+		const showEmpty = !!this.show_empty_outlets;
 		const $rows = this.$root.find("[data-hq-outlet-row]");
-		const matched = $rows.filter(
-			(_, el) => !q || String($(el).data("hq-company") || "").toLowerCase().includes(q)
-		);
+		const isEmpty = (_, el) => el.getAttribute("data-hq-empty") === "1";
+		const hiddenEmpty = showEmpty ? 0 : $rows.filter(isEmpty).length;
+		const matched = $rows.filter((_, el) => {
+			if (!showEmpty && isEmpty(_, el)) return false;
+			return !q || String($(el).data("hq-company") || "").toLowerCase().includes(q);
+		});
 		const total = matched.length;
 		const pages = Math.max(1, Math.ceil(total / HQ_OUTLET_PAGE_SIZE));
 		this.outlet_page = Math.min(Math.max(1, this.outlet_page), pages);
@@ -742,7 +782,7 @@ class HQSalesMonitor {
 		const start = total ? (this.outlet_page - 1) * HQ_OUTLET_PAGE_SIZE + 1 : 0;
 		const end = Math.min(this.outlet_page * HQ_OUTLET_PAGE_SIZE, total);
 		this.$root.find("[data-hq-outlet-pager]").text(
-			`${start} - ${end} ${__("of")} ${total} ${__("outlets")}`
+			`${start} - ${end} ${__("of")} ${total} ${__("outlets")}${hiddenEmpty ? ` · ${HQ_UTILS.fmtCount(hiddenEmpty)} ${__("empty hidden")}` : ""}`
 		);
 		this.$root.find('[data-hq-outlet-page="prev"]').prop("disabled", this.outlet_page <= 1);
 		this.$root.find('[data-hq-outlet-page="next"]').prop("disabled", this.outlet_page >= pages);
@@ -752,12 +792,22 @@ class HQSalesMonitor {
 	// Peak Hour card (full width) — the hour window reshapes THIS card only
 	// ------------------------------------------------------------------
 
+	// The user's saved window rules — unless it is the untouched full day,
+	// in which case the axis auto-scales to hug the hours that actually
+	// sold (min-1 .. max+1). Any explicit From/To pick makes the window
+	// custom again (and is saved like before).
+	_effective_hour_window(s) {
+		const user = HQ_UTILS.parseHourWindow(this.hour_start, this.hour_end);
+		if (user && !(user.start === 0 && user.end === 24)) {
+			return { win: user, auto: false };
+		}
+		const auto = HQ_UTILS.autoHourWindow((s.hours || {}).rows);
+		if (auto) return { win: auto, auto: true };
+		return { win: user || { start: 0, end: 24, overnight: false }, auto: false };
+	}
+
 	_hours_card(s) {
-		const win = HQ_UTILS.parseHourWindow(this.hour_start, this.hour_end) || {
-			start: 0,
-			end: 24,
-			overnight: false,
-		};
+		const { win, auto } = this._effective_hour_window(s);
 		const bins = HQ_UTILS.hourWindowBins((s.hours || {}).rows, win.start, win.end);
 		const stats = HQ_UTILS.windowStats(bins);
 		const ccy = s.scope.default_currency;
@@ -771,7 +821,9 @@ class HQSalesMonitor {
 			}).join("");
 		const winLabel = `${HQ_UTILS.hourLabel(win.start)} – ${HQ_UTILS.hourLabel(win.end)}${win.overnight ? ` · ${__("overnight")}` : ""}`;
 		return `<div class="hq-card hq-kpi hq-card--hours">
-			<div class="hq-kpi-label">${__("Peak Hour")} <span class="hq-period">${winLabel}</span></div>
+			<div class="hq-kpi-label">${__("Peak Hour")}
+				<span class="hq-period">${auto ? `${__("auto")} · ` : ""}${winLabel}</span>
+				${auto ? this._tip(__("Auto-scaled to hours with sales")) : ""}</div>
 			<div class="hq-kpi-sub">${peak}</div>
 			<div class="hq-hour-controls">
 				<label class="hq-ctl">${__("From")}
@@ -810,18 +862,23 @@ class HQSalesMonitor {
 		const rows = HQ_UTILS.categoryDonutRows(cp, __("Other"));
 		let body;
 		if (cp.invalid) {
-			body = this._donut_placeholder(__("Category no longer exists — please choose another"));
+			body = this._empty_line(__("Category no longer exists — please choose another"));
 		} else if (!sel) {
-			body = this._donut_placeholder(__("Choose a category to see its top selling items"));
+			body = this._empty_line(__("Choose a category to see its top selling items"));
 		} else if (!rows.length) {
-			body = this._donut_placeholder(__("No positive sales in this category in this period"));
+			body = this._empty_line(__("No positive sales in this category in this period"));
 		} else {
 			const of =
 				rows.length - (Number(cp.other_net) > 0 ? 1 : 0) < cp.items_with_sales
 					? ` · ${__("top 5 of")} ${cp.items_with_sales} ${__("items")}`
 					: "";
-			body = `<div class="hq-donut"><div class="hq-donut-chart" data-hq-donut="catprod-${slot}"></div>
-				${this._donut_legend(rows, "net_amount", "item_name", ccy, "qty")}</div>
+			body = `${this._share_body(rows, {
+				labelKey: "item_name",
+				valueKey: "net_amount",
+				subKey: "qty",
+				ccy,
+				chartId: `catprod-${slot}`,
+			})}
 				<div class="hq-kpi-sub hq-muted">${__("Share of category net revenue")} <span class="hq-money">${HQ_UTILS.fmtMoney(cp.category_total, ccy)}</span>${of}</div>`;
 		}
 		return `<div class="hq-card hq-card--donut">
@@ -830,9 +887,33 @@ class HQSalesMonitor {
 		</div>`;
 	}
 
-	// Neutral empty state: a dashed ring (no fake arcs) with the reason.
-	_donut_placeholder(msg) {
-		return `<div class="hq-donut"><div class="hq-donut-empty"><span>${frappe.utils.escape_html(msg)}</span></div></div>`;
+	// Compact empty state: one quiet line — an empty card must not carry the
+	// height of a full one.
+	_empty_line(msg) {
+		return `<p class="hq-empty-line">${frappe.utils.escape_html(msg)}</p>`;
+	}
+
+	// ------------------------------------------------------------------
+	// Donut shape rule: a ring earns its geometry at three segments or more.
+	// One segment is a single stat; two sit side by side as stats (shares
+	// recomputed from exactly the drawn values, like the donut legend).
+	// ------------------------------------------------------------------
+
+	_share_body(rows, cfg) {
+		const data = (rows || []).filter((r) => r && Number(r[cfg.valueKey]) > 0);
+		if (!data.length) return "";
+		const total = data.reduce((sum, r) => sum + Number(r[cfg.valueKey]), 0);
+		const stat = (r) => `<div class="hq-stat">
+			<div class="hq-stat-label">${frappe.utils.escape_html(String(r[cfg.labelKey]))}</div>
+			<div class="hq-stat-value"><span class="hq-money">${HQ_UTILS.fmtMoney(r[cfg.valueKey], cfg.ccy)}</span></div>
+			<div class="hq-stat-pct">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(Number(r[cfg.valueKey]), total))}</div>
+		</div>`;
+		if (data.length < 3) {
+			const cls = data.length === 2 ? " hq-stat-group--duo" : "";
+			return `<div class="hq-stat-group${cls}">${data.map(stat).join("")}</div>`;
+		}
+		return `<div class="hq-donut"><div class="hq-donut-chart" data-hq-donut="${cfg.chartId}"></div>
+			${this._donut_legend(data, cfg.valueKey, cfg.labelKey, cfg.ccy, cfg.subKey)}</div>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -858,14 +939,14 @@ class HQSalesMonitor {
 		const ct = s.category_top || {};
 		const rows = (ct.rows || []).filter((r) => Number(r.net_amount) > 0);
 		const title = `${__("Top Selling Categories")} <span class="hq-period">${__("pre-tax net")} · ${frappe.utils.escape_html(ct.currency || "")}</span>`;
-		let body;
-		if (!rows.length) {
-			body = this._donut_placeholder(__("No positive sales in this period"));
-		} else {
-			body = `<div class="hq-donut"><div class="hq-donut-chart" data-hq-donut="category"></div>
-				${this._donut_legend(rows, "net_amount", "item_group", ct.currency)}</div>
-				${rows.length < (ct.groups_with_sales || rows.length) ? `<div class="hq-kpi-sub hq-muted">${__("top 5 of")} ${ct.groups_with_sales} ${__("groups")}</div>` : ""}`;
-		}
+		const body = rows.length
+			? `${this._share_body(rows, {
+					labelKey: "item_group",
+					valueKey: "net_amount",
+					ccy: ct.currency,
+					chartId: "category",
+				})}${rows.length < (ct.groups_with_sales || rows.length) ? `<div class="hq-kpi-sub hq-muted">${__("top 5 of")} ${ct.groups_with_sales} ${__("groups")}</div>` : ""}`
+			: this._empty_line(__("No positive sales in this period"));
 		return `<div class="hq-card hq-card--donut"><div class="hq-card-title">${title}</div>${body}</div>`;
 	}
 
@@ -902,13 +983,14 @@ class HQSalesMonitor {
 			.filter((r) => r.currency === ccy && Number(r.net_tax_incl) > 0)
 			.slice(0, 5);
 		const title = `${__("Top Outlets")} <span class="hq-period">${__("net incl. tax")} · ${ccy || ""}</span>`;
-		let body;
-		if (!rows.length) {
-			body = `<p class="hq-muted hq-empty">${__("No positive sales in this period")}</p>`;
-		} else {
-			body = `<div class="hq-donut"><div class="hq-donut-chart" data-hq-donut="outlet"></div>
-				${this._donut_legend(rows, "net_tax_incl", "company", ccy)}</div>`;
-		}
+		const body = rows.length
+			? this._share_body(rows, {
+					labelKey: "company",
+					valueKey: "net_tax_incl",
+					ccy,
+					chartId: "outlet",
+				})
+			: this._empty_line(__("No positive sales in this period"));
 		return `<div class="hq-card hq-card--donut"><div class="hq-card-title">${title}</div>${body}</div>`;
 	}
 
@@ -1026,13 +1108,14 @@ class HQSalesMonitor {
 	}
 
 	// Every donut on the page routes through here: positive-only rows, one
-	// palette, value tooltips, hardened observer lifecycle. Empty data draws
-	// nothing (the card shows its placeholder instead).
+	// palette, value tooltips, hardened observer lifecycle. The ring shape
+	// starts at three segments — below that the card renders stats instead
+	// and this finds no chart container to draw.
 	_add_donut(selector, rows, labelKey, valueKey, ccy) {
 		const el = this.$root.find(selector).get(0);
 		if (!el) return;
 		const data = (rows || []).filter((r) => Number(r[valueKey]) > 0);
-		if (!data.length) return;
+		if (data.length < 3) return;
 		const chart = new frappe.Chart(el, {
 			data: {
 				labels: data.map((r) => String(r[labelKey])),
@@ -1056,8 +1139,9 @@ class HQSalesMonitor {
 		const el = this.$root.find(".hq-hour-chart").get(0);
 		if (!el || !frappe.Chart) return;
 		// Only the selected window is drawn; hours without sales stay explicit
-		// zero bins so every bar maps to its hour.
-		const win = HQ_UTILS.parseHourWindow(this.hour_start, this.hour_end) || { start: 0, end: 24 };
+		// zero bins so every bar maps to its hour. An untouched full-day
+		// setting auto-scales to the hours that actually sold.
+		const { win } = this._effective_hour_window(s);
 		const bins = HQ_UTILS.hourWindowBins((s.hours || {}).rows, win.start, win.end);
 		// Min-width scales with the bin count, so a short window (e.g. 05–18)
 		// fits its container instead of forcing a 940px scroll; longer windows
@@ -1163,6 +1247,12 @@ class HQSalesMonitor {
 				this.outlet_page = 1;
 				this._apply_outlet_filter();
 			}, 150))
+			.off("change", "[data-hq-show-empty]")
+			.on("change", "[data-hq-show-empty]", (e) => {
+				this.show_empty_outlets = e.currentTarget.checked;
+				this.outlet_page = 1;
+				this._apply_outlet_filter();
+			})
 			.off("click", "[data-hq-outlet-page]")
 			.on("click", "[data-hq-outlet-page]", (e) => {
 				this.outlet_page += $(e.currentTarget).data("hq-outlet-page") === "next" ? 1 : -1;

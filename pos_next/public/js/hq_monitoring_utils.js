@@ -177,6 +177,37 @@
 	}
 
 	/**
+	 * Peak-hour auto-scale: the axis hugs the hours that actually have orders
+	 * (min-1 .. max+1, clamped to the day). Returns a parseHourWindow result,
+	 * or null when no hour in the rows has orders (caller keeps the full day).
+	 */
+	function autoHourWindow(rows) {
+		let minH = 24;
+		let maxH = -1;
+		(rows || []).forEach((r) => {
+			if (!r || !(Number(r.orders) > 0)) return;
+			const h = Number(r.hour);
+			if (!Number.isInteger(h) || h < 0 || h > 23) return;
+			minH = Math.min(minH, h);
+			maxH = Math.max(maxH, h);
+		});
+		if (maxH < 0) return null;
+		return parseHourWindow(Math.max(0, minH - 1), Math.min(24, maxH + 1));
+	}
+
+	/**
+	 * An outlet row is "empty" when it had no transactions, no net sales AND
+	 * no monthly target — nothing to monitor, so the outlet table hides it
+	 * until the user asks for everything. An outlet that carries a target is
+	 * never empty (its zero line is the point).
+	 */
+	function isEmptyOutlet(row) {
+		if (!row) return false;
+		if (Number(row.orders) > 0 || Number(row.net_tax_incl) > 0) return false;
+		return !row.target || !!row.target.missing;
+	}
+
+	/**
 	 * Sanitize stored per-user dashboard preferences (server user settings blob
 	 * or raw JSON string). Corrupt/garbage input falls back to defaults
 	 * (all-day window, no categories) — never throws. Categories are only
@@ -262,6 +293,8 @@
 		hourWindowBins: hourWindowBins,
 		windowStats: windowStats,
 		hourChartMinWidth: hourChartMinWidth,
+		autoHourWindow: autoHourWindow,
+		isEmptyOutlet: isEmptyOutlet,
 		sanitizePrefs: sanitizePrefs,
 		categoryDonutRows: categoryDonutRows,
 		toCsv: toCsv,
