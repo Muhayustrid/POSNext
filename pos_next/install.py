@@ -266,6 +266,26 @@ CUSTOM_FIELDS = {
 			"insert_after": "sales_invoice",
 		},
 	],
+	# One-time per-outlet payback ("balik modal") target. Monthly targets live
+	# in the POS Monthly Target doctype (they need per-month history); this pair
+	# is a single attribute of the outlet itself, so it belongs on the master.
+	"Company": [
+		{
+			"fieldname": "pos_overall_sales_target",
+			"label": "Overall Sales Target",
+			"fieldtype": "Currency",
+			"insert_after": "default_currency",
+			"non_negative": 1,
+			"description": "One-time payback target for this outlet. HQ Sales Monitoring tracks cumulative POS net sales (tax incl.) against it.",
+		},
+		{
+			"fieldname": "pos_overall_target_from",
+			"label": "Overall Target Counted From",
+			"fieldtype": "Date",
+			"insert_after": "pos_overall_sales_target",
+			"description": "Count cumulative sales from this date. Empty = all time.",
+		},
+	],
 	"Offline Invoice Sync": [
 		{
 			"fieldname": "pos_invoice",

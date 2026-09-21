@@ -95,6 +95,7 @@ class HQSalesMonitor {
 		this.page = page;
 		this.product_page = 1;
 		this.category = "";
+		this.outlet_query = "";
 		// Peak-hour window (start inclusive, end exclusive; end <= start wraps
 		// past midnight) and the two independent category-card picks. Defaults
 		// are replaced by the user's last saved choices before the first load.
@@ -171,16 +172,28 @@ class HQSalesMonitor {
 				if (this._preset() === "custom") this.refresh();
 			}),
 		});
+		// Outlet = Company. A Link control gives the searchable dropdown the
+		// Select never had; get_query keeps the choices inside the user's
+		// permitted companies and only_select blocks free-typed values.
 		this.company_field = this.page.add_field({
 			fieldname: "company",
-			label: __("Company"),
-			fieldtype: "Select",
-			options: [{ label: __("All Companies"), value: "" }],
+			label: __("Outlet"),
+			fieldtype: "Link",
+			options: "Company",
+			placeholder: __("All Outlets"),
+			only_select: 1,
+			get_query: () => ({
+				filters: {
+					name: ["in", (this.state && this.state.scope.company_options) || []],
+				},
+			}),
 			change: this._later(() => {
 				this.product_page = 1;
 				this.refresh();
 			}),
 		});
+		// page.add_field does not forward df.placeholder — set it directly.
+		this.company_field.$input.attr("placeholder", __("All Outlets"));
 		this.descendants_field = this.page.add_field({
 			fieldname: "include_descendants",
 			label: __("Include Subsidiaries"),
@@ -302,17 +315,15 @@ class HQSalesMonitor {
 	}
 
 	_sync_filter_options() {
-		const scope = this.state.scope || {};
-		this.company_field.df.options = [{ label: __("All Companies"), value: "" }].concat(
-			(scope.company_options || []).map((c) => ({ label: c, value: c }))
-		);
-		this.company_field.set_options();
+		// The Link outlet filter is scoped through get_query (live, reads
+		// this.state); here only the subsidiaries toggle depends on scope.
 		this.descendants_field.$wrapper.toggle(!!this.company_field.get_value());
 	}
 
 	// ------------------------------------------------------------------
-	// Rendering — visual order mirrors the legacy HQ report:
-	// monthly table, daily table, mini stats, 2x2 hero, 2x2 chart grid.
+	// Rendering — layout v2: scope strip, KPI row (range + aggregate MTD
+	// achievement), the per-outlet target table as the centrepiece, then the
+	// monitoring matrices, minis, charts, peak hour and product ranking.
 	// ------------------------------------------------------------------
 
 	_render() {
@@ -326,6 +337,15 @@ class HQSalesMonitor {
 		}
 		const parts = [
 			this._scope_line(s.scope),
+			`<div class="hq-section-title">${__("Selected Range")}
+				<span class="hq-period">${this._range_label(s)}</span></div>`,
+			'<div class="hq-kpi-row">',
+			this._sales_card(s),
+			this._transactions_card(s),
+			this._apc_card(s),
+			this._achievement_card(s),
+			"</div>",
+			this._outlet_performance_card(s),
 			`<div class="hq-section-title">${__("Monthly Monitoring")}
 				<span class="hq-period">${__("MTD")} ${frappe.utils.escape_html(s.windows.month_start)} → ${frappe.utils.escape_html(s.windows.day)}${s.daily.cutoff ? ` · ${__("cut at")} ${s.daily.cutoff}` : ""}</span></div>`,
 			this._monthly_table(s),
@@ -335,31 +355,22 @@ class HQSalesMonitor {
 			'<div class="hq-minis">',
 			this._mini_cards(s),
 			"</div>",
-			`<div class="hq-section-title">${__("Selected Range")}
-				<span class="hq-period">${this._range_label(s)}</span></div>`,
-			'<div class="hq-hero">',
-			this._sales_card(s),
-			this._transactions_card(s),
-			this._apc_card(s),
-			this._hours_card(s),
-			"</div>",
 			'<div class="hq-charts">',
 			this._category_product_card(s, "a"),
 			this._category_product_card(s, "b"),
 			this._category_donut_card(s),
 			this._outlet_donut_card(s),
 			"</div>",
-			this._chart_notes(s),
-			'<div class="hq-rankings">',
+			this._hours_card(s),
 			this._product_card(s),
-			this._outlet_table_card(s),
-			"</div>",
+			this._chart_notes(s),
 			this._notice_card(s.channels, s.pax),
 			this._footer(s),
 		];
 		this.$root.html(parts.join(""));
 		this._bind_delegates();
 		this._render_charts(s);
+		this._apply_outlet_filter();
 	}
 
 	_range_label(s) {
@@ -427,6 +438,13 @@ class HQSalesMonitor {
 
 	_na() {
 		return '<span class="hq-muted">N/A</span>';
+	}
+
+	// Inline progress bar; pct is clamped for the fill, never for the label.
+	_bar(pct, cls) {
+		const value = pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, Number(pct)));
+		return `<span class="hq-bar${cls ? ` ${cls}` : ""}" role="img"
+			aria-label="${HQ_UTILS.fmtPct(pct === null || pct === undefined ? 0 : pct)}"><span class="hq-bar-fill" style="width:${value}%"></span></span>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -626,12 +644,11 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Hero 2x2: Total Sales / Transactions / APC / Peak Hour
+	// KPI row: Total Sales / Transactions / APC / Achievement (MTD aggregate)
 	// ------------------------------------------------------------------
 
 	_sales_card(s) {
 		const r = s.range || {};
-		const ccy = s.scope.default_currency;
 		return `<div class="hq-card hq-kpi hq-kpi--primary hq-sales-toggle">
 			<div class="hq-kpi-label">${__("Total Sales")} <button type="button" class="hq-toggle" data-hq-toggle>${__("incl. taxes & charges")}</button></div>
 			<div class="hq-kpi-value hq-sales-incl">${this._metric_text(r.net_tax_incl)}</div>
@@ -660,10 +677,218 @@ class HQSalesMonitor {
 		</div>`;
 	}
 
+	_achievement_card(s) {
+		const t = s.targets || {};
+		const ccy = s.scope.default_currency;
+		const has = !!t.available;
+		const pct = has ? (t.achievement_sales_pct || {})[ccy] : null;
+		const target = has ? ((t.target_sales || {}).by_currency || {})[ccy] : null;
+		const mtd = ((s.monthly.net_tax_incl || {}).by_currency || {})[ccy];
+		const sub = has
+			? `${__("MTD")} <span class="hq-money">${HQ_UTILS.fmtMoney(mtd ?? 0, ccy)}</span> / ${__("Target")} <span class="hq-money">${HQ_UTILS.fmtMoney(target ?? 0, ccy)}</span>`
+			: frappe.utils.escape_html(t.notice || __("Monthly target not set"));
+		return `<div class="hq-card hq-kpi hq-kpi--ach">
+			<div class="hq-kpi-label">${__("Achievement (MTD)")} <span class="hq-period">${frappe.utils.escape_html(s.windows.month_start || "")}</span></div>
+			<div class="hq-kpi-value">${pct == null ? this._na() : HQ_UTILS.fmtPct(pct, 1)}</div>
+			${this._bar(pct, "hq-bar--lg")}
+			<div class="hq-kpi-sub">${sub}</div>
+		</div>`;
+	}
+
+	// ------------------------------------------------------------------
+	// Outlet Performance — the centrepiece table. One row per outlet
+	// (= company): monthly target vs MTD actual with progress, the overall
+	// payback ("balik modal") progress, then the selected-range figures.
+	// ------------------------------------------------------------------
+
+	_outlet_rows(s) {
+		const monthly = {};
+		((s.targets || {}).by_company || []).forEach((r) => {
+			monthly[r.company] = r;
+		});
+		const overall = ((s.targets || {}).overall || {}).by_company || {};
+		const ranked = (s.outlet_ranking || []).map((r) => ({
+			...r,
+			target: monthly[r.company] || null,
+			overall: overall[r.company] || null,
+		}));
+		// Outlets with no sales in the selected range still carry their
+		// targets — append them (zero sales) instead of hiding them.
+		const seen = new Set(ranked.map((r) => r.company));
+		const quiet = Object.keys(monthly)
+			.filter((c) => !seen.has(c))
+			.sort()
+			.map((c) => ({
+				company: c,
+				currency: (monthly[c] || {}).currency,
+				gross: 0,
+				net_tax_incl: 0,
+				orders: 0,
+				apc: null,
+				share_pct: null,
+				profiles: [],
+				target: monthly[c],
+				overall: overall[c] || null,
+			}));
+		return ranked.concat(quiet);
+	}
+
+	_outlet_row(r) {
+		const t = r.target || {};
+		const o = r.overall;
+		const ccy = r.currency || (this.state.scope || {}).default_currency;
+		const missing = !t || t.missing;
+
+		const targetCell = missing
+			? `<span class="hq-badge hq-badge--warn">${__("No monthly target")}</span>`
+			: `<span class="hq-money">${HQ_UTILS.fmtMoney(t.target_sales, ccy)}</span>
+				<div class="hq-item-code">${HQ_UTILS.fmtCount(t.target_transactions ?? 0)} ${__("target TC")}</div>`;
+		const mtdCell = `<span class="hq-money">${HQ_UTILS.fmtMoney(t.mtd_net_tax_incl, ccy)}</span>
+			<div class="hq-item-code">${HQ_UTILS.fmtCount(t.mtd_orders ?? 0)} ${__("TC")}</div>`;
+		const achCell = missing
+			? this._na()
+			: `${this._bar(t.achievement_sales_pct)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(t.achievement_sales_pct, 1)}</b>
+				${t.projected_sales != null ? `<div class="hq-item-code">${__("proj.")} <span class="hq-money">${HQ_UTILS.fmtMoney(t.projected_sales, ccy)}</span> · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}</div>` : ""}`;
+		const overallCell = o
+			? `${this._bar(o.achievement_pct, "hq-bar--thin")} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>
+				<div class="hq-item-code">${__("cum.")} <span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span> / <span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)} →` : ""}</div>`
+			: `<span class="hq-muted">—</span>`;
+
+		return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
+			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}
+				${(r.profiles || []).length ? `<div class="hq-item-code">${r.profiles
+					.slice(0, 3)
+					.map((p) => `${frappe.utils.escape_html(p.pos_profile)} (${HQ_UTILS.fmtCount(p.orders)})`)
+					.join(" · ")}${r.profiles.length > 3 ? ` +${r.profiles.length - 3}` : ""}</div>` : ""}</td>
+			<td class="hq-num">${targetCell}</td>
+			<td class="hq-num">${mtdCell}</td>
+			<td class="hq-num hq-ach">${achCell}</td>
+			<td class="hq-num hq-ach">${overallCell}</td>
+			<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span>
+				${r.share_pct != null ? `<div class="hq-item-code">${HQ_UTILS.fmtPct(r.share_pct)}</div>` : ""}</td>
+			<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
+			<td class="hq-num">${r.apc === null ? "N/A" : `<span class="hq-money">${HQ_UTILS.fmtMoney(r.apc, r.currency)}</span>`}</td>
+			<td class="hq-num"><button class="btn btn-xs btn-default" data-hq-set-target="${frappe.utils.escape_html(r.company)}">${__("Set Target")}</button></td>
+		</tr>`;
+	}
+
+	_outlet_performance_card(s) {
+		const rows = this._outlet_rows(s).map((r) => this._outlet_row(r)).join("");
+		return `<div class="hq-card hq-card--table hq-card--outlets">
+			<div class="hq-card-title">${__("Outlet Performance")}
+				<span class="hq-period">${__("MTD targets")} · ${frappe.utils.escape_html(s.windows.month_start || "")} · ${__("range figures")}: ${this._range_label(s)}</span></div>
+			<div class="hq-rank-controls">
+				<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
+					placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.outlet_query)}" aria-label="${__("Search outlet")}"></div>
+				<span class="hq-kpi-sub hq-muted">${__("Outlet = company; POS profiles listed beneath; balik modal = cumulative sales vs overall target")}</span>
+				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
+			</div>
+			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
+				<thead><tr>
+					<th>${__("Outlet (Company)")}</th>
+					<th class="hq-num">${__("Monthly Target")}</th>
+					<th class="hq-num">${__("MTD")}</th>
+					<th class="hq-num">${__("Achievement")}</th>
+					<th class="hq-num">${__("Balik Modal")}</th>
+					<th class="hq-num">${__("Net Sales")}</th>
+					<th class="hq-num">${__("TC")}</th>
+					<th class="hq-num">${__("Avg Ticket")}</th>
+					<th></th>
+				</tr></thead>
+				<tbody>${rows || `<tr><td colspan="9" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
+			</table></div>
+		</div>`;
+	}
+
+	// ------------------------------------------------------------------
+	// Set Target dialog — monthly targets for the running month plus the
+	// overall payback target stored on the Company master. Blank fields keep
+	// stored values; the server enforces permissions per store.
+	// ------------------------------------------------------------------
+
+	_target_dialog(company) {
+		const t = this.state.targets || {};
+		const monthly = (t.by_company || []).find((r) => r.company === company) || {};
+		const overall = (t.overall || {}).by_company || {};
+		const current = overall[company] || {};
+		const month_start = (this.state.windows || {}).month_start || "";
+		const d = new frappe.ui.Dialog({
+			title: `${__("Set Target")} — ${company}`,
+			fields: [
+				{
+					fieldname: "monthly_head",
+					fieldtype: "HTML",
+					options: `<div class="hq-dialog-head">${__("Monthly targets")} · <b>${frappe.utils.escape_html(month_start)}</b></div>`,
+				},
+				{
+					fieldname: "target_sales",
+					label: `${__("Target Sales")} (${__("net incl. tax")})`,
+					fieldtype: "Currency",
+					default: monthly.target_sales ?? "",
+				},
+				{
+					fieldname: "target_transactions",
+					label: __("Target Transactions"),
+					fieldtype: "Int",
+					default: monthly.target_transactions ?? "",
+				},
+				{
+					fieldname: "overall_head",
+					fieldtype: "HTML",
+					options: `<div class="hq-dialog-head">${__("Overall / balik modal")} · ${__("one-time target on the outlet")}</div>`,
+				},
+				{
+					fieldname: "overall_target",
+					label: __("Overall Sales Target"),
+					fieldtype: "Currency",
+					default: current.overall_target ?? "",
+					description: `${__("0 clears the overall target")}.`,
+				},
+				{
+					fieldname: "overall_from",
+					label: __("Count cumulative from"),
+					fieldtype: "Date",
+					default: current.from_date || "",
+					description: `${__("Empty = all time")}.`,
+				},
+			],
+			primary_action_label: __("Save"),
+			primary_action: (values) => {
+				frappe.call({
+					method: "pos_next.api.hq_monitoring.set_outlet_target",
+					args: {
+						company,
+						month_start,
+						target_sales: values.target_sales ?? "",
+						target_transactions: values.target_transactions ?? "",
+						overall_target: values.overall_target ?? "",
+						overall_from: values.overall_from || "",
+					},
+					freeze: true,
+					callback: () => {
+						d.hide();
+						frappe.show_alert({ message: __("Targets updated"), indicator: "green" });
+						this.refresh();
+					},
+				});
+			},
+		});
+		d.show();
+	}
+
+	_apply_outlet_filter() {
+		const q = (this.outlet_query || "").toLowerCase();
+		this.$root.find("[data-hq-outlet-row]").each((_, el) => {
+			const name = String($(el).data("hq-company") || "").toLowerCase();
+			$(el).toggle(!q || name.includes(q));
+		});
+	}
+
+	// ------------------------------------------------------------------
+	// Peak Hour card (full width) — the hour window reshapes THIS card only
+	// ------------------------------------------------------------------
+
 	_hours_card(s) {
-		// The hour window reshapes THIS card only: chart bins and the peak
-		// label are recomputed from the measured rows inside the window; no
-		// other metric on the page changes.
 		const win = HQ_UTILS.parseHourWindow(this.hour_start, this.hour_end) || {
 			start: 0,
 			end: 24,
@@ -824,7 +1049,7 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Rankings: products | outlets side by side on desktop
+	// Product Ranking (full width)
 	// ------------------------------------------------------------------
 
 	_product_card(s) {
@@ -872,35 +1097,6 @@ class HQSalesMonitor {
 			<button class="btn btn-xs btn-default" ${pr.page <= 1 ? "disabled" : ""} data-hq-page="prev">${__("Previous")}</button>
 			<span>${pr.page} / ${pages} (${HQ_UTILS.fmtCount(pr.total)} ${__("items")})</span>
 			<button class="btn btn-xs btn-default" ${pr.page >= pages ? "disabled" : ""} data-hq-page="next">${__("Next")}</button>
-		</div>`;
-	}
-
-	_outlet_table_card(s) {
-		const rows = s.outlet_ranking || [];
-		const body = rows
-			.map(
-				(r) => `<tr>
-				<td>${frappe.utils.escape_html(r.company)}
-					${(r.profiles || []).length ? `<div class="hq-item-code">${r.profiles
-						.slice(0, 3)
-						.map((p) => `${frappe.utils.escape_html(p.pos_profile)} (${HQ_UTILS.fmtCount(p.orders)})`)
-						.join(" · ")}${r.profiles.length > 3 ? ` +${r.profiles.length - 3}` : ""}</div>` : ""}</td>
-				<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span></td>
-				<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
-				<td class="hq-num">${r.apc === null ? "N/A" : `<span class="hq-money">${HQ_UTILS.fmtMoney(r.apc, r.currency)}</span>`}</td>
-				<td class="hq-num">${HQ_UTILS.fmtPct(r.share_pct)}</td>
-			</tr>`
-			)
-			.join("");
-		return `<div class="hq-card hq-card--table hq-card--rank">
-			<div class="hq-card-title">${__("Outlet Ranking")} <span class="hq-period">${this._range_label(s)}</span></div>
-			<div class="hq-rank-controls"><span class="hq-kpi-sub">${__("Outlet = company; POS profiles listed beneath")}</span>
-				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button></div>
-			<div class="hq-table-scroll"><table class="hq-table">
-				<thead><tr><th>${__("Outlet (Company)")}</th><th class="hq-num">${__("Net Sales")}</th>
-				<th class="hq-num">${__("Transactions")}</th><th class="hq-num">${__("Avg Ticket")}</th><th class="hq-num">${__("Share %")}</th></tr></thead>
-				<tbody>${body || `<tr><td colspan="5" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
-			</table></div>
 		</div>`;
 	}
 
@@ -1097,6 +1293,15 @@ class HQSalesMonitor {
 			.on("change", "[data-hq-cat]", (e) => {
 				this._set_category($(e.currentTarget).data("hq-cat"), e.currentTarget.value || "");
 			})
+			.off("input", "[data-hq-outlet-search]")
+			.on("input", "[data-hq-outlet-search]", frappe.utils.debounce((e) => {
+				this.outlet_query = (e.currentTarget.value || "").trim();
+				this._apply_outlet_filter();
+			}, 150))
+			.off("click", "[data-hq-set-target]")
+			.on("click", "[data-hq-set-target]", (e) => {
+				this._target_dialog($(e.currentTarget).data("hq-set-target"));
+			})
 			.off("click", "[data-hq-toggle]")
 			.on("click", "[data-hq-toggle]", (e) => {
 				const card = $(e.currentTarget).closest(".hq-sales-toggle");
@@ -1137,8 +1342,25 @@ class HQSalesMonitor {
 			// column instead of being baked into the amount.
 			sections.push(
 				HQ_UTILS.toCsv(
-					[__("Outlet (Company)"), __("POS Profiles"), __("Currency"), __("Net Sales"), __("Transactions"), __("Avg Ticket"), __("Share %")],
-					(s.outlet_ranking || []).map((r) => [
+					[
+						__("Outlet (Company)"),
+						__("POS Profiles"),
+						__("Currency"),
+						__("Net Sales"),
+						__("Transactions"),
+						__("Avg Ticket"),
+						__("Share %"),
+						__("Monthly Target"),
+						__("Target Transactions"),
+						__("MTD Net Sales"),
+						__("MTD Transactions"),
+						__("Achievement %"),
+						__("Projected Sales"),
+						__("Overall Sales Target"),
+						__("Cumulative Net Sales"),
+						__("Overall Achievement %"),
+					],
+					this._outlet_rows(s).map((r) => [
 						r.company,
 						(r.profiles || []).map((p) => p.pos_profile).join("; "),
 						r.currency,
@@ -1146,6 +1368,15 @@ class HQSalesMonitor {
 						r.orders,
 						r.apc,
 						r.share_pct,
+						r.target && !r.target.missing ? r.target.target_sales : "",
+						r.target && !r.target.missing ? r.target.target_transactions : "",
+						r.target ? r.target.mtd_net_tax_incl : "",
+						r.target ? r.target.mtd_orders : "",
+						r.target && !r.target.missing ? r.target.achievement_sales_pct : "",
+						r.target ? r.target.projected_sales : "",
+						r.overall ? r.overall.overall_target : "",
+						r.overall ? r.overall.cumulative_net_tax_incl : "",
+						r.overall ? r.overall.achievement_pct : "",
 					])
 				)
 			);

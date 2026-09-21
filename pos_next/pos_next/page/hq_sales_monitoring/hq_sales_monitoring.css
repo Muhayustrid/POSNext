@@ -1,6 +1,9 @@
-/* HQ Sales Monitoring — desk page styles.
-   Hierarchy mirrors the legacy HQ report: full-width monitoring tables,
-   compact stat row, 2x2 hero, 2x2 chart grid, side-by-side rankings. */
+/* HQ Sales Monitoring — desk page styles (layout v2).
+   Surfaces, text and the accent follow Frappe's theme variables so the page
+   tracks light/dark and custom themes. Structure: scope strip, KPI row,
+   Outlet Performance table (monthly target + balik-modal progress), the
+   monitoring matrices, minis, 2x2 chart grid, full-width peak hour and
+   product ranking. */
 
 #page-hq-sales-monitoring .page-form,
 .hq-monitor {
@@ -14,6 +17,7 @@
 .hq-monitor {
 	font-size: 13px;
 	padding-bottom: 32px;
+	color: var(--text-color);
 }
 
 /* Filters wrap (never overflow the page); comfortable touch targets. */
@@ -28,23 +32,25 @@
 #page-hq-sales-monitoring .page-form > .frappe-control {
 	flex: 0 1 170px;
 	min-width: 140px;
-	max-width: 240px;
+	max-width: 260px;
 }
 
 .hq-scope {
 	margin: 2px 0 10px;
 	font-size: 12px;
-	color: #57606a;
+	color: var(--text-muted);
 }
 
 .hq-section-title {
 	font-size: 15px;
 	font-weight: 600;
-	margin: 14px 0 8px;
+	letter-spacing: -0.01em;
+	margin: 18px 0 8px;
 	display: flex;
 	align-items: baseline;
 	gap: 10px;
 	flex-wrap: wrap;
+	color: var(--heading-color, var(--text-color));
 }
 
 .hq-section-title:first-of-type {
@@ -54,49 +60,40 @@
 .hq-period {
 	font-size: 11.5px;
 	font-weight: 400;
-	color: #6b7280;
+	color: var(--text-muted);
 }
 
-/* Full-width monitoring tables, compact stat cards, 2x2 hero + chart grid. */
+/* KPI row and minis share the 4-column rhythm. */
+.hq-kpi-row,
 .hq-minis {
 	display: grid;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
 	gap: 12px;
-	margin-bottom: 4px;
+	margin-bottom: 12px;
+	align-items: stretch;
 }
 
-.hq-hero {
+.hq-charts {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 12px;
-	margin-bottom: 4px;
-	/* Cards keep their natural height: the tall Peak Hour chart must not
-	   stretch the Avg per Transaction card into a half-empty box. */
-	align-items: start;
-}
-
-.hq-charts,
-.hq-rankings {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 12px;
-	margin-bottom: 4px;
+	margin-bottom: 12px;
 	align-items: start;
 }
 
 .hq-card {
-	background: #fff;
-	border: 1px solid #e2e6e9;
-	border-radius: 10px;
+	background: var(--card-bg, #fff);
+	border: 1px solid var(--border-color, #e2e6e9);
+	border-radius: var(--border-radius-lg, 12px);
 	padding: 14px 16px;
 	margin-bottom: 12px;
 	min-width: 0;
+	box-shadow: var(--shadow-xs);
 }
 
+.hq-kpi-row .hq-card,
 .hq-minis .hq-card,
-.hq-hero .hq-card,
-.hq-charts .hq-card,
-.hq-rankings .hq-card {
+.hq-charts .hq-card {
 	margin-bottom: 0;
 }
 
@@ -104,7 +101,7 @@
 	font-weight: 600;
 	font-size: 13px;
 	margin-bottom: 10px;
-	color: #16181a;
+	color: var(--heading-color, var(--text-color));
 	display: flex;
 	align-items: baseline;
 	gap: 8px;
@@ -124,10 +121,12 @@
 
 /* Monitoring matrices keep the row label visible while numbers scroll. */
 .hq-table--matrix th[scope="row"],
-.hq-table--matrix thead tr:first-child th:first-child {
+.hq-table--matrix thead tr:first-child th:first-child,
+.hq-table--outlets td:first-child,
+.hq-table--outlets thead th:first-child {
 	position: sticky;
 	left: 0;
-	background: #fff;
+	background: var(--card-bg, #fff);
 	z-index: 1;
 	text-align: left;
 }
@@ -140,15 +139,29 @@
 
 .hq-table th,
 .hq-table td {
-	padding: 6px 8px;
-	border-bottom: 1px solid #f1f3f5;
+	padding: 7px 10px;
+	border-bottom: 1px solid var(--border-color, #f1f3f5);
 	text-align: left;
 	vertical-align: top;
 }
 
+.hq-table tbody tr {
+	transition: background 0.15s ease;
+}
+
+.hq-table tbody tr:hover td {
+	background: var(--control-bg, #f5f6f8);
+}
+
+/* Sticky cells must follow the row hover too, or they look torn off. */
+.hq-table tbody tr:hover th[scope="row"],
+.hq-table tbody tr:hover td:first-child {
+	background: var(--control-bg, #f5f6f8);
+}
+
 .hq-table thead th {
 	font-size: 11px;
-	color: #6b7280;
+	color: var(--text-muted);
 	text-transform: uppercase;
 	letter-spacing: 0.3px;
 	white-space: nowrap;
@@ -166,20 +179,20 @@
 .hq-table--matrix tbody th[scope="row"] {
 	font-weight: 600;
 	white-space: nowrap;
-	border-right: 1px solid #f1f3f5;
+	border-right: 1px solid var(--border-color, #f1f3f5);
 }
 
 .hq-table--matrix .hq-group {
 	text-align: center;
-	border-left: 1px solid #f1f3f5;
+	border-left: 1px solid var(--border-color, #f1f3f5);
 	text-transform: none;
 	font-size: 12px;
-	color: #16181a;
+	color: var(--heading-color, var(--text-color));
 	font-weight: 600;
 }
 
 .hq-table--matrix .hq-group + th {
-	border-left: 1px solid #f1f3f5;
+	border-left: 1px solid var(--border-color, #f1f3f5);
 }
 
 .hq-num {
@@ -187,10 +200,15 @@
 	white-space: nowrap;
 }
 
-/* Compact stat cards */
+.hq-outlet-name {
+	font-weight: 600;
+	min-width: 180px;
+}
+
+/* KPI cards */
 .hq-kpi-label {
 	font-size: 11.5px;
-	color: #6b7280;
+	color: var(--text-muted);
 	margin-bottom: 4px;
 	display: flex;
 	align-items: center;
@@ -201,9 +219,10 @@
 .hq-kpi-value {
 	font-size: 20px;
 	font-weight: 600;
-	color: #16181a;
+	color: var(--heading-color, var(--text-color));
 	line-height: 1.25;
 	font-variant-numeric: tabular-nums;
+	letter-spacing: -0.01em;
 }
 
 .hq-mini {
@@ -224,21 +243,22 @@
 	overflow-wrap: anywhere;
 }
 
-/* Subtle neutral-blue accent on the headline card only. */
-.hq-kpi--primary {
-	background: #f6f9fd;
-	border-color: #d8e4f2;
+/* Quiet tinted surface for the two headline cards. */
+.hq-kpi--primary,
+.hq-kpi--ach {
+	background: var(--control-bg, #f6f9fd);
+	border-color: var(--border-color, #d8e4f2);
 }
 
 .hq-kpi-sub,
 .hq-extra {
 	font-size: 11px;
-	color: #6b7280;
+	color: var(--text-muted);
 	margin-top: 4px;
 }
 
 .hq-muted {
-	color: #8d99a6;
+	color: var(--text-muted);
 }
 
 .hq-money {
@@ -249,23 +269,80 @@
 	margin: 12px 0;
 }
 
+/* Progress bars: inline in table cells, large in the achievement KPI. */
+.hq-bar {
+	display: inline-block;
+	vertical-align: middle;
+	width: 72px;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--control-bg, #edf0f3);
+	overflow: hidden;
+	margin-right: 6px;
+}
+
+.hq-bar--thin {
+	height: 4px;
+	width: 60px;
+}
+
+.hq-bar--lg {
+	display: block;
+	width: 100%;
+	height: 8px;
+	margin: 6px 0 2px;
+}
+
+.hq-bar-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--primary, #2490ef);
+	transition: width 0.3s ease;
+}
+
+.hq-ach-pct {
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-badge {
+	display: inline-block;
+	font-size: 10.5px;
+	font-weight: 500;
+	padding: 1px 8px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+
+.hq-badge--warn {
+	color: var(--orange, #e8590c);
+	border-color: var(--orange, #e8590c);
+	background: color-mix(in srgb, var(--orange, #e8590c) 8%, transparent);
+}
+
 /* Tax toggle on the Total Sales card */
 .hq-toggle {
-	border: 1px solid #d0d7de;
-	background: #fff;
+	border: 1px solid var(--border-color, #d0d7de);
+	background: var(--card-bg, #fff);
 	border-radius: 999px;
 	font-size: 10.5px;
 	padding: 1px 8px;
-	color: #2490ef;
+	color: var(--primary, #2490ef);
 	cursor: pointer;
+	transition: background 0.15s ease;
 }
 
 .hq-toggle:hover {
-	background: #f0f6ff;
+	background: color-mix(in srgb, var(--primary, #2490ef) 8%, transparent);
+}
+
+.hq-toggle:active {
+	transform: translateY(1px);
 }
 
 .hq-toggle:focus-visible {
-	outline: 2px solid #2490ef;
+	outline: 2px solid var(--primary, #2490ef);
 	outline-offset: 1px;
 }
 
@@ -295,7 +372,7 @@
 	align-items: baseline;
 	gap: 8px;
 	padding: 3px 0;
-	border-bottom: 1px dashed #f1f3f5;
+	border-bottom: 1px dashed var(--border-color, #f1f3f5);
 }
 
 .hq-dot {
@@ -322,14 +399,14 @@
 .hq-legend-pct {
 	flex: 0 0 52px;
 	text-align: right;
-	color: #6b7280;
+	color: var(--text-muted);
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 }
 
 /* Secondary quantity in a legend row (Top Selling <category> cards). */
 .hq-legend-sub {
-	color: #8d99a6;
+	color: var(--text-muted);
 	font-size: 11px;
 	font-weight: 400;
 	white-space: nowrap;
@@ -341,7 +418,7 @@
 	width: 190px;
 	max-width: 100%;
 	height: 190px;
-	border: 2px dashed #d9dfe5;
+	border: 2px dashed var(--border-color, #d9dfe5);
 	border-radius: 50%;
 	display: flex;
 	align-items: center;
@@ -349,13 +426,13 @@
 	text-align: center;
 	padding: 24px;
 	margin: 0 auto;
-	color: #8d99a6;
+	color: var(--text-muted);
 	font-size: 12px;
 }
 
 .hq-item-code {
 	font-size: 11px;
-	color: #8d99a6;
+	color: var(--text-muted);
 	margin-top: 2px;
 	white-space: nowrap;
 	overflow: hidden;
@@ -371,14 +448,32 @@
 	flex-wrap: wrap;
 }
 
-.hq-select {
-	border: 1px solid #d0d7de;
-	border-radius: 6px;
+.hq-select,
+.hq-input {
+	border: 1px solid var(--border-color, #d0d7de);
+	border-radius: var(--border-radius-md, 6px);
 	padding: 6px 10px;
 	font-size: 12.5px;
 	max-width: 240px;
-	background: #fff;
+	background: var(--card-bg, #fff);
+	color: var(--text-color);
 	min-height: 36px;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hq-input {
+	max-width: 260px;
+}
+
+.hq-select:hover,
+.hq-input:hover {
+	border-color: var(--primary, #2490ef);
+}
+
+.hq-select:focus-visible,
+.hq-input:focus-visible {
+	outline: 2px solid var(--primary, #2490ef);
+	outline-offset: 1px;
 }
 
 /* Inline in a card title ("Top Selling <select>"): shrinks with the card,
@@ -391,21 +486,21 @@
 	font-weight: 400;
 }
 
-.hq-select:focus-visible {
-	outline: 2px solid #2490ef;
-	outline-offset: 1px;
-}
-
 /* Touch targets: comfortable on coarse pointers (44px per HIG). */
 @media (pointer: coarse) {
 	.hq-select,
+	.hq-input,
 	.hq-toggle,
 	.btn-xs {
 		min-height: 44px;
 	}
 }
 
-/* Peak Hour card: window selects sit inline above the chart. */
+/* Peak Hour card (full width): window selects sit inline above the chart. */
+.hq-card--hours {
+	margin-top: 12px;
+}
+
 .hq-hour-controls {
 	display: flex;
 	align-items: end;
@@ -419,7 +514,7 @@
 	flex-direction: column;
 	gap: 2px;
 	font-size: 11px;
-	color: #6b7280;
+	color: var(--text-muted);
 }
 
 .hq-ctl .hq-select {
@@ -435,14 +530,14 @@
 
 .hq-notes {
 	font-size: 12px;
-	color: #57606a;
+	color: var(--text-muted);
 }
 
 .hq-notes summary {
 	cursor: pointer;
 	font-weight: 600;
 	font-size: 13px;
-	color: #16181a;
+	color: var(--heading-color, var(--text-color));
 }
 
 .hq-notes .hq-kpi-sub {
@@ -464,23 +559,29 @@
 	overflow-x: auto;
 }
 
-/* Mid width: hero/minis drop to 2 columns, pairs stack. */
+/* Set Target dialog section heads */
+.hq-dialog-head {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+	margin: 6px 0 2px;
+	padding-bottom: 4px;
+	border-bottom: 1px solid var(--border-color, #f1f3f5);
+}
+
+/* Mid width: KPIs/minis drop to 2 columns, charts stack. */
 @media screen and (max-width: 1280px) {
+	.hq-kpi-row,
 	.hq-minis {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.hq-charts,
-	.hq-rankings {
+	.hq-charts {
 		grid-template-columns: 1fr;
 	}
 }
 
 @media screen and (max-width: 768px) {
-	.hq-hero {
-		grid-template-columns: 1fr;
-	}
-
 	.hq-kpi-value {
 		font-size: 16px;
 	}
@@ -488,6 +589,7 @@
 
 /* Phone: everything single column, donut above legend, category rows wrap. */
 @media screen and (max-width: 480px) {
+	.hq-kpi-row,
 	.hq-minis {
 		grid-template-columns: 1fr;
 	}

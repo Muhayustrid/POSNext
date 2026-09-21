@@ -21,7 +21,14 @@ from datetime import date, timedelta
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from pos_next.api.hq_monitoring import get_sales_monitoring, growth_pct, previous_weekday, ratio
+from pos_next.api.hq_monitoring import (
+	get_sales_monitoring,
+	growth_pct,
+	previous_weekday,
+	ratio,
+	set_outlet_target,
+)
+from pos_next.install import sync_custom_fields
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
 	get_default_currency,
@@ -59,6 +66,9 @@ class TestHQMonitoring(IntegrationTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user(ADMIN)
+		# The overall-target Company custom fields must exist for this suite —
+		# a fresh checkout runs tests before its first migrate.
+		sync_custom_fields(quiet=True)
 		# Dedicated companies (the shared default company carries unrelated POS
 		# invoices from other tests / the site). Nothing here is committed, so
 		# the class-end rollback removes every artifact.
@@ -66,6 +76,10 @@ class TestHQMonitoring(IntegrationTestCase):
 		cls.currency_b = next((c for c in ("USD", "EUR", "SGD") if c != cls.currency_a), "USD")
 		cls.company_a = cls._make_hq_company("_Test HQ Co A", cls.currency_a)
 		cls.company_b = cls._make_hq_company("_Test HQ Co B", cls.currency_b)
+		# Ad-hoc test companies need an active Fiscal Year covering today — the
+		# site's real FY lists its outlets explicitly and covers nothing else.
+		cls._ensure_fiscal_year(cls.company_a)
+		cls._ensure_fiscal_year(cls.company_b)
 		# Wipe invoices of every HQ test company (covers leftovers of earlier
 		# runs under slightly different company names) so counts are exact.
 		for name in frappe.get_all("Company", filters={"name": ["like", "_Test HQ Co %"]}, pluck="name"):
@@ -83,7 +97,10 @@ class TestHQMonitoring(IntegrationTestCase):
 				frappe.get_doc(
 					{"doctype": "POS Settings", "pos_profile": profile, "require_refund_code": 0}
 				).insert(ignore_permissions=True)
-		cls.customer = frappe.db.get_value("Customer", {}, "name")
+		# The site's real customers restrict "Allowed To Transact With" to their
+		# outlet companies; a fresh unrestricted customer transacts with any of
+		# the ad-hoc test companies.
+		cls.customer = cls._make_customer()
 		cls.cash_a = cls._cash_mode(cls.company_a)
 		cls.cash_b = cls._cash_mode(cls.company_b)
 
@@ -91,6 +108,10 @@ class TestHQMonitoring(IntegrationTestCase):
 		cls.item_y = cls._item_in_other_group("HQMON Y")
 		cls.pkg_parent = make_test_item("HQMON PKG")
 		cls.pkg_component = make_test_item("HQMON PKGC")
+		# The site manages selling price lists itself (price groups) and has no
+		# global default, so invoices bind an explicit per-currency list.
+		cls.price_list_a = cls._make_price_list(cls.currency_a)
+		cls.price_list_b = cls._make_price_list(cls.currency_b)
 
 		cls._make_invoice(
 			cls.company_a,
@@ -145,6 +166,55 @@ class TestHQMonitoring(IntegrationTestCase):
 	# ------------------------------------------------------------------
 	# fixtures
 	# ------------------------------------------------------------------
+
+	@classmethod
+	def _make_price_list(cls, currency):
+		name = f"_Test HQ PL {currency}"
+		if not frappe.db.exists("Price List", name):
+			frappe.get_doc(
+				{
+					"doctype": "Price List",
+					"price_list_name": name,
+					"currency": currency,
+					"selling": 1,
+					"enabled": 1,
+				}
+			).insert(ignore_permissions=True)
+		return name
+
+	@classmethod
+	def _make_customer(cls):
+		name = "_Test HQ Customer"
+		existing = frappe.db.exists("Customer", {"customer_name": name})
+		if existing:
+			return existing
+		# naming may be by series — the doc's name, not customer_name, is the link
+		return (
+			frappe.get_doc(
+				{"doctype": "Customer", "customer_name": name, "customer_type": "Individual"}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+
+	@classmethod
+	def _ensure_fiscal_year(cls, company):
+		year = frappe.utils.nowdate()[:4]
+		name = f"_Test HQ FY {year}"
+		if not frappe.db.exists("Fiscal Year", name):
+			frappe.get_doc(
+				{
+					"doctype": "Fiscal Year",
+					"year": name,
+					"year_start_date": f"{year}-01-01",
+					"year_end_date": f"{year}-12-31",
+					"companies": [{"company": company}],
+				}
+			).insert(ignore_permissions=True)
+		elif not frappe.db.exists("Fiscal Year Company", {"parent": name, "company": company}):
+			doc = frappe.get_doc("Fiscal Year", name)
+			doc.append("companies", {"company": company})
+			doc.save(ignore_permissions=True)
 
 	@classmethod
 	def _make_hq_company(cls, name, currency):
@@ -231,6 +301,7 @@ class TestHQMonitoring(IntegrationTestCase):
 		inv.company = company
 		inv.customer = cls.customer
 		inv.is_pos = 1
+		inv.selling_price_list = cls.price_list_b if currency else cls.price_list_a
 		if posting_date:
 			inv.set_posting_time = 1
 			inv.posting_date = posting_date
@@ -572,6 +643,126 @@ class TestHQMonitoring(IntegrationTestCase):
 		# TC projection = MTD orders / days elapsed x days in month
 		elapsed = data["windows"]["days_elapsed"]
 		self.assertEqual(t["projected_orders"], round(3 / elapsed * dim))
+
+	def test_targets_by_company_rows(self):
+		data = self._payload()
+		rows = data["targets"]["by_company"]
+		self.assertEqual([r["company"] for r in rows], [self.company_a])
+		row = rows[0]
+		self.assertFalse(row["missing"])
+		self.assertEqual(row["currency"], self.currency_a)
+		self.assertEqual(row["target_sales"], 100000.0)
+		self.assertEqual(row["target_transactions"], 10)
+		self.assertEqual(row["mtd_net_tax_incl"], 4500.0)
+		self.assertEqual(row["mtd_orders"], 3)
+		self.assertEqual(row["mtd_apc"], 1500.0)
+		self.assertEqual(row["achievement_sales_pct"], round(4500 / 100000 * 100, 2))
+		self.assertEqual(row["achievement_transactions_pct"], 30.0)
+		elapsed = data["windows"]["days_elapsed"]
+		dim = data["windows"]["days_in_month"]
+		self.assertEqual(row["projected_sales"], round(4500 / elapsed * dim, 2))
+
+	def test_overall_target_absent_when_unset(self):
+		self.assertFalse(self._payload()["targets"]["overall"]["available"])
+
+	def test_overall_target_cumulative_and_from_date(self):
+		frappe.set_user(ADMIN)
+		frappe.db.set_value(
+			"Company",
+			self.company_a,
+			{"pos_overall_sales_target": 10000, "pos_overall_target_from": None},
+		)
+		data = self._payload()  # scope = company A only
+		overall = data["targets"]["overall"]
+		self.assertTrue(overall["available"])
+		row = overall["by_company"][self.company_a]
+		self.assertEqual(row["overall_target"], 10000.0)
+		self.assertIsNone(row["from_date"])
+		self.assertEqual(row["cumulative_net_tax_incl"], 4500.0)
+		self.assertEqual(row["cumulative_orders"], 3)
+		self.assertEqual(row["achievement_pct"], 45.0)
+		self.assertEqual(row["remaining"], 5500.0)
+
+		# each outlet pins its own lower bound: counting from tomorrow drops
+		# today's invoices from the cumulative sum
+		frappe.db.set_value(
+			"Company",
+			self.company_a,
+			"pos_overall_target_from",
+			frappe.utils.add_days(frappe.utils.nowdate(), 1),
+		)
+		row = self._payload()["targets"]["overall"]["by_company"][self.company_a]
+		self.assertEqual(row["cumulative_net_tax_incl"], 0.0)
+		self.assertEqual(row["achievement_pct"], 0.0)
+
+	def test_set_outlet_target_updates_and_creates(self):
+		frappe.set_user(ADMIN)
+		month = frappe.utils.get_first_day(frappe.utils.nowdate())
+		out = set_outlet_target(
+			company=self.company_a,
+			month_start=month,
+			target_sales=200000,
+			target_transactions=20,
+			overall_target=500000,
+			overall_from="",
+		)
+		self.assertTrue(out["monthly"])
+		self.assertTrue(out["overall_updated"])
+		doc = frappe.get_doc("POS Monthly Target", out["monthly"])
+		self.assertEqual(doc.target_sales, 200000.0)
+		self.assertEqual(doc.target_transactions, 20)
+		self.assertEqual(
+			frappe.db.get_value("Company", self.company_a, "pos_overall_sales_target"), 500000.0
+		)
+
+		data = self._payload()
+		row = data["targets"]["by_company"][0]
+		self.assertEqual(row["target_sales"], 200000.0)
+		self.assertFalse(row["missing"])
+		self.assertEqual(
+			data["targets"]["overall"]["by_company"][self.company_a]["overall_target"], 500000.0
+		)
+
+		# blank monthly fields keep the stored values; overall 0 clears it
+		set_outlet_target(company=self.company_a, overall_target=0, overall_from="")
+		self.assertEqual(
+			frappe.db.get_value("Company", self.company_a, "pos_overall_sales_target"), 0.0
+		)
+		row = self._payload()["targets"]["by_company"][0]
+		self.assertEqual(row["target_sales"], 200000.0)
+
+		# missing month row is created (create permission path)
+		frappe.db.delete("POS Monthly Target", {"company": self.company_a, "month_start": month})
+		out = set_outlet_target(company=self.company_a, target_sales=80000)
+		doc = frappe.get_doc("POS Monthly Target", out["monthly"])
+		self.assertEqual(doc.target_sales, 80000.0)
+		self.assertEqual(doc.target_transactions, 0)
+
+		# restore the class fixture for sibling tests (method changes persist)
+		frappe.db.delete("POS Monthly Target", {"company": self.company_a, "month_start": month})
+		self._make_target(self.company_a)
+
+	def test_set_outlet_target_validation_and_permission(self):
+		frappe.set_user(ADMIN)
+		with self.assertRaises(frappe.ValidationError):
+			set_outlet_target(company=self.company_a, target_sales=-100)
+		with self.assertRaises(frappe.ValidationError):
+			set_outlet_target(company=self.company_a, month_start="2026-08-15", target_sales=100)
+		with self.assertRaises(frappe.ValidationError):
+			set_outlet_target(company=self.company_a)  # nothing to save
+		with self.assertRaises(frappe.ValidationError):
+			set_outlet_target(company="_Test HQ Missing Co", target_sales=100)
+
+		# Sales Manager reads the dashboard but cannot move targets
+		frappe.set_user(self.user_all)
+		with self.assertRaises(frappe.PermissionError):
+			set_outlet_target(company=self.company_a, target_sales=100)
+		with self.assertRaises(frappe.PermissionError):
+			set_outlet_target(company=self.company_a, overall_target=100)
+
+		frappe.set_user(self.user_no_role)
+		with self.assertRaises(frappe.PermissionError):
+			set_outlet_target(company=self.company_a, target_sales=100)
 
 	def test_targets_missing_marked_unavailable(self):
 		# drop company A's target: aggregate over A scope must go N/A, not partial

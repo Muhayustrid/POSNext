@@ -128,8 +128,28 @@ def _to_int(value, default=1, lo=1, hi=None):
 		value = default
 	value = max(lo, value)
 	if hi:
-		value = min(hi, value)
+		value = min(value, hi)
 	return value
+
+
+def _parse_amount(value, label):
+	"""Non-negative amount; blank/None = field not provided (leave untouched)."""
+	if value in (None, ""):
+		return None
+	amount = flt(value)
+	if amount < 0:
+		frappe.throw(_("{0} cannot be negative").format(label))
+	return amount
+
+
+def _parse_count(value):
+	"""Non-negative integer; blank/None = field not provided."""
+	if value in (None, ""):
+		return None
+	try:
+		return max(0, int(float(value)))
+	except (TypeError, ValueError):
+		frappe.throw(_("Invalid number: {0}").format(value))
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +258,85 @@ def get_sales_monitoring(
 			max(result["outlet_ranking"], key=lambda r: r["orders"]) if result["outlet_ranking"] else None
 		),
 	}
-	result["targets"] = _targets_section(scope["companies"], currency_map, default_ccy, window, monthly)
+	result["targets"] = _targets_section(scope["companies"], currency_map, default_ccy, window, monthly, mtd_rows)
+	result["targets"]["overall"] = _overall_target_section(scope, currency_map)
+	return result
+
+
+@frappe.whitelist()
+def set_outlet_target(
+	company=None,
+	month_start=None,
+	target_sales=None,
+	target_transactions=None,
+	overall_target=None,
+	overall_from=None,
+):
+	"""Set an outlet's targets from the HQ Sales Monitoring page.
+
+	- Monthly: upserts the POS Monthly Target of ``month_start`` (default the
+	  current month). A blank field keeps the stored value.
+	- Overall (payback / "balik modal"): writes the Overall Sales Target custom
+	  fields on the Company master. ``overall_target`` blank = untouched, 0
+	  clears it; ``overall_from`` "" clears the counted-from date.
+
+	Role gate is the read gate (HQ_ROLES) plus explicit write/create
+	permissions per target store — Sales Manager can read the dashboard but
+	not move targets.
+	"""
+	_check_hq_access()
+	if not company or not frappe.db.exists("Company", company):
+		frappe.throw(_("Please choose a valid outlet"))
+	if not frappe.has_permission("Company", "read", doc=company):
+		frappe.throw(_("Not permitted to access Company {0}").format(company), frappe.PermissionError)
+
+	sales = _parse_amount(target_sales, _("Monthly Target Sales"))
+	transactions = _parse_count(target_transactions)
+	overall = _parse_amount(overall_target, _("Overall Sales Target"))
+	start = _parse_date(overall_from)
+
+	result = {"monthly": None, "overall_updated": False}
+
+	if sales is not None or transactions is not None:
+		month = _parse_date(month_start) or get_first_day(nowdate())
+		if month != get_first_day(month):
+			frappe.throw(_("Month Start must be the first day of the month"))
+		name = frappe.db.exists("POS Monthly Target", {"company": company, "month_start": month})
+		action = "write" if name else "create"
+		if not frappe.has_permission("POS Monthly Target", action):
+			frappe.throw(
+				_("You need {0} permission on POS Monthly Target").format(_(action.title())),
+				frappe.PermissionError,
+			)
+		doc = (
+			frappe.get_doc("POS Monthly Target", name)
+			if name
+			else frappe.get_doc(
+				{"doctype": "POS Monthly Target", "company": company, "month_start": str(month)}
+			)
+		)
+		if sales is not None:
+			doc.target_sales = sales
+		if transactions is not None:
+			doc.target_transactions = transactions
+		doc.save()
+		result["monthly"] = doc.name
+
+	if overall is not None:
+		if not frappe.has_permission("Company", "write", doc=company):
+			frappe.throw(
+				_("You need write permission on Company {0}").format(company),
+				frappe.PermissionError,
+			)
+		frappe.db.set_value(
+			"Company",
+			company,
+			{"pos_overall_sales_target": overall, "pos_overall_target_from": start},
+		)
+		result["overall_updated"] = True
+
+	if result["monthly"] is None and not result["overall_updated"]:
+		frappe.throw(_("Nothing to save — enter at least one target"))
 	return result
 
 
@@ -872,7 +970,7 @@ def _category_top(companies, profiles, start, end, cutoff, currency_map, default
 # ---------------------------------------------------------------------------
 
 
-def _targets_section(companies, currency_map, default_ccy, window, monthly):
+def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_rows):
 	month_start = window["month_start"]
 	rows = frappe.get_all(
 		"POS Monthly Target",
@@ -880,6 +978,44 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly):
 		fields=["company", "target_sales", "target_transactions"],
 	)
 	missing = [c for c in companies if c not in {r.company for r in rows}]
+
+	# Per-outlet rows: unlike the aggregate below, a missing target only blanks
+	# that outlet's cells — the table shows whatever is configured.
+	targets_by_company = {r.company: r for r in rows}
+	mtd_by_company = {r.company: r for r in mtd_rows}
+	days_elapsed = window["days_elapsed"]
+	days_in_month = window["days_in_month"]
+	by_company = []
+	for company in companies:
+		target = targets_by_company.get(company)
+		actual = mtd_by_company.get(company)
+		net = flt(actual.net_tax_incl) if actual else 0.0
+		orders = int(actual.orders) if actual else 0
+		target_sales = flt(target.target_sales) if target else None
+		target_tx = int(target.target_transactions or 0) if target else None
+		projected = (
+			round(net / days_elapsed * days_in_month, 2)
+			if target and days_elapsed
+			else None
+		)
+		by_company.append(
+			{
+				"company": company,
+				"currency": currency_map.get(company),
+				"missing": target is None,
+				"target_sales": target_sales,
+				"target_transactions": target_tx,
+				"mtd_net_tax_incl": round(net, 2),
+				"mtd_orders": orders,
+				"mtd_apc": round(net / orders, 2) if orders else None,
+				"achievement_sales_pct": ratio(net, target_sales) if target else None,
+				"achievement_transactions_pct": ratio(orders, target_tx) if target else None,
+				"projected_sales": projected,
+				"projected_achievement_pct": (
+					ratio(projected, target_sales) if target and projected is not None else None
+				),
+			}
+		)
 
 	sales_target = {}
 	tx_target = 0
@@ -896,6 +1032,7 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly):
 			"missing_companies": missing[:10],
 			"missing_count": len(missing),
 			"notice": _("Monthly target is not set for every scoped company, so achievement is not shown."),
+			"by_company": by_company,
 		}
 
 	target_metric = make_metric(sales_target, default_ccy)
@@ -920,6 +1057,7 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly):
 	return {
 		"available": True,
 		"month_start": month_start,
+		"by_company": by_company,
 		"target_sales": target_metric,
 		"target_transactions": tx_target,
 		"achievement_sales_pct": achievement,
@@ -951,6 +1089,77 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly):
 	}
 
 
+def _overall_target_section(scope, currency_map):
+	"""Per-outlet payback ("balik modal") target: cumulative POS net sales
+	(tax incl.) vs the one-time Overall Sales Target on the Company master.
+
+	Each outlet counts from its own "Counted From" date (empty = all time), so
+	one query pins every company's lower bound instead of one query per outlet.
+	Outlets without an overall target are simply absent from ``by_company``.
+	"""
+	# Guard: before the app's first migrate the custom fields do not exist yet;
+	# reading them would error, so report the section unavailable instead.
+	if not frappe.get_meta("Company").has_field("pos_overall_sales_target"):
+		return {"available": False, "by_company": {}}
+	configured = {
+		r.name: r
+		for r in frappe.get_all(
+			"Company",
+			filters={"name": ["in", scope["companies"]]},
+			fields=["name", "pos_overall_sales_target", "pos_overall_target_from"],
+		)
+		if flt(r.pos_overall_sales_target) > 0
+	}
+	if not configured:
+		return {"available": False, "by_company": {}}
+
+	where = ["si.docstatus = 1", "si.is_pos = 1", "si.company IN %(companies)s"]
+	params = {"companies": list(configured)}
+	if scope["profiles"] is not None:
+		params["profiles"] = list(scope["profiles"])
+		where.append("si.pos_profile IN %(profiles)s")
+	bounds = []
+	for i, (name, row) in enumerate(configured.items()):
+		if row.pos_overall_target_from:
+			params[f"c{i}"] = name
+			params[f"d{i}"] = row.pos_overall_target_from
+			bounds.append(f"(si.company = %(c{i})s AND si.posting_date >= %(d{i})s)")
+	if bounds:
+		where.append("(" + " OR ".join(bounds) + ")")
+
+	cumulative = {}
+	for r in frappe.db.sql(
+		f"""
+		SELECT si.company,
+			SUM(si.base_grand_total) AS net_tax_incl,
+			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
+		FROM {_invoice_from()}
+		WHERE {" AND ".join(where)}
+		GROUP BY si.company
+		""",
+		params,
+		as_dict=True,
+	):
+		cumulative[r.company] = r
+
+	by_company = {}
+	for company, row in configured.items():
+		cum = cumulative.get(company)
+		net = flt(cum.net_tax_incl) if cum else 0.0
+		orders = int(cum.orders) if cum else 0
+		target = flt(row.pos_overall_sales_target)
+		by_company[company] = {
+			"currency": currency_map.get(company),
+			"overall_target": target,
+			"from_date": str(row.pos_overall_target_from) if row.pos_overall_target_from else None,
+			"cumulative_net_tax_incl": round(net, 2),
+			"cumulative_orders": orders,
+			"achievement_pct": ratio(net, target),
+			"remaining": round(target - net, 2),
+		}
+	return {"available": True, "by_company": by_company}
+
+
 def _empty_payload(scope, notice):
 	return {
 		"scope": scope,
@@ -970,5 +1179,5 @@ def _empty_payload(scope, notice):
 		"highlights": {},
 		"channels": {"available": False},
 		"pax": {"available": False},
-		"targets": {"available": False},
+		"targets": {"available": False, "by_company": [], "overall": {"available": False, "by_company": {}}},
 	}
