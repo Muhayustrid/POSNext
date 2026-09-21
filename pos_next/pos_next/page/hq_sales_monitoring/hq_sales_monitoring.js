@@ -520,7 +520,7 @@ class HQSalesMonitor {
 			cells.push(`<div class="hq-mini">
 				<div class="hq-kpi-label">${__("Biggest Outlet (share)")}</div>
 				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(h.biggest_outlet.company)}</div>
-				<div class="hq-kpi-sub">${this._signed_pct(h.biggest_outlet.share_pct)} · <span class="hq-money">${HQ_UTILS.fmtMoney(h.biggest_outlet.net_tax_incl, h.biggest_outlet.currency)}</span></div>
+				<div class="hq-kpi-sub">${HQ_UTILS.fmtPct(h.biggest_outlet.share_pct, 1)} · <span class="hq-money">${HQ_UTILS.fmtMoney(h.biggest_outlet.net_tax_incl, h.biggest_outlet.currency)}</span></div>
 			</div>`);
 		} else {
 			cells.push(`<div class="hq-mini"><div class="hq-kpi-label">${__("Biggest Outlet (share)")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
@@ -582,7 +582,7 @@ class HQSalesMonitor {
 				? `<div class="hq-kpi-sub hq-muted" style="margin-top: 8px">
 					${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")}): ${__("Sales")} ${this._signed_pct((d.growth_vs_last_week_pct || {})[ccy])}
 					· ${__("TC")} ${this._signed_pct(tcGrowth)} · ${__("Avg Ticket")} ${this._signed_pct(apcGrowth)}
-					· ${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((d.growth_vs_prior_weekday_pct || {})[ccy])}${d.cutoff ? ` · ${__("cut at")} ${frappe.utils.escape_html(d.cutoff)}` : ""}
+					· ${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((d.growth_vs_prior_weekday_pct || {})[ccy])}
 				</div>`
 				: "";
 
@@ -592,7 +592,7 @@ class HQSalesMonitor {
 		const mtd = ((s.monthly.net_tax_incl || {}).by_currency || {})[ccy];
 		const achSub = has
 			? `${__("MTD")} <span class="hq-money">${HQ_UTILS.fmtMoney(mtd ?? 0, ccy)}</span> / ${__("Target")} <span class="hq-money">${HQ_UTILS.fmtMoney(target ?? 0, ccy)}</span>`
-			: frappe.utils.escape_html(t.notice || __("Monthly target not set"));
+			: frappe.utils.escape_html(__(t.notice) || __("Monthly target not set"));
 		const dailyTarget = has ? (t.daily_target_sales || {})[ccy] : null;
 
 		const slot = (label, value, sub) => `<div class="hq-mini">
@@ -614,7 +614,7 @@ class HQSalesMonitor {
 			${slot(
 				__("Total Transactions"),
 				HQ_UTILS.fmtCount(r.orders ?? 0),
-				`${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)} ${this._tip(`${__("Pax")}: ${__("no source field on POS invoices")}`)}`
+				`${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)} ${this._tip(__("Pax is not recorded on POS invoices"))}`
 			)}
 			${slot(
 				`${__("Avg per Transaction")} ${this._tip(`${__("Net incl. tax ÷ orders")} · ${__("per currency, never merged")}`)}`,
@@ -622,9 +622,9 @@ class HQSalesMonitor {
 				"&nbsp;"
 			)}
 			${`<div class="hq-mini">
-				<div class="hq-kpi-label">${__("Achievement (MTD)")} <span class="hq-period">${frappe.utils.escape_html(w.month_start || "")}</span></div>
+				<div class="hq-kpi-label">${__("Achievement (MTD)")} <span class="hq-period">${w.month_start ? `${__("since")} ${frappe.utils.escape_html(w.month_start)}` : ""}</span></div>
 				<div class="hq-kpi-value">${pct == null ? this._na() : HQ_UTILS.fmtPct(pct, 1)}</div>
-				${this._bar(pct, "hq-bar--lg")}
+				${pct == null ? "" : this._bar(pct, "hq-bar--lg")}
 				<div class="hq-kpi-sub">${achSub}</div>
 			</div>`}
 			${slot(
@@ -710,7 +710,7 @@ class HQSalesMonitor {
 				${t.projected_sales != null ? `<div class="hq-item-code">${__("proj.")} <span class="hq-money">${HQ_UTILS.fmtMoney(t.projected_sales, ccy)}</span> · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}</div>` : ""}`;
 		const overallCell = o
 			? `<span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span>
-				<div class="hq-item-code"><span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span> · <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
+				<div class="hq-item-code">${__("of")} <span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span> · <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
 			: this._na();
 
 		return `<tr data-hq-outlet-row${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
