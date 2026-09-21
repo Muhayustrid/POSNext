@@ -13,9 +13,11 @@ from contextlib import ExitStack
 from unittest.mock import Mock, patch
 
 import frappe
+from frappe.utils import add_days, nowdate
 
 from pos_next.shift_schedule import (
 	_as_time_delta,
+	_backdate_exempt,
 	_gate_shifts,
 	assert_invoice_sales_allowed,
 	assert_sales_allowed,
@@ -398,6 +400,106 @@ class TestInvoiceHook(unittest.TestCase):
 			)
 			with self.assertRaises(RuntimeError):
 				validate_invoice(doc)
+
+
+class TestBackdateExemption(unittest.TestCase):
+	"""The HO backdate lane skips the expired-deadline rejection only when the
+	server-side marker is set AND the posting date falls inside the shift's own
+	period — everything else fails closed."""
+
+	EXPIRED = frappe._dict(GATE_ROW)
+	# what _gate_shifts expects from its shift lookup (pos_profile, docstatus, status)
+	OPEN_SHIFT_ROW = frappe._dict({"pos_profile": "Profile 1", "docstatus": 1, "status": "Open"})
+	PERIOD_ROW = frappe._dict(
+		{
+			"period_start_date": "2026-09-01 08:00:00",
+			"posting_date": "2026-09-01",
+			"period_end_date": "2026-09-07 22:30:00",
+		}
+	)
+
+	def _doc(self, posting_date, creation="2026-09-07 22:30:00.000000"):
+		doc = Mock()
+		doc.docstatus = 1
+		doc.creation = creation  # created after the deadline
+		values = {
+			"posa_pos_opening_shift": "POSA-OS-0001",
+			"pos_opening_shift": None,
+			"pos_profile": "Profile 1",
+			"posting_date": posting_date,
+			"is_consolidated": None,
+		}
+		doc.get = lambda field: values.get(field)
+		return doc
+
+	def _get_value(self, doctype, name, fields=None, as_dict=False, **kwargs):
+		if fields == ("pos_profile", "docstatus", "status"):
+			return self.OPEN_SHIFT_ROW
+		if fields == ("pos_schedule_enabled", "pos_schedule_enforce_closing", "pos_schedule_deadline", "docstatus"):
+			return self.EXPIRED
+		if fields == ("period_start_date", "posting_date", "period_end_date"):
+			return self.PERIOD_ROW
+		raise AssertionError(f"unexpected get_value fields {fields}")
+
+	def _validate(self, posting_date, flag):
+		old = getattr(frappe.flags, "pos_next_backdate_entry", None)
+		frappe.flags.pos_next_backdate_entry = flag or None
+		try:
+			with (
+				patch("pos_next.shift_schedule.frappe.db.exists", return_value=True),
+				patch("pos_next.shift_schedule.frappe.db.get_value", side_effect=self._get_value),
+				patch("pos_next.shift_schedule.now_datetime", return_value=_dt(2026, 9, 7, 23, 0)),
+			):
+				validate_invoice(self._doc(posting_date))
+		finally:
+			frappe.flags.pos_next_backdate_entry = old
+
+	def test_flag_and_in_period_date_pass_the_gate(self):
+		# must not raise despite being created after the expired deadline
+		self._validate("2026-09-05", flag=True)
+
+	def test_flag_without_posting_date_fails_closed(self):
+		with patch("pos_next.shift_schedule.frappe.throw", side_effect=_throw):
+			with self.assertRaises(RuntimeError):
+				self._validate(None, flag=True)
+
+	def test_flag_with_date_outside_period_still_blocked(self):
+		with patch("pos_next.shift_schedule.frappe.throw", side_effect=_throw):
+			with self.assertRaises(RuntimeError):
+				self._validate("2026-08-31", flag=True)
+
+	def test_in_period_date_without_flag_still_blocked(self):
+		with patch("pos_next.shift_schedule.frappe.throw", side_effect=_throw):
+			with self.assertRaises(RuntimeError):
+				self._validate("2026-09-05", flag=False)
+
+	def test_exempt_requires_flag_before_any_db_access(self):
+		get_value = Mock()
+		with patch("pos_next.shift_schedule.frappe.db.get_value", get_value):
+			self.assertFalse(_backdate_exempt(self._doc("2026-09-05"), "POSA-OS-0001"))
+		get_value.assert_not_called()
+
+	def test_exempt_period_end_falls_back_to_today(self):
+		row = frappe._dict(
+			{"period_start_date": "2026-09-01 08:00:00", "posting_date": "2026-09-01", "period_end_date": None}
+		)
+		frappe.flags.pos_next_backdate_entry = True
+		try:
+			with patch("pos_next.shift_schedule.frappe.db.get_value", return_value=row):
+				self.assertTrue(_backdate_exempt(self._doc(nowdate()), "POSA-OS-0001"))
+				self.assertFalse(_backdate_exempt(self._doc(add_days(nowdate(), 1)), "POSA-OS-0001"))
+		finally:
+			frappe.flags.pos_next_backdate_entry = None
+
+	def test_exempt_rejects_unparseable_date_and_missing_shift(self):
+		frappe.flags.pos_next_backdate_entry = True
+		try:
+			with patch("pos_next.shift_schedule.frappe.db.get_value", return_value=self.PERIOD_ROW):
+				self.assertFalse(_backdate_exempt(self._doc("garbage"), "POSA-OS-0001"))
+			with patch("pos_next.shift_schedule.frappe.db.get_value", return_value=None):
+				self.assertFalse(_backdate_exempt(self._doc("2026-09-05"), "POSA-OS-0001"))
+		finally:
+			frappe.flags.pos_next_backdate_entry = None
 
 
 class TestGateShifts(unittest.TestCase):

@@ -26,6 +26,7 @@ POS_SETTINGS_FIELDS = [
 	"allow_credit_sale",
 	"allow_customer_credit_payment",
 	"allow_return",
+	"allow_change_posting_date",
 	"allow_partial_payment",
 	"use_exact_amount",
 	"decimal_precision",
@@ -57,6 +58,7 @@ DEFAULT_POS_SETTINGS = {
 	"allow_credit_sale": 0,
 	"allow_customer_credit_payment": 0,
 	"allow_return": 0,
+	"allow_change_posting_date": 0,
 	"allow_write_off_change": 0,  # Derived from POS Profile
 	"allow_partial_payment": 0,
 	"use_exact_amount": 0,

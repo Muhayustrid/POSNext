@@ -20,7 +20,7 @@ import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import cint, get_datetime, now_datetime
+from frappe.utils import cint, get_datetime, getdate, now_datetime, nowdate
 
 SCHEDULE_FIELDS = (
     "pos_schedule_enabled",
@@ -256,6 +256,35 @@ def assert_invoice_sales_allowed(invoice_name, doctype="Sales Invoice"):
 		assert_sales_allowed(gate_shift)
 
 
+def _backdate_exempt(doc, gate_shift):
+	"""HO backdate lane: skip the expired-deadline rejection for an invoice the
+	backdate endpoint is entering (role + POS Settings allow_change_posting_date
+	are verified there before the marker is set), but only when its posting
+	date falls inside the shift's own period. The marker is request-scoped
+	server state a client cannot forge; anything missing fails closed.
+	"""
+	if not getattr(frappe.flags, "pos_next_backdate_entry", None):
+		return False
+	posting_date = doc.get("posting_date")
+	if not posting_date:
+		return False
+	row = frappe.db.get_value(
+		"POS Opening Shift",
+		gate_shift,
+		("period_start_date", "posting_date", "period_end_date"),
+		as_dict=True,
+	)
+	if not row:
+		return False
+	try:
+		day = getdate(posting_date)
+	except Exception:
+		return False
+	start = getdate(row.period_start_date or row.posting_date)
+	end = getdate(row.period_end_date) if row.period_end_date else getdate(nowdate())
+	return start <= day <= end
+
+
 def validate_invoice(doc, method=None):
 	"""doc_events validate hook: block submitting sales/return invoices whose
 	mandatory deadline has passed, whatever entrypoint drove the submit.
@@ -280,6 +309,8 @@ def validate_invoice(doc, method=None):
 		gate = get_shift_gate(gate_shift)
 		if gate and gate["expired"]:
 			if creation and creation <= gate["deadline"]:
+				continue
+			if _backdate_exempt(doc, gate_shift):
 				continue
 			frappe.throw(
 				_(

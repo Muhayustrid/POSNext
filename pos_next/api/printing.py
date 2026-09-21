@@ -231,7 +231,9 @@ def update_print_config(pos_profile, config):
 	updates = {}
 	for key, value in config.items():
 		if key in _INT_KNOBS:
-			_, default, lo, hi = _INT_KNOBS[key]
+			# not `_`: a bare throwaway shadows the module-level gettext `_`
+			# and turns every later frappe.throw(_(...)) into UnboundLocalError
+			transport_key, default, lo, hi = _INT_KNOBS[key]
 			if key in _OR_DEFAULT_KNOBS:
 				value = value or default
 			updates[key] = _clamp_int(value, default, lo, hi)

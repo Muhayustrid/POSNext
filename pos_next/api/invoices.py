@@ -10,7 +10,7 @@ import frappe
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
-from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
+from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate, nowtime
 
 from pos_next.invoice_type import (
 	POS_INVOICE,
@@ -733,7 +733,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 			or 0
 		)
 
-		if return_validity_days > 0:
+		if return_validity_days > 0 and not _backdate_entry_active(invoice_info.pos_profile):
 			days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
 			if days_since_invoice > return_validity_days:
 				return {
@@ -811,6 +811,53 @@ def _enforce_profile_warehouse(invoice_doc, pos_profile_doc):
 		item.warehouse = wh
 
 
+def _posting_date_shifted(invoice_doc):
+	"""True when the payload drives the posting date itself: an explicit
+	set_posting_time, or any posting_date other than today."""
+	if cint(invoice_doc.get("set_posting_time")):
+		return True
+	posting_date = invoice_doc.get("posting_date")
+	if not posting_date:
+		return False
+	try:
+		return getdate(posting_date) != getdate(nowdate())
+	except Exception:
+		return True  # unparseable date — fail closed
+
+
+def _enforce_posting_date_policy(invoice_doc):
+	"""A shifted posting date is the HO backdate lane only.
+
+	Passes when the request carries the backdate marker (set by
+	pos_next.api.backdate_invoices.submit_backdate_invoice after its own
+	role + POS Settings verification), or when the session user itself holds
+	a backdate role while the invoice profile's allow_change_posting_date is
+	on. Everything else — including offline replays — is rejected.
+	"""
+	if not _posting_date_shifted(invoice_doc):
+		return
+	if getattr(frappe.flags, "pos_next_backdate_entry", None):
+		return
+	from pos_next.api.backdate_invoices import allow_change_posting_date, has_backdate_role
+
+	if has_backdate_role() and allow_change_posting_date(invoice_doc.get("pos_profile")):
+		return
+	frappe.throw(_("Changing the invoice posting date is not allowed"), frappe.PermissionError)
+
+
+def _backdate_entry_active(pos_profile=None):
+	"""True during an HO backdate request (the request-scoped marker set by
+	pos_next.api.backdate_invoices.submit_backdate_invoice), or for a session
+	user who already holds backdate access for the profile — used to relax the
+	return validity window for backdated returns.
+	"""
+	if getattr(frappe.flags, "pos_next_backdate_entry", None):
+		return True
+	from pos_next.api.backdate_invoices import allow_change_posting_date, has_backdate_role
+
+	return bool(has_backdate_role() and allow_change_posting_date(pos_profile))
+
+
 # ==========================================
 # Invoice Management (Two-Step Flow)
 # ==========================================
@@ -851,6 +898,11 @@ def update_invoice(data):
 		# read linked docs (e.g., Customer) and trigger controller permission checks.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+
+		# HO backdate lane is the only path allowed to shift the posting date —
+		# checked before any account/profile resolution so a plain rejection
+		# never surfaces as an unrelated permission error.
+		_enforce_posting_date_policy(invoice_doc)
 
 		pos_profile_doc = None
 		if pos_profile:
@@ -1546,6 +1598,11 @@ def submit_invoice(invoice=None, data=None):
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+
+		# Same gate as update_invoice, before account resolution: the
+		# payload-with-name branch can reach this submit without passing
+		# through update_invoice again.
+		_enforce_posting_date_policy(invoice_doc)
 
 		# Ensure update_stock is set (POS Invoice and Sales Invoice)
 		if doctype != "Sales Order":
@@ -2369,7 +2426,7 @@ def get_invoice_for_return(invoice_name):
 			or 0
 		)
 
-		if return_validity_days > 0:
+		if return_validity_days > 0 and not _backdate_entry_active(invoice_info.pos_profile):
 			days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
 			if days_since_invoice > return_validity_days:
 				frappe.throw(
@@ -2686,7 +2743,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 			or 0
 		)
 
-		if return_validity_days > 0:
+		if return_validity_days > 0 and not _backdate_entry_active(invoice_info.pos_profile):
 			days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
 			if days_since_invoice > return_validity_days:
 				frappe.throw(
