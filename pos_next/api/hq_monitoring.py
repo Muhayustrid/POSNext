@@ -340,6 +340,91 @@ def set_outlet_target(
 	return result
 
 
+@frappe.whitelist()
+def get_outlet_targets(month_start=None):
+	"""Per-outlet target sheet for the "Outlet Targets" desk page (read-only).
+
+	One row for EVERY company in the user's full permission window (selling or
+	not), covering one calendar month: monthly target vs month-to-date actual,
+	linear projection to month end, and the payback (overall) target. The MTD
+	dataset is the same one the monitoring page uses, so the numbers reconcile:
+	current month stops at today (cut at "now"); a closed month reports its
+	full actuals (projection = actual); a future month has no elapsed days, so
+	its actuals are 0 and the projection is null.
+	"""
+	_check_hq_access()
+
+	today = getdate(nowdate())
+	month = _parse_date(month_start) or get_first_day(today)
+	if month != get_first_day(month):
+		frappe.throw(_("Month Start must be the first day of the month"))
+	month_end = get_last_day(month)
+	days_in_month = month_end.day
+
+	# company_options = the user's full visible window, pre-narrowing.
+	scope = _resolve_scope(None, 0)
+	companies = scope["company_options"]
+	currency_map = _currency_map(companies)
+
+	if month == get_first_day(today):
+		days_elapsed = (today - month).days + 1
+		window_end, cutoff = today, now_datetime()
+	elif month < get_first_day(today):
+		days_elapsed = days_in_month
+		window_end, cutoff = month_end, None
+	else:
+		days_elapsed = 0
+		window_end, cutoff = month_end, None
+
+	where, params = _si_window_where(companies, scope["profiles"], month, window_end, cutoff)
+	mtd_by_company = {r.company: r for r in _totals_rows(where, params)}
+
+	targets_by_company = {
+		r.company: r
+		for r in frappe.get_all(
+			"POS Monthly Target",
+			filters={"company": ["in", companies], "month_start": str(month)},
+			fields=["company", "target_sales", "target_transactions"],
+		)
+	}
+	overall_by_company = _overall_target_section(scope, currency_map)["by_company"]
+
+	rows = []
+	for company in companies:
+		target = targets_by_company.get(company)
+		actual = mtd_by_company.get(company)
+		net = flt(actual.net_tax_incl) if actual else 0.0
+		orders = int(actual.orders) if actual else 0
+		target_sales = flt(target.target_sales) if target else None
+		rows.append(
+			{
+				"company": company,
+				"currency": currency_map.get(company),
+				"monthly": {
+					"target_sales": target_sales,
+					"target_transactions": int(target.target_transactions or 0) if target else None,
+					"missing": target is None,
+				},
+				"mtd_net_tax_incl": round(net, 2),
+				"mtd_orders": orders,
+				"achievement_sales_pct": ratio(net, target_sales) if target else None,
+				# same linear projection as the monitoring targets section
+				"projected_sales": (
+					round(net / days_elapsed * days_in_month, 2) if target and days_elapsed else None
+				),
+				"overall": overall_by_company.get(company),
+			}
+		)
+
+	return {
+		"month_start": str(month),
+		"month_end": str(month_end),
+		"days_elapsed": days_elapsed,
+		"rows": rows,
+		"generated_at": now_datetime().strftime("%Y-%m-%d %H:%M:%S"),
+	}
+
+
 # ---------------------------------------------------------------------------
 # Scope / access
 # ---------------------------------------------------------------------------

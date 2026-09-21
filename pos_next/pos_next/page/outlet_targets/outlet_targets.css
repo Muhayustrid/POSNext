@@ -1,0 +1,241 @@
+/* Outlet Targets — desk page styles.
+   Surfaces, text and the single accent follow Frappe's theme variables so the
+   page tracks light/dark and custom themes. Structure: toolbar (search +
+   export), the targets table (monthly + balik-modal), footer line. */
+
+#page-outlet-targets .page-form,
+.ot-page {
+	max-width: 1400px;
+	margin-left: auto;
+	margin-right: auto;
+	padding-left: 20px;
+	padding-right: 20px;
+}
+
+.ot-page {
+	font-size: 13px;
+	padding-bottom: 32px;
+	color: var(--text-color);
+}
+
+/* Filters wrap (never overflow the page); comfortable touch targets. */
+#page-outlet-targets .page-form {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 10px;
+	padding-bottom: 4px;
+}
+
+#page-outlet-targets .page-form > .frappe-control {
+	flex: 0 1 170px;
+	min-width: 140px;
+	max-width: 260px;
+}
+
+.ot-card {
+	background: var(--card-bg, #fff);
+	border: 1px solid var(--border-color, #e2e6e9);
+	border-radius: var(--border-radius-md, 8px);
+	padding: 14px 16px;
+	margin-bottom: 12px;
+	min-width: 0;
+	box-shadow: var(--shadow-xs);
+}
+
+.ot-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 10px;
+	flex-wrap: wrap;
+}
+
+.ot-input {
+	border: 1px solid var(--border-color, #d0d7de);
+	border-radius: var(--border-radius-md, 6px);
+	padding: 6px 10px;
+	font-size: 12.5px;
+	max-width: 260px;
+	min-height: 36px;
+	background: var(--card-bg, #fff);
+	color: var(--text-color);
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ot-input:hover {
+	border-color: var(--primary, #2490ef);
+}
+
+.ot-input:focus-visible {
+	outline: 2px solid var(--primary, #2490ef);
+	outline-offset: 1px;
+}
+
+.ot-table-scroll {
+	overflow-x: auto;
+	max-width: 100%;
+	-webkit-overflow-scrolling: touch;
+}
+
+/* The outlet column stays visible while the numbers scroll. */
+.ot-table td:first-child,
+.ot-table thead th:first-child {
+	position: sticky;
+	left: 0;
+	background: var(--card-bg, #fff);
+	z-index: 1;
+	text-align: left;
+}
+
+.ot-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+
+.ot-table th,
+.ot-table td {
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--border-color, #f1f3f5);
+	text-align: left;
+	vertical-align: top;
+}
+
+.ot-table tbody tr {
+	transition: background 0.15s ease;
+}
+
+.ot-table tbody tr:hover td {
+	background: var(--control-bg, #f5f6f8);
+}
+
+/* Sticky cells must follow the row hover too, or they look torn off. */
+.ot-table tbody tr:hover td:first-child {
+	background: var(--control-bg, #f5f6f8);
+}
+
+.ot-table thead th {
+	font-size: 11px;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+	white-space: nowrap;
+}
+
+.ot-num {
+	text-align: right !important;
+	white-space: nowrap;
+}
+
+.ot-outlet {
+	font-weight: 600;
+	min-width: 180px;
+}
+
+.ot-money {
+	white-space: nowrap;
+}
+
+.ot-sub {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 2px;
+	white-space: nowrap;
+}
+
+.ot-small {
+	font-size: 11px;
+}
+
+.ot-muted {
+	color: var(--text-muted);
+}
+
+.ot-pct {
+	font-variant-numeric: tabular-nums;
+}
+
+/* Progress bar: the one accent on the page (--primary) lives in the fill. */
+.ot-bar {
+	display: inline-block;
+	vertical-align: middle;
+	width: 72px;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--control-bg, #edf0f3);
+	overflow: hidden;
+	margin-right: 6px;
+}
+
+.ot-bar--thin {
+	height: 4px;
+	width: 60px;
+}
+
+.ot-bar-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--primary, #2490ef);
+	transition: width 0.3s ease;
+}
+
+.ot-error {
+	margin: 4px 0;
+	color: var(--text-muted);
+}
+
+/* Touch targets: comfortable on coarse pointers (44px per HIG). */
+@media (pointer: coarse) {
+	.ot-input,
+	.btn-xs {
+		min-height: 44px;
+	}
+}
+
+/* Small screens: controls fold, the outlet column keeps its sticky lane. */
+@media screen and (max-width: 768px) {
+	#page-outlet-targets .page-form > .frappe-control {
+		flex: 1 1 45%;
+		min-width: 150px;
+	}
+
+	.ot-card {
+		padding: 12px;
+	}
+
+	.ot-toolbar {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.ot-input {
+		max-width: 100%;
+	}
+}
+
+/* Print: strip the desk chrome, keep the table */
+@media print {
+	.no-print,
+	.page-head,
+	.sidebar-toggle-placeholder,
+	#page-outlet-targets .page-head,
+	.layout-side-section,
+	.standard-sidebar,
+	.navbar {
+		display: none !important;
+	}
+
+	.layout-main-section {
+		width: 100% !important;
+		border: none !important;
+	}
+
+	.ot-card {
+		break-inside: avoid;
+		page-break-inside: avoid;
+		border-color: #ccc;
+	}
+}

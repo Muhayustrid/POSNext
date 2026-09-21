@@ -22,6 +22,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from pos_next.api.hq_monitoring import (
+	get_outlet_targets,
 	get_sales_monitoring,
 	growth_pct,
 	previous_weekday,
@@ -771,6 +772,63 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertFalse(data["targets"]["available"])
 		self.assertIn(self.company_a, data["targets"]["missing_companies"])
 		self._make_target(self.company_a)  # restore for sibling tests
+
+	def test_get_outlet_targets_lists_all_outlets(self):
+		frappe.set_user(ADMIN)
+		month = frappe.utils.get_first_day(frappe.utils.nowdate())
+		# drop B's monthly target: B must still be listed, flagged missing
+		frappe.db.delete("POS Monthly Target", {"company": self.company_b, "month_start": month})
+		try:
+			out = get_outlet_targets()
+			rows = {r["company"]: r for r in out["rows"]}
+			self.assertIn(self.company_a, rows)
+			self.assertIn(self.company_b, rows)
+			self.assertEqual(out["month_start"], str(month))
+			self.assertEqual(out["month_end"], str(frappe.utils.get_last_day(month)))
+			self.assertGreaterEqual(out["days_elapsed"], 1)
+
+			a = rows[self.company_a]
+			self.assertFalse(a["monthly"]["missing"])
+			self.assertEqual(a["monthly"]["target_sales"], 100000.0)
+			self.assertEqual(a["monthly"]["target_transactions"], 10)
+			self.assertEqual(a["currency"], self.currency_a)
+			self.assertEqual(a["mtd_net_tax_incl"], 4500.0)
+			self.assertEqual(a["mtd_orders"], 3)
+			self.assertEqual(a["achievement_sales_pct"], round(4500 / 100000 * 100, 2))
+			# linear projection from elapsed days to month end
+			dim = frappe.utils.get_last_day(month).day
+			self.assertEqual(a["projected_sales"], round(4500 / out["days_elapsed"] * dim, 2))
+
+			b = rows[self.company_b]
+			self.assertTrue(b["monthly"]["missing"])
+			self.assertIsNone(b["monthly"]["target_sales"])
+			# no target never hides the outlet: its month sales still show
+			self.assertEqual(b["mtd_net_tax_incl"], 100.0)
+			self.assertEqual(b["mtd_orders"], 1)
+			self.assertIsNone(b["achievement_sales_pct"])
+			self.assertIsNone(b["projected_sales"])
+			self.assertIsNone(b["overall"])  # no payback target configured for B
+		finally:
+			self._make_target(self.company_b)  # restore for sibling tests
+
+	def test_get_outlet_targets_future_month(self):
+		frappe.set_user(ADMIN)
+		month = frappe.utils.get_first_day(frappe.utils.add_months(frappe.utils.nowdate(), 1))
+		out = get_outlet_targets(month_start=month)
+		self.assertEqual(out["month_start"], str(month))
+		self.assertEqual(out["days_elapsed"], 0)
+		rows = {r["company"]: r for r in out["rows"]}
+		self.assertIn(self.company_a, rows)
+		a = rows[self.company_a]
+		self.assertEqual(a["mtd_net_tax_incl"], 0.0)
+		self.assertEqual(a["mtd_orders"], 0)
+		self.assertIsNone(a["projected_sales"])
+		self.assertTrue(a["monthly"]["missing"])  # fixture only targets this month
+
+	def test_get_outlet_targets_month_start_validation(self):
+		frappe.set_user(ADMIN)
+		with self.assertRaises(frappe.ValidationError):
+			get_outlet_targets(month_start="2026-08-15")
 
 	# ------------------------------------------------------------------
 	# permission enforcement

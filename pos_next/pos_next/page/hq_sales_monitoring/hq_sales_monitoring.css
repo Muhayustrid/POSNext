@@ -1,9 +1,8 @@
-/* HQ Sales Monitoring — desk page styles (layout v2).
+/* HQ Sales Monitoring — desk page styles (layout v3).
    Surfaces, text and the accent follow Frappe's theme variables so the page
-   tracks light/dark and custom themes. Structure: scope strip, KPI row,
-   Outlet Performance table (monthly target + balik-modal progress), the
-   monitoring matrices, minis, 2x2 chart grid, full-width peak hour and
-   product ranking. */
+   tracks light/dark and custom themes. Structure: scope strip, KPI row (one
+   dominant Sales card), Outlet Performance table, the monitoring matrices,
+   the mini strip, 2x2 chart grid, full-width peak hour and product ranking. */
 
 #page-hq-sales-monitoring .page-form,
 .hq-monitor {
@@ -63,14 +62,21 @@
 	color: var(--text-muted);
 }
 
-/* KPI row and minis share the 4-column rhythm. */
-.hq-kpi-row,
-.hq-minis {
+/* KPI row: the Sales card gets double width — it is the page's primary
+   metric; Transactions / APC / Achievement are companions. */
+.hq-kpi-row {
 	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
+	grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
 	gap: 12px;
 	margin-bottom: 12px;
 	align-items: stretch;
+}
+
+/* Minis: ONE strip card, four equal slots split by thin left borders. */
+.hq-minis {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 0 16px;
 }
 
 .hq-charts {
@@ -92,7 +98,6 @@
 }
 
 .hq-kpi-row .hq-card,
-.hq-minis .hq-card,
 .hq-charts .hq-card {
 	margin-bottom: 0;
 }
@@ -198,6 +203,7 @@
 .hq-num {
 	text-align: right !important;
 	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
 }
 
 .hq-outlet-name {
@@ -228,6 +234,12 @@
 .hq-mini {
 	display: flex;
 	flex-direction: column;
+	min-width: 0;
+}
+
+.hq-mini + .hq-mini {
+	border-left: 1px solid var(--border-color, #f1f3f5);
+	padding-left: 16px;
 }
 
 .hq-mini .hq-kpi-name {
@@ -263,6 +275,7 @@
 
 .hq-money {
 	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
 }
 
 .hq-empty {
@@ -275,15 +288,10 @@
 	vertical-align: middle;
 	width: 72px;
 	height: 6px;
-	border-radius: 999px;
+	border-radius: 3px;
 	background: var(--control-bg, #edf0f3);
 	overflow: hidden;
 	margin-right: 6px;
-}
-
-.hq-bar--thin {
-	height: 4px;
-	width: 60px;
 }
 
 .hq-bar--lg {
@@ -303,22 +311,6 @@
 
 .hq-ach-pct {
 	font-variant-numeric: tabular-nums;
-}
-
-.hq-badge {
-	display: inline-block;
-	font-size: 10.5px;
-	font-weight: 500;
-	padding: 1px 8px;
-	border-radius: 999px;
-	border: 1px solid transparent;
-	white-space: nowrap;
-}
-
-.hq-badge--warn {
-	color: var(--orange, #e8590c);
-	border-color: var(--orange, #e8590c);
-	background: color-mix(in srgb, var(--orange, #e8590c) 8%, transparent);
 }
 
 /* Tax toggle on the Total Sales card */
@@ -559,20 +551,10 @@
 	overflow-x: auto;
 }
 
-/* Set Target dialog section heads */
-.hq-dialog-head {
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--text-muted);
-	margin: 6px 0 2px;
-	padding-bottom: 4px;
-	border-bottom: 1px solid var(--border-color, #f1f3f5);
-}
-
-/* Mid width: KPIs/minis drop to 2 columns, charts stack. */
+/* Mid width: KPIs drop to 2 columns, charts stack (the mini strip keeps its
+   four slots — they still fit). */
 @media screen and (max-width: 1280px) {
-	.hq-kpi-row,
-	.hq-minis {
+	.hq-kpi-row {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
@@ -589,9 +571,19 @@
 
 /* Phone: everything single column, donut above legend, category rows wrap. */
 @media screen and (max-width: 480px) {
-	.hq-kpi-row,
-	.hq-minis {
+	.hq-kpi-row {
 		grid-template-columns: 1fr;
+	}
+
+	/* Mini strip becomes 2x2; hairlines step aside for spacing. */
+	.hq-minis {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 12px 16px;
+	}
+
+	.hq-mini + .hq-mini {
+		border-left: none;
+		padding-left: 0;
 	}
 
 	.hq-card {

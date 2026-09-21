@@ -142,6 +142,18 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
+   "label": "Outlet Targets",
+   "link_to": "outlet-targets",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Discount Code",
    "link_to": "POS Discount Confirmation Code",
    "link_type": "DocType",

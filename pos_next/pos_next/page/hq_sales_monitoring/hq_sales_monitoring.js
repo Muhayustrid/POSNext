@@ -31,6 +31,9 @@ if (typeof format_number === "function" && typeof get_number_format === "functio
 // One palette for every chart on the page; legend dots reuse it by index.
 const HQ_PALETTE = ["#2490ef", "#2e7d54", "#e8590c", "#7048c9", "#d6336c", "#94a3b8"];
 
+// Outlet table pages client-side: the API payload already carries every row.
+const HQ_OUTLET_PAGE_SIZE = 8;
+
 /**
  * frappe-charts 2.0-rc27: a ResizeObserver burst (initial observation + size
  * settle in one frame) runs draw() twice and the second pass crashes on
@@ -94,6 +97,7 @@ class HQSalesMonitor {
 	constructor(page) {
 		this.page = page;
 		this.product_page = 1;
+		this.outlet_page = 1;
 		this.category = "";
 		this.outlet_query = "";
 		// Peak-hour window (start inclusive, end exclusive; end <= start wraps
@@ -284,6 +288,7 @@ class HQSalesMonitor {
 
 	refresh() {
 		if (!this.$root) return Promise.resolve();
+		this.outlet_page = 1;
 		return new Promise((resolve) => {
 			frappe.call({
 				method: "pos_next.api.hq_monitoring.get_sales_monitoring",
@@ -347,14 +352,12 @@ class HQSalesMonitor {
 			"</div>",
 			this._outlet_performance_card(s),
 			`<div class="hq-section-title">${__("Monthly Monitoring")}
-				<span class="hq-period">${__("MTD")} ${frappe.utils.escape_html(s.windows.month_start)} → ${frappe.utils.escape_html(s.windows.day)}${s.daily.cutoff ? ` · ${__("cut at")} ${s.daily.cutoff}` : ""}</span></div>`,
+				<span class="hq-period">${__("MTD")} ${frappe.utils.escape_html(s.windows.month_start)} - ${frappe.utils.escape_html(s.windows.day)}${s.daily.cutoff ? ` · ${__("cut at")} ${s.daily.cutoff}` : ""}</span></div>`,
 			this._monthly_table(s),
 			`<div class="hq-section-title">${__("Daily Monitoring")}
 				<span class="hq-period">${frappe.utils.escape_html(s.windows.day)}</span></div>`,
 			this._daily_table(s),
-			'<div class="hq-minis">',
 			this._mini_cards(s),
-			"</div>",
 			'<div class="hq-charts">',
 			this._category_product_card(s, "a"),
 			this._category_product_card(s, "b"),
@@ -376,7 +379,7 @@ class HQSalesMonitor {
 	_range_label(s) {
 		const scope = s.scope || {};
 		const cut = s.range && s.range.cut_at ? ` · ${__("cut at")} ${s.range.cut_at}` : "";
-		return `${frappe.utils.escape_html(scope.from_date)} → ${frappe.utils.escape_html(scope.to_date)}${cut}`;
+		return `${frappe.utils.escape_html(scope.from_date)} - ${frappe.utils.escape_html(scope.to_date)}${cut}`;
 	}
 
 	_scope_line(scope) {
@@ -594,7 +597,7 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Mini stat cards
+	// Mini stats — one strip card, four equal slots split by hairlines
 	// ------------------------------------------------------------------
 
 	_mini_cards(s) {
@@ -602,45 +605,45 @@ class HQSalesMonitor {
 		const t = s.turnover || {};
 		const h = s.highlights || {};
 		const fav = s.favorite_product;
-		const cards = [];
+		const cells = [];
 
 		const change = t.change_pct_vs_prev_comparable || {};
-		cards.push(`<div class="hq-card hq-mini">
+		cells.push(`<div class="hq-mini">
 			<div class="hq-kpi-label">${__("Turnover MTD")}</div>
 			<div class="hq-kpi-value">${this._metric_text(t.this_month_net)}</div>
 			<div class="hq-kpi-sub">${__("vs same elapsed days last month")}: ${this._pct_cell(change, ccy, true)}</div>
 		</div>`);
 
 		if (h.biggest_outlet) {
-			cards.push(`<div class="hq-card hq-mini">
+			cells.push(`<div class="hq-mini">
 				<div class="hq-kpi-label">${__("Biggest Outlet (share)")}</div>
 				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(h.biggest_outlet.company)}</div>
 				<div class="hq-kpi-sub">${this._signed_pct(h.biggest_outlet.share_pct)} · <span class="hq-money">${HQ_UTILS.fmtMoney(h.biggest_outlet.net_tax_incl, h.biggest_outlet.currency)}</span></div>
 			</div>`);
 		} else {
-			cards.push(`<div class="hq-card hq-mini"><div class="hq-kpi-label">${__("Biggest Outlet (share)")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
+			cells.push(`<div class="hq-mini"><div class="hq-kpi-label">${__("Biggest Outlet (share)")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
 		}
 
 		if (h.most_transactions_outlet) {
-			cards.push(`<div class="hq-card hq-mini">
+			cells.push(`<div class="hq-mini">
 				<div class="hq-kpi-label">${__("Outlet with Most Transactions")}</div>
 				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(h.most_transactions_outlet.company)}</div>
 				<div class="hq-kpi-sub">${HQ_UTILS.fmtCount(h.most_transactions_outlet.orders)} ${__("orders")}</div>
 			</div>`);
 		} else {
-			cards.push(`<div class="hq-card hq-mini"><div class="hq-kpi-label">${__("Outlet with Most Transactions")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
+			cells.push(`<div class="hq-mini"><div class="hq-kpi-label">${__("Outlet with Most Transactions")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
 		}
 
 		if (fav) {
-			cards.push(`<div class="hq-card hq-mini">
+			cells.push(`<div class="hq-mini">
 				<div class="hq-kpi-label">${__("Favorite Product")}</div>
 				<div class="hq-kpi-value hq-kpi-name">${frappe.utils.escape_html(fav.item_name)}</div>
 				<div class="hq-kpi-sub">${HQ_UTILS.fmtCount(fav.qty)} ${__("qty")} · ${frappe.utils.escape_html(fav.item_group || "")}</div>
 			</div>`);
 		} else {
-			cards.push(`<div class="hq-card hq-mini"><div class="hq-kpi-label">${__("Favorite Product")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
+			cells.push(`<div class="hq-mini"><div class="hq-kpi-label">${__("Favorite Product")}</div><div class="hq-kpi-sub">${__("No data")}</div></div>`);
 		}
-		return cards.join("");
+		return `<div class="hq-card hq-minis">${cells.join("")}</div>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -740,19 +743,21 @@ class HQSalesMonitor {
 		const missing = !t || t.missing;
 
 		const targetCell = missing
-			? `<span class="hq-badge hq-badge--warn">${__("No monthly target")}</span>`
+			? `<div class="hq-item-code">${__("not set yet")}</div>`
 			: `<span class="hq-money">${HQ_UTILS.fmtMoney(t.target_sales, ccy)}</span>
 				<div class="hq-item-code">${HQ_UTILS.fmtCount(t.target_transactions ?? 0)} ${__("target TC")}</div>`;
 		const mtdCell = `<span class="hq-money">${HQ_UTILS.fmtMoney(t.mtd_net_tax_incl, ccy)}</span>
 			<div class="hq-item-code">${HQ_UTILS.fmtCount(t.mtd_orders ?? 0)} ${__("TC")}</div>`;
+		// The only per-row bar lives in Achievement; Target / MTD / Balik
+		// Modal are plain numbers.
 		const achCell = missing
 			? this._na()
 			: `${this._bar(t.achievement_sales_pct)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(t.achievement_sales_pct, 1)}</b>
 				${t.projected_sales != null ? `<div class="hq-item-code">${__("proj.")} <span class="hq-money">${HQ_UTILS.fmtMoney(t.projected_sales, ccy)}</span> · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}</div>` : ""}`;
 		const overallCell = o
-			? `${this._bar(o.achievement_pct, "hq-bar--thin")} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>
-				<div class="hq-item-code">${__("cum.")} <span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span> / <span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)} →` : ""}</div>`
-			: `<span class="hq-muted">—</span>`;
+			? `<span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span> / <span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>
+				<div class="hq-item-code"><b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
+			: this._na();
 
 		return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
 			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}
@@ -763,12 +768,11 @@ class HQSalesMonitor {
 			<td class="hq-num">${targetCell}</td>
 			<td class="hq-num">${mtdCell}</td>
 			<td class="hq-num hq-ach">${achCell}</td>
-			<td class="hq-num hq-ach">${overallCell}</td>
+			<td class="hq-num">${overallCell}</td>
 			<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span>
 				${r.share_pct != null ? `<div class="hq-item-code">${HQ_UTILS.fmtPct(r.share_pct)}</div>` : ""}</td>
 			<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
 			<td class="hq-num">${r.apc === null ? "N/A" : `<span class="hq-money">${HQ_UTILS.fmtMoney(r.apc, r.currency)}</span>`}</td>
-			<td class="hq-num"><button class="btn btn-xs btn-default" data-hq-set-target="${frappe.utils.escape_html(r.company)}">${__("Set Target")}</button></td>
 		</tr>`;
 	}
 
@@ -781,6 +785,7 @@ class HQSalesMonitor {
 				<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
 					placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.outlet_query)}" aria-label="${__("Search outlet")}"></div>
 				<span class="hq-kpi-sub hq-muted">${__("Outlet = company; POS profiles listed beneath; balik modal = cumulative sales vs overall target")}</span>
+				<button class="btn btn-xs btn-default" data-hq-goto-targets>${__("Manage Targets")}</button>
 				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
 			</div>
 			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
@@ -793,95 +798,42 @@ class HQSalesMonitor {
 					<th class="hq-num">${__("Net Sales")}</th>
 					<th class="hq-num">${__("TC")}</th>
 					<th class="hq-num">${__("Avg Ticket")}</th>
-					<th></th>
 				</tr></thead>
-				<tbody>${rows || `<tr><td colspan="9" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
+				<tbody>${rows || `<tr><td colspan="8" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
+			<div class="hq-pager">
+				<button class="btn btn-xs btn-default" disabled data-hq-outlet-page="prev">${__("Previous")}</button>
+				<span data-hq-outlet-pager></span>
+				<button class="btn btn-xs btn-default" disabled data-hq-outlet-page="next">${__("Next")}</button>
+			</div>
 		</div>`;
 	}
 
 	// ------------------------------------------------------------------
-	// Set Target dialog — monthly targets for the running month plus the
-	// overall payback target stored on the Company master. Blank fields keep
-	// stored values; the server enforces permissions per store.
+	// Outlet table filtering + client-side paging (no refetch: the payload
+	// already carries every row). Search filters, the active page slices.
 	// ------------------------------------------------------------------
-
-	_target_dialog(company) {
-		const t = this.state.targets || {};
-		const monthly = (t.by_company || []).find((r) => r.company === company) || {};
-		const overall = (t.overall || {}).by_company || {};
-		const current = overall[company] || {};
-		const month_start = (this.state.windows || {}).month_start || "";
-		const d = new frappe.ui.Dialog({
-			title: `${__("Set Target")} — ${company}`,
-			fields: [
-				{
-					fieldname: "monthly_head",
-					fieldtype: "HTML",
-					options: `<div class="hq-dialog-head">${__("Monthly targets")} · <b>${frappe.utils.escape_html(month_start)}</b></div>`,
-				},
-				{
-					fieldname: "target_sales",
-					label: `${__("Target Sales")} (${__("net incl. tax")})`,
-					fieldtype: "Currency",
-					default: monthly.target_sales ?? "",
-				},
-				{
-					fieldname: "target_transactions",
-					label: __("Target Transactions"),
-					fieldtype: "Int",
-					default: monthly.target_transactions ?? "",
-				},
-				{
-					fieldname: "overall_head",
-					fieldtype: "HTML",
-					options: `<div class="hq-dialog-head">${__("Overall / balik modal")} · ${__("one-time target on the outlet")}</div>`,
-				},
-				{
-					fieldname: "overall_target",
-					label: __("Overall Sales Target"),
-					fieldtype: "Currency",
-					default: current.overall_target ?? "",
-					description: `${__("0 clears the overall target")}.`,
-				},
-				{
-					fieldname: "overall_from",
-					label: __("Count cumulative from"),
-					fieldtype: "Date",
-					default: current.from_date || "",
-					description: `${__("Empty = all time")}.`,
-				},
-			],
-			primary_action_label: __("Save"),
-			primary_action: (values) => {
-				frappe.call({
-					method: "pos_next.api.hq_monitoring.set_outlet_target",
-					args: {
-						company,
-						month_start,
-						target_sales: values.target_sales ?? "",
-						target_transactions: values.target_transactions ?? "",
-						overall_target: values.overall_target ?? "",
-						overall_from: values.overall_from || "",
-					},
-					freeze: true,
-					callback: () => {
-						d.hide();
-						frappe.show_alert({ message: __("Targets updated"), indicator: "green" });
-						this.refresh();
-					},
-				});
-			},
-		});
-		d.show();
-	}
 
 	_apply_outlet_filter() {
 		const q = (this.outlet_query || "").toLowerCase();
-		this.$root.find("[data-hq-outlet-row]").each((_, el) => {
-			const name = String($(el).data("hq-company") || "").toLowerCase();
-			$(el).toggle(!q || name.includes(q));
-		});
+		const $rows = this.$root.find("[data-hq-outlet-row]");
+		const matched = $rows.filter(
+			(_, el) => !q || String($(el).data("hq-company") || "").toLowerCase().includes(q)
+		);
+		const total = matched.length;
+		const pages = Math.max(1, Math.ceil(total / HQ_OUTLET_PAGE_SIZE));
+		this.outlet_page = Math.min(Math.max(1, this.outlet_page), pages);
+		$rows.hide();
+		matched
+			.slice((this.outlet_page - 1) * HQ_OUTLET_PAGE_SIZE, this.outlet_page * HQ_OUTLET_PAGE_SIZE)
+			.show();
+		const start = total ? (this.outlet_page - 1) * HQ_OUTLET_PAGE_SIZE + 1 : 0;
+		const end = Math.min(this.outlet_page * HQ_OUTLET_PAGE_SIZE, total);
+		this.$root.find("[data-hq-outlet-pager]").text(
+			`${start} - ${end} ${__("of")} ${total} ${__("outlets")}`
+		);
+		this.$root.find('[data-hq-outlet-page="prev"]').prop("disabled", this.outlet_page <= 1);
+		this.$root.find('[data-hq-outlet-page="next"]').prop("disabled", this.outlet_page >= pages);
 	}
 
 	// ------------------------------------------------------------------
@@ -1296,12 +1248,17 @@ class HQSalesMonitor {
 			.off("input", "[data-hq-outlet-search]")
 			.on("input", "[data-hq-outlet-search]", frappe.utils.debounce((e) => {
 				this.outlet_query = (e.currentTarget.value || "").trim();
+				this.outlet_page = 1;
 				this._apply_outlet_filter();
 			}, 150))
-			.off("click", "[data-hq-set-target]")
-			.on("click", "[data-hq-set-target]", (e) => {
-				this._target_dialog($(e.currentTarget).data("hq-set-target"));
+			.off("click", "[data-hq-outlet-page]")
+			.on("click", "[data-hq-outlet-page]", (e) => {
+				this.outlet_page += $(e.currentTarget).data("hq-outlet-page") === "next" ? 1 : -1;
+				this.outlet_page = Math.max(1, this.outlet_page);
+				this._apply_outlet_filter();
 			})
+			.off("click", "[data-hq-goto-targets]")
+			.on("click", "[data-hq-goto-targets]", () => frappe.set_route("outlet-targets"))
 			.off("click", "[data-hq-toggle]")
 			.on("click", "[data-hq-toggle]", (e) => {
 				const card = $(e.currentTarget).closest(".hq-sales-toggle");
