@@ -116,7 +116,12 @@
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 12px;
 	margin-bottom: 12px;
-	align-items: start;
+	/* Cards in one row share a height; an empty card opts out (compact). */
+	align-items: stretch;
+}
+
+.hq-card--donut:has(.hq-empty-line) {
+	align-self: start;
 }
 
 .hq-card {
@@ -206,11 +211,6 @@
 .hq-table--outlets td {
 	padding-left: 7px;
 	padding-right: 7px;
-}
-
-/* Sub-lines under a figure may ellipsize rather than widen the column. */
-.hq-table--outlets .hq-item-code {
-	max-width: 150px;
 }
 
 .hq-num {
@@ -389,12 +389,17 @@
 .hq-bar {
 	display: inline-block;
 	vertical-align: middle;
-	width: 58px;
+	width: 64px;
 	height: 6px;
 	border-radius: 3px;
 	background: var(--control-bg, #edf0f3);
 	overflow: hidden;
 	margin-right: 6px;
+}
+
+/* Target reached turns the fill green — the page's one semantic accent. */
+.hq-bar.hq-bar--ok .hq-bar-fill {
+	background: #2e7d54;
 }
 
 .hq-bar--lg {
@@ -461,57 +466,93 @@
 	min-width: 200px;
 }
 
+/* Grid rows keep dot / label / value / pct in true columns: values stack
+   right-aligned whatever the label length does above them. */
 .hq-legend li {
-	display: flex;
+	display: grid;
+	grid-template-columns: 10px minmax(0, 1fr) max-content 56px;
+	column-gap: 8px;
 	align-items: baseline;
-	gap: 8px;
-	padding: 3px 0;
-	border-bottom: 1px dashed var(--border-color, #f1f3f5);
+	padding: 4px 0;
+}
+
+.hq-legend li:not(:last-child) {
+	border-bottom: 1px solid var(--border-color, #f1f3f5);
 }
 
 .hq-dot {
-	flex: 0 0 10px;
 	width: 10px;
 	height: 10px;
 	border-radius: 3px;
 	align-self: center;
 }
 
-/* Legend labels wrap instead of truncating: a category the user cannot read
-   is worse than a taller row (the old built-in legend truncated too). */
-.hq-legend-label {
-	flex: 1 1 auto;
+/* Legend name cell: full name in the title tooltip; the visible label
+   clamps to two lines so one monster test-name can never break the value
+   columns' alignment. */
+.hq-legend-name {
 	min-width: 0;
+}
+
+.hq-legend-label {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
 	overflow-wrap: anywhere;
 }
 
-.hq-legend-value {
-	flex: 0 0 auto;
-	font-variant-numeric: tabular-nums;
-}
-
-.hq-legend-pct {
-	flex: 0 0 52px;
-	text-align: right;
-	color: var(--text-muted);
-	font-size: 11px;
-	font-variant-numeric: tabular-nums;
-}
-
-/* Secondary quantity in a legend row (Top Selling <category> cards). */
 .hq-legend-sub {
+	display: inline-block;
 	color: var(--text-muted);
 	font-size: 11px;
 	font-weight: 400;
 	white-space: nowrap;
+	margin-top: 1px;
 }
 
-/* Donut figure: the ring keeps its shape at any segment count; a lone
-   segment is a full circle with its share labeled in the hole. */
+.hq-legend-value {
+	justify-self: end;
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-legend-pct {
+	justify-self: end;
+	color: var(--text-muted);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Secondary quantity in a legend row (Top Selling <category> cards):
+   consolidated into the .hq-legend-sub rule above. */
+
+/* Donut figure: a fixed square slot — frappe-charts sizes the ring from
+   min(inner box dims) minus its reserved paddings, so the slot width is
+   what actually caps the ring (260 -> ~150px ring). The ring is re-centered
+   into the slot from its measured bbox (JS), so the label's CSS centering
+   lands in the hole. */
 .hq-donut-figure {
 	position: relative;
-	flex: 1 1 200px;
-	min-width: 180px;
+	flex: 0 0 260px;
+	width: 260px;
+	height: 260px;
+}
+
+.hq-donut-chart {
+	width: 100%;
+	height: 100%;
+}
+
+/* The svg box is taller than the figure (frappe-charts reserves vertical
+   space); the transparent overflow is pointer-dead so it never blocks the
+   legend or footnote below. */
+.hq-donut-chart svg {
+	display: block;
+	pointer-events: none;
+}
+
+.hq-donut-chart svg path {
+	pointer-events: auto;
 }
 
 .hq-donut-center {
@@ -521,7 +562,8 @@
 	align-items: center;
 	justify-content: center;
 	pointer-events: none;
-	font-size: 15px;
+	white-space: nowrap;
+	font-size: 14px;
 	font-weight: 600;
 	color: var(--heading-color, var(--text-color));
 	font-variant-numeric: tabular-nums;
@@ -543,6 +585,20 @@
 	gap: 10px;
 	margin-bottom: 8px;
 	flex-wrap: wrap;
+}
+
+/* Filters cluster left, actions right; each cluster aligns its own height. */
+.hq-rank-group {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+/* Cell variant of the info glyph: native title tooltip, no bubble (the
+   table's scroll container would clip an absolutely positioned body). */
+.hq-tip--cell {
+	cursor: help;
 }
 
 .hq-select,
@@ -573,12 +629,13 @@
 	outline-offset: 1px;
 }
 
-/* Inline in a card title ("Top Selling <select>"): shrinks with the card,
-   wraps under the title on narrow screens. Same height as every select. */
+/* Inline in a card title ("Top Selling <select>"): one shared width so the
+   two category cards' title rows line up; wraps under the title on narrow
+   screens. Same height as every select. */
 .hq-select--inline {
 	max-width: 100%;
-	flex: 0 1 220px;
-	min-width: 140px;
+	flex: 0 1 230px;
+	min-width: 170px;
 	margin: 0;
 	font-weight: 400;
 }
@@ -716,6 +773,10 @@
 	.hq-donut {
 		flex-direction: column;
 		align-items: stretch;
+	}
+
+	.hq-donut-figure {
+		margin: 0 auto;
 	}
 
 	.hq-donut-chart {

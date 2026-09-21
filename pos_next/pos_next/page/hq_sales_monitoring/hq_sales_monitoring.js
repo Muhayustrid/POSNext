@@ -43,7 +43,7 @@ const HQ_OUTLET_PAGE_SIZE = 8;
  * rendering is untouched. # ponytail: drop when frappe-charts is pinned to a
  * release with this fixed
  */
-function _harden_chart(chart) {
+function _harden_chart(chart, after) {
 	if (!chart || !chart.boundDrawFn) return;
 	const raw = chart.boundDrawFn;
 	let pending = false;
@@ -54,6 +54,7 @@ function _harden_chart(chart) {
 			pending = false;
 			try {
 				raw();
+				if (after) after();
 			} catch (e) {
 				if (!(e instanceof DOMException && e.name === "NotFoundError")) throw e;
 			}
@@ -485,6 +486,14 @@ class HQSalesMonitor {
 		return `<span class="hq-tip" tabindex="0"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"></circle><line x1="12" y1="10.6" x2="12" y2="16.6"></line><circle cx="12" cy="7.4" r="1.1"></circle></svg><span class="hq-tip-body">${safe}</span></span>`;
 	}
 
+	// Table-cell variant: the table's scroll container clips absolutely
+	// positioned bubbles, so cells use the native title tooltip on the same
+	// glyph instead. Text stays identical to what the card tooltips show.
+	_cell_tip(text) {
+		const safe = frappe.utils.escape_html(text);
+		return `<span class="hq-tip hq-tip--cell" title="${safe}" aria-label="${safe}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"></circle><line x1="12" y1="10.6" x2="12" y2="16.6"></line><circle cx="12" cy="7.4" r="1.1"></circle></svg></span>`;
+	}
+
 	_signed(value, ccy) {
 		if (value === null || value === undefined) return this._na();
 		const n = Number(value);
@@ -693,32 +702,38 @@ class HQSalesMonitor {
 	_outlet_row(r) {
 		const t = r.target || {};
 		const o = r.overall;
-		const ccy = r.currency || (this.state.scope || {}).default_currency;
+		const scopeCcy = (this.state.scope || {}).default_currency;
+		const ccy = r.currency || scopeCcy;
 		const missing = !t || t.missing;
+		// Default-currency rows show bare numbers (the scope strip names the
+		// currency once); foreign-currency rows keep their code so nothing
+		// ever looks merged across currencies.
+		const bare = ccy === scopeCcy ? "" : ccy;
+		const money = (v) => `<span class="hq-money">${HQ_UTILS.fmtMoney(v, bare)}</span>`;
 
+		// One line per cell: secondary figures (target/MTD transactions,
+		// projection, payback target) live in native title tooltips so no
+		// cell ever stacks or ellipsizes a number again.
 		const targetCell = missing
-			? `<div class="hq-item-code">${__("not set yet")}</div>`
-			: `<span class="hq-money">${HQ_UTILS.fmtMoney(t.target_sales, ccy)}</span>
-				<div class="hq-item-code">${HQ_UTILS.fmtCount(t.target_transactions ?? 0)} ${__("target TC")}</div>`;
-		const mtdCell = `<span class="hq-money">${HQ_UTILS.fmtMoney(t.mtd_net_tax_incl, ccy)}</span>
-			<div class="hq-item-code">${HQ_UTILS.fmtCount(t.mtd_orders ?? 0)} ${__("TC")}</div>`;
-		// The only per-row bar lives in Achievement; Target / MTD / Balik
-		// Modal are plain numbers.
+			? `<span class="hq-muted">${__("not set yet")}</span>`
+			: `${money(t.target_sales)}${t.target_transactions != null && Number(t.target_transactions) > 0 ? ` ${this._cell_tip(`${HQ_UTILS.fmtCount(t.target_transactions)} ${__("target TC")}`)}` : ""}`;
+		const mtdCell = `${money(t.mtd_net_tax_incl ?? 0)}${t.mtd_orders != null && Number(t.mtd_orders) > 0 ? ` ${this._cell_tip(`${HQ_UTILS.fmtCount(t.mtd_orders)} ${__("TC")}`)}` : ""}`;
+		const projTip =
+			!missing && t.projected_sales != null
+				? this._cell_tip(`${__("proy.")} ${HQ_UTILS.fmtMoney(t.projected_sales, bare)} · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}`)
+				: "";
 		const achCell = missing
 			? this._na()
-			: `${this._bar(t.achievement_sales_pct)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(t.achievement_sales_pct, 1)}</b>
-				${t.projected_sales != null ? `<div class="hq-item-code">${__("proj.")} <span class="hq-money">${HQ_UTILS.fmtMoney(t.projected_sales, ccy)}</span> · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}</div>` : ""}`;
+			: `${this._bar(t.achievement_sales_pct, Number(t.achievement_sales_pct) >= 100 ? "hq-bar--ok" : "")}<b class="hq-ach-pct">${HQ_UTILS.fmtPct(t.achievement_sales_pct, 1)}</b>${projTip}`;
 		const overallCell = o
-			? `<span class="hq-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span>
-				<div class="hq-item-code">${__("of")} <span class="hq-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span> · <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
+			? `${money(o.cumulative_net_tax_incl)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${this._cell_tip(`${__("of")} ${HQ_UTILS.fmtMoney(o.overall_target, bare)}${o.from_date ? ` · ${__("since")} ${frappe.utils.escape_html(o.from_date)}` : ""}`)}`
 			: this._na();
 
 		return `<tr data-hq-outlet-row${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
 			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}</td>
-			<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_tax_incl, r.currency)}</span>
-				${r.share_pct != null ? `<div class="hq-item-code">${HQ_UTILS.fmtPct(r.share_pct)}</div>` : ""}</td>
+			<td class="hq-num">${money(r.net_tax_incl)}</td>
 			<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
-			<td class="hq-num">${r.apc === null ? "N/A" : `<span class="hq-money">${HQ_UTILS.fmtMoney(r.apc, r.currency)}</span>`}</td>
+			<td class="hq-num">${r.apc === null ? "N/A" : money(r.apc)}</td>
 			<td class="hq-num">${targetCell}</td>
 			<td class="hq-num">${mtdCell}</td>
 			<td class="hq-num hq-ach">${achCell}</td>
@@ -731,16 +746,20 @@ class HQSalesMonitor {
 		return `<div class="hq-card hq-card--table hq-card--outlets">
 			<div class="hq-card-title">${__("Outlet Performance")}
 				${this._tip(__("Outlet = company; balik modal = cumulative sales vs overall target"))}
-				<span class="hq-period">${__("MTD targets")} · ${frappe.utils.escape_html(s.windows.month_start || "")} · ${__("range figures")}: ${this._range_label(s)}</span></div>
+				<span class="hq-period">${__("MTD targets")} · ${__("since")} ${frappe.utils.escape_html(s.windows.month_start || "")} · ${__("range figures")}: ${frappe.utils.escape_html((s.scope || {}).from_date || "")} - ${frappe.utils.escape_html((s.scope || {}).to_date || "")}</span></div>
 			<div class="hq-rank-controls">
-				<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
-					placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.outlet_query)}" aria-label="${__("Search outlet")}"></div>
-				<label class="hq-empty-toggle">
-					<input type="checkbox" data-hq-show-empty${this.show_empty_outlets ? " checked" : ""}>
-					${__("Show empty outlets")}
-				</label>
-				<button class="btn btn-xs btn-default" data-hq-goto-targets>${__("Manage Targets")}</button>
-				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
+				<div class="hq-rank-group">
+					<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
+						placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.outlet_query)}" aria-label="${__("Search outlet")}"></div>
+					<label class="hq-empty-toggle">
+						<input type="checkbox" data-hq-show-empty${this.show_empty_outlets ? " checked" : ""}>
+						${__("Show empty outlets")}
+					</label>
+				</div>
+				<div class="hq-rank-group">
+					<button class="btn btn-xs btn-default" data-hq-goto-targets>${__("Manage Targets")}</button>
+					<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
+				</div>
 			</div>
 			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
 			<thead><tr>
@@ -790,8 +809,9 @@ class HQSalesMonitor {
 		this.$root.find("[data-hq-outlet-pager]").text(
 			`${start} - ${end} ${__("of")} ${total} ${__("outlets")}${hiddenEmpty ? ` · ${HQ_UTILS.fmtCount(hiddenEmpty)} ${__("empty hidden")}` : ""}`
 		);
-		this.$root.find('[data-hq-outlet-page="prev"]').prop("disabled", this.outlet_page <= 1);
-		this.$root.find('[data-hq-outlet-page="next"]').prop("disabled", this.outlet_page >= pages);
+		// A lone page needs no dead Previous/Next buttons.
+		this.$root.find('[data-hq-outlet-page="prev"]').toggle(pages > 1).prop("disabled", this.outlet_page <= 1);
+		this.$root.find('[data-hq-outlet-page="next"]').toggle(pages > 1).prop("disabled", this.outlet_page >= pages);
 	}
 
 	// ------------------------------------------------------------------
@@ -922,7 +942,7 @@ class HQSalesMonitor {
 		return `<ul class="hq-legend">${rows
 			.map(
 				(r, i) => `<li><span class="hq-dot" style="background:${HQ_PALETTE[i % HQ_PALETTE.length]}"></span>
-				<span class="hq-legend-label">${frappe.utils.escape_html(String(r[labelKey]))}${
+				<span class="hq-legend-name"><span class="hq-legend-label" title="${frappe.utils.escape_html(String(r[labelKey]))}">${frappe.utils.escape_html(String(r[labelKey]))}</span>${
 					subKey && Number(r[subKey]) > 0
 						? ` <span class="hq-legend-sub">${HQ_UTILS.fmtCount(r[subKey])} ${__("qty")}</span>`
 						: ""
@@ -1120,7 +1140,10 @@ class HQSalesMonitor {
 			},
 			type: "donut",
 			colors: HQ_PALETTE,
-			height: 190,
+			// frappe-charts' pie reserves ~110px of vertical space before the
+			// radius is derived (radius = min(inner box)), so a taller config
+			// is what actually grows the ring: 260 -> ~150px ring.
+			height: 260,
 			// The page renders its own accessible value legend (.hq-legend);
 			// frappe-charts' built-in legend would duplicate and truncate it.
 			showLegend: false,
@@ -1128,7 +1151,32 @@ class HQSalesMonitor {
 				formatTooltipY: (value) => HQ_UTILS.fmtMoney(value, ccy),
 			},
 		});
-		_harden_chart(chart);
+		// Re-center the drawn ring inside its figure: measure the real ring
+		// bbox, translate the svg so the ring sits at the figure's center
+		// (the reserved space above/below is transparent and pointer-dead).
+		// Runs again after every observer-triggered redraw.
+		const recenter = () => {
+			try {
+				const svg = el.querySelector("svg");
+				const arc = svg && svg.querySelector("path");
+				const fig = el.closest(".hq-donut-figure");
+				if (!svg || !arc || !fig) return;
+				const m = arc.getScreenCTM();
+				const sm = svg.getScreenCTM();
+				if (!m || !sm) return;
+				const bb = arc.getBBox();
+				const ringScreen = new DOMPoint(bb.x + bb.width / 2, bb.y + bb.height / 2).matrixTransform(m);
+				const ringLocal = ringScreen.matrixTransform(sm.inverse());
+				const dx = fig.clientWidth / 2 - ringLocal.x;
+				const dy = fig.clientHeight / 2 - ringLocal.y;
+				svg.style.transform = `translate(${Math.round(dx)}px, ${Math.round(dy)}px)`;
+			} catch (e) {
+				// geometry unavailable (detached node, no CTM) — the CSS
+				// default centering stands
+			}
+		};
+		_harden_chart(chart, recenter);
+		recenter();
 		this._charts.push(chart);
 	}
 
