@@ -759,12 +759,8 @@ class HQSalesMonitor {
 				<div class="hq-item-code"><b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)}` : ""}</div>`
 			: this._na();
 
-		return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
-			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}
-				${(r.profiles || []).length ? `<div class="hq-item-code">${r.profiles
-					.slice(0, 3)
-					.map((p) => `${frappe.utils.escape_html(p.pos_profile)} (${HQ_UTILS.fmtCount(p.orders)})`)
-					.join(" · ")}${r.profiles.length > 3 ? ` +${r.profiles.length - 3}` : ""}</div>` : ""}</td>
+			return `<tr data-hq-outlet-row data-hq-company="${frappe.utils.escape_html(r.company)}">
+				<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}</td>
 			<td class="hq-num">${targetCell}</td>
 			<td class="hq-num">${mtdCell}</td>
 			<td class="hq-num hq-ach">${achCell}</td>
@@ -784,7 +780,7 @@ class HQSalesMonitor {
 			<div class="hq-rank-controls">
 				<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
 					placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.outlet_query)}" aria-label="${__("Search outlet")}"></div>
-				<span class="hq-kpi-sub hq-muted">${__("Outlet = company; POS profiles listed beneath; balik modal = cumulative sales vs overall target")}</span>
+				<span class="hq-kpi-sub hq-muted">${__("Outlet = company; balik modal = cumulative sales vs overall target")}</span>
 				<button class="btn btn-xs btn-default" data-hq-goto-targets>${__("Manage Targets")}</button>
 				<button class="btn btn-xs btn-default" data-hq-export="outlets">${__("Export CSV")}</button>
 			</div>
