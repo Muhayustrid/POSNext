@@ -40,11 +40,14 @@ test('isEmptyOutlet hides only zero-sales, zero-TC, no-target outlets', () => {
 	assert.equal(utils.isEmptyOutlet({ orders: 0, net_tax_incl: 3, target: null }), false);
 });
 
-test('page gates the donut shape at three segments', () => {
+test('donut keeps its ring at any segment count', () => {
 	const add = source.slice(source.indexOf('_add_donut(selector'), source.indexOf('_render_hour_chart(s) {'));
-	assert.match(add, /data\.length < 3/);
-	// one/two-segment stats and the compact empty line exist
-	assert.match(source, /_share_body\(/);
+	assert.match(add, /if \(!data\.length\) return;/);
+	// a lone segment is a full circle with its share labeled in the hole
+	assert.match(source, /hq-donut-center/);
+	assert.match(source, /100%/);
+	assert.doesNotMatch(source, /hq-stat-group/);
+	// compact one-line empty states replace the old 190px dashed ring
 	assert.match(source, /hq-empty-line/);
 	assert.doesNotMatch(source, /_donut_placeholder/);
 });

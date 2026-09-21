@@ -450,8 +450,7 @@
 }
 
 .hq-donut-chart {
-	flex: 1 1 200px;
-	min-width: 180px;
+	width: 100%;
 }
 
 .hq-legend {
@@ -507,42 +506,25 @@
 	white-space: nowrap;
 }
 
-/* Sub-donut share stats: one segment is a single figure, two sit side by
-   side; the ring shape starts at three segments. */
-.hq-stat-group {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr);
-	max-width: 380px;
+/* Donut figure: the ring keeps its shape at any segment count; a lone
+   segment is a full circle with its share labeled in the hole. */
+.hq-donut-figure {
+	position: relative;
+	flex: 1 1 200px;
+	min-width: 180px;
 }
 
-.hq-stat-group--duo {
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 0 16px;
-}
-
-.hq-stat + .hq-stat {
-	border-left: 1px solid var(--border-color, #f1f3f5);
-	padding-left: 16px;
-}
-
-.hq-stat-label {
-	font-size: 11.5px;
-	color: var(--text-muted);
-	margin-bottom: 4px;
-	overflow-wrap: anywhere;
-}
-
-.hq-stat-value {
-	font-size: 18px;
+.hq-donut-center {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+	font-size: 15px;
 	font-weight: 600;
 	color: var(--heading-color, var(--text-color));
 	font-variant-numeric: tabular-nums;
-}
-
-.hq-stat-pct {
-	font-size: 11px;
-	color: var(--text-muted);
-	margin-top: 2px;
 }
 
 .hq-item-code {

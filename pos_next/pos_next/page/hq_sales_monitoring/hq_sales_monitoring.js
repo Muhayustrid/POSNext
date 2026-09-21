@@ -330,16 +330,19 @@ class HQSalesMonitor {
 		});
 	}
 
-	// Once per session: an unpicked Top Selling slot defaults to the category
-	// with the highest net sales (slot b takes the runner-up, so the pair is
-	// an immediate comparison instead of an empty placeholder). Transient
-	// only — preferences are written solely by an explicit user selection.
+	// First refresh WITH data: an unpicked Top Selling slot defaults to the
+	// category with the highest net sales (slot b takes the runner-up, so the
+	// pair is an immediate comparison instead of an empty placeholder). A
+	// no-sales-yet morning leaves the one-shot unconsumed so the next
+	// refresh (e.g. after switching range, or once sales start) fills it.
+	// Transient only — preferences are written solely by an explicit pick.
 	_autofill_categories() {
 		if (this._autofilled) return false;
-		this._autofilled = true;
 		const top = ((this.state.category_top || {}).rows || [])
 			.filter((r) => r && Number(r.net_amount) > 0)
 			.map((r) => r.item_group);
+		if (!top.length) return false;
+		this._autofilled = true;
 		let refetch = false;
 		if (!this.category_a && top[0]) {
 			this.category_a = top[0];
@@ -563,16 +566,19 @@ class HQSalesMonitor {
 
 		// Daily rhythm: growth vs the SAME weekday last week (the one
 		// comparison the range filters cannot align automatically). Growth
-		// only — today's absolute figures already live in this card.
+		// only — today's absolute figures already live in this card. The
+		// footnote stays hidden on a day with nothing to compare yet (no
+		// orders today NOR last week same weekday) instead of saying N/A
+		// three times.
 		const lw = (d && d.last_week_same) || {};
 		const orders = (d && d.totals && d.totals.orders) || 0;
+		const hasRhythm = !!(d && d.totals && (orders > 0 || lw.orders > 0));
 		const tcGrowth = HQ_UTILS.growthPct(orders, lw.orders);
 		const apcGrowth = HQ_UTILS.growthPct(
 			((d && d.totals && d.totals.apc || {}).by_currency || {})[ccy],
 			((lw.apc || {}).by_currency || {})[ccy]
 		);
-		const rhythm =
-			d && d.totals
+		const rhythm = hasRhythm
 				? `<div class="hq-kpi-sub hq-muted" style="margin-top: 8px">
 					${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")}): ${__("Sales")} ${this._signed_pct((d.growth_vs_last_week_pct || {})[ccy])}
 					· ${__("TC")} ${this._signed_pct(tcGrowth)} · ${__("Avg Ticket")} ${this._signed_pct(apcGrowth)}
@@ -894,25 +900,17 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Donut shape rule: a ring earns its geometry at three segments or more.
-	// One segment is a single stat; two sit side by side as stats (shares
-	// recomputed from exactly the drawn values, like the donut legend).
+	// Donut share body: the ring keeps its shape at ANY segment count —
+	// a lone segment is a full circle with its share labeled in the hole,
+	// so the card never collapses into a stat. No data -> the caller shows
+	// the compact empty line instead.
 	// ------------------------------------------------------------------
 
 	_share_body(rows, cfg) {
 		const data = (rows || []).filter((r) => r && Number(r[cfg.valueKey]) > 0);
 		if (!data.length) return "";
-		const total = data.reduce((sum, r) => sum + Number(r[cfg.valueKey]), 0);
-		const stat = (r) => `<div class="hq-stat">
-			<div class="hq-stat-label">${frappe.utils.escape_html(String(r[cfg.labelKey]))}</div>
-			<div class="hq-stat-value"><span class="hq-money">${HQ_UTILS.fmtMoney(r[cfg.valueKey], cfg.ccy)}</span></div>
-			<div class="hq-stat-pct">${HQ_UTILS.fmtPct(HQ_UTILS.pctOf(Number(r[cfg.valueKey]), total))}</div>
-		</div>`;
-		if (data.length < 3) {
-			const cls = data.length === 2 ? " hq-stat-group--duo" : "";
-			return `<div class="hq-stat-group${cls}">${data.map(stat).join("")}</div>`;
-		}
-		return `<div class="hq-donut"><div class="hq-donut-chart" data-hq-donut="${cfg.chartId}"></div>
+		const center = data.length === 1 ? '<div class="hq-donut-center">100%</div>' : "";
+		return `<div class="hq-donut"><div class="hq-donut-figure">${center}<div class="hq-donut-chart" data-hq-donut="${cfg.chartId}"></div></div>
 			${this._donut_legend(data, cfg.valueKey, cfg.labelKey, cfg.ccy, cfg.subKey)}</div>`;
 	}
 
@@ -1108,14 +1106,13 @@ class HQSalesMonitor {
 	}
 
 	// Every donut on the page routes through here: positive-only rows, one
-	// palette, value tooltips, hardened observer lifecycle. The ring shape
-	// starts at three segments — below that the card renders stats instead
-	// and this finds no chart container to draw.
+	// palette, value tooltips, hardened observer lifecycle. Any data draws
+	// the ring (one segment = full circle); empty data finds no container.
 	_add_donut(selector, rows, labelKey, valueKey, ccy) {
 		const el = this.$root.find(selector).get(0);
 		if (!el) return;
 		const data = (rows || []).filter((r) => Number(r[valueKey]) > 0);
-		if (data.length < 3) return;
+		if (!data.length) return;
 		const chart = new frappe.Chart(el, {
 			data: {
 				labels: data.map((r) => String(r[labelKey])),
