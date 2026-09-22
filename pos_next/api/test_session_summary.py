@@ -3,6 +3,7 @@
 
 import json
 import unittest
+import uuid
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -80,22 +81,32 @@ class TestSessionSummary(IntegrationTestCase):
 		elif not frappe.db.get_value("User", cls.user, "enabled"):
 			# a previous run's cleanup disabled the shared fixture user
 			frappe.db.set_value("User", cls.user, "enabled", 1)
+		# A fresh profile per run: the recap scope is "every shift of the
+		# profile", so a shared fixed-name profile accumulates leftover
+		# shifts/invoices from earlier runs and demos, breaking exact-value
+		# period assertions (the warehouse stays shared: it is not scoped).
 		cls.pos_profile = make_test_pos_profile(
-			"SessionSummary", cls.company, make_test_warehouse("SessionSummary", cls.company)
+			f"SessionSummary{uuid.uuid4().hex[:6]}",
+			cls.company,
+			make_test_warehouse("SessionSummary", cls.company),
 		)
 		# refund code gate fails closed; turn it off for this test profile
+		# (only an enabled row is honoured by the settings resolver)
 		if not frappe.db.exists("POS Settings", {"pos_profile": cls.pos_profile}):
 			frappe.get_doc(
 				{
 					"doctype": "POS Settings",
 					"pos_profile": cls.pos_profile,
+					"enabled": 1,
 					"require_refund_code": 0,
 				}
 			).insert(ignore_permissions=True)
 		else:
 			# a previous run may have left the gate on for this shared profile
 			frappe.db.set_value(
-				"POS Settings", {"pos_profile": cls.pos_profile}, "require_refund_code", 0
+				"POS Settings",
+				{"pos_profile": cls.pos_profile},
+				{"enabled": 1, "require_refund_code": 0},
 			)
 		cls.debtors_account = frappe.db.get_value(
 			"Account",

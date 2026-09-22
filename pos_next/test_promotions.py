@@ -31,7 +31,6 @@ running site has configured.
 from types import SimpleNamespace
 
 import frappe
-from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, nowdate
 
@@ -217,13 +216,28 @@ def _ensure_test_items(company, warehouse, price_list):
 		)
 		if current < 50:
 			try:
-				make_stock_entry(
-					item_code=item_code,
-					target=warehouse,
-					qty=100,
-					rate=ITEM_PRICES[item_code] / 2,
-					company=company,
-				)
+				# Built inline instead of erpnext's make_stock_entry helper:
+				# importing that helper pulls erpnext.tests.utils, whose
+				# module-level BootStrapTestData re-creates master data on
+				# every first import and dies with DuplicateEntryError on a
+				# site that already carries those records.
+				frappe.get_doc(
+					{
+						"doctype": "Stock Entry",
+						"stock_entry_type": "Material Receipt",
+						"purpose": "Material Receipt",
+						"company": company,
+						"items": [
+							{
+								"item_code": item_code,
+								"qty": 100,
+								"t_warehouse": warehouse,
+								"basic_rate": ITEM_PRICES[item_code] / 2,
+								"allow_zero_valuation_rate": 1,
+							}
+						],
+					}
+				).insert(ignore_permissions=True).submit()
 			except Exception:
 				# Stock entry failure shouldn't abort the test setup; the
 				# individual test will surface the real cause.
@@ -309,6 +323,9 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 		profile.selling_price_list = price_list
 		profile.ignore_pricing_rule = 0
 		profile.disable_rounded_total = 1
+		# the site's custom-field default enables the shift schedule with no
+		# times, which the profile validator rejects on a fresh save
+		profile.pos_schedule_enabled = 0
 		profile.payments = []
 		profile.append(
 			"payments",
@@ -331,6 +348,7 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 			"ignore_pricing_rule": 0,
 			"disable_rounded_total": 1,
 			"disabled": 0,
+			"pos_schedule_enabled": 0,
 		}
 	)
 	profile.append(

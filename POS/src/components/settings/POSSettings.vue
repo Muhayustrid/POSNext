@@ -299,15 +299,25 @@
 											</h4>
 										</div>
 										<div class="flex flex-col gap-3">
-											<CheckboxField
-												v-model="settings.allow_negative_stock"
-												:label="__('Allow Negative Stock')"
-												:description="
-													__(
-														'Enable selling items even when stock reaches zero or below. Integrates with Back Office stock settings.'
-													)
-												"
-											/>
+											<!-- Read-only: allow_negative_stock is a global setting managed in Desk -->
+											<div class="flex items-start gap-2.5 p-2 rounded">
+												<div class="flex items-center h-5">
+													<input
+														type="checkbox"
+														:checked="settings.allow_negative_stock"
+														disabled
+														class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded cursor-not-allowed opacity-60"
+													/>
+												</div>
+												<div class="flex-1 min-w-0">
+													<label class="block text-sm font-medium text-gray-400 cursor-not-allowed">
+														{{ __("Allow Negative Stock") }}
+													</label>
+													<p class="text-xs text-gray-400 mt-0.5 leading-tight">
+														{{ __("Managed via Global Settings in Desk.") }}
+													</p>
+												</div>
+											</div>
 											<div class="mt-3 p-3 bg-blue-100 rounded-md">
 												<div class="flex items-start gap-2">
 													<svg
@@ -1842,9 +1852,6 @@ const warehousesResource = createResource({
 	},
 });
 
-// Track original allow_negative_stock value for detecting changes
-const originalAllowNegativeStock = ref(null);
-
 const settingsResource = createResource({
 	url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
 	makeParams() {
@@ -1856,8 +1863,6 @@ const settingsResource = createResource({
 		if (data) {
 			Object.assign(settings.value, data);
 			settings.value.pos_profile = props.posProfile;
-			// Store original value
-			originalAllowNegativeStock.value = data.allow_negative_stock;
 			// Update event system snapshot
 			updateSettingsSnapshot(settings.value);
 		}
@@ -1957,8 +1962,6 @@ async function saveSettings() {
 	saving.value = true;
 	const oldWarehouse = props.currentWarehouse;
 	const warehouseChanged = selectedWarehouse.value !== oldWarehouse;
-	const negativeStockChanged =
-		originalAllowNegativeStock.value !== settings.value.allow_negative_stock;
 	const taxInclusiveChanged =
 		originalTaxInclusive.value !== null &&
 		originalTaxInclusive.value !== settings.value.tax_inclusive;
@@ -1970,12 +1973,16 @@ async function saveSettings() {
 	};
 
 	try {
-		// Save POS Settings (without warehouse)
+		// Save POS Settings (without warehouse).
+		// allow_negative_stock is global (POS Next Global Settings in Desk) and is
+		// stripped so this payload never overwrites the server-side global value.
+		const settingsPayload = { ...settings.value };
+		delete settingsPayload.allow_negative_stock;
 		const result = await call(
 			"pos_next.pos_next.doctype.pos_settings.pos_settings.update_pos_settings",
 			{
 				pos_profile: props.posProfile,
-				settings: settings.value,
+				settings: settingsPayload,
 			}
 		);
 
@@ -1983,7 +1990,6 @@ async function saveSettings() {
 			Object.assign(settings.value, result);
 			settings.value.pos_profile = props.posProfile;
 			// Update original values after successful save
-			originalAllowNegativeStock.value = result.allow_negative_stock;
 			originalTaxInclusive.value = result.tax_inclusive;
 		}
 
@@ -2011,21 +2017,6 @@ async function saveSettings() {
 		// Detect and emit settings changes through event system
 		// This will notify all listeners (POSSale, stock store, cart store, etc.)
 		detectSettingsChanges(settings.value, oldSettings);
-
-		// IMPORTANT: Page reload for critical stock policy change
-		// The allow_negative_stock setting affects deep stock validation logic
-		// throughout the app, including:
-		// - Stock validation in cart operations (posCart.js:59)
-		// - Stock enforcement checks (posSettings.js:268)
-		// - Item addition logic and error handling
-		// A page reload ensures all components get the fresh setting and
-		// prevents inconsistent state. Event listeners are still notified
-		// before reload for any cleanup needed.
-		if (negativeStockChanged) {
-			log.info("Stock policy changed, reloading page for consistency...");
-			window.location.reload();
-			return;
-		}
 
 		// Show success toast for other changes
 		let successMessage = __("Settings saved successfully");

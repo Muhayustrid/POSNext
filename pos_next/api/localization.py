@@ -43,7 +43,8 @@ def get_user_language():
 @frappe.whitelist()
 def get_allowed_locales():
 	"""
-	Get list of allowed locales from POS Settings for the language switcher.
+	Get list of allowed locales from POS Next Global Settings for the
+	language switcher.
 
 	Returns:
 		dict: List of allowed locale codes
@@ -54,7 +55,7 @@ def get_allowed_locales():
 
 def get_allowed_locales_from_settings():
 	"""
-	Get allowed locales from POS Settings.
+	Get allowed locales from the POS Next Global Settings single.
 	Falls back to default locales if not configured.
 
 	Returns:
@@ -63,16 +64,10 @@ def get_allowed_locales_from_settings():
 	default_locales = {"en", "id"}
 
 	try:
-		# Get the first POS Settings (or we could use a specific one based on user's profile)
-		pos_settings_list = frappe.get_all("POS Settings", filters={"enabled": 1}, fields=["name"], limit=1)
+		global_settings = frappe.get_doc("POS Next Global Settings")
 
-		if not pos_settings_list:
-			return default_locales
-
-		pos_settings = frappe.get_doc("POS Settings", pos_settings_list[0].name)
-
-		if pos_settings.allowed_locales and len(pos_settings.allowed_locales) > 0:
-			return {row.language.lower() for row in pos_settings.allowed_locales}
+		if global_settings.allowed_locales and len(global_settings.allowed_locales) > 0:
+			return {row.language.lower() for row in global_settings.allowed_locales}
 
 		return default_locales
 	except Exception:

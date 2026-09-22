@@ -10,6 +10,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
+from pos_next.api.settings_resolver import get_effective_pos_setting, get_effective_pos_settings
+
 
 def validate(doc, method=None):
 	"""
@@ -41,11 +43,8 @@ def apply_tax_inclusive(doc):
 		return
 
 	try:
-		# Get POS Settings for this profile
-		pos_settings = frappe.db.get_value(
-			"POS Settings", {"pos_profile": doc.pos_profile}, ["tax_inclusive"], as_dict=True
-		)
-		tax_inclusive = pos_settings.get("tax_inclusive", 0) if pos_settings else 0
+		# Effective setting for this profile (enabled row, else global single)
+		tax_inclusive = cint(get_effective_pos_setting(doc.pos_profile, "tax_inclusive"))
 	except Exception:
 		tax_inclusive = 0
 
@@ -89,12 +88,9 @@ def auto_assign_loyalty_program_on_invoice(doc):
 	if customer_loyalty:
 		return
 
-	# Get POS Settings
-	pos_settings = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": doc.pos_profile},
-		["enable_loyalty_program", "default_loyalty_program"],
-		as_dict=True,
+	# Effective settings for this profile (enabled row, else global single)
+	pos_settings = get_effective_pos_settings(
+		doc.pos_profile, ["enable_loyalty_program", "default_loyalty_program"]
 	)
 
 	if not pos_settings:

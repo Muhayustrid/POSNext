@@ -1,11 +1,19 @@
 {
  "actions": [],
- "creation": "2025-10-15 00:00:00",
+ "creation": "2026-09-22 00:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "pos_profile",
-  "enabled",
+  "tab_general",
+  "section_break_invoice_target",
+  "invoice_type",
+  "monthly_target_basis",
+  "overall_target_basis",
+  "section_break_negative_stock",
+  "allow_negative_stock",
+  "section_break_localization",
+  "allowed_locales",
+  "tab_details",
   "section_break_wallet",
   "enable_loyalty_program",
   "default_loyalty_program",
@@ -102,25 +110,71 @@
   "po_default_price_list",
   "po_receive_requires_delivery_note",
   "barcode_tab",
-  "barcode_rules",
-  "invoice_type"
+  "barcode_rules"
  ],
  "fields": [
   {
-   "fieldname": "pos_profile",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "POS Profile",
-   "options": "POS Profile",
-   "reqd": 1,
-   "unique": 1
+   "fieldname": "tab_general",
+   "fieldtype": "Tab Break",
+   "label": "General"
   },
   {
-   "default": "1",
-   "description": "Enable custom POS settings for this profile",
-   "fieldname": "enabled",
+   "fieldname": "section_break_invoice_target",
+   "fieldtype": "Section Break",
+   "label": "Invoice & Target"
+  },
+  {
+   "default": "POS Invoice",
+   "description": "Global for all profiles: the document type the POS screen creates (Sales Invoice or POS Invoice). POS Next's POS Invoices post their own stock and GL entries on submit, so they behave like Sales Invoices while keeping POS traffic out of the Sales Invoice list. Changing it is blocked while shifts are open, offline invoices are pending, or legacy unconsolidated POS Invoices exist.",
+   "fieldname": "invoice_type",
+   "fieldtype": "Select",
+   "label": "Invoice Type Created via POS Screen",
+   "options": "Sales Invoice\nPOS Invoice"
+  },
+  {
+   "default": "Net Sales",
+   "description": "Global for all profiles: the metric monthly targets are measured against (Net Sales, Gross Profit, or Net Profit). Net Sales is the current behaviour (net including tax). Existing target numbers are not migrated when the basis changes.",
+   "fieldname": "monthly_target_basis",
+   "fieldtype": "Select",
+   "label": "Monthly Target Basis",
+   "options": "Net Sales\nGross Profit\nNet Profit"
+  },
+  {
+   "default": "Net Sales",
+   "description": "Global for all profiles: the metric the overall (payback) target is measured against (Net Sales, Gross Profit, or Net Profit). Net Profit reads the outlet company's full P&L and cannot be narrowed by POS Profile. Existing target numbers are not migrated when the basis changes.",
+   "fieldname": "overall_target_basis",
+   "fieldtype": "Select",
+   "label": "Overall (Payback) Target Basis",
+   "options": "Net Sales\nGross Profit\nNet Profit"
+  },
+  {
+   "fieldname": "section_break_negative_stock",
+   "fieldtype": "Section Break",
+   "label": "Negative Stock"
+  },
+  {
+   "default": "0",
+   "description": "Enable selling items even when stock reaches zero or below. Integrates with ERPNext negative stock settings.",
+   "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
-   "label": "Enabled"
+   "label": "Allow Negative Stock"
+  },
+  {
+   "fieldname": "section_break_localization",
+   "fieldtype": "Section Break",
+   "label": "Localization"
+  },
+  {
+   "description": "Select languages available in the POS language switcher. If empty, defaults to English and Indonesian.",
+   "fieldname": "allowed_locales",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed Languages",
+   "options": "POS Allowed Locale"
+  },
+  {
+   "fieldname": "tab_details",
+   "fieldtype": "Tab Break",
+   "label": "Details"
   },
   {
    "fieldname": "section_break_wallet",
@@ -514,7 +568,7 @@
   {
    "default": "160",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Paper advance after each copy so the receipt clears the tear bar (dots = mm×8, e.g. 100≈12mm)",
+   "description": "Paper advance after each copy so the receipt clears the tear bar (dots = mm\u00d78, e.g. 100\u224812mm)",
    "fieldname": "imin_feed_dots",
    "fieldtype": "Int",
    "label": "Advance Paper (dots)"
@@ -522,7 +576,7 @@
   {
    "default": "24",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "White space appended inside the bitmap so the last line clears the tear bar (dots = mm×8, e.g. 24≈3mm). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
+   "description": "White space appended inside the bitmap so the last line clears the tear bar (dots = mm\u00d78, e.g. 24\u22483mm). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
    "fieldname": "imin_tail_dots",
    "fieldtype": "Int",
    "label": "Tail Spacer (dots)"
@@ -538,7 +592,7 @@
   {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Font scale for the crew copy only (percent) — the short order slip the outlet keeps. Default 100 = the same size as the customer receipt; raise if the crew wants it chunkier. 60–250.",
+   "description": "Font scale for the crew copy only (percent) \u2014 the short order slip the outlet keeps. Default 100 = the same size as the customer receipt; raise if the crew wants it chunkier. 60\u2013250.",
    "fieldname": "imin_crew_font_scale",
    "fieldtype": "Int",
    "label": "Crew Copy Font Scale (%)"
@@ -554,7 +608,7 @@
   {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Vertical density of the printed receipt and crew copy (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50–150.",
+   "description": "Vertical density of the printed receipt and crew copy (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50\u2013150.",
    "fieldname": "imin_line_spacing",
    "fieldtype": "Int",
    "label": "Line Spacing (%)"
@@ -562,7 +616,7 @@
   {
    "default": "16",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Left and right print margin in dots (dots = mm×8, e.g. 16≈2mm). Overrides the padding the receipt format's own CSS sets on either side, so text uses more of the paper width. 0–64. VERIFY ON DEVICE.",
+   "description": "Left and right print margin in dots (dots = mm\u00d78, e.g. 16\u22482mm). Overrides the padding the receipt format's own CSS sets on either side, so text uses more of the paper width. 0\u201364. VERIFY ON DEVICE.",
    "fieldname": "imin_side_margin",
    "fieldtype": "Int",
    "label": "Side Margin (dots)"
@@ -593,7 +647,7 @@
   {
    "default": "1",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Copies printed for the Closing/EOD receipt — a separate print lane from the per-transaction copies. 1 = the report goes to the manager only. 1–5.",
+   "description": "Copies printed for the Closing/EOD receipt \u2014 a separate print lane from the per-transaction copies. 1 = the report goes to the manager only. 1\u20135.",
    "fieldname": "imin_eod_print_copies",
    "fieldtype": "Int",
    "label": "EOD Print Copies"
@@ -601,7 +655,7 @@
   {
    "default": "800",
    "depends_on": "eval:doc.print_driver==='imin' && (doc.imin_eod_print_copies||1)>1",
-   "description": "Pause between EOD copies so the cashier can tear the first one off (ms); overridable per-device. 0–10000.",
+   "description": "Pause between EOD copies so the cashier can tear the first one off (ms); overridable per-device. 0\u201310000.",
    "fieldname": "imin_eod_copy_delay_ms",
    "fieldtype": "Int",
    "label": "EOD Delay Between Copies (ms)"
@@ -609,7 +663,7 @@
   {
    "default": "160",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Paper advance after the EOD receipt so it clears the tear bar (dots = mm×8, e.g. 160≈20mm). 8–500.",
+   "description": "Paper advance after the EOD receipt so it clears the tear bar (dots = mm\u00d78, e.g. 160\u224820mm). 8\u2013500.",
    "fieldname": "imin_eod_feed_dots",
    "fieldtype": "Int",
    "label": "EOD Advance Paper (dots)"
@@ -617,7 +671,7 @@
   {
    "default": "24",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "White space appended inside the EOD bitmap so the last line clears the tear bar (dots = mm×8). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
+   "description": "White space appended inside the EOD bitmap so the last line clears the tear bar (dots = mm\u00d78). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
    "fieldname": "imin_eod_tail_dots",
    "fieldtype": "Int",
    "label": "EOD Tail Spacer (dots)"
@@ -625,7 +679,7 @@
   {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Font scale for the EOD receipt (percent), same 96 DPI authoring as the sales receipt; 100 = as authored. The EOD list is longer, so lower values fit more lines per page. 60–250.",
+   "description": "Font scale for the EOD receipt (percent), same 96 DPI authoring as the sales receipt; 100 = as authored. The EOD list is longer, so lower values fit more lines per page. 60\u2013250.",
    "fieldname": "imin_eod_font_scale",
    "fieldtype": "Int",
    "label": "EOD Font Scale (%)"
@@ -633,7 +687,7 @@
   {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Vertical density of the printed EOD receipt (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50–150.",
+   "description": "Vertical density of the printed EOD receipt (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50\u2013150.",
    "fieldname": "imin_eod_line_spacing",
    "fieldtype": "Int",
    "label": "EOD Line Spacing (%)"
@@ -641,7 +695,7 @@
   {
    "default": "16",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Left and right print margin for the EOD receipt in dots (dots = mm×8, e.g. 16≈2mm). 0 is edge-to-edge. 0–64. VERIFY ON DEVICE.",
+   "description": "Left and right print margin for the EOD receipt in dots (dots = mm\u00d78, e.g. 16\u22482mm). 0 is edge-to-edge. 0\u201364. VERIFY ON DEVICE.",
    "fieldname": "imin_eod_side_margin",
    "fieldtype": "Int",
    "label": "EOD Side Margin (dots)"
@@ -656,7 +710,7 @@
   },
   {
    "default": "1",
-   "description": "On failure, fall back down the chain (iMin → QZ → Browser)",
+   "description": "On failure, fall back down the chain (iMin \u2192 QZ \u2192 Browser)",
    "fieldname": "print_fallback_enabled",
    "fieldtype": "Check",
    "label": "Enable Print Fallback"
@@ -803,70 +857,39 @@
    "fieldtype": "Table",
    "label": "Barcode Rules",
    "options": "POS Barcode Rules"
-  },
-  {
-   "default": "POS Invoice",
-   "description": "Hidden placeholder: ERPNext v16 core validates POS Settings.invoice_type on POS Invoice, Sales Invoice and POS Closing Entry. The live value lives on POS Next Global Settings.",
-   "fieldname": "invoice_type",
-   "fieldtype": "Select",
-   "hidden": 1,
-   "label": "Invoice Type Created via POS Screen",
-   "options": "Sales Invoice\nPOS Invoice",
-   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
+ "issingle": 1,
  "links": [],
- "modified": "2026-09-22 20:30:00.000000",
+ "modified": "2026-09-22 20:45:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
- "name": "POS Settings",
- "naming_rule": "By fieldname",
+ "name": "POS Next Global Settings",
+ "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [
   {
    "create": 1,
    "delete": 1,
    "email": 1,
-   "export": 1,
    "print": 1,
    "read": 1,
-   "report": 1,
    "role": "System Manager",
    "share": 1,
    "write": 1
   },
   {
-   "create": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
    "read": 1,
-   "report": 1,
-   "role": "Sales Manager",
-   "share": 1,
-   "write": 1
+   "role": "Sales Manager"
   },
   {
-   "create": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
    "read": 1,
-   "report": 1,
-   "role": "Nexus POS Manager",
-   "share": 1,
-   "write": 1
+   "role": "Nexus POS Manager"
   },
   {
    "read": 1,
    "role": "Sales User"
-  },
-  {
-   "export": 1,
-   "read": 1,
-   "role": "POSNext Cashier",
-   "write": 1
   }
  ],
  "row_format": "Dynamic",

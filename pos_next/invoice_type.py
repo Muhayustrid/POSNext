@@ -10,9 +10,7 @@ _VALID_TYPES = (SALES_INVOICE, POS_INVOICE)
 def get_pos_invoice_doctype():
 	"""The doctype new POS transactions are created in (request-cached).
 
-	Stored on the POS Settings rows — one global value shared by every row;
-	the POS Settings controller keeps all rows in sync on save, so reading
-	any row yields the site-wide choice.
+	Stored on the POS Next Global Settings single — the site-wide choice.
 
 	POS Invoice is the default: POS Next's POS Invoices post their own GL and
 	stock ledger entries at submit (see CustomPOSInvoice), so they behave like
@@ -21,8 +19,7 @@ def get_pos_invoice_doctype():
 	cached = getattr(frappe.local, "_pos_next_invoice_doctype", None)
 	if cached:
 		return cached
-	# NOTE: filters={} (any row) — filters=None would be a name lookup of None.
-	value = frappe.db.get_value("POS Settings", {}, "invoice_type") or POS_INVOICE
+	value = frappe.db.get_single_value("POS Next Global Settings", "invoice_type") or POS_INVOICE
 	if value not in _VALID_TYPES:
 		value = POS_INVOICE
 	frappe.local._pos_next_invoice_doctype = value
@@ -54,7 +51,7 @@ def _legacy_deferred_pos_invoices():
 
 
 def validate_invoice_type_change(doc):
-	"""POS Settings validate hook: gate the global invoice-type switch."""
+	"""Validate hook (POS Next Global Settings): gate the global invoice-type switch."""
 	from frappe import _
 
 	before = doc.get_doc_before_save()

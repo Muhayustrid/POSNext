@@ -9,6 +9,8 @@ from erpnext.stock.get_item_details import get_item_details
 from frappe import _
 from frappe.utils import add_days, cint, flt, nowdate
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
+
 
 def _check_guest():
 	if frappe.session.user == "Guest":
@@ -37,10 +39,10 @@ def _profile_value(pos_profile, fieldname):
 
 
 def _po_setting(pos_profile, fieldname):
-	"""Field from this profile's enabled POS Settings row, else None."""
+	"""Field from this profile's enabled POS Settings row, else the global single."""
 	if not pos_profile:
 		return None
-	return frappe.db.get_value("POS Settings", {"enabled": 1, "pos_profile": pos_profile}, fieldname)
+	return get_effective_pos_setting(pos_profile, fieldname)
 
 
 @frappe.whitelist()

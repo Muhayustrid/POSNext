@@ -13,6 +13,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_datetime, nowdate, today
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
+
 
 @frappe.whitelist()
 def get_customer_balance(customer, company=None):
@@ -124,12 +126,8 @@ def check_credit_sale_enabled(pos_profile):
 	if not pos_profile:
 		return False
 
-	# Get POS Settings for the profile
-	pos_settings = frappe.db.get_value(
-		"POS Settings", {"pos_profile": pos_profile}, "allow_credit_sale", as_dict=False
-	)
-
-	return bool(pos_settings)
+	# Enabled POS Settings row for the profile, else the global single
+	return bool(get_effective_pos_setting(pos_profile, "allow_credit_sale"))
 
 
 @frappe.whitelist()

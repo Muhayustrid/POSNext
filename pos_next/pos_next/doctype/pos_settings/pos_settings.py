@@ -5,18 +5,13 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
-from pos_next.invoice_type import get_pos_invoice_doctype, validate_invoice_type_change
-from pos_next.target_basis import validate_target_bases
+from pos_next.api.settings_resolver import get_effective_pos_settings
+from pos_next.invoice_type import get_pos_invoice_doctype
 
 
 class POSSettings(Document):
 	def validate(self):
 		"""Validate POS Settings"""
-		# invoice_type is global: every row must agree, and switching it is
-		# gated (no open shifts, no pending offline invoices).
-		validate_invoice_type_change(self)
-		# target bases are global too: both values must be in the valid set.
-		validate_target_bases(self)
 		# Guard against None values and validate discount percentage
 		max_discount = flt(self.max_discount_allowed)
 		if max_discount < 0 or max_discount > 100:
@@ -41,88 +36,6 @@ class POSSettings(Document):
 					"Please disable Partial Payment first."
 				)
 
-	def on_update(self):
-		"""Sync allow_negative_stock with Stock Settings"""
-		self.sync_negative_stock_setting()
-		self.sync_invoice_type()
-		self.sync_target_bases()
-
-	def sync_invoice_type(self):
-		"""Keep the global invoice_type identical on every POS Settings row.
-
-		db.set_value skips controller hooks, so this cannot recurse; the
-		validate gate (validate_invoice_type_change) already ran for the
-		row the user actually saved.
-		"""
-		frappe.db.set_value(
-			"POS Settings",
-			{"name": ["!=", self.name]},
-			"invoice_type",
-			self.invoice_type,
-			update_modified=False,
-		)
-
-	def sync_target_bases(self):
-		"""Keep the global target bases identical on every POS Settings row.
-
-		Same deal as sync_invoice_type: db.set_value skips controller hooks,
-		so this cannot recurse, and validate_target_bases already ran for the
-		row the user actually saved.
-		"""
-		for fieldname in ("monthly_target_basis", "overall_target_basis"):
-			frappe.db.set_value(
-				"POS Settings",
-				{"name": ["!=", self.name]},
-				fieldname,
-				self.get(fieldname),
-				update_modified=False,
-			)
-
-	def sync_negative_stock_setting(self):
-		"""
-		Synchronize allow_negative_stock with Stock Settings.
-
-		When enabled in POS Settings, it enables the global Stock Settings.
-		When disabled, it only disables global Stock Settings if no other
-		POS Settings have it enabled.
-
-		Note: Runs in the same transaction as the save, no manual commits.
-		"""
-		current_stock_setting = cint(
-			frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
-		)
-
-		if cint(self.allow_negative_stock):
-			# Enable Stock Settings if not already enabled
-			if not current_stock_setting:
-				frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1, update_modified=False)
-				frappe.msgprint(
-					"Stock Settings 'Allow Negative Stock' has been automatically enabled.",
-					indicator="green",
-					alert=True,
-				)
-		else:
-			# Only disable if no other enabled POS Settings have it enabled
-			if current_stock_setting:
-				# Use count for better performance and clarity
-				other_enabled_count = frappe.db.count(
-					"POS Settings",
-					{
-						"allow_negative_stock": 1,
-						"enabled": 1,  # Only check enabled POS Settings
-						"name": ["!=", self.name],
-					},
-				)
-
-				if other_enabled_count == 0:
-					frappe.db.set_single_value(
-						"Stock Settings", "allow_negative_stock", 0, update_modified=False
-					)
-					frappe.msgprint(
-						"Stock Settings 'Allow Negative Stock' has been automatically disabled.",
-						indicator="orange",
-						alert=True,
-					)
 
 
 @frappe.whitelist()
@@ -130,9 +43,11 @@ def get_pos_settings(pos_profile):
 	"""
 	Get POS Settings for a specific POS Profile.
 
-	Also injects the current global Stock Settings value to show the actual
-	source of truth, preventing confusion when the checkbox appears enabled
-	but the global setting was changed elsewhere.
+	An enabled POS Settings row wins whole; without one (no row or a disabled
+	row) every field falls back to the POS Next Global Settings single via
+	the resolver. Global settings (invoice_type, target bases,
+	allow_negative_stock) stay global and are injected here so this
+	per-profile feed stays complete for the POS screen.
 	"""
 	from frappe import _
 
@@ -145,17 +60,21 @@ def get_pos_settings(pos_profile):
 	if not has_access and not frappe.has_permission("POS Settings", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	settings = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "*", as_dict=True)
+	settings = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile, "enabled": 1}, "*", as_dict=True)
 
-	# If no settings exist, create default settings
 	if not settings:
-		settings = create_default_settings(pos_profile)
+		settings = get_effective_pos_settings(pos_profile)
 
-	# Inject the current global Stock Settings value for transparency
-	# This helps UI reflect the actual state even if multiple POS Settings exist
-	settings["_global_allow_negative_stock"] = cint(
-		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
+	# Global negative-stock switch now lives on the POS Next Global Settings
+	# single; the payload key stays so the POS screen is unchanged.
+	settings["allow_negative_stock"] = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "allow_negative_stock") or 0
 	)
+
+	# Legacy global columns: the DB columns survive the doctype migration
+	# (inert), so drop them instead of leaking stale per-row copies.
+	settings.pop("monthly_target_basis", None)
+	settings.pop("overall_target_basis", None)
 
 	# Mirror the bootstrap preload feed so both feeds agree; the UI treats a
 	# missing key as disabled.
@@ -167,16 +86,6 @@ def get_pos_settings(pos_profile):
 	settings["invoice_type"] = get_pos_invoice_doctype()
 
 	return settings
-
-
-def create_default_settings(pos_profile):
-	"""Create default POS Settings for a POS Profile"""
-	doc = frappe.new_doc("POS Settings")
-	doc.pos_profile = pos_profile
-	doc.enabled = 1
-	doc.insert()
-
-	return doc.as_dict()
 
 
 @frappe.whitelist()
@@ -206,6 +115,9 @@ def update_pos_settings(pos_profile, settings):
 		doc = frappe.new_doc("POS Settings")
 		doc.pos_profile = pos_profile
 		doc.update(settings)
+		# Every read path filters enabled=1; a stale SPA payload must never
+		# create a row those paths would ignore.
+		doc.enabled = 1
 		doc.insert()
 
 	return doc.as_dict()

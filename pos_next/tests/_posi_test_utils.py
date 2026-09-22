@@ -7,8 +7,6 @@ Duplicated from pos_next/api/test_pos_invoice_submit.py on purpose (tests
 must not import across app subpackages) — keep the two in sync.
 """
 
-from unittest import mock
-
 import frappe
 
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
@@ -25,18 +23,11 @@ _PROFILE_FILTER = [
 
 
 def _set_invoice_type(value):
-	"""Flip the site switch. The switch guard (open shifts / pending syncs) is
-	mock-neutralised: this shared dev site holds real open shifts."""
-	with mock.patch("frappe.db.count", return_value=0):
-		name = frappe.db.get_value("POS Settings", {}, "name")
-		if name:
-			doc = frappe.get_doc("POS Settings", name)
-		else:
-			doc = frappe.new_doc("POS Settings")
-			doc.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
-			doc.enabled = 1
-		doc.invoice_type = value
-		doc.save(ignore_permissions=True)
+	"""Flip the site switch on the POS Next Global Settings single.
+
+	Written at the DB level, past the switch guard: this shared dev site
+	holds real open shifts, so a validated save would be blocked."""
+	frappe.db.set_single_value("POS Next Global Settings", "invoice_type", value)
 	try:
 		del frappe.local._pos_next_invoice_doctype
 	except AttributeError:

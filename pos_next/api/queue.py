@@ -13,13 +13,15 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
+
 
 @frappe.whitelist()
 def get_next_queue_number(pos_profile: str) -> dict:
 	company = frappe.db.get_value("POS Profile", pos_profile, "company")
 	if not company:
 		frappe.throw(_("POS Profile {0} not found").format(pos_profile))
-	if not frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "enable_pos_queue"):
+	if not get_effective_pos_setting(pos_profile, "enable_pos_queue"):
 		return {"enabled": False}
 
 	date = nowdate()

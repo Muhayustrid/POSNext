@@ -88,9 +88,28 @@ def get_pos_profile_data(pos_profile):
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
 	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
+	from pos_next.api.settings_resolver import get_effective_pos_settings
+
+	# Global negative-stock switch lives on the POS Next Global Settings
+	# single; injected on every return path so the payload key stays.
+	allow_negative_stock = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "allow_negative_stock") or 0
+	)
+
+	def _payload(settings):
+		settings["allow_negative_stock"] = allow_negative_stock
+		return settings
+
+	def _resolved_defaults():
+		base = DEFAULT_POS_SETTINGS.copy()
+		for key, value in get_effective_pos_settings(pos_profile).items():
+			if key in base:
+				base[key] = value
+		base["enabled"] = 1
+		return base
 
 	if not pos_profile:
-		return DEFAULT_POS_SETTINGS.copy()
+		return _payload(_resolved_defaults())
 
 	try:
 		# Get POS Settings linked to this POS Profile
@@ -99,12 +118,12 @@ def get_pos_settings(pos_profile):
 		)
 
 		if not pos_settings:
-			return DEFAULT_POS_SETTINGS.copy()
+			return _payload(_resolved_defaults())
 
-		return pos_settings
+		return _payload(pos_settings)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")
-		return DEFAULT_POS_SETTINGS.copy()
+		return _payload(_resolved_defaults())
 
 
 @frappe.whitelist()
@@ -172,9 +191,9 @@ def get_receivable_accounts(pos_profile):
 	if not company:
 		return []
 
-	allow_credit_sale = cint(
-		frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "allow_credit_sale")
-	)
+	from pos_next.api.settings_resolver import get_effective_pos_setting
+
+	allow_credit_sale = cint(get_effective_pos_setting(pos_profile, "allow_credit_sale"))
 	if not allow_credit_sale:
 		return []
 

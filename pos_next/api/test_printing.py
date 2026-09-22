@@ -25,9 +25,10 @@ def _settings_row(**values):
 	Faked instead of written to the DB so knob bands are exercised even on a
 	site where the columns are not migrated yet (the API then filters them out
 	of the query and answers the getattr default, which is a different path).
+	A frappe._dict because the settings resolver reads the row with .get().
 	"""
-	row = SimpleNamespace(**{field: None for field in PRINT_CONFIG_FIELDS})
-	row.__dict__.update(values)
+	row = frappe._dict({field: None for field in PRINT_CONFIG_FIELDS})
+	row.update(values)
 	meta = SimpleNamespace(get=lambda _k: [SimpleNamespace(fieldname=f) for f in PRINT_CONFIG_FIELDS])
 	with patch("pos_next.api.printing.frappe.get_meta", return_value=meta), patch(
 		"pos_next.api.printing.frappe.db.get_value", return_value=row
@@ -111,15 +112,19 @@ class TestPrintingAPI(FrappeTestCase):
 
 	def test_fallback_enabled_defaults_to_true_when_unset(self):
 		# print_fallback_enabled defaults to 1 on the doctype. When no active
-		# POS Settings row exists for the profile the transport must still
-		# get fallback_enabled=True — a False there silently disables the
-		# whole fallback chain. (The column is NOT NULL DEFAULT 1 in the
-		# schema — an explicit NULL is unreachable, so "unset" means no row.)
+		# POS Settings row exists for the profile the resolver answers from
+		# the global single, so "unset" must hold at BOTH tiers here — the
+		# persisted single row is dropped for this test (the per-test
+		# rollback restores it), otherwise a site-wide 0 legitimately turns
+		# the whole fallback chain off.
 		settings_name = frappe.db.get_value(
 			"POS Settings", {"pos_profile": self.profile, "enabled": 1}, "name"
 		)
 		if settings_name:
 			frappe.db.set_value("POS Settings", settings_name, "enabled", 0)
+		frappe.db.delete(
+			"Singles", {"doctype": "POS Next Global Settings", "field": "print_fallback_enabled"}
+		)
 		try:
 			cfg = get_print_config(self.profile)
 			self.assertTrue(cfg["fallback_enabled"])

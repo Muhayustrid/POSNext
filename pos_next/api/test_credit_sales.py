@@ -5,7 +5,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
+from frappe.tests.utils import FrappeTestCase
+
 from pos_next.api import credit_sales
+from pos_next.api.credit_sales import check_credit_sale_enabled
+from pos_next.api.settings_resolver import GLOBAL_DOCTYPE
 
 
 def _builder_with_result(result):
@@ -101,3 +106,35 @@ class TestCreditSales(unittest.TestCase):
 		with patch("pos_next.api.credit_sales.frappe.get_doc", return_value=payment_entry):
 			with self.assertRaisesRegex(RuntimeError, "is not a valid customer advance"):
 				credit_sales._create_payment_entry_from_advance(invoice_doc, "PE-0001", 25)
+
+
+class TestCheckCreditSaleEnabledGlobalTier(FrappeTestCase):
+	"""A profile with no POS Settings row follows the global single's value."""
+
+	PROFILE = "PN-NO-SUCH-PROFILE"
+
+	def setUp(self):
+		super().setUp()
+		# Raw tabSingles row: None means "never persisted" and must be
+		# restored as an absence, not as a value.
+		row = frappe.db.sql(
+			"select value from `tabSingles` where doctype = %s and field = 'allow_credit_sale'",
+			GLOBAL_DOCTYPE,
+		)
+		self.orig = row[0][0] if row else None
+
+	def tearDown(self):
+		if self.orig is None:
+			frappe.db.delete(
+				"Singles", {"doctype": GLOBAL_DOCTYPE, "field": "allow_credit_sale"}
+			)
+		else:
+			frappe.db.set_single_value("POS Next Global Settings", "allow_credit_sale", self.orig)
+		frappe.db.commit()
+		super().tearDown()
+
+	def test_follows_the_global_value_both_ways(self):
+		for value, expected in ((0, False), (1, True)):
+			with self.subTest(allow_credit_sale=value):
+				frappe.db.set_single_value("POS Next Global Settings", "allow_credit_sale", value)
+				self.assertIs(check_credit_sale_enabled(self.PROFILE), expected)

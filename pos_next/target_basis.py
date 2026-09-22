@@ -21,10 +21,9 @@ _FIELDS = {"monthly": "monthly_target_basis", "overall": "overall_target_basis"}
 def get_target_basis(which):
 	"""The metric targets are measured against, for "monthly" or "overall".
 
-	Stored on the POS Settings rows - one global value shared by every row;
-	the POS Settings controller keeps all rows in sync on save, so reading
-	any row yields the site-wide choice. Invalid or empty values fall back
-	to Net Sales (the behaviour before this switch existed).
+	Stored on the POS Next Global Settings single - the site-wide choice.
+	Invalid or empty values fall back to Net Sales (the behaviour before
+	this switch existed).
 	"""
 	if which not in _FIELDS:
 		raise ValueError(f"unknown target basis slot: {which!r}")
@@ -34,8 +33,7 @@ def get_target_basis(which):
 	cached = cache.get(which)
 	if cached:
 		return cached
-	# NOTE: filters={} (any row) — filters=None would be a name lookup of None.
-	value = frappe.db.get_value("POS Settings", {}, _FIELDS[which]) or NET_SALES
+	value = frappe.db.get_single_value("POS Next Global Settings", _FIELDS[which]) or NET_SALES
 	if value not in TARGET_BASES:
 		value = NET_SALES
 	cache[which] = value
@@ -43,10 +41,10 @@ def get_target_basis(which):
 
 
 def validate_target_bases(doc):
-	"""POS Settings validate hook: keep both basis values in the valid set.
+	"""Validate hook (POS Next Global Settings): keep both basis values valid.
 
-	Empty is normalised to Net Sales (the default) so synced rows converge
-	on a valid value; anything else invalid is rejected.
+	Empty is normalised to Net Sales (the default); anything else invalid is
+	rejected.
 	"""
 	from frappe import _
 

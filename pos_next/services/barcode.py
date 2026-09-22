@@ -28,6 +28,8 @@ from typing import TypedDict
 import frappe
 from erpnext.stock.get_item_details import get_conversion_factor
 
+from pos_next.api.settings_resolver import get_global_barcode_rules
+
 logger = logging.getLogger(__name__)
 
 
@@ -132,35 +134,23 @@ def resolve_barcode(barcode: str, pos_profile: str) -> BarcodeResult | None:
 def _get_barcode_rules_for_profile(pos_profile: str) -> list[str] | None:
 	"""Return enabled Barcode Rule names for the given POS Profile.
 
-	Returns None when no per-profile configuration exists, which signals
-	the resolver to consider every active Barcode Rule. This keeps the
-	resolver functional on sites that have not yet migrated to the
-	POS Next `POS Settings` doctype (which adds `pos_profile` +
-	`barcode_rules`).
+	Rules come from the profile's enabled POS Settings row; without one, the
+	global single's table answers. Returns None when nothing is configured at
+	all, which signals the resolver to consider every active Barcode Rule (the
+	fail-open bias this service has always kept for unmigrated sites).
 	"""
-	settings_name = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "name")
-	if not settings_name:
+	rules = get_global_barcode_rules(pos_profile)
+	if not rules:
 		logger.info(
-			"resolve_barcode: no POS Settings row for profile=%r — falling back to all active rules",
+			"resolve_barcode: no barcode rules configured for profile=%r — falling back to all active rules",
 			pos_profile,
 		)
 		return None
 
-	try:
-		settings_doc = frappe.get_cached_doc("POS Settings", settings_name)
-	except Exception:
-		logger.warning(
-			"resolve_barcode: could not load POS Settings %r — falling back",
-			settings_name,
-		)
-		return None
-
-	rules_table = getattr(settings_doc, "barcode_rules", None) or []
-	enabled = [row.barcode_rule for row in rules_table if not row.disable]
+	enabled = [row.barcode_rule for row in rules if not row.disable]
 	logger.debug(
-		"resolve_barcode: profile=%r settings=%r enabled_rules=%s",
+		"resolve_barcode: profile=%r enabled_rules=%s",
 		pos_profile,
-		settings_name,
 		enabled,
 	)
 	return enabled

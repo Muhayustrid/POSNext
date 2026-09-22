@@ -35,21 +35,22 @@ class TestCustomersAPI(unittest.TestCase):
 			],
 		)
 
-	@patch("pos_next.api.customers.frappe.db")
+	@patch("pos_next.api.settings_resolver.frappe.db")
 	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_db):
 		# Explicit MagicMock: patch auto-derives the child mock class from the
 		# target attribute, and an AsyncMock here returns a coroutine instead
-		# of the value on Python 3.14.
-		mock_db.get_value = MagicMock(return_value="LOYALTY-A")
+		# of the value on Python 3.14. The row comes back dict-shaped because
+		# the settings resolver reads it with .get().
+		mock_db.get_value = MagicMock(
+			return_value={"name": "PS-0001", "default_loyalty_program": "LOYALTY-A"}
+		)
 
 		result = get_default_loyalty_program_from_settings(pos_profile="POS-A")
 
 		self.assertEqual(result, "LOYALTY-A")
-		mock_db.get_value.assert_called_once_with(
-			"POS Settings",
-			{"enabled": 1, "pos_profile": "POS-A"},
-			"default_loyalty_program",
-		)
+		filters = mock_db.get_value.call_args[0][1]
+		self.assertEqual(filters, {"pos_profile": "POS-A", "enabled": 1})
+		self.assertIn("default_loyalty_program", mock_db.get_value.call_args[0][2])
 
 	@patch("pos_next.api.customers.frappe.get_cached_value")
 	@patch("pos_next.api.customers.frappe.get_all")
@@ -67,6 +68,26 @@ class TestCustomersAPI(unittest.TestCase):
 		result = get_default_loyalty_program_from_settings(company="Company A")
 
 		self.assertIsNone(result)
+
+	@patch("pos_next.api.settings_resolver.frappe.get_meta")
+	@patch("pos_next.api.settings_resolver.frappe.db")
+	@patch("pos_next.api.customers.frappe.get_all")
+	def test_get_default_loyalty_program_from_settings_falls_back_to_global_default(
+		self,
+		mock_get_all,
+		mock_resolver_db,
+		mock_get_meta,
+	):
+		# The company scan finds no row default: the global single's persisted
+		# default_loyalty_program still applies.
+		mock_get_all.return_value = []
+		mock_get_meta.return_value.get_field.return_value = Mock(fieldtype="Link", default=None)
+		# Explicit MagicMock child: patch auto-derives AsyncMock on 3.14.
+		mock_resolver_db.sql = MagicMock(return_value=[("default_loyalty_program", "LOYALTY-G")])
+
+		result = get_default_loyalty_program_from_settings(company="Company A")
+
+		self.assertEqual(result, "LOYALTY-G")
 
 	@patch(
 		"pos_next.api.customers.frappe.local",

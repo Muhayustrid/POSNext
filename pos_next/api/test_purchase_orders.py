@@ -206,7 +206,12 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				"doctype": "Item",
 				"item_code": f"PO-T-{cls._uniq()}",
 				"item_name": f"PO Proxy Item {cls._uniq()}",
-				"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+				# creation-asc: an unordered first row can land on a fixture
+				# group carrying default Item Tax rows, which silently adds
+				# tax rows (and tax money) to every PO built from the item
+				"item_group": frappe.db.get_value(
+					"Item Group", {"is_group": 0}, "name", order_by="creation asc"
+				),
 				"stock_uom": frappe.db.get_value("UOM", "Unit", "name") or "Nos",
 				"is_stock_item": 1,
 				"is_purchase_item": 1,

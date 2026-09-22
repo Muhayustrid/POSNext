@@ -6,6 +6,8 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
+
 
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
@@ -230,12 +232,7 @@ def get_default_loyalty_program_from_settings(company=None, pos_profile=None):
 	    str: Loyalty program name or None if not configured
 	"""
 	if pos_profile:
-		pos_settings = frappe.db.get_value(
-			"POS Settings",
-			{"enabled": 1, "pos_profile": pos_profile},
-			"default_loyalty_program",
-		)
-		return pos_settings or None
+		return get_effective_pos_setting(pos_profile, "default_loyalty_program") or None
 
 	if not company:
 		return None
@@ -256,6 +253,10 @@ def get_default_loyalty_program_from_settings(company=None, pos_profile=None):
 	unique_programs = list(dict.fromkeys(program for program in company_programs if program))
 	if len(unique_programs) == 1:
 		return unique_programs[0]
+
+	if not unique_programs:
+		# No company-specific row default: a persisted global default still applies.
+		return get_effective_pos_setting(None, "default_loyalty_program") or None
 
 	return None
 

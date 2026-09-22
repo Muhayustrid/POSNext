@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from unittest import mock
 
 import frappe
@@ -12,29 +11,9 @@ from pos_next.invoice_type import (
 )
 
 
-@contextmanager
-def _no_blockers():
-	"""Make the switch guard see zero open shifts / pending syncs.
-
-	Site data (posnext.localhost) holds real open POS Opening Shifts, so the
-	guard would legitimately block any switch; the allowed-path tests only
-	need the zero-count case.
-	"""
-	with mock.patch("frappe.db.count", return_value=0):
-		yield
-
-
 def _set_invoice_type(value):
-	"""Flip the global switch stored on the POS Settings rows."""
-	name = frappe.db.get_value("POS Settings", {}, "name")
-	if name:
-		doc = frappe.get_doc("POS Settings", name)
-	else:
-		doc = frappe.new_doc("POS Settings")
-		doc.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
-		doc.enabled = 1
-	doc.invoice_type = value
-	doc.save(ignore_permissions=True)
+	"""Flip the global switch stored on the POS Next Global Settings single."""
+	frappe.db.set_single_value("POS Next Global Settings", "invoice_type", value)
 
 
 class TestInvoiceType(FrappeTestCase):
@@ -42,8 +21,7 @@ class TestInvoiceType(FrappeTestCase):
 		self._clear_cache()
 
 	def tearDown(self):
-		with _no_blockers():
-			_set_invoice_type(SALES_INVOICE)
+		_set_invoice_type(SALES_INVOICE)
 		self._clear_cache()
 		frappe.db.commit()
 
@@ -55,9 +33,9 @@ class TestInvoiceType(FrappeTestCase):
 			pass  # not cached yet (`in frappe.local` is unreliable on v16)
 
 	def test_code_default_is_pos_invoice(self):
-		"""A site with no stored choice gets POS Invoice. The stored row wins
+		"""A site with no stored choice gets POS Invoice. The stored value wins
 		when present, so this exercises the resolver's fallback directly."""
-		with mock.patch("frappe.db.get_value", return_value=None):
+		with mock.patch("frappe.db.get_single_value", return_value=None):
 			self._clear_cache()
 			self.assertEqual(get_pos_invoice_doctype(), POS_INVOICE)
 			self.assertEqual(get_sales_report_doctypes(), ["POS Invoice", "Sales Invoice"])
@@ -69,8 +47,7 @@ class TestInvoiceType(FrappeTestCase):
 		self.assertEqual(get_sales_report_doctypes(), ["Sales Invoice"])
 
 	def test_switch_allowed_without_open_shift(self):
-		with _no_blockers():
-			_set_invoice_type(POS_INVOICE)
+		_set_invoice_type(POS_INVOICE)
 		self._clear_cache()
 		self.assertEqual(get_pos_invoice_doctype(), POS_INVOICE)
 		self.assertEqual(get_sales_report_doctypes(), ["POS Invoice", "Sales Invoice"])
@@ -116,8 +93,11 @@ class TestInvoiceType(FrappeTestCase):
 		shift.reload()
 		shift.submit()
 		try:
+			# a validated save on the single is what runs the switch guard
+			doc = frappe.get_doc("POS Next Global Settings")
+			doc.invoice_type = POS_INVOICE
 			with self.assertRaises(frappe.ValidationError):
-				_set_invoice_type(POS_INVOICE)
+				doc.save(ignore_permissions=True)
 		finally:
 			# shift.cancel() is not staleness-proof: on_submit's db.set_value
 			# bumps `modified`, leaving the in-memory doc outdated. Flip

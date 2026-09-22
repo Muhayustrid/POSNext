@@ -40,6 +40,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
 from pos_next.overrides.pos_offer_usage import parse_applied_offer_rules
 
 CODE_DOCTYPE = "POS Discount Confirmation Code"
@@ -217,14 +218,14 @@ def validate_code(code_value, company):
 
 
 def refund_code_required(pos_profile):
-	"""Refund gate toggle from POS Settings (per profile).
+	"""Refund gate toggle from POS Settings (per profile, else global single).
 
-	Missing setting row or value fails closed — the gate stays on until head
-	office explicitly turns it off.
+	An unset value fails closed — the gate stays on until head office
+	explicitly turns it off.
 	"""
 	if not pos_profile:
 		return True
-	value = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "require_refund_code")
+	value = get_effective_pos_setting(pos_profile, "require_refund_code")
 	return True if value is None else bool(cint(value))
 
 

@@ -131,15 +131,20 @@ class TestEnforcePostingDatePolicy(unittest.TestCase):
 
 class TestAllowChangePostingDate(unittest.TestCase):
 	def test_reads_the_profiles_enabled_settings_row(self):
-		get_value = Mock(return_value=1)
-		with patch("pos_next.api.backdate_invoices.frappe.db.get_value", get_value):
+		# Through the resolver's row tier: the enabled POS Settings row for
+		# the profile supplies the flag.
+		get_value = Mock(return_value={"name": "PS-0001", "allow_change_posting_date": 1})
+		with patch("pos_next.api.settings_resolver.frappe.db.get_value", get_value):
 			self.assertTrue(allow_change_posting_date("Profile 1"))
 		filters = get_value.call_args[0][1]
-		self.assertEqual(filters, {"enabled": 1, "pos_profile": "Profile 1"})
-		self.assertEqual(get_value.call_args[0][2], "allow_change_posting_date")
+		self.assertEqual(filters, {"pos_profile": "Profile 1", "enabled": 1})
+		self.assertIn("allow_change_posting_date", get_value.call_args[0][2])
 
 	def test_off_value_or_missing_profile_is_false(self):
-		with patch("pos_next.api.backdate_invoices.frappe.db.get_value", return_value=0):
+		with patch(
+			"pos_next.api.settings_resolver.frappe.db.get_value",
+			return_value={"name": "PS-0001", "allow_change_posting_date": 0},
+		):
 			self.assertFalse(allow_change_posting_date("Profile 1"))
 		self.assertFalse(allow_change_posting_date(None))
 
@@ -293,8 +298,11 @@ class TestBackdateEntryFlow(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# creation-asc: an unordered first row can land on a demo/test-chart
+		# profile (INR _Test Company) whose party accounts break every submit
 		cls.profile = frappe.db.get_value(
-			"POS Profile", _PROFILE_FILTER, ["name", "company", "warehouse"], as_dict=True
+			"POS Profile", _PROFILE_FILTER, ["name", "company", "warehouse"], as_dict=True,
+			order_by="creation asc",
 		)
 		if not cls.profile:
 			raise unittest.SkipTest("no schedule-safe POS Profile")

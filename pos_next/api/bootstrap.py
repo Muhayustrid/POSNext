@@ -28,8 +28,10 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Coalesce
+from frappe.utils import cint
 
 from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
+from pos_next.api.settings_resolver import get_effective_pos_settings
 from pos_next.invoice_type import get_pos_invoice_doctype
 
 
@@ -210,6 +212,20 @@ def _get_pos_settings(pos_profile_doc):
 	# Doctype new POS invoices are created in ("Sales Invoice"/"POS Invoice");
 	# resolved outside the try so the exception path also carries it.
 	invoice_type = get_pos_invoice_doctype()
+	# Global negative-stock switch lives on the POS Next Global Settings
+	# single; injected outside the try so the payload key survives errors.
+	allow_negative_stock = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "allow_negative_stock") or 0
+	)
+
+	def _resolved_defaults():
+		base = DEFAULT_POS_SETTINGS.copy()
+		for key, value in get_effective_pos_settings(pos_profile_doc.name).items():
+			if key in base:
+				base[key] = value
+		base["enabled"] = 1
+		return base
+
 	try:
 		settings = (
 			frappe.db.get_value(
@@ -218,7 +234,7 @@ def _get_pos_settings(pos_profile_doc):
 				POS_SETTINGS_FIELDS,
 				as_dict=True,
 			)
-			or DEFAULT_POS_SETTINGS.copy()
+			or _resolved_defaults()
 		)
 
 		# Derive from POS Profile (single source of truth)
@@ -230,12 +246,14 @@ def _get_pos_settings(pos_profile_doc):
 		# missing key as disabled.
 		settings["queue_enabled"] = bool(settings.get("enable_pos_queue"))
 		settings["invoice_type"] = invoice_type
+		settings["allow_negative_stock"] = allow_negative_stock
 
 		return settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")
-		settings = DEFAULT_POS_SETTINGS.copy()
+		settings = _resolved_defaults()
 		settings["invoice_type"] = invoice_type
+		settings["allow_negative_stock"] = allow_negative_stock
 		return settings
 
 

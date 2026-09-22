@@ -73,11 +73,13 @@ def _code_row(**overrides):
 
 def _settings_then_code(setting_value, code_row=None):
 	"""db.get_value double: the POS Settings toggle lookup vs the code row
-	lookup — the refund gate reads the toggle before validating the code."""
+	lookup — the refund gate reads the toggle before validating the code.
+	The POS Settings answer is a row dict because the settings resolver
+	reads it with .get()."""
 
 	def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
 		if doctype == "POS Settings":
-			return setting_value
+			return {"name": "PS-0001", "require_refund_code": setting_value}
 		return code_row
 
 	return lookup
@@ -546,10 +548,12 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 
 	@staticmethod
 	def _return_code_lookup(validate_result=None, lock_result=None, setting_value=1):
-		"""Same as _code_lookup but answers the POS Settings toggle lookup too."""
+		"""Same as _code_lookup but answers the POS Settings toggle lookup too.
+		The POS Settings answer is a row dict because the settings resolver
+		reads it with .get()."""
 		def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
 			if doctype == "POS Settings":
-				return setting_value
+				return {"name": "PS-0001", "require_refund_code": setting_value}
 			if for_update:
 				return lock_result
 			return validate_result
@@ -760,7 +764,7 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 
 
 class TestRefundCodeRequired(unittest.TestCase):
-	"""Per-profile toggle from POS Settings; missing data fails closed."""
+	"""Per-profile toggle (enabled row, else the global single); unset fails closed."""
 
 	def test_no_profile_fails_closed(self):
 		with DB_PATCH as mock_db:
@@ -768,19 +772,33 @@ class TestRefundCodeRequired(unittest.TestCase):
 			self.assertTrue(refund_code_required(""))
 			mock_db.get_value.assert_not_called()
 
-	def test_missing_setting_row_fails_closed(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = None
-			self.assertTrue(refund_code_required("Profile 1"))
-
 	def test_disabled_setting_is_open(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = 0
+		get_value = MagicMock(return_value={"name": "PS-0001", "require_refund_code": 0})
+		with patch("pos_next.api.settings_resolver.frappe.db.get_value", get_value):
 			self.assertFalse(refund_code_required("Profile 1"))
+		self.assertEqual(get_value.call_args[0][1], {"pos_profile": "Profile 1", "enabled": 1})
+		self.assertIn("require_refund_code", get_value.call_args[0][2])
 
 	def test_enabled_setting_is_closed(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = 1
+		with patch(
+			"pos_next.api.settings_resolver.frappe.db.get_value",
+			return_value={"name": "PS-0001", "require_refund_code": 1},
+		):
+			self.assertTrue(refund_code_required("Profile 1"))
+
+	def test_missing_row_falls_back_to_the_global_default_and_stays_closed(self):
+		# No enabled row and nothing persisted on the single: its meta default
+		# (1) keeps the gate closed until head office explicitly turns it off.
+		with (
+			patch("pos_next.api.settings_resolver.frappe.db") as mock_db,
+			patch("pos_next.api.settings_resolver.frappe.get_meta") as mock_meta,
+		):
+			# Explicit MagicMock children: patch auto-derives AsyncMock on 3.14.
+			mock_db.get_value = MagicMock(return_value=None)
+			mock_db.sql = MagicMock(return_value=[])
+			mock_meta.return_value.get_field.return_value = SimpleNamespace(
+				fieldtype="Check", default="1"
+			)
 			self.assertTrue(refund_code_required("Profile 1"))
 
 

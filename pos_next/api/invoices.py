@@ -12,6 +12,10 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate, nowtime
 
+from pos_next.api.settings_resolver import (
+	get_effective_pos_setting,
+	get_effective_pos_settings,
+)
 from pos_next.invoice_type import (
 	POS_INVOICE,
 	get_pos_invoice_doctype,
@@ -30,7 +34,6 @@ FIELD_DISCOUNT_PERCENTAGE = "discount_percentage"
 FIELD_ALLOW_USER_TO_EDIT_RATE = "allow_user_to_edit_rate"
 FIELD_MAX_DISCOUNT_ALLOWED = "max_discount_allowed"
 FIELD_DISABLE_ROUNDED_TOTAL = "disable_rounded_total"
-FIELD_ALLOW_NEGATIVE_STOCK = "allow_negative_stock"
 
 # Doctypes
 DOCTYPE_SALES_INVOICE = "Sales Invoice"
@@ -132,14 +135,11 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
 			"message": _("POS Profile is required to validate rate edit for item {0}").format(item_code),
 		}
 
-	# Use cached POS Settings if provided, otherwise fetch from DB
+	# Use cached POS Settings if provided, otherwise resolve (row, else global)
 	pos_settings = pos_settings_cache
 	if pos_settings is None:
-		pos_settings = frappe.db.get_value(
-			DOCTYPE_POS_SETTINGS,
-			{"pos_profile": pos_profile},
-			[FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED],
-			as_dict=True,
+		pos_settings = get_effective_pos_settings(
+			pos_profile, [FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED]
 		)
 
 	# Check if POS Settings exists
@@ -483,9 +483,7 @@ def _validate_receivable_account(account, company, pos_profile):
 	if cint(acc.disabled):
 		frappe.throw(_("Receivable account {0} is disabled").format(account))
 
-	allow_credit_sale = cint(
-		frappe.db.get_value(DOCTYPE_POS_SETTINGS, {"pos_profile": pos_profile}, "allow_credit_sale")
-	)
+	allow_credit_sale = cint(get_effective_pos_setting(pos_profile, "allow_credit_sale"))
 	if not allow_credit_sale:
 		frappe.throw(_("Credit sales are not enabled for this POS Profile."))
 
@@ -601,20 +599,14 @@ def _get_item_negative_stock_allow_set(items):
 
 def _should_block(pos_profile):
 	"""Check if sale should be blocked for insufficient stock."""
-	# First check global ERPNext Stock Settings
+	# The negative-stock switch lives in ERPNext Stock Settings, kept in sync
+	# with the POS Next Global Settings single by that doctype's bridge.
 	allow_negative = cint(frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0)
 	if allow_negative:
 		return False
 
-	# Check POS Settings for the specific profile
+	# Fall back to the POS Profile's block toggle
 	if pos_profile:
-		# Check if POS Settings allows negative stock
-		pos_settings_allow_negative = cint(
-			frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "allow_negative_stock") or 0
-		)
-		if pos_settings_allow_negative:
-			return False
-
 		# Try to get custom field (may not exist in vanilla ERPNext)
 		block_sale = cint(
 			frappe.db.get_value("POS Profile", pos_profile, "posa_block_sale_beyond_available_qty") or 1
@@ -727,9 +719,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
 		return_validity_days = cint(
-			frappe.db.get_value(
-				"POS Settings", {"pos_profile": invoice_info.pos_profile}, "return_validity_days"
-			)
+			get_effective_pos_setting(invoice_info.pos_profile, "return_validity_days")
 			or 0
 		)
 
@@ -972,20 +962,13 @@ def update_invoice(data):
 		# ========================================================================
 		pos_settings_cache = None
 		if pos_profile:
-			pos_settings_cache = frappe.db.get_value(
-				DOCTYPE_POS_SETTINGS,
-				{"pos_profile": pos_profile},
-				[FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED, FIELD_ALLOW_NEGATIVE_STOCK],
-				as_dict=True,
+			pos_settings_cache = get_effective_pos_settings(
+				pos_profile, [FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED]
 			)
 			# disable_rounded_total is on POS Profile, not POS Settings
-			pos_profile_rounded = frappe.db.get_value(
+			pos_settings_cache[FIELD_DISABLE_ROUNDED_TOTAL] = frappe.db.get_value(
 				DOCTYPE_POS_PROFILE, pos_profile, FIELD_DISABLE_ROUNDED_TOTAL
 			)
-			if pos_settings_cache:
-				pos_settings_cache[FIELD_DISABLE_ROUNDED_TOTAL] = pos_profile_rounded
-			else:
-				pos_settings_cache = {FIELD_DISABLE_ROUNDED_TOTAL: pos_profile_rounded}
 
 		# ========================================================================
 		# DISCOUNT CALCULATION - CRITICAL LOGIC
@@ -1730,7 +1713,7 @@ def submit_invoice(invoice=None, data=None):
 		is_credit_sale = cint(data.get("is_credit_sale") or invoice.get("is_credit_sale"))
 		if is_credit_sale and not invoice_doc.payments and flt(invoice_doc.grand_total) > 0:
 			allow_credit_sale = cint(
-				frappe.db.get_value(DOCTYPE_POS_SETTINGS, {"pos_profile": pos_profile}, "allow_credit_sale")
+				get_effective_pos_setting(pos_profile, "allow_credit_sale")
 			)
 			if not allow_credit_sale:
 				frappe.throw(_("Credit sales are not enabled for this POS Profile."))
@@ -2254,7 +2237,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	return_validity_days = 0
 	if pos_profile:
 		return_validity_days = cint(
-			frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "return_validity_days") or 0
+			get_effective_pos_setting(pos_profile, "return_validity_days") or 0
 		)
 
 	si = frappe.qb.DocType(doctype)
@@ -2371,9 +2354,7 @@ def check_invoice_return_validity(invoice_name):
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
 		return_validity_days = cint(
-			frappe.db.get_value(
-				"POS Settings", {"pos_profile": invoice_info.pos_profile}, "return_validity_days"
-			)
+			get_effective_pos_setting(invoice_info.pos_profile, "return_validity_days")
 			or 0
 		)
 
@@ -2420,9 +2401,7 @@ def get_invoice_for_return(invoice_name):
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
 		return_validity_days = cint(
-			frappe.db.get_value(
-				"POS Settings", {"pos_profile": invoice_info.pos_profile}, "return_validity_days"
-			)
+			get_effective_pos_setting(invoice_info.pos_profile, "return_validity_days")
 			or 0
 		)
 
@@ -2737,9 +2716,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
 		return_validity_days = cint(
-			frappe.db.get_value(
-				"POS Settings", {"pos_profile": invoice_info.pos_profile}, "return_validity_days"
-			)
+			get_effective_pos_setting(invoice_info.pos_profile, "return_validity_days")
 			or 0
 		)
 

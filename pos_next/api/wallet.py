@@ -10,6 +10,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from pos_next.api.settings_resolver import get_effective_pos_settings
+
 
 def validate_wallet_payment(doc, method=None):
 	"""
@@ -343,13 +345,12 @@ def get_or_create_wallet(customer, company, pos_settings=None, force_create=Fals
 
 
 def get_pos_settings(pos_profile):
-	"""Get POS Settings for a profile."""
+	"""Effective POS Settings for a profile (enabled row, else global single)."""
 	if not pos_profile:
 		return None
 
-	return frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": pos_profile},
+	return get_effective_pos_settings(
+		pos_profile,
 		[
 			"enable_loyalty_program",
 			"default_loyalty_program",
@@ -357,7 +358,6 @@ def get_pos_settings(pos_profile):
 			"auto_create_wallet",
 			"loyalty_to_wallet",
 		],
-		as_dict=True,
 	)
 
 

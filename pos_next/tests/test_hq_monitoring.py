@@ -103,11 +103,21 @@ class TestHQMonitoring(IntegrationTestCase):
 			"HQMB", cls.company_b, make_test_warehouse("HQMB", cls.company_b)
 		)
 		# refund code gate fails closed; disable it for these test profiles
+		# (only an enabled row is honoured by the settings resolver)
 		for profile in (cls.profile_a, cls.profile_b):
 			if not frappe.db.exists("POS Settings", {"pos_profile": profile}):
 				frappe.get_doc(
-					{"doctype": "POS Settings", "pos_profile": profile, "require_refund_code": 0}
+					{
+						"doctype": "POS Settings",
+						"pos_profile": profile,
+						"enabled": 1,
+						"require_refund_code": 0,
+					}
 				).insert(ignore_permissions=True)
+			else:
+				frappe.db.set_value(
+					"POS Settings", {"pos_profile": profile}, {"enabled": 1, "require_refund_code": 0}
+				)
 		# The site's real customers restrict "Allowed To Transact With" to their
 		# outlet companies; a fresh unrestricted customer transacts with any of
 		# the ad-hoc test companies.
@@ -953,8 +963,17 @@ class TestTargetBasis(IntegrationTestCase):
 		for profile in (cls.profile_gp, cls.profile_np):
 			if not frappe.db.exists("POS Settings", {"pos_profile": profile}):
 				frappe.get_doc(
-					{"doctype": "POS Settings", "pos_profile": profile, "require_refund_code": 0}
+					{
+						"doctype": "POS Settings",
+						"pos_profile": profile,
+						"enabled": 1,
+						"require_refund_code": 0,
+					}
 				).insert(ignore_permissions=True)
+			else:
+				frappe.db.set_value(
+					"POS Settings", {"pos_profile": profile}, {"enabled": 1, "require_refund_code": 0}
+				)
 		cls.customer = cls._make_customer()
 		cls.price_list = cls._make_price_list()
 		cls.mode_gp = cls._profile_mode(cls.profile_gp)
@@ -1236,13 +1255,13 @@ class TestTargetBasis(IntegrationTestCase):
 			("overall_target_basis", overall),
 		):
 			if value:
-				frappe.db.set_value("POS Settings", {}, fieldname, value, update_modified=False)
+				frappe.db.set_single_value("POS Next Global Settings", fieldname, value)
 		cls._clear_basis_cache()
 
 	@classmethod
 	def _restore_default_basis(cls):
 		for fieldname in ("monthly_target_basis", "overall_target_basis"):
-			frappe.db.set_value("POS Settings", {}, fieldname, NET_SALES, update_modified=False)
+			frappe.db.set_single_value("POS Next Global Settings", fieldname, NET_SALES)
 		cls._clear_basis_cache()
 
 	def _dashboard(self, company):
@@ -1291,14 +1310,13 @@ class TestTargetBasis(IntegrationTestCase):
 		self.assertIsNone(sheet["zero_cost_rows"])
 
 	# ------------------------------------------------------------------
-	# setter / sync / validation
+	# setter / validation
 	# ------------------------------------------------------------------
 
-	def test_target_basis_setter_sync_and_validation(self):
+	def test_target_basis_setter_and_validation(self):
 		frappe.set_user(ADMIN)
 		try:
-			row = frappe.db.get_value("POS Settings", {"pos_profile": self.profile_np}, "name")
-			doc = frappe.get_doc("POS Settings", row)
+			doc = frappe.get_doc("POS Next Global Settings")
 			doc.monthly_target_basis = GROSS_PROFIT
 			doc.overall_target_basis = NET_PROFIT
 			doc.save(ignore_permissions=True)
@@ -1306,26 +1324,15 @@ class TestTargetBasis(IntegrationTestCase):
 			self.assertEqual(get_target_basis("monthly"), GROSS_PROFIT)
 			self.assertEqual(get_target_basis("overall"), NET_PROFIT)
 
-			# on_update synced the global switch onto every other row
-			for name in frappe.get_all(
-				"POS Settings", filters={"name": ["!=", row]}, pluck="name"
-			):
-				self.assertEqual(
-					frappe.db.get_value("POS Settings", name, "monthly_target_basis"), GROSS_PROFIT
-				)
-				self.assertEqual(
-					frappe.db.get_value("POS Settings", name, "overall_target_basis"), NET_PROFIT
-				)
-
 			# invalid values are rejected by the controller
-			bad = frappe.get_doc("POS Settings", row)
+			bad = frappe.get_doc("POS Next Global Settings")
 			bad.monthly_target_basis = "Bogus"
 			with self.assertRaises(frappe.ValidationError):
 				bad.save(ignore_permissions=True)
 
 			# junk that slipped into the DB reads back as the Net Sales default
-			frappe.db.set_value(
-				"POS Settings", row, "overall_target_basis", "Junk", update_modified=False
+			frappe.db.set_single_value(
+				"POS Next Global Settings", "overall_target_basis", "Junk"
 			)
 			self._clear_basis_cache()
 			self.assertEqual(get_target_basis("overall"), NET_SALES)

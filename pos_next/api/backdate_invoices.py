@@ -22,6 +22,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, getdate, nowdate
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
+
 BACKDATE_ROLES = ("System Manager", "Nexus POS Manager")
 
 
@@ -33,18 +35,10 @@ def has_backdate_role():
 
 
 def allow_change_posting_date(pos_profile):
-	"""The profile's enabled POS Settings row decides (field default is off)."""
+	"""The enabled row decides, else the global single (field default is off)."""
 	if not pos_profile:
 		return False
-	return bool(
-		cint(
-			frappe.db.get_value(
-				"POS Settings",
-				{"enabled": 1, "pos_profile": pos_profile},
-				"allow_change_posting_date",
-			)
-		)
-	)
+	return bool(cint(get_effective_pos_setting(pos_profile, "allow_change_posting_date")))
 
 
 def _check_backdate_access(pos_profile):

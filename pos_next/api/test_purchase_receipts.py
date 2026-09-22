@@ -27,7 +27,11 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
+		# creation-asc: an unordered first row can land on a demo/test-chart
+		# profile (INR _Test Company) whose party accounts break every draft
+		cls.pos_profile = frappe.db.get_value(
+			"POS Profile", {"disabled": 0}, "name", order_by="creation asc"
+		)
 		cls.profile_company = cls.warehouse = None
 		if cls.pos_profile:
 			cls.profile_company, cls.warehouse = frappe.db.get_value(
@@ -191,7 +195,12 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 				"doctype": "Item",
 				"item_code": f"PR-T-{cls._uniq()}",
 				"item_name": f"PR Proxy Item {cls._uniq()}",
-				"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name"),
+				# creation-asc: an unordered first row can land on a fixture
+				# group carrying default Item Tax rows, which silently adds
+				# tax rows (and tax money) to every PO built from the item
+				"item_group": frappe.db.get_value(
+					"Item Group", {"is_group": 0}, "name", order_by="creation asc"
+				),
 				"stock_uom": frappe.db.get_value("UOM", "Unit", "name") or "Nos",
 				"is_stock_item": 1,
 				"is_purchase_item": 1,

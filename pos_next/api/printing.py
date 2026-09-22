@@ -15,6 +15,8 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
+from pos_next.api.settings_resolver import get_effective_pos_settings
+
 PRINT_CONFIG_FIELDS = (
 	"print_driver",
 	"imin_paper_width",
@@ -143,11 +145,13 @@ def _normalized_print_config(settings):
 
 
 def _resolve_settings_row(pos_profile):
-	"""(resolved_profile, settings_row_or_None) with the meta guard applied.
+	"""(resolved_profile, effective_settings_or_None) with the meta guard applied.
 
 	The meta guard keeps the endpoint answering transport defaults on a site
 	whose POS Settings print columns have not migrated yet, instead of raising
-	pymysql's Unknown column error.
+	pymysql's Unknown column error. Without a profile the newest enabled row is
+	probed first; with neither an enabled row nor a profile, the resolver's
+	global single tier answers.
 	"""
 	resolved_profile = pos_profile
 	if not resolved_profile:
@@ -165,13 +169,8 @@ def _resolve_settings_row(pos_profile):
 	else:
 		fields = []
 
-	if fields and resolved_profile:
-		settings = frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": resolved_profile, "enabled": 1},
-			list(fields),
-			as_dict=True,
-		)
+	if fields:
+		settings = get_effective_pos_settings(resolved_profile, fields)
 	else:
 		settings = None
 

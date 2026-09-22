@@ -17,3 +17,5 @@ pos_next.patches.v2_7_0.reorder_pos_settings_fields
 pos_next.patches.v2_8_0.reorder_pos_settings_fields
 pos_next.patches.v2_9_0.reorder_pos_settings_fields
 pos_next.patches.v2_10_0.reorder_pos_settings_fields
+pos_next.patches.v2_11_0.copy_global_settings_to_single
+pos_next.patches.v2_11_0.reorder_pos_settings_fields
