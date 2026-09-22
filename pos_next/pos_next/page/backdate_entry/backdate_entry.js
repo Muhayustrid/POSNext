@@ -139,7 +139,7 @@ class BackdateEntry {
 	}
 
 	// ------------------------------------------------------------------
-	// Gate: role check first; the per-outlet POS Settings flag shows as a
+	// Gate: role check first; the per-profile POS Settings flag shows as a
 	// badge per shift and is enforced server-side on every action.
 	// ------------------------------------------------------------------
 
@@ -159,7 +159,7 @@ class BackdateEntry {
 		);
 	}
 
-	// The "select an outlet" hint only belongs to the outlet list; during
+	// The "select a profile" hint only belongs to the profile list; during
 	// entry it would describe a step that is already done.
 	_set_hint(show) {
 		if (this.$hint) this.$hint.toggle(Boolean(show));
@@ -168,7 +168,7 @@ class BackdateEntry {
 	_setup() {
 		this.$root.html(`
 			<div class="bd-hint" data-bd-hint-root>${__(
-				"Select an outlet with a closed shift to reopen for backdate entry"
+				"Select a POS Profile with a closed shift to reopen for backdate entry"
 			)}</div>
 			<div class="bd-body"></div>`);
 		this.$body = this.$root.find(".bd-body");
@@ -187,7 +187,7 @@ class BackdateEntry {
 	}
 
 	_load_context(company) {
-		// while an outlets list is on screen, swap only its rows for the
+		// while the profile list is on screen, swap only its rows for the
 		// loading note so the filter dropdowns do not flash away
 		if (this.view !== "entry") {
 			const $list = this.$body.find(".bd-list");
@@ -216,8 +216,8 @@ class BackdateEntry {
 	}
 
 	// ------------------------------------------------------------------
-	// Outlet + closed-shift list (shifts grouped per profile; one POS
-	// Settings row per profile so every shift of an outlet agrees)
+	// POS Profile + closed-shift list (shifts grouped per profile; one POS
+	// Settings row per profile so every shift of a profile agrees)
 	// ------------------------------------------------------------------
 
 	_outlets() {
@@ -287,13 +287,13 @@ class BackdateEntry {
 		const badge = selected
 			? selected.setting_on
 				? `<span class="indicator-pill green">${__("Backdate entry enabled")}</span>`
-				: `<span class="indicator-pill gray">${__("Backdate entry is disabled for this outlet")}</span>`
+				: `<span class="indicator-pill gray">${__("Backdate entry is disabled for this POS Profile")}</span>`
 			: "";
 		this.$body.html(`
 			<div class="bd-toolbar bd-toolbar--filters">
 				${company_field}
 				<div class="bd-field">
-					<label class="bd-label" for="bd-outlet">${__("Outlet")}</label>
+					<label class="bd-label" for="bd-outlet">${__("POS Profile")}</label>
 					<select class="bd-select" id="bd-outlet" data-bd-outlet>${options}</select>
 				</div>
 				${badge ? `<div class="bd-toolbar-note">${badge}</div>` : ""}
@@ -325,7 +325,7 @@ class BackdateEntry {
 						"Reopen Shift"
 					)}</button>`
 				: `<button class="btn btn-default btn-sm" disabled title="${__(
-						"Backdate entry is disabled for this outlet"
+						"Backdate entry is disabled for this POS Profile"
 					)}">${__("Reopen Shift")}</button>`;
 		return `<div class="bd-card bd-row" data-bd-shift="${frappe.utils.escape_html(shift.name)}">
 			<div class="bd-row-main">
@@ -344,7 +344,7 @@ class BackdateEntry {
 				this.company = e.currentTarget.value;
 				this.outlet = "";
 				// refetch with the filter so the 100-most-recent window is
-				// scoped to the chosen company before the outlet list builds
+				// scoped to the chosen company before the profile list builds
 				this._load_context(this.company);
 			})
 			.off("change", "[data-bd-outlet]")
@@ -1026,7 +1026,7 @@ class BackdateEntry {
 						limit: 20,
 					},
 					callback: (r) => {
-						// only the outlet's own sales inside the shift window are offered
+						// only the profile's own sales inside the shift window are offered
 						this.invoice_results = (r.message || []).filter((inv) => !inv.is_return);
 						done(
 							this.invoice_results.map((inv) => ({
@@ -1115,7 +1115,7 @@ class BackdateEntry {
 	}
 
 	_load_refund_gate() {
-		// POS Settings require_refund_code for this outlet (UI hint only —
+		// POS Settings require_refund_code for this profile (UI hint only —
 		// the doc_events gate re-checks on save/submit and fails closed).
 		frappe.call({
 			method: "pos_next.api.discount_code.get_status",
@@ -1199,7 +1199,7 @@ class BackdateEntry {
 	}
 
 	// ------------------------------------------------------------------
-	// Profile support data (payment modes + default customer of the OUTLET
+	// Profile support data (payment modes + default customer of the PROFILE
 	// profile, not the session's) — same endpoints as the SPA dialog.
 	// ------------------------------------------------------------------
 
@@ -1391,10 +1391,10 @@ class BackdateEntry {
 					</svg>
 				</div>
 				<div class="bd-done">${__("Invoice {0} submitted", [this.submitted_name])}</div>
-				<p class="bd-muted">${__(
-					"The backdate entry is recorded on shift {0}. Close the shift again so the closing report includes it. Use the button below or the outlet's regular close-shift flow.",
-					[this.shift.name]
-				)}</p>
+			<p class="bd-muted">${__(
+				"The backdate entry is recorded on shift {0}. Close the shift again so the closing report includes it. Use the button below or the POS Profile's regular close-shift flow.",
+				[this.shift.name]
+			)}</p>
 				<div class="bd-actions bd-actions--center">
 					<button class="btn btn-default" data-bd-again>${__("Enter Another Entry")}</button>
 					<button class="btn btn-primary" data-bd-close-now>${__("Close Shift Now")}</button>
