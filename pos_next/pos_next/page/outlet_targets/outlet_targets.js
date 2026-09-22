@@ -104,6 +104,17 @@ class OutletTargetsPage {
 		return `${this.year_field.get_value()}-${this.month_field.get_value()}-01`;
 	}
 
+	// Target basis (enum + server-translated labels arrive in the payload's
+	// target_basis; the fallbacks keep the page usable on an older payload).
+	_basis(which) {
+		return ((this.state && this.state.target_basis) || {})[which] || "Net Sales";
+	}
+
+	_basis_label(which) {
+		const tb = (this.state && this.state.target_basis) || {};
+		return tb[`${which}_label`] || __("Net Sales");
+	}
+
 	refresh() {
 		if (!this.$root) return Promise.resolve();
 		return new Promise((resolve) => {
@@ -147,6 +158,9 @@ class OutletTargetsPage {
 			this.$root.html(`<div class="ot-card"><p class="ot-muted">${__("No data")}</p></div>`);
 			return;
 		}
+		// Target columns are headed by the configured basis (e.g.
+		// "Target Laba Kotor (bulanan)"); the sales columns stay sales.
+		const mlabel = frappe.utils.escape_html(this._basis_label("monthly"));
 		this.$root.html([
 			`<div class="ot-toolbar">
 				<input type="search" class="ot-input" data-ot-search
@@ -157,8 +171,8 @@ class OutletTargetsPage {
 			`<div class="ot-card"><div class="ot-table-scroll"><table class="ot-table">
 				<thead><tr>
 					<th>${__("Outlet (Company)")}</th>
-					<th class="ot-num">${__("Monthly Target")}</th>
-					<th class="ot-num">${__("MTD")}</th>
+					<th class="ot-num">${__("Target")} ${mlabel} (${__("monthly")})</th>
+					<th class="ot-num">${mlabel} ${__("MTD")}</th>
 					<th class="ot-num">${__("Achievement")}</th>
 					<th class="ot-num">${__("Projection")}</th>
 					<th class="ot-num">${__("Balik Modal")}</th>
@@ -180,22 +194,26 @@ class OutletTargetsPage {
 		const ccy = r.currency || "";
 		const missing = !!m.missing;
 		const unset = `<span class="ot-small ot-muted">${__("not set yet")}</span>`;
+		// Neutral basis keys with the old net-sales keys as fallback; MTD TC
+		// stays a sales count on every basis.
+		const mtdValue = r.mtd_value ?? r.mtd_net_tax_incl;
+		const projected = r.projected_value ?? r.projected_sales;
 
 		const targetCell = missing
 			? unset
-			: `<span class="ot-money">${HQ_UTILS.fmtMoney(m.target_sales, ccy)}</span>
+			: `<span class="ot-money">${HQ_UTILS.fmtMoney(r.target_value ?? m.target_sales, ccy)}</span>
 				<div class="ot-sub">${HQ_UTILS.fmtCount(m.target_transactions ?? 0)} ${__("target TC")}</div>`;
-		const mtdCell = `<span class="ot-money">${HQ_UTILS.fmtMoney(r.mtd_net_tax_incl, ccy)}</span>
+		const mtdCell = `<span class="ot-money">${HQ_UTILS.fmtMoney(mtdValue ?? 0, ccy)}</span>
 			<div class="ot-sub">${HQ_UTILS.fmtCount(r.mtd_orders ?? 0)} ${__("TC")}</div>`;
 		const achCell = missing
 			? unset
 			: `${this._bar(r.achievement_sales_pct)} <b class="ot-pct">${HQ_UTILS.fmtPct(r.achievement_sales_pct, 1)}</b>`;
-		const projCell = missing || r.projected_sales == null
+		const projCell = missing || projected == null
 			? `<span class="ot-muted">-</span>`
-			: `<span class="ot-money">${HQ_UTILS.fmtMoney(r.projected_sales, ccy)}</span>`;
+			: `<span class="ot-money">${HQ_UTILS.fmtMoney(projected, ccy)}</span>`;
 		const overallCell = o && o.overall_target != null
 			? `${this._bar(o.achievement_pct, "ot-bar--thin")} <b class="ot-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>
-				<div class="ot-sub">${__("cum.")} <span class="ot-money">${HQ_UTILS.fmtMoney(o.cumulative_net_tax_incl, ccy)}</span>
+				<div class="ot-sub">${__("cum.")} <span class="ot-money">${HQ_UTILS.fmtMoney(o.cumulative_value ?? o.cumulative_net_tax_incl, ccy)}</span>
 				/ <span class="ot-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)} →` : ""}</div>`
 			: `<span class="ot-muted">-</span>`;
 
@@ -228,17 +246,22 @@ class OutletTargetsPage {
 		const m = row.monthly || {};
 		const o = row.overall || {};
 		const month_start = this._month_start();
+		// Field labels follow the configured bases; only Net Sales keeps the
+		// "net incl. tax" qualifier (the profit bases carry their own meaning).
+		const mlabel = this._basis_label("monthly");
+		const olabel = this._basis_label("overall");
+		const netHint = this._basis("monthly") === "Net Sales" ? ` (${__("net incl. tax")})` : "";
 		const d = new frappe.ui.Dialog({
 			title: `${__("Set Target")} · ${frappe.utils.escape_html(company)}`,
 			fields: [
 				{
 					fieldname: "monthly_head",
 					fieldtype: "HTML",
-					options: `<div class="ot-dialog-head">${__("Monthly targets")} · <b>${frappe.utils.escape_html(month_start)}</b></div>`,
+					options: `<div class="ot-dialog-head">${__("Monthly targets")} (${frappe.utils.escape_html(mlabel)}) · <b>${frappe.utils.escape_html(month_start)}</b></div>`,
 				},
 				{
 					fieldname: "target_sales",
-					label: `${__("Target Sales")} (${__("net incl. tax")})`,
+					label: `${__("Target")} ${mlabel}${netHint}`,
 					fieldtype: "Currency",
 					default: m.target_sales ?? "",
 				},
@@ -251,11 +274,11 @@ class OutletTargetsPage {
 				{
 					fieldname: "overall_head",
 					fieldtype: "HTML",
-					options: `<div class="ot-dialog-head">${__("Overall / balik modal")} · ${__("one-time target on the outlet")}</div>`,
+					options: `<div class="ot-dialog-head">${__("Overall / balik modal")} (${frappe.utils.escape_html(olabel)}) · ${__("one-time target on the outlet")}</div>`,
 				},
 				{
 					fieldname: "overall_target",
-					label: __("Overall Sales Target"),
+					label: `${__("Overall Target")} (${olabel})`,
 					fieldtype: "Currency",
 					default: o.overall_target ?? "",
 					description: `${__("0 clears the overall target")}.`,
@@ -325,19 +348,23 @@ class OutletTargetsPage {
 	_export_csv() {
 		const s = this.state;
 		if (!s) return;
+		// Target columns are headed by the configured basis labels; values
+		// read the neutral keys with the old net-sales keys as fallback.
+		const mlabel = this._basis_label("monthly");
+		const olabel = this._basis_label("overall");
 		const csv = HQ_UTILS.toCsv(
 			[
 				__("Outlet (Company)"),
 				__("Currency"),
-				__("Monthly Target"),
+				`${__("Target")} ${mlabel} (${__("monthly")})`,
 				__("Target Transactions"),
-				__("MTD Net Sales"),
+				`${mlabel} ${__("MTD")}`,
 				__("MTD Transactions"),
 				__("Achievement %"),
-				__("Projected Sales"),
-				__("Overall Sales Target"),
+				`${__("Projected")} ${mlabel}`,
+				`${__("Overall Target")} (${olabel})`,
 				__("Overall From"),
-				__("Cumulative Net Sales"),
+				`${olabel} ${__("Cumulative")}`,
 				__("Overall Achievement %"),
 			],
 			(s.rows || []).map((r) => {
@@ -346,15 +373,15 @@ class OutletTargetsPage {
 				return [
 					r.company,
 					r.currency,
-					m.missing ? "" : m.target_sales,
+					m.missing ? "" : (r.target_value ?? m.target_sales),
 					m.missing ? "" : m.target_transactions,
-					r.mtd_net_tax_incl,
+					r.mtd_value ?? r.mtd_net_tax_incl,
 					r.mtd_orders,
 					m.missing ? "" : r.achievement_sales_pct,
-					m.missing ? "" : r.projected_sales,
+					m.missing ? "" : (r.projected_value ?? r.projected_sales),
 					o.overall_target ?? "",
 					o.from_date || "",
-					o.cumulative_net_tax_incl ?? "",
+					o.cumulative_value ?? o.cumulative_net_tax_incl ?? "",
 					o.achievement_pct ?? "",
 				];
 			})

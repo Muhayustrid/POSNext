@@ -392,7 +392,7 @@ class HQSalesMonitor {
 			this._hours_card(s),
 			this._product_card(s),
 			this._chart_notes(s),
-			this._notice_card(s.channels, s.pax),
+			this._notice_card(s.channels, s.pax, ((s.targets || {}).overall || {}).profile_note),
 			this._footer(s),
 		];
 		this.$root.html(parts.join(""));
@@ -414,6 +414,27 @@ class HQSalesMonitor {
 			· ${__("Base currency")}: <b>${scope.default_currency || "-"}</b>
 			${(scope.companies || []).length > 1 ? this._tip(__("each company in its own base currency; no cross-currency sum")) : ""}
 		</div>`;
+	}
+
+	// ------------------------------------------------------------------
+	// Target basis: the configured metric behind every target figure
+	// (enum + server-translated labels arrive in state.target_basis; the
+	// fallbacks keep the page usable on an older payload).
+	// ------------------------------------------------------------------
+
+	_basis(which) {
+		return ((this.state && this.state.target_basis) || {})[which] || "Net Sales";
+	}
+
+	_basis_label(which) {
+		const tb = (this.state && this.state.target_basis) || {};
+		return tb[`${which}_label`] || __("Net Sales");
+	}
+
+	// Gross Profit counts unvalued SLE rows so its figures carry a caveat.
+	_zero_cost_tip(basis, rows) {
+		if (this._basis(basis) !== "Gross Profit" || !(Number(rows) > 0)) return "";
+		return ` ${this._cell_tip(__("{0} rows without cost of goods", [Number(rows)]))}`;
 	}
 
 	// ------------------------------------------------------------------
@@ -595,10 +616,15 @@ class HQSalesMonitor {
 				</div>`
 				: "";
 
-		// Achievement (MTD aggregate) keeps its progress bar in the row.
+		// Achievement (MTD aggregate) keeps its progress bar in the row. The
+		// numerator follows the configured monthly target basis (neutral key
+		// mtd_value_by_currency, falling back to net sales on older payloads).
+		const mlabel = this._basis_label("monthly");
 		const pct = has ? (t.achievement_sales_pct || {})[ccy] : null;
 		const target = has ? ((t.target_sales || {}).by_currency || {})[ccy] : null;
-		const mtd = ((s.monthly.net_tax_incl || {}).by_currency || {})[ccy];
+		const mtd =
+			((t.mtd_value_by_currency || {}).by_currency || {})[ccy] ??
+			((s.monthly.net_tax_incl || {}).by_currency || {})[ccy];
 		const achSub = has
 			? `${__("MTD")} <span class="hq-money">${HQ_UTILS.fmtMoney(mtd ?? 0, ccy)}</span> / ${__("Target")} <span class="hq-money">${HQ_UTILS.fmtMoney(target ?? 0, ccy)}</span>`
 			: frappe.utils.escape_html(__(t.notice) || __("Monthly target not set"));
@@ -631,7 +657,7 @@ class HQSalesMonitor {
 				"&nbsp;"
 			)}
 			${`<div class="hq-mini">
-				<div class="hq-kpi-label">${__("Achievement (MTD)")} <span class="hq-period">${w.month_start ? `${__("since")} ${frappe.utils.escape_html(w.month_start)}` : ""}</span></div>
+				<div class="hq-kpi-label">${__("Achievement (MTD)")} · ${frappe.utils.escape_html(mlabel)} <span class="hq-period">${w.month_start ? `${__("since")} ${frappe.utils.escape_html(w.month_start)}` : ""}</span></div>
 				<div class="hq-kpi-value">${pct == null ? this._na() : HQ_UTILS.fmtPct(pct, 1)}</div>
 				${pct == null ? "" : this._bar(pct, "hq-bar--lg")}
 				<div class="hq-kpi-sub">${achSub}</div>
@@ -713,20 +739,23 @@ class HQSalesMonitor {
 
 		// One line per cell: secondary figures (target/MTD transactions,
 		// projection, payback target) live in native title tooltips so no
-		// cell ever stacks or ellipsizes a number again.
+		// cell ever stacks or ellipsizes a number again. Money figures read
+		// the basis-neutral keys (mtd_value/target_value/...) with the old
+		// net-sales keys as fallback for older payloads.
 		const targetCell = missing
 			? `<span class="hq-muted">${__("not set yet")}</span>`
-			: `${money(t.target_sales)}${t.target_transactions != null && Number(t.target_transactions) > 0 ? ` ${this._cell_tip(`${HQ_UTILS.fmtCount(t.target_transactions)} ${__("target TC")}`)}` : ""}`;
-		const mtdCell = `${money(t.mtd_net_tax_incl ?? 0)}${t.mtd_orders != null && Number(t.mtd_orders) > 0 ? ` ${this._cell_tip(`${HQ_UTILS.fmtCount(t.mtd_orders)} ${__("TC")}`)}` : ""}`;
+			: `${money(t.target_value ?? t.target_sales)}${t.target_transactions != null && Number(t.target_transactions) > 0 ? ` ${this._cell_tip(`${HQ_UTILS.fmtCount(t.target_transactions)} ${__("target TC")}`)}` : ""}`;
+		const mtdCell = `${money(t.mtd_value ?? t.mtd_net_tax_incl ?? 0)}${t.mtd_orders != null && Number(t.mtd_orders) > 0 ? ` ${this._cell_tip(`${HQ_UTILS.fmtCount(t.mtd_orders)} ${__("TC")}`)}` : ""}${this._zero_cost_tip("monthly", t.zero_cost_rows)}`;
+		const projected = t.projected_value ?? t.projected_sales;
 		const projTip =
-			!missing && t.projected_sales != null
-				? this._cell_tip(`${__("proy.")} ${HQ_UTILS.fmtMoney(t.projected_sales, bare)} · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}`)
+			!missing && projected != null
+				? this._cell_tip(`${__("proy.")} ${HQ_UTILS.fmtMoney(projected, bare)} · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}`)
 				: "";
 		const achCell = missing
 			? this._na()
 			: `${this._bar(t.achievement_sales_pct, Number(t.achievement_sales_pct) >= 100 ? "hq-bar--ok" : "")}<b class="hq-ach-pct">${HQ_UTILS.fmtPct(t.achievement_sales_pct, 1)}</b>${projTip}`;
 		const overallCell = o
-			? `${money(o.cumulative_net_tax_incl)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${this._cell_tip(`${__("of")} ${HQ_UTILS.fmtMoney(o.overall_target, bare)}${o.from_date ? ` · ${__("since")} ${frappe.utils.escape_html(o.from_date)}` : ""}`)}`
+			? `${money(o.cumulative_value ?? o.cumulative_net_tax_incl)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${this._cell_tip(`${__("of")} ${HQ_UTILS.fmtMoney(o.overall_target, bare)}${o.from_date ? ` · ${__("since")} ${frappe.utils.escape_html(o.from_date)}` : ""}`)}${this._zero_cost_tip("overall", o.zero_cost_rows)}`
 			: this._na();
 
 		return `<tr data-hq-outlet-row${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
@@ -743,6 +772,11 @@ class HQSalesMonitor {
 
 	_outlet_performance_card(s) {
 		const rows = this._outlet_rows(s).map((r) => this._outlet_row(r)).join("");
+		// The four target columns name their basis in a native-title tooltip:
+		// Target / MTD / Achievement follow the monthly basis, Balik Modal the
+		// overall (payback) one.
+		const monthlyTip = this._cell_tip(__("Monthly basis: {0}", [this._basis_label("monthly")]));
+		const overallTip = this._cell_tip(__("Overall (payback) basis: {0}", [this._basis_label("overall")]));
 		return `<div class="hq-card hq-card--table hq-card--outlets">
 			<div class="hq-card-title">${__("Outlet Performance")}
 				${this._tip(__("Outlet = company; balik modal = cumulative sales vs overall target"))}
@@ -762,16 +796,16 @@ class HQSalesMonitor {
 				</div>
 			</div>
 			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
-			<thead><tr>
-				<th>${__("Outlet (Company)")}</th>
-				<th class="hq-num">${__("Net Sales")}</th>
-				<th class="hq-num">${__("TC")}</th>
-				<th class="hq-num">${__("Avg Ticket")}</th>
-				<th class="hq-num">${__("Monthly Target")}</th>
-				<th class="hq-num">${__("MTD")}</th>
-				<th class="hq-num">${__("Achievement")}</th>
-				<th class="hq-num">${__("Balik Modal")}</th>
-			</tr></thead>
+				<thead><tr>
+					<th>${__("Outlet (Company)")}</th>
+					<th class="hq-num">${__("Net Sales")}</th>
+					<th class="hq-num">${__("TC")}</th>
+					<th class="hq-num">${__("Avg Ticket")}</th>
+					<th class="hq-num">${__("Monthly Target")} ${monthlyTip}</th>
+					<th class="hq-num">${__("MTD")} ${monthlyTip}</th>
+					<th class="hq-num">${__("Achievement")} ${monthlyTip}</th>
+					<th class="hq-num">${__("Balik Modal")} ${overallTip}</th>
+				</tr></thead>
 				<tbody>${rows || `<tr><td colspan="8" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
 			<div class="hq-pager">
@@ -1064,10 +1098,15 @@ class HQSalesMonitor {
 		</div>`;
 	}
 
+	// Sections are either {available, notice} objects or plain already-
+	// translated note strings (e.g. the overall target's profile note).
 	_notice_card(...sections) {
 		const rows = sections
-			.filter((sec) => sec && !sec.available)
-			.map((sec) => `<div class="hq-kpi-sub hq-muted">ℹ ${frappe.utils.escape_html(sec.notice || "")}</div>`);
+			.map((sec) =>
+				typeof sec === "string" ? sec : sec && !sec.available ? sec.notice || "" : ""
+			)
+			.filter(Boolean)
+			.map((notice) => `<div class="hq-kpi-sub hq-muted">ℹ ${frappe.utils.escape_html(notice)}</div>`);
 		if (!rows.length) return "";
 		return `<details class="hq-card hq-notes">
 			<summary>${__("Data Source Notes")}</summary>
@@ -1352,52 +1391,55 @@ class HQSalesMonitor {
 				)
 			);
 		}
-		if (!kind) sections.push("");
-		if (!kind || kind === "outlets") {
-			// CSV stays machine-readable: raw ungrouped numbers ("." decimal),
-			// never the localized display strings. Per-row currency gets its own
-			// column instead of being baked into the amount.
-			sections.push(
-				HQ_UTILS.toCsv(
-					[
-						__("Outlet (Company)"),
-						__("POS Profiles"),
-						__("Currency"),
-						__("Net Sales"),
-						__("Transactions"),
-						__("Avg Ticket"),
-						__("Share %"),
-						__("Monthly Target"),
-						__("Target Transactions"),
-						__("MTD Net Sales"),
-						__("MTD Transactions"),
-						__("Achievement %"),
-						__("Projected Sales"),
-						__("Overall Sales Target"),
-						__("Cumulative Net Sales"),
-						__("Overall Achievement %"),
-					],
-					this._outlet_rows(s).map((r) => [
-						r.company,
-						(r.profiles || []).map((p) => p.pos_profile).join("; "),
-						r.currency,
-						r.net_tax_incl,
-						r.orders,
-						r.apc,
-						r.share_pct,
-						r.target && !r.target.missing ? r.target.target_sales : "",
-						r.target && !r.target.missing ? r.target.target_transactions : "",
-						r.target ? r.target.mtd_net_tax_incl : "",
-						r.target ? r.target.mtd_orders : "",
-						r.target && !r.target.missing ? r.target.achievement_sales_pct : "",
-						r.target ? r.target.projected_sales : "",
-						r.overall ? r.overall.overall_target : "",
-						r.overall ? r.overall.cumulative_net_tax_incl : "",
-						r.overall ? r.overall.achievement_pct : "",
-					])
-				)
-			);
-		}
+	if (!kind) sections.push("");
+	if (!kind || kind === "outlets") {
+		// CSV stays machine-readable: raw ungrouped numbers ("." decimal),
+		// never the localized display strings. Per-row currency gets its own
+		// column instead of being baked into the amount. Target columns are
+		// headed by the configured basis labels.
+		const mlabel = this._basis_label("monthly");
+		const olabel = this._basis_label("overall");
+		sections.push(
+			HQ_UTILS.toCsv(
+				[
+					__("Outlet (Company)"),
+					__("POS Profiles"),
+					__("Currency"),
+					__("Net Sales"),
+					__("Transactions"),
+					__("Avg Ticket"),
+					__("Share %"),
+					`${__("Target")} ${mlabel} (${__("monthly")})`,
+					__("Target Transactions"),
+					`${mlabel} ${__("MTD")}`,
+					__("MTD Transactions"),
+					__("Achievement %"),
+					`${__("Projected")} ${mlabel}`,
+					`${__("Overall Target")} (${olabel})`,
+					`${olabel} ${__("Cumulative")}`,
+					__("Overall Achievement %"),
+				],
+				this._outlet_rows(s).map((r) => [
+					r.company,
+					(r.profiles || []).map((p) => p.pos_profile).join("; "),
+					r.currency,
+					r.net_tax_incl,
+					r.orders,
+					r.apc,
+					r.share_pct,
+					r.target && !r.target.missing ? (r.target.target_value ?? r.target.target_sales) : "",
+					r.target && !r.target.missing ? r.target.target_transactions : "",
+					r.target ? (r.target.mtd_value ?? r.target.mtd_net_tax_incl) : "",
+					r.target ? r.target.mtd_orders : "",
+					r.target && !r.target.missing ? r.target.achievement_sales_pct : "",
+					r.target ? (r.target.projected_value ?? r.target.projected_sales) : "",
+					r.overall ? r.overall.overall_target : "",
+					r.overall ? (r.overall.cumulative_value ?? r.overall.cumulative_net_tax_incl) : "",
+					r.overall ? r.overall.achievement_pct : "",
+				])
+			)
+		);
+	}
 		const blob = new Blob(["\ufeff" + sections.join("\n")], { type: "text/csv;charset=utf-8;" });
 		const a = document.createElement("a");
 		a.href = URL.createObjectURL(blob);
