@@ -1,4 +1,5 @@
 import { call } from "@/utils/apiWrapper"
+import { escapeHtml } from "@/utils/escapeHtml"
 import { logger } from "@/utils/logger"
 import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
@@ -185,9 +186,9 @@ export function buildReceiptHTML(invoiceData) {
 			const subtotal = qty * displayRate
 			return `
 						<div class="item-row">
-							<div class="item-name">${item.item_name || item.item_code} ${isFree ? __("(FREE)") : ""}</div>
+							<div class="item-name">${escapeHtml(item.item_name || item.item_code)} ${isFree ? __("(FREE)") : ""}</div>
 							<div class="item-details">
-								<span>${qty} × ${formatCurrency(displayRate)}</span>
+								<span>${escapeHtml(qty)} × ${formatCurrency(displayRate)}</span>
 								<span><strong>${formatCurrency(subtotal)}</strong></span>
 							</div>
 							${
@@ -207,8 +208,8 @@ export function buildReceiptHTML(invoiceData) {
 								item.serial_no
 									? `<div class="item-serials"><div class="item-serials-label">${__(
 											"Serial No:",
-										)}</div><div class="item-serials-list">${String(
-											item.serial_no,
+										)}</div><div class="item-serials-list">${escapeHtml(
+											String(item.serial_no),
 										).replace(/\n/g, ", ")}</div></div>`
 									: ""
 							}
@@ -228,22 +229,22 @@ export function buildReceiptHTML(invoiceData) {
 						: ""
 				}
 				<div class="header">
-					<div class="company-name">${invoiceData.company || "POS Next"}</div>
-					<div style="font-size: 12px;">${invoiceData.header || __("TAX INVOICE")}</div>
+					<div class="company-name">${escapeHtml(invoiceData.company || "POS Next")}</div>
+					<div style="font-size: 12px;">${escapeHtml(invoiceData.header || __("TAX INVOICE"))}</div>
 				</div>
 
 				${invoiceData.is_offline ? `<div class="offline-badge">${__("OFFLINE — PENDING SYNC")}</div>` : ""}
 
 				<div class="invoice-info">
-					<div><span>${__("Invoice #:")}</span><span><strong>${invoiceData.name}</strong></span></div>
+					<div><span>${__("Invoice #:")}</span><span><strong>${escapeHtml(invoiceData.name)}</strong></span></div>
 					<div><span>${__("Date:")}</span><span>${new Date(
 						invoiceData.posting_date || Date.now(),
 					).toLocaleString()}</span></div>
-					${
-						partyValue
-							? `<div><span>${partyLabel}</span><span>${partyValue}</span></div>`
-							: ""
-					}
+						${
+							partyValue
+								? `<div><span>${partyLabel}</span><span>${escapeHtml(partyValue)}</span></div>`
+								: ""
+						}
 					${
 						invoiceData.status === "Partly Paid" ||
 						(
@@ -302,10 +303,10 @@ export function buildReceiptHTML(invoiceData) {
 					<div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">${__("Payments:")}</div>
 					${invoiceData.payments
 						.map(
-							(p) =>
-								`<div class="payment-row"><span>${
-									p.mode_of_payment
-								}:</span><span>${formatCurrency(p.amount)}</span></div>`,
+								(p) =>
+									`<div class="payment-row"><span>${
+										escapeHtml(p.mode_of_payment)
+									}:</span><span>${formatCurrency(p.amount)}</span></div>`,
 						)
 						.join("")}
 					<div class="payment-row total-paid"><span>${__("Total Paid:")}</span><span>${formatCurrency(
@@ -334,7 +335,7 @@ export function buildReceiptHTML(invoiceData) {
 				}
 
 				<div class="footer">
-					<div style="margin-bottom: 5px;">${invoiceData.footer || __("Thank you for your business!")}</div>
+					<div style="margin-bottom: 5px;">${escapeHtml(invoiceData.footer || __("Thank you for your business!"))}</div>
 					${
 						invoiceData.footer
 							? ""
@@ -364,7 +365,7 @@ export function buildReceiptDocumentHTML(
 		<html>
 		<head>
 			<meta charset="UTF-8">
-			<title>${__("Invoice - {0}", [invoiceData.name])}</title>
+			<title>${__("Invoice - {0}", [escapeHtml(invoiceData.name)])}</title>
 			<style>${receiptStylesFor(dots ?? 576)}</style>
 		</head>
 		<body>

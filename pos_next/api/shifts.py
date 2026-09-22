@@ -79,6 +79,14 @@ def get_opening_dialog_data():
 @frappe.whitelist()
 def check_opening_shift(user=None):
 	"""Check if user has an open shift"""
+	if (
+		user
+		and user != frappe.session.user
+		and not frappe.has_permission("POS Opening Shift", "read")
+	):
+		# the user param is client input: only a caller who may read opening
+		# shifts at all may look at someone else's shifts
+		frappe.throw(_("You can only check your own open shift"), frappe.PermissionError)
 	if not user:
 		user = frappe.session.user
 
@@ -114,6 +122,18 @@ def check_opening_shift(user=None):
 def create_opening_shift(pos_profile, company, balance_details):
 	"""Create a new POS Opening Shift"""
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
+
+	# only users defined on the profile may open a shift on it
+	_check_profile_access(pos_profile)
+
+	# Serialize the duplicate check: lock the profile row first so two
+	# concurrent creates for the same profile cannot both pass the open-shift
+	# check below and insert two open shifts. Lock, check and insert run in
+	# one transaction (no manual commit — the request commits atomically).
+	# ponytail: profile-row lock serializes per profile; two different
+	# profiles opened concurrently by the SAME user is still a tiny race —
+	# add a User-row lock if that ever matters.
+	frappe.db.get_value("POS Profile", pos_profile, "name", for_update=True)
 
 	# Check if user already has an open shift
 	existing_shift = check_opening_shift(frappe.session.user)
@@ -161,6 +181,24 @@ def get_closing_shift_data(opening_shift):
 	"""Get data for closing shift"""
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import make_closing_shift_from_opening
 
+	if not opening_shift:
+		frappe.throw(_("Opening shift is required"))
+
+	# read-level gate (same ownership rule as get_session_summary): the gate
+	# must sit outside the try below, which would swallow PermissionError into
+	# a generic 500-style throw
+	shift_user = frappe.db.get_value("POS Opening Shift", opening_shift, "user")
+	if shift_user is None:
+		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
+
+	if (
+		shift_user != frappe.session.user
+		and not frappe.has_permission("POS Opening Shift", "read", doc=opening_shift)
+	):
+		# doc= enforces per-document user permissions (e.g. company scope),
+		# matching what Desk would enforce on this exact shift
+		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
+
 	try:
 		# Get the opening shift document
 		opening_shift_doc = frappe.get_doc("POS Opening Shift", opening_shift)
@@ -174,6 +212,10 @@ def get_closing_shift_data(opening_shift):
 
 		# Ensure datetime values are JSON serializable
 		return json.loads(json.dumps(closing_data, default=str))
+	except frappe.PermissionError:
+		# surface the ownership gate (here or in the derive) as 403, not a
+		# generic submit error
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Closing Shift Data Error")
 		frappe.throw(_("Error getting closing shift data: {0}").format(str(e)))
@@ -194,6 +236,9 @@ def submit_closing_shift(closing_shift):
 
 		result = submit_shift(closing_shift)
 		return {"name": result, "status": "success"}
+	except frappe.PermissionError:
+		# surface the ownership gate as 403, not a generic submit error
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Submit Closing Shift Error")
 		frappe.throw(_("Error submitting closing shift: {0}").format(str(e)))

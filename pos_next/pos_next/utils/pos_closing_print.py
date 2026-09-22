@@ -18,10 +18,26 @@ def format_rupiah(value) -> str:
 	return f"{'-' if whole < 0 else ''}Rp{abs(whole):,}".replace(",", ".")
 
 
+def _can_read_closing(closing) -> bool:
+	"""SEC-16: recap helpers must not leak another shift's takings. Read
+	permission passes; otherwise the shift's own cashier may still print the
+	recap of their own shift."""
+	if frappe.has_permission("POS Closing Shift", "read", doc=closing):
+		return True
+	return closing.get("owner") == frappe.session.user
+
+
 def _as_closing_doc(doc):
 	if isinstance(doc, str):
-		return frappe.get_doc("POS Closing Shift", doc)
-	return doc
+		closing = frappe.get_doc("POS Closing Shift", doc)
+	else:
+		closing = doc
+	# Deny by returning an empty structure, never by throwing: these are
+	# jinja print-format helpers and must render a blank recap instead of
+	# aborting the whole print.
+	if closing is None or not _can_read_closing(closing):
+		return frappe.get_doc({"doctype": "POS Closing Shift"})
+	return closing
 
 
 def _collect_parent_targets(pos_transactions: Iterable) -> set[tuple[str, str]]:

@@ -1,7 +1,7 @@
 [
  {
-  "amend": 1,
-  "cancel": 1,
+  "amend": 0,
+  "cancel": 0,
   "create": 1,
   "delete": 0,
   "docstatus": 0,
@@ -10,7 +10,7 @@
   "export": 1,
   "if_owner": 0,
   "import": 0,
-  "modified": "2025-12-28 10:53:40.352941",
+  "modified": "2026-09-23 01:26:45.295794",
   "name": "o0edj4dsfs",
   "parent": "POS Closing Entry",
   "permlevel": 0,
@@ -72,8 +72,8 @@
   "write": 1
  },
  {
-  "amend": 1,
-  "cancel": 1,
+  "amend": 0,
+  "cancel": 0,
   "create": 1,
   "delete": 0,
   "docstatus": 0,
@@ -82,7 +82,7 @@
   "export": 1,
   "if_owner": 0,
   "import": 0,
-  "modified": "2025-12-28 10:57:33.203603",
+  "modified": "2026-09-23 01:26:46.295794",
   "name": "q07p8b4i9v",
   "parent": "Sales Invoice",
   "permlevel": 0,
@@ -443,7 +443,7 @@
   "export": 1,
   "if_owner": 0,
   "import": 0,
-  "modified": "2025-12-28 11:00:50.626120",
+  "modified": "2026-09-23 01:26:47.295794",
   "name": "s9gse1849c",
   "parent": "Payment Entry",
   "permlevel": 0,
@@ -453,7 +453,7 @@
   "role": "POSNext Cashier",
   "select": 0,
   "share": 0,
-  "submit": 1,
+  "submit": 0,
   "write": 1
  },
  {

@@ -14,7 +14,6 @@ stash; every consumer re-verifies the names before granting anything.
 """
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import frappe
@@ -121,6 +120,18 @@ class TestSubmitLegAttribution(unittest.TestCase):
 			for item in cleaned_items
 		]
 
+	@staticmethod
+	def _gate_get_all(rules, child_rows=None):
+		"""frappe.get_all double: rule verification vs child-table applicability."""
+		child_rows = child_rows or []
+
+		def _get_all(doctype, filters=None, fields=None, **kwargs):
+			if doctype == "Pricing Rule":
+				return rules
+			return child_rows
+
+		return _get_all
+
 	def test_online_submit_keeps_db_attribution_and_gate_passes(self):
 		# DB draft rows as the preceding update_invoice save wrote them.
 		db_attribution = {"row-1": '["PR-ITEM-1"]'}
@@ -134,6 +145,9 @@ class TestSubmitLegAttribution(unittest.TestCase):
 					"name": "row-1",
 					"pricing_rules": "",
 					"discount_percentage": 10,
+					"price_list_rate": 100,
+					"rate": 90,
+					"item_code": "IT1",
 					"pos_offer_item_rules": '["PR-ITEM-1"]',
 				}
 			],
@@ -142,15 +156,26 @@ class TestSubmitLegAttribution(unittest.TestCase):
 		self.assertNotIn("pos_offer_item_rules", cleaned["items"][0])
 
 		rebuilt = self._rebuild_rows(cleaned["items"])
+		rebuilt[0]["item_code"] = "IT1"
+		rebuilt[0]["price_list_rate"] = 100
+		rebuilt[0]["rate"] = 90
 		doc = FakeDoc(is_pos=1, company="Company A", items=rebuilt)
 		_reapply_item_offer_attribution(doc, cleaned.get("items"), db_attribution)
 
 		self.assertEqual(rebuilt[0].get("pos_offer_item_rules"), '["PR-ITEM-1"]')
 
-		with GATE_DB_PATCH as mock_db, GATE_GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-ITEM-1", apply_on="Item Code")]
-			mock_db.get_value.return_value = None
-
+		rule = frappe._dict(
+			name="PR-ITEM-1",
+			apply_on="Item Code",
+			price_or_product_discount="Price",
+			rate_or_discount="Discount Percentage",
+			discount_percentage=10,
+		)
+		with GATE_DB_PATCH as mock_db, patch(
+			"pos_next.overrides.discount_code.frappe.get_all",
+			side_effect=self._gate_get_all([rule], [{"parent": "PR-ITEM-1", "item_code": "IT1"}]),
+			create=True,
+		):
 			validate_invoice_discounts(doc, "validate")  # must not raise
 
 			self.assertFalse(invoice_has_manual_discount(doc))
@@ -158,18 +183,39 @@ class TestSubmitLegAttribution(unittest.TestCase):
 	def test_new_row_is_derived_from_pricing_rules(self):
 		payload = {
 			"is_pos": 1,
-			"items": [{"pricing_rules": '["PR-ITEM-9"]', "discount_percentage": 5}],
+			"items": [
+				{
+					"pricing_rules": '["PR-ITEM-9"]',
+					"discount_percentage": 5,
+					"item_code": "IT9",
+					"price_list_rate": 100,
+					"rate": 95,
+				}
+			],
 		}
 		cleaned = _strip_server_managed_fields(payload)
 
 		rebuilt = self._rebuild_rows(cleaned["items"])
+		rebuilt[0]["item_code"] = "IT9"
+		rebuilt[0]["price_list_rate"] = 100
+		rebuilt[0]["rate"] = 95
 		doc = FakeDoc(is_pos=1, items=rebuilt)
 		_reapply_item_offer_attribution(doc, cleaned.get("items"), {})
 
 		self.assertEqual(rebuilt[0].get("pos_offer_item_rules"), '["PR-ITEM-9"]')
 
-		with GATE_DB_PATCH as mock_db, GATE_GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-ITEM-9", apply_on="Item Code")]
+		rule = frappe._dict(
+			name="PR-ITEM-9",
+			apply_on="Item Code",
+			price_or_product_discount="Price",
+			rate_or_discount="Discount Percentage",
+			discount_percentage=5,
+		)
+		with patch(
+			"pos_next.overrides.discount_code.frappe.get_all",
+			side_effect=self._gate_get_all([rule], [{"parent": "PR-ITEM-9", "item_code": "IT9"}]),
+			create=True,
+		):
 			self.assertFalse(invoice_has_manual_discount(doc))
 
 	def test_forged_payload_attribution_does_not_survive(self):

@@ -425,8 +425,28 @@ def create_payment_entry(
 		from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
 		if payment_account:
-			if not frappe.db.exists("Account", payment_account):
+			# SEC-18: a client-supplied account must be a real, enabled
+			# Bank/Cash account of the invoice's company (same idea as
+			# _validate_receivable_account in api/invoices.py) — otherwise a
+			# tampered client could post payments against an arbitrary GL.
+			account = frappe.db.get_value(
+				"Account",
+				payment_account,
+				["company", "account_type", "disabled"],
+				as_dict=True,
+			)
+			if not account:
 				frappe.throw(_("Payment account {0} does not exist").format(payment_account))
+			if account.company != invoice.company:
+				frappe.throw(
+					_("Payment account {0} does not belong to company {1}").format(
+						payment_account, invoice.company
+					)
+				)
+			if account.account_type not in ("Bank", "Cash"):
+				frappe.throw(_("Payment account {0} is not a Bank or Cash account").format(payment_account))
+			if cint(account.disabled):
+				frappe.throw(_("Payment account {0} is disabled").format(payment_account))
 		else:
 			account_info = get_bank_cash_account(mode_of_payment, invoice.company)
 			if not account_info or not account_info.get("account"):

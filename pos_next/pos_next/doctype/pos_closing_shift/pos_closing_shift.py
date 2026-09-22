@@ -499,6 +499,19 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 def make_closing_shift_from_opening(opening_shift):
 	opening_shift = json.loads(opening_shift)
 
+	opening_shift_name = opening_shift.get("name")
+	if not opening_shift_name:
+		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
+
+	# read-level gate, same ownership rule as submit_closing_shift: only the
+	# shift owner (or a user with closing-shift read access) may derive the
+	# closing data of a shift
+	if (
+		frappe.db.get_value("POS Opening Shift", opening_shift_name, "user") != frappe.session.user
+		and not frappe.has_permission("POS Closing Shift", "read")
+	):
+		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
+
 	# Initialize closing shift document
 	closing_shift = frappe.new_doc("POS Closing Shift")
 	closing_shift.update(
@@ -607,7 +620,39 @@ def make_closing_shift_from_opening(opening_shift):
 @frappe.whitelist()
 def submit_closing_shift(closing_shift):
 	closing_shift = json.loads(closing_shift)
-	closing_shift_doc = frappe.get_doc(closing_shift)
+
+	opening_shift_name = closing_shift.get("pos_opening_shift")
+	if not opening_shift_name:
+		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
+
+	opening_shift = frappe.get_doc("POS Opening Shift", opening_shift_name)
+
+	# The payload is untrusted client JSON: only the shift owner (or a user
+	# with closing-shift submit rights) may close a shift at all.
+	if (
+		opening_shift.user != frappe.session.user
+		and not frappe.has_permission("POS Closing Shift", "submit")
+	):
+		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
+
+	# The server holds the numbers: rebuild the closing shift from the opening
+	# shift's real transactions so expected_amount, totals and taxes can never
+	# be forged. The client only contributes the physically counted
+	# closing_amount per mode of payment (rows for unknown modes are dropped).
+	server_data = make_closing_shift_from_opening(json.dumps(opening_shift.as_dict(), default=str))
+	counted = {
+		row.get("mode_of_payment"): row.get("closing_amount")
+		for row in (closing_shift.get("payment_reconciliation") or [])
+		if row.get("mode_of_payment")
+	}
+	for row in server_data.get("payment_reconciliation") or []:
+		mode = row.get("mode_of_payment")
+		if mode in counted:
+			row["closing_amount"] = counted[mode]
+
+	closing_shift_doc = frappe.get_doc(server_data)
+	# kept only AFTER the explicit ownership gate above — the cashier must
+	# always be able to close their own shift regardless of role setup
 	closing_shift_doc.flags.ignore_permissions = True
 	closing_shift_doc.save()
 	closing_shift_doc.submit()

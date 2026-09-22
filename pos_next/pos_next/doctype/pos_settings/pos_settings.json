@@ -817,7 +817,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-22 20:30:00.000000",
+ "modified": "2026-09-23 01:26:43.295794",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
@@ -863,10 +863,8 @@
    "role": "Sales User"
   },
   {
-   "export": 1,
    "read": 1,
-   "role": "POSNext Cashier",
-   "write": 1
+   "role": "POSNext Cashier"
   }
  ],
  "row_format": "Dynamic",

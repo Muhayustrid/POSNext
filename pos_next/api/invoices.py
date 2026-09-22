@@ -12,6 +12,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate, nowtime
 
+from pos_next.api.items import _fetch_uom_prices_map
 from pos_next.api.settings_resolver import (
 	get_effective_pos_setting,
 	get_effective_pos_settings,
@@ -21,6 +22,7 @@ from pos_next.invoice_type import (
 	get_pos_invoice_doctype,
 	sales_invoice_union,
 )
+from pos_next.overrides.discount_code import verify_transaction_rule_names
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -92,21 +94,57 @@ def calculate_price_list_rate(item_rate, discount_pct, current_price_list_rate):
 	return current_price_list_rate if current_price_list_rate else item_rate
 
 
+def _server_price_list_rates(items, price_list, posting_date=None):
+	"""Server-fetched price_list_rate per cart row, keyed by item_code (SEC-04).
+
+	Reuses the exact Item Price map that prices get_items carts, so an honest
+	client's rate equals the server value; a price the server cannot resolve
+	yields 0 and that row falls back to the legacy client-declared basis (no
+	server truth to contradict it).
+	"""
+	item_codes = sorted(
+		{item.get(FIELD_ITEM_CODE) for item in items or [] if item.get(FIELD_ITEM_CODE)}
+	)
+	if not item_codes or not price_list:
+		return {}
+	return _fetch_uom_prices_map(item_codes, price_list, posting_date)
+
+
+def _resolve_server_price_list_rate(price_map, item):
+	"""The server's list price for one payload row: the Item Price for the row's
+	UOM, else the UOM-less (per stock UOM) price scaled by the row's conversion
+	factor; 0.0 when neither exists."""
+	uom_prices = price_map.get(item.get(FIELD_ITEM_CODE)) or {}
+	if not uom_prices:
+		return 0.0
+	uom = item.get("uom") or item.get("stock_uom")
+	if uom and uom in uom_prices:
+		return flt(uom_prices[uom])
+	stock_price = uom_prices.get("")
+	if stock_price:
+		return flt(stock_price) * (flt(item.get("conversion_factor") or 1) or 1)
+	return 0.0
+
+
 def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
 	"""
-	Validate manually edited item rates against POS Settings business rules.
+	Validate a manually edited item rate against POS Settings business rules.
 
 	This function enforces:
 	1. Rate must be positive
 	2. Rate editing must be enabled in POS Settings
 	3. Rate reduction must not exceed max_discount_allowed (if configured)
 
+	SEC-04: the client's is_rate_manually_edited flag is only an audit hint.
+	Whether this validation runs is decided by the CALLER from server-side
+	data (a rate below the server-fetched price_list_rate, or the flagged
+	audit lane) — the flag itself can no longer switch validation off.
+
 	Args:
 	    item: The item dict/object with rate information. Must contain:
-	        - is_rate_manually_edited: Flag indicating manual edit (1 or 0)
 	        - item_code: The item code for error messages
 	        - rate: The edited rate
-	        - original_rate or price_list_rate: The original catalog price
+	        - price_list_rate (or original_rate): The server-resolved catalog price
 	    pos_profile: POS Profile name for settings lookup. Required for manual edits.
 	    pos_settings_cache: Optional pre-fetched POS Settings dict to avoid repeated DB queries.
 	        Should contain: allow_user_to_edit_rate, max_discount_allowed
@@ -114,12 +152,6 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
 	Returns:
 	    dict with 'valid' boolean and 'message' string if invalid
 	"""
-	is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
-
-	# Skip validation if not a manual edit
-	if not is_manual_edit:
-		return {"valid": True}
-
 	item_code = item.get(FIELD_ITEM_CODE)
 	item_rate = flt(item.get(FIELD_RATE) or 0)
 	original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
@@ -853,6 +885,43 @@ def _backdate_entry_active(pos_profile=None):
 # ==========================================
 
 
+# Fields the client payload may never set on an existing draft (SEC-03
+# mass-assignment): identity and workflow state are server-owned.
+_DRAFT_UNSETTABLE_FIELDS = ("owner", "docstatus", "amended_from", "modified_by")
+
+
+def _check_profile_access(pos_profile, doctype=None):
+	"""SEC-03 gate (PATTERN A, api/shifts.py): only POS Profile users may save
+	drafts under a profile. Administrator and users holding write permission on
+	the invoice doctype (back office) pass too — same convention as
+	get_invoices below. The HO backdate lane defers to its own role+setting
+	gate via _backdate_entry_active at the call sites."""
+	if frappe.session.user == "Administrator":
+		return
+	if frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
+	):
+		return
+	if doctype and frappe.has_permission(doctype, "write"):
+		return
+	frappe.throw(
+		_("You are not a user of POS Profile {0}").format(pos_profile),
+		frappe.PermissionError,
+	)
+
+
+def _check_draft_owner_access(doc, doctype):
+	"""SEC-03 gate (PATTERN B, api/shifts.py get_session_summary): a draft may
+	only be modified by its owner or a user with document-level write
+	permission — no cross-cashier overwrite or submit."""
+	if doc.owner == frappe.session.user:
+		return
+	if frappe.has_permission(doctype, "write", doc=doc):
+		return
+	frappe.throw(_("You can only modify your own drafts"), frappe.PermissionError)
+
+
 @frappe.whitelist()
 def update_invoice(data):
 	"""Create or update invoice draft (Step 1)."""
@@ -871,6 +940,12 @@ def update_invoice(data):
 		pos_profile = data.get("pos_profile")
 		doctype = _resolve_target_doctype(payload_doctype)
 
+		# SEC-03: identity/workflow fields are server-owned in either branch
+		# (insert forces owner/docstatus, the update branch must not inherit
+		# them from the payload).
+		for field in _DRAFT_UNSETTABLE_FIELDS:
+			data.pop(field, None)
+
 		# Ensure the document type is set
 		data.setdefault("doctype", doctype)
 
@@ -880,19 +955,36 @@ def update_invoice(data):
 		# Create or update invoice
 		if data.get("name"):
 			invoice_doc = frappe.get_doc(doctype, data.get("name"))
+			# SEC-03: no cross-cashier IDOR — only the draft's owner (or a
+			# doc-level writer) may update it, and identity/docstatus can never
+			# ride the payload (mass-assignment).
+			_check_draft_owner_access(invoice_doc, doctype)
 			invoice_doc.update(data)
+			own_draft = invoice_doc.owner == frappe.session.user
 		else:
+			# insert-own-draft: the new document is owned by the session user
 			invoice_doc = frappe.get_doc(data)
+			own_draft = True
 
 		# Important: set before set_missing_values()/pricing/validation paths that may
 		# read linked docs (e.g., Customer) and trigger controller permission checks.
-		invoice_doc.flags.ignore_permissions = True
+		# The bypass covers own drafts only (insert or owner update); updating
+		# another user's draft (doc-level write verified above) runs under real
+		# permissions.
+		invoice_doc.flags.ignore_permissions = own_draft
 		frappe.flags.ignore_account_permission = True
 
 		# HO backdate lane is the only path allowed to shift the posting date —
 		# checked before any account/profile resolution so a plain rejection
 		# never surfaces as an unrelated permission error.
 		_enforce_posting_date_policy(invoice_doc)
+
+		# SEC-03: profile gate — after the posting-date policy (whose error the
+		# backdate suite pins) but still before any profile resolution, item
+		# detail lookup or write. The HO backdate lane keeps its own role+
+		# setting authorization (_backdate_entry_active is server-side only).
+		if pos_profile and not _backdate_entry_active(pos_profile):
+			_check_profile_access(pos_profile, doctype)
 
 		pos_profile_doc = None
 		if pos_profile:
@@ -980,6 +1072,20 @@ def update_invoice(data):
 		# Formula: rate = price_list_rate * (1 - discount_percentage/100)
 		# Reverse: price_list_rate = rate / (1 - discount_percentage/100)
 		# ========================================================================
+		# SEC-04: the server resolves its own list price for every row — the
+		# basis for manual-discount detection and the max-discount cap. The
+		# client's price_list_rate stays a display hint.
+		price_list = (
+			(pos_profile_doc.selling_price_list if pos_profile_doc else None)
+			or invoice_doc.get("selling_price_list")
+		)
+		server_prices = _server_price_list_rates(
+			invoice_doc.get("items"), price_list, invoice_doc.get("posting_date")
+		)
+		# Same rounding the client applies to rates (System Settings
+		# currency_precision, exactly what bootstrap.py feeds roundCurrency),
+		# so an honest row's rate equals the server list price exactly.
+		rate_precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
 		# Collect applied pricing rule names before we clear item.pricing_rules
 		applied_rule_names_seen = set()
 		for item in invoice_doc.get("items", []):
@@ -987,37 +1093,6 @@ def update_invoice(data):
 			discount_pct = flt(item.discount_percentage or 0)
 			frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
 			is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
-
-			if is_manual_edit:
-				# MANUAL RATE EDIT: preserve original price_list_rate for audit
-				original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
-				if original_rate > 0:
-					item.price_list_rate = original_rate
-
-				# Validate manual rate edit against business rules (uses cached settings)
-				validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
-				if not validation.get("valid"):
-					frappe.throw(validation.get("message"))
-			else:
-				# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
-				if frontend_price_list_rate > 0:
-					item.price_list_rate = frontend_price_list_rate
-				# Fallback: reverse-calculate if discount exists but no price_list_rate
-				elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
-					item.price_list_rate = calculate_price_list_rate(
-						item_rate, discount_pct, frontend_price_list_rate
-					)
-				else:
-					# No discount or price_list_rate - use rate as is
-					item.price_list_rate = item_rate
-
-				# Ensure price_list_rate is never less than rate (data integrity)
-				if flt(item.price_list_rate) < item_rate:
-					item.price_list_rate = item_rate
-
-			# IMPORTANT: Keep the rate from frontend (do NOT set to 0)
-			# ERPNext will recalculate if needed, but preserving frontend rate
-			# prevents rounding issues and ensures UI matches invoice
 
 			# POS Next computes offers itself (via apply_offers) and sends each
 			# item with discount_percentage / discount_amount / rate already set.
@@ -1051,7 +1126,64 @@ def update_invoice(data):
 				item.pos_offer_item_rules = json.dumps(sorted(item_rule_names)) if item_rule_names else ""
 				item.pricing_rules = ""
 			else:
+				item_rule_names = []
 				item.pos_offer_item_rules = ""
+
+			# SEC-04: manual-edit detection is server-side — a rate below the
+			# server's own list price is a discount even when the client omits
+			# the flag (the flag itself only feeds the audit lane). Rule-
+			# attributed rows are offer-driven, not manual; free rows and
+			# package rows are priced server-side elsewhere; returns mirror the
+			# original invoice's prices.
+			server_plr = _resolve_server_price_list_rate(server_prices, item)
+			server_detected = (
+				bool(pos_profile)
+				and not invoice_doc.get("is_return")
+				and not item_rule_names
+				and not cint(item.get("is_free_item") or 0)
+				and not item.get("pos_package")
+				and server_plr > 0
+				and 0 < item_rate < flt(server_plr, rate_precision)
+			)
+
+			if is_manual_edit or server_detected:
+				# MANUAL RATE EDIT: the server's list price is the cap/audit
+				# basis when known; the client-declared original is the legacy
+				# fallback (flagged rows only).
+				if server_detected:
+					item.price_list_rate = flt(server_plr, rate_precision)
+					# The server's list price is the cap basis — a forged
+					# client original_rate must not shrink the measured cut.
+					item.original_rate = item.price_list_rate
+				else:
+					original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
+					if original_rate > 0:
+						item.price_list_rate = original_rate
+
+				# Validate manual rate edit against business rules (uses cached settings)
+				validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
+				if not validation.get("valid"):
+					frappe.throw(validation.get("message"))
+			else:
+				# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
+				if frontend_price_list_rate > 0:
+					item.price_list_rate = frontend_price_list_rate
+				# Fallback: reverse-calculate if discount exists but no price_list_rate
+				elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
+					item.price_list_rate = calculate_price_list_rate(
+						item_rate, discount_pct, frontend_price_list_rate
+					)
+				else:
+					# No discount or price_list_rate - use rate as is
+					item.price_list_rate = item_rate
+
+				# Ensure price_list_rate is never less than rate (data integrity)
+				if flt(item.price_list_rate) < item_rate:
+					item.price_list_rate = item_rate
+
+			# IMPORTANT: Keep the rate from frontend (do NOT set to 0)
+			# ERPNext will recalculate if needed, but preserving frontend rate
+			# prevents rounding issues and ensures UI matches invoice
 
 		# offer stashes are POS Invoice/Sales Invoice custom fields (Tasks 2/3);
 		# on POS Invoice pos_applied_one_time_rules is not a column — the
@@ -1080,7 +1212,16 @@ def update_invoice(data):
 			# enforcement (pos_offer_usage — one idempotent ledger row per
 			# offer) and the discount code gate's header exemption see the same
 			# rule set; both re-verify the names before granting anything.
-			applied_rule_names_seen.update(_parse_relayed_offer_rules(relayed_offer_rules))
+			# SEC-10: the relay is a client claim — only names the server can
+			# confirm join the stash: an enabled, in-scope, Price-type
+			# Transaction rule whose configured discount equals this doc's
+			# header discount. Item-level and free-item rules ride
+			# item.pricing_rules and were stashed above.
+			applied_rule_names_seen.update(
+				verify_transaction_rule_names(
+					_parse_relayed_offer_rules(relayed_offer_rules), invoice_doc
+				)
+			)
 			# Same transport as the one-time list: POS Offer quota enforcement
 			# and usage recording read this on validate/submit/cancel
 			# (pos_next.overrides.pos_offer_usage).
@@ -1199,8 +1340,8 @@ def update_invoice(data):
 		# the POS Profile warehouse wins on every row (see _enforce_profile_warehouse).
 		_enforce_profile_warehouse(invoice_doc, pos_profile_doc)
 
-		# Save as draft
-		invoice_doc.flags.ignore_permissions = True
+		# Save as draft — permission flags were decided at the top (own draft
+		# bypass only); docstatus stays server-owned.
 		frappe.flags.ignore_account_permission = True
 		invoice_doc.docstatus = 0
 		invoice_doc.save()
@@ -1499,6 +1640,12 @@ def submit_invoice(invoice=None, data=None):
 	pos_profile = invoice.get("pos_profile")
 	doctype = _resolve_target_doctype(payload_doctype)
 
+	# SEC-03: identity/workflow fields are server-owned (the new-draft branch
+	# re-strips inside update_invoice; the existing-draft branch strips below
+	# before the row rebuild).
+	for field in _DRAFT_UNSETTABLE_FIELDS:
+		invoice.pop(field, None)
+
 	# Normalize pricing_rules before processing
 	standardize_pricing_rules(invoice.get("items"))
 
@@ -1565,6 +1712,9 @@ def submit_invoice(invoice=None, data=None):
 			# update_invoice save that created it — the relay is intentionally
 			# dropped here rather than replayed against a known document.
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
+			# SEC-03: no cross-cashier submit — owner or doc-level write only
+			# (identity fields were already stripped from the payload above).
+			_check_draft_owner_access(invoice_doc, doctype)
 			# The row rebuild below re-appends every child from its stripped
 			# payload dict, which would drop the server-derived per-item offer
 			# attribution (the client must never relay it verbatim) and wrongly
@@ -1578,14 +1728,22 @@ def submit_invoice(invoice=None, data=None):
 			invoice_doc.update(invoice)
 			_reapply_item_offer_attribution(invoice_doc, invoice.get("items"), db_item_attribution)
 
-		# Keep permission bypass consistent for POS API flow.
-		invoice_doc.flags.ignore_permissions = True
+		# Permission bypass only for the owner's own draft (mirrors
+		# update_invoice); submitting another user's draft runs under the real
+		# permissions verified by _check_draft_owner_access above.
+		invoice_doc.flags.ignore_permissions = invoice_doc.owner == frappe.session.user
 		frappe.flags.ignore_account_permission = True
 
 		# Same gate as update_invoice, before account resolution: the
 		# payload-with-name branch can reach this submit without passing
 		# through update_invoice again.
 		_enforce_posting_date_policy(invoice_doc)
+
+		# SEC-03: profile gate — after the posting-date policy (whose error the
+		# backdate suite pins) but before any profile resolution or write. The
+		# HO backdate lane keeps its own role+setting authorization.
+		if pos_profile and not _backdate_entry_active(pos_profile):
+			_check_profile_access(pos_profile, doctype)
 
 		# Ensure update_stock is set (POS Invoice and Sales Invoice)
 		if doctype != "Sales Order":
@@ -1637,18 +1795,13 @@ def submit_invoice(invoice=None, data=None):
 
 		# Handle POS Coupon if coupon_code is provided
 		coupon_code = invoice.get("coupon_code") or data.get("coupon_code")
-		if coupon_code:
-			# Increment usage counter for POS Coupon
-			if frappe.db.table_exists("POS Coupon"):
-				try:
-					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
+		if coupon_code and frappe.db.table_exists("POS Coupon"):
+			# SEC-15: increment under a row lock inside this submit transaction.
+			# A fully-redeemed coupon throws and aborts the submit — never
+			# swallowed, and the increment commits with the invoice or not at all.
+			from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
 
-					increment_coupon_usage(coupon_code)
-				except Exception as e:
-					frappe.log_error(
-						title="Failed to increment coupon usage",
-						message=f"Coupon: {coupon_code}, Error: {e!s}",
-					)
+			increment_coupon_usage(coupon_code)
 
 		# Auto-set batch numbers for returns
 		_auto_set_return_batches(invoice_doc)
@@ -2113,28 +2266,39 @@ def delete_invoice(invoice):
 	if not frappe.db.exists(doctype, invoice):
 		frappe.throw(_("Invoice {0} does not exist").format(invoice))
 
+	doc = frappe.get_doc(doctype, invoice)
+
 	# Check if it's a draft
-	if frappe.db.get_value(doctype, invoice, "docstatus") != 0:
+	if doc.docstatus != 0:
 		frappe.throw(_("Cannot delete submitted invoice {0}").format(invoice))
 
-	frappe.delete_doc(doctype, invoice, force=1)
+	# E1: same gates as the draft update path (SEC-03) — profile membership
+	# plus owner-or-write — and no force delete past doctype permissions.
+	_check_profile_access(doc.get("pos_profile"), doctype)
+	_check_draft_owner_access(doc, doctype)
+
+	frappe.delete_doc(doctype, invoice)
 	return _("Invoice {0} Deleted").format(invoice)
 
 
 @frappe.whitelist()
 def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	"""
-	Clean up old draft invoices to prevent stock reservation issues.
-	Deletes drafts older than max_age_hours (default 24 hours).
+	Clean up the current user's old draft invoices to prevent stock reservation
+	issues (SEC-06: own drafts only, age clamped to a day minimum).
 	"""
 	from datetime import datetime, timedelta
 
 	doctype = get_pos_invoice_doctype()
-	cutoff_time = datetime.now() - timedelta(hours=int(max_age_hours))
+	# Clamp: a caller can never trigger a fresher-than-a-day mass delete
+	# (the frontend asks for 1h; it gets 24h).
+	max_age_hours = max(24, cint(max_age_hours))
+	cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
 
 	filters = {
 		"docstatus": 0,  # Draft only
 		"is_pos": 1,  # Only POS Sales Invoices
+		"owner": frappe.session.user,  # Own drafts only (SEC-06)
 		"modified": ["<", cutoff_time.strftime("%Y-%m-%d %H:%M:%S")],
 	}
 
@@ -2153,7 +2317,10 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	deleted_count = 0
 	for draft in old_drafts:
 		try:
-			frappe.delete_doc(doctype, draft["name"], force=True, ignore_permissions=True)
+			# No force/ignore_permissions: the per-doc delete permission check
+			# stays in force (SEC-06); an unprivileged owner's stale draft is
+			# skipped and logged instead of force-deleted.
+			frappe.delete_doc(doctype, draft["name"])
 			deleted_count += 1
 		except Exception as e:
 			frappe.log_error(
@@ -2170,6 +2337,35 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 # ==========================================
 # Return Invoice Management
 # ==========================================
+
+
+def _check_return_read_access(pos_profile):
+	"""SEC-05 gate for single-invoice return reads: the caller must be a POS
+	Profile User of the invoice's profile (Administrator excepted). Strict on
+	purpose — a site-wide read grant (role "All" read=1) must not open the POS
+	return flow to every user. Cross-profile returns need membership in the
+	invoice's profile."""
+	if frappe.session.user == "Administrator":
+		return
+	if pos_profile and frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
+	):
+		return
+	frappe.throw(_("You don't have permission to view this invoice"), frappe.PermissionError)
+
+
+def _return_search_scope():
+	"""SEC-05 scoping for return searches (cheap: one indexed child-table
+	query, no JOINs). Administrator gets None (unrestricted); profile members
+	get their profile list to filter by; no membership at all →
+	PermissionError."""
+	if frappe.session.user == "Administrator":
+		return None
+	profiles = frappe.get_all("POS Profile User", filters={"user": frappe.session.user}, pluck="parent")
+	if not profiles:
+		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
+	return profiles
 
 
 def _filter_fully_returned(invoices, doctype="Sales Invoice"):
@@ -2233,6 +2429,9 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	# transactions are created in
 	doctype = get_pos_invoice_doctype()
 
+	# SEC-05: restrict the listing to the caller's own POS profiles
+	scope = _return_search_scope()
+
 	# Check return validity days from POS Settings
 	return_validity_days = 0
 	if pos_profile:
@@ -2262,6 +2461,9 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 		.orderby(si.creation, order=frappe.qb.desc)
 		.limit(fetch_limit)
 	)
+
+	if scope is not None:
+		query = query.where(si.pos_profile.isin(scope))
 
 	if return_validity_days > 0:
 		cutoff_date = add_days(today(), -return_validity_days)
@@ -2297,10 +2499,14 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	# frappe.qb's .like() which parameterizes internally. Manual escaping needed.
 	search_term = cstr(search_term).strip().replace("%", r"\%").replace("_", r"\_")
 	doctype = get_pos_invoice_doctype()
+
+	# SEC-05: restrict the search to the caller's own POS profiles
+	scope = _return_search_scope()
+
 	si = frappe.qb.DocType(doctype)
 
 	# Step 1: find matching invoices (lightweight, no JOINs)
-	candidates = (
+	query = (
 		frappe.qb.from_(si)
 		.select(
 			si.name,
@@ -2317,10 +2523,13 @@ def search_invoice_by_number(search_term, pos_profile=None):
 		.orderby(si.posting_date, order=frappe.qb.desc)
 		.orderby(si.creation, order=frappe.qb.desc)
 		.limit(10)
-	).run(as_dict=True)
+	)
+
+	if scope is not None:
+		query = query.where(si.pos_profile.isin(scope))
 
 	# Step 2: filter out fully-returned invoices
-	return _filter_fully_returned(candidates, doctype=doctype)
+	return _filter_fully_returned(query.run(as_dict=True), doctype=doctype)
 
 
 @frappe.whitelist()
@@ -2350,6 +2559,10 @@ def check_invoice_return_validity(invoice_name):
 		}
 
 	invoice_info = invoice_data[0]
+
+	# E2: bare existence must not confirm other outlets' invoice numbers —
+	# same profile gate as the rest of the return flow (SEC-05).
+	_check_return_read_access(invoice_info.pos_profile)
 
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
@@ -2397,6 +2610,10 @@ def get_invoice_for_return(invoice_name):
 		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
 	invoice_info = invoice_check[0]
+
+	# SEC-05: no return-flow read outside the caller's profile, before any
+	# further detail is computed.
+	_check_return_read_access(invoice_info.pos_profile)
 
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
@@ -2705,6 +2922,10 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 
 	invoice_info = invoice_check[0]
 
+	# SEC-05: no return against an invoice outside the caller's profile,
+	# before any further detail is computed.
+	_check_return_read_access(invoice_info.pos_profile)
+
 	# Validate docstatus
 	if invoice_info.docstatus != 1:
 		frappe.throw(_("Invoice must be submitted to create a return"))
@@ -2908,6 +3129,13 @@ def search_invoices_for_return(
 	page_length = 100
 	start = (page - 1) * page_length
 
+	# The doctype argument is client-supplied; only the POS doctypes are
+	# searchable through this endpoint.
+	doctype = doctype if doctype in (DOCTYPE_SALES_INVOICE, POS_INVOICE) else get_pos_invoice_doctype()
+
+	# SEC-05: restrict results to the caller's own POS profiles
+	scope = _return_search_scope()
+
 	# Build main invoice query
 	si = frappe.qb.DocType(doctype)
 
@@ -2921,6 +3149,9 @@ def search_invoices_for_return(
 		.limit(page_length)
 		.offset(start)
 	)
+
+	if scope is not None:
+		query = query.where(si.pos_profile.isin(scope))
 
 	# Add company filter
 	if company:
@@ -2989,6 +3220,9 @@ def search_invoices_for_return(
 		.select(Count(si.name).as_("total"))
 		.where((si.docstatus == 1) & (si.is_return == 0))
 	)
+
+	if scope is not None:
+		count_query = count_query.where(si.pos_profile.isin(scope))
 
 	# Re-apply the same filters for count
 	if company:

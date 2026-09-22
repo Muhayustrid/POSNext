@@ -170,6 +170,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { highlightSafe } from "@/utils/escapeHtml";
 
 const props = defineProps({
 	modelValue: {
@@ -363,13 +364,13 @@ function scrollToHighlighted() {
 }
 
 function highlightMatch(text) {
-	if (!searchQuery.value || searchQuery.value === selectedOption.value?.label) {
-		return text;
-	}
-
-	const query = searchQuery.value;
-	const regex = new RegExp(`(${query})`, "gi");
-	return text.replace(regex, "<mark>$1</mark>");
+	// Empty query (or a query identical to the selected label) means "no
+	// highlight", but the label itself is still data -> always escaped.
+	const query =
+		!searchQuery.value || searchQuery.value === selectedOption.value?.label
+			? ""
+			: searchQuery.value;
+	return highlightSafe(text, query);
 }
 
 // Click outside to close

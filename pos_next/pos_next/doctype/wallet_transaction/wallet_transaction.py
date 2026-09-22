@@ -32,6 +32,12 @@ class WalletTransaction(AccountsController):
 
 		# For debit transactions, check if sufficient balance
 		if self.transaction_type == "Debit":
+			# SEC-14 (PATTERN C): lock the wallet row inside the request
+			# transaction — a concurrent debit waits here and re-checks against
+			# the balance the first one committed, instead of both passing
+			# against the same snapshot. No manual commit.
+			frappe.get_doc("Wallet", self.wallet, for_update=True)
+
 			from pos_next.pos_next.doctype.wallet.wallet import get_customer_wallet_balance
 
 			balance = get_customer_wallet_balance(self.customer, self.company)
@@ -61,7 +67,9 @@ class WalletTransaction(AccountsController):
 
 	def update_wallet_balance(self):
 		"""Update the wallet's current balance"""
-		wallet_doc = frappe.get_doc("Wallet", self.wallet)
+		# SEC-14 (PATTERN C): serialize balance updates under a row lock held
+		# for the rest of the request transaction.
+		wallet_doc = frappe.get_doc("Wallet", self.wallet, for_update=True)
 		wallet_doc.update_balance()
 
 	def make_gl_entries(self, cancel=False):
@@ -188,7 +196,6 @@ class WalletTransaction(AccountsController):
 		return None
 
 
-@frappe.whitelist()
 def create_wallet_credit(
 	wallet,
 	amount,
@@ -200,6 +207,9 @@ def create_wallet_credit(
 ):
 	"""
 	Create a wallet credit transaction.
+
+	Internal helper — not an HTTP endpoint. Callers must gate access
+	themselves (e.g. frappe.has_permission), see create_manual_wallet_credit.
 
 	Args:
 		wallet: Wallet name
@@ -249,16 +259,18 @@ def create_wallet_credit(
 	return transaction
 
 
-@frappe.whitelist()
-def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversion_factor=None):
+def credit_loyalty_points_to_wallet(customer, company, loyalty_points):
 	"""
 	Convert loyalty points to wallet credit.
+
+	Internal helper — not an HTTP endpoint. The conversion factor is always
+	resolved server-side from the customer's Loyalty Program; client-supplied
+	values are never trusted.
 
 	Args:
 		customer: Customer ID
 		company: Company
 		loyalty_points: Number of loyalty points to convert
-		conversion_factor: Points to currency conversion (optional, fetched from program if not provided)
 
 	Returns:
 		Wallet Transaction document or None
@@ -266,11 +278,11 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 	if flt(loyalty_points) <= 0:
 		return None
 
-	# Get conversion factor from loyalty program if not provided
-	if not conversion_factor:
-		loyalty_program = frappe.db.get_value("Customer", customer, "loyalty_program")
-		if loyalty_program:
-			conversion_factor = frappe.db.get_value("Loyalty Program", loyalty_program, "conversion_factor")
+	# Conversion factor is resolved server-side from the Loyalty Program only
+	conversion_factor = None
+	loyalty_program = frappe.db.get_value("Customer", customer, "loyalty_program")
+	if loyalty_program:
+		conversion_factor = frappe.db.get_value("Loyalty Program", loyalty_program, "conversion_factor")
 
 	if not conversion_factor:
 		conversion_factor = 1.0  # Default: 1 point = 1 currency

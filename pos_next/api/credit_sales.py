@@ -253,6 +253,13 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
 
+	# SEC-09: only users with write access on this invoice may move its credit
+	if not frappe.has_permission("Sales Invoice", "write", doc=invoice_name):
+		frappe.throw(
+			_("Not permitted to redeem credit on Sales Invoice {0}").format(invoice_name),
+			frappe.PermissionError,
+		)
+
 	# Shift schedule: no payments after a mandatory schedule deadline
 	assert_invoice_sales_allowed(invoice_name)
 
@@ -584,6 +591,15 @@ def cancel_credit_journal_entries(invoice_name):
 	Args:
 		invoice_name: Sales Invoice name
 	"""
+	# SEC-09: cancelling redemption JEs mutates the invoice's books
+	if not frappe.has_permission("Sales Invoice", "write", doc=invoice_name):
+		frappe.throw(
+			_("Not permitted to cancel credit journal entries for Sales Invoice {0}").format(
+				invoice_name
+			),
+			frappe.PermissionError,
+		)
+
 	remark = get_credit_redeem_remark(invoice_name)
 
 	# Find linked journal entries
@@ -622,6 +638,21 @@ def cancel_credit_journal_entries(invoice_name):
 	return cancelled_count
 
 
+def _check_profile_access(pos_profile):
+	"""PATTERN A (same as api/shifts.py): only users of the POS Profile pass."""
+	if frappe.session.user == "Administrator":
+		return
+	is_profile_user = frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
+	)
+	if not is_profile_user:
+		frappe.throw(
+			_("You are not a user of POS Profile {0}").format(pos_profile),
+			frappe.PermissionError,
+		)
+
+
 @frappe.whitelist()
 def get_credit_sale_summary(pos_profile):
 	"""
@@ -635,6 +666,9 @@ def get_credit_sale_summary(pos_profile):
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
+
+	# SEC-09: credit summaries are per-profile; only profile members may read
+	_check_profile_access(pos_profile)
 
 	# Get credit sales (outstanding > 0)
 	summary = frappe.db.sql(
@@ -675,11 +709,8 @@ def get_credit_invoices(pos_profile, limit=100):
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
-	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	# SEC-09: same per-profile gate as get_credit_sale_summary above.
+	_check_profile_access(pos_profile)
 
 	# Query for credit invoices
 	invoices = frappe.db.sql(

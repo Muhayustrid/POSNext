@@ -867,6 +867,7 @@ import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import { __ } from "@/utils/translation";
 import { formatCurrencyNumber } from "@/utils/currency";
+import { highlightSafe } from "@/utils/escapeHtml";
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -1340,18 +1341,17 @@ async function loadAvailability() {
 }
 
 /**
- * Highlight matching text in search results
+ * Highlight matching text in search results.
+ * Escaped via highlightSafe: data containing markup renders as text and the
+ * query is RegExp-escaped ("(" no longer throws).
  * @param {string} text - Text to search in
  * @param {string} query - Search query to highlight
  * @returns {string} HTML with highlighted matches
  */
 function highlightMatch(text, query) {
-	if (!text || !query) return text;
-
-	const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const regex = new RegExp(`(${escapedQuery})`, "gi");
-	return text.replace(
-		regex,
+	return highlightSafe(
+		text,
+		query,
 		'<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5">$1</mark>'
 	);
 }

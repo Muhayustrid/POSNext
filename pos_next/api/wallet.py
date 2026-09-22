@@ -29,6 +29,17 @@ def validate_wallet_payment(doc, method=None):
 	if wallet_amount <= 0:
 		return
 
+	# SEC-14 (PATTERN C): take the wallet row lock inside the request
+	# transaction so two concurrent submits serialize here instead of both
+	# passing the balance check against the same snapshot. The lock is held
+	# until the request transaction ends — no manual commit.
+	frappe.db.get_value(
+		"Wallet",
+		{"customer": doc.customer, "company": doc.company, "status": "Active"},
+		"name",
+		for_update=True,
+	)
+
 	# Get customer wallet balance
 	wallet_balance = get_customer_wallet_balance(doc.customer, doc.company, exclude_invoice=doc.name)
 
@@ -210,23 +221,38 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 
 def get_pending_wallet_payments(customer, exclude_invoice=None):
 	"""
-	Get total wallet payments from unconsolidated/pending POS invoices.
+	Get total wallet payments from open invoices (draft or submitted, not
+	cancelled) across BOTH invoice doctypes — Sales Invoice and POS Invoice —
+	so a wallet payment on either type earmarks the balance (SEC-14).
+
+	Drafts are counted deliberately: their outstanding_amount is 0 until
+	submit, yet the wallet payment already reserves the balance. The old
+	``outstanding_amount > 0`` filter let the same balance be spent twice.
 	"""
-	filters = {"customer": customer, "docstatus": ["in", [0, 1]], "outstanding_amount": [">", 0], "is_pos": 1}
-
-	invoices = frappe.get_all("Sales Invoice", filters=filters, fields=["name"])
-
 	pending_amount = 0.0
 
-	for invoice in invoices:
-		if exclude_invoice and invoice.name == exclude_invoice:
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		if not frappe.db.table_exists(doctype):
+			continue
+
+		invoice_names = frappe.get_all(
+			doctype,
+			filters={"customer": customer, "docstatus": ["in", [0, 1]], "is_pos": 1},
+			pluck="name",
+		)
+		if not invoice_names:
 			continue
 
 		payments = frappe.get_all(
-			"Sales Invoice Payment", filters={"parent": invoice.name}, fields=["mode_of_payment", "amount"]
+			"Sales Invoice Payment",  # child doctype shared by both invoice types
+			filters={"parenttype": doctype, "parent": ["in", invoice_names]},
+			fields=["parent", "mode_of_payment", "amount"],
 		)
 
 		for payment in payments:
+			if exclude_invoice and payment.parent == exclude_invoice:
+				continue
+
 			is_wallet = frappe.db.get_value("Mode of Payment", payment.mode_of_payment, "is_wallet_payment")
 			if is_wallet:
 				pending_amount += flt(payment.amount)

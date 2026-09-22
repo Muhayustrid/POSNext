@@ -14,16 +14,16 @@ from pos_next.api.customers import (
 
 class TestCustomersAPI(unittest.TestCase):
 	@patch("pos_next.api.customers.frappe.logger")
-	@patch("pos_next.api.customers.frappe.get_all")
+	@patch("pos_next.api.customers.frappe.get_list")
 	@patch("pos_next.api.customers.frappe.db")
-	def test_get_customers_applies_search_term_filters(self, mock_db, mock_get_all, mock_logger):
+	def test_get_customers_applies_search_term_filters(self, mock_db, mock_get_list, mock_logger):
 		mock_logger.return_value = Mock()
-		mock_get_all.return_value = []
+		mock_get_list.return_value = []
 
 		get_customers(search_term="john", limit=10)
 
-		mock_get_all.assert_called_once()
-		kwargs = mock_get_all.call_args.kwargs
+		mock_get_list.assert_called_once()
+		kwargs = mock_get_list.call_args.kwargs
 		self.assertEqual(kwargs["filters"], {"disabled": 0})
 		self.assertEqual(
 			kwargs["or_filters"],

@@ -134,6 +134,15 @@ export default defineConfig({
 				navigateFallback: null,
 				navigateFallbackDenylist: [/^\/api/, /^\/app/],
 				runtimeCaching: [
+					// SEC-17: never cache /api/ responses — they carry cashier-scoped
+					// data (invoices, customers, PII) that must not leak to the next
+					// cashier on a shared device. Registered FIRST: workbox matches
+					// routes in registration order, so no later pattern (e.g. /files/)
+					// can capture an /api/ URL.
+					{
+						urlPattern: /\/api\/.*/i,
+						handler: "NetworkOnly",
+					},
 					{
 						urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
 						handler: "CacheFirst",
@@ -182,21 +191,6 @@ export default defineConfig({
 							expiration: {
 								maxEntries: 200, // Cache up to 200 product images
 								maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
-							},
-							cacheableResponse: {
-								statuses: [0, 200],
-							},
-						},
-					},
-					{
-						urlPattern: /\/api\/.*/i,
-						handler: "NetworkFirst",
-						options: {
-							cacheName: "api-cache",
-							networkTimeoutSeconds: 10,
-							expiration: {
-								maxEntries: 100,
-								maxAgeSeconds: 60 * 60 * 24, // 24 hours
 							},
 							cacheableResponse: {
 								statuses: [0, 200],

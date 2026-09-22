@@ -233,11 +233,53 @@ class TestInvoiceHasManualDiscount(unittest.TestCase):
 
 
 class TestOfferExemption(unittest.TestCase):
-	"""Offer-attributed discounts (server-stashed pricing rules) are exempt."""
+	"""Offer-attributed discounts (server-stashed pricing rules) are exempt —
+	only when the claimed rule is real for the document (SEC-10): enabled, in
+	scope, applicable to the row, and its discount reconciles with the row."""
+
+	@staticmethod
+	def _rule(name, **overrides):
+		"""Pricing Rule row as the gate's verification query returns it."""
+		row = {
+			"name": name,
+			"apply_on": "Item Code",
+			"company": None,
+			"valid_from": None,
+			"valid_upto": None,
+			"applicable_for": None,
+			"price_or_product_discount": "Price",
+			"rate_or_discount": "Discount Percentage",
+			"discount_percentage": 10,
+			"discount_amount": 0,
+			"rate": 0,
+			"min_qty": 0,
+			"max_qty": 0,
+			"min_amt": 0,
+			"max_amt": 0,
+		}
+		row.update(overrides)
+		return frappe._dict(row)
+
+	@staticmethod
+	def _gate_get_all(rules, child_rows=None):
+		"""frappe.get_all double dispatching on doctype: the rule verification
+		query vs the child-table applicability queries."""
+		child_rows = child_rows or []
+
+		def _get_all(doctype, filters=None, fields=None, **kwargs):
+			if doctype == "Pricing Rule":
+				return rules
+			return child_rows
+
+		return _get_all
 
 	def test_item_with_verified_rule_passes_without_code(self):
-		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-OFFER-1", apply_on="Item Code")]
+		rules = [self._rule("PR-OFFER-1")]
+		with DB_PATCH as mock_db, patch(
+			"pos_next.overrides.discount_code.frappe.get_all",
+			side_effect=self._gate_get_all(rules, [{"parent": "PR-OFFER-1", "item_code": "IT1"}]),
+			create=True,
+		):
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
@@ -245,6 +287,8 @@ class TestOfferExemption(unittest.TestCase):
 					FakeItem(
 						item_code="IT1",
 						discount_percentage=10,
+						price_list_rate=100,
+						rate=90,
 						pos_offer_item_rules='["PR-OFFER-1"]',
 					)
 				],
@@ -254,19 +298,21 @@ class TestOfferExemption(unittest.TestCase):
 			validate_invoice_discounts(doc, "validate")  # must not raise
 
 			mock_db.get_value.assert_not_called()
-			mock_get_all.assert_called_once_with(
-				"Pricing Rule",
-				filters={"name": ["in", ["PR-OFFER-1"]], "disable": 0},
-				fields=["name", "apply_on"],
-			)
 
 	def test_item_exempt_when_any_claimed_rule_is_verified(self):
-		with GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-1", apply_on="Item Code")]
+		rules = [self._rule("PR-1")]
+		with patch(
+			"pos_next.overrides.discount_code.frappe.get_all",
+			side_effect=self._gate_get_all(rules, [{"parent": "PR-1", "item_code": "IT1"}]),
+			create=True,
+		):
 			doc = FakeDoc(
 				items=[
 					FakeItem(
+						item_code="IT1",
 						discount_percentage=10,
+						price_list_rate=100,
+						rate=90,
 						pos_offer_item_rules='["PR-1", "PR-FAKE"]',
 					)
 				],
@@ -286,6 +332,8 @@ class TestOfferExemption(unittest.TestCase):
 					FakeItem(
 						item_code="IT1",
 						discount_percentage=10,
+						price_list_rate=100,
+						rate=90,
 						pos_offer_item_rules='["PR-GONE"]',
 					)
 				],
@@ -331,14 +379,21 @@ class TestOfferExemption(unittest.TestCase):
 
 	def test_header_discount_exempt_with_verified_transaction_rule(self):
 		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-TRANS", apply_on="Transaction")]
+			mock_get_all.return_value = [
+				self._rule(
+					"PR-TRANS",
+					apply_on="Transaction",
+					rate_or_discount="Discount Percentage",
+					discount_percentage=10,
+				)
+			]
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
-				discount_amount=25000,
 				# In production this stash is item-derived rules plus the
 				# client-relayed transaction rule names, merged by update_invoice.
 				pos_applied_offer_rules='["PR-TRANS"]',
+				additional_discount_percentage=10,
 				items=[FakeItem(item_code="IT1")],
 				discount_confirmation_code="",
 			)
@@ -347,11 +402,37 @@ class TestOfferExemption(unittest.TestCase):
 
 			mock_db.get_value.assert_not_called()
 
+	def test_header_discount_gated_when_rule_discount_mismatches(self):
+		# SEC-10: an enabled, in-scope Transaction rule whose configured
+		# discount does NOT match the header discount exempts nothing.
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				self._rule(
+					"PR-TRANS",
+					apply_on="Transaction",
+					rate_or_discount="Discount Percentage",
+					discount_percentage=10,
+				)
+			]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				pos_applied_offer_rules='["PR-TRANS"]',
+				additional_discount_percentage=25,
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
 	def test_item_claimed_transaction_rule_does_not_exempt_header(self):
 		# R3 keys the header exemption on the INVOICE-level stash only — an
 		# item claiming a Transaction rule must not free the header discount.
 		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-TRANS", apply_on="Transaction")]
+			mock_get_all.return_value = [
+				self._rule("PR-TRANS", apply_on="Transaction", discount_percentage=10)
+			]
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
@@ -361,6 +442,8 @@ class TestOfferExemption(unittest.TestCase):
 					FakeItem(
 						item_code="IT1",
 						discount_percentage=10,
+						price_list_rate=100,
+						rate=90,
 						pos_offer_item_rules='["PR-TRANS"]',
 					)
 				],
@@ -371,11 +454,21 @@ class TestOfferExemption(unittest.TestCase):
 				validate_invoice_discounts(doc, "validate")
 
 	def test_relay_merged_stash_exempts_header_and_items(self):
-		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [
-				SimpleNamespace(name="PR-ITEM-1", apply_on="Item Code"),
-				SimpleNamespace(name="PR-TRANS", apply_on="Transaction"),
-			]
+		rules = [
+			self._rule("PR-ITEM-1"),
+			self._rule(
+				"PR-TRANS",
+				apply_on="Transaction",
+				rate_or_discount="Discount Amount",
+				discount_percentage=0,
+				discount_amount=25000,
+			),
+		]
+		with DB_PATCH as mock_db, patch(
+			"pos_next.overrides.discount_code.frappe.get_all",
+			side_effect=self._gate_get_all(rules, [{"parent": "PR-ITEM-1", "item_code": "IT1"}]),
+			create=True,
+		):
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
@@ -385,6 +478,8 @@ class TestOfferExemption(unittest.TestCase):
 					FakeItem(
 						item_code="IT1",
 						discount_percentage=10,
+						price_list_rate=100,
+						rate=90,
 						pos_offer_item_rules='["PR-ITEM-1"]',
 					)
 				],
@@ -398,7 +493,7 @@ class TestOfferExemption(unittest.TestCase):
 	def test_header_discount_gated_when_no_verified_rule_is_transaction(self):
 		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
 			# Verified rules exist, but none with apply_on == "Transaction".
-			mock_get_all.return_value = [SimpleNamespace(name="PR-ITEM", apply_on="Item Code")]
+			mock_get_all.return_value = [self._rule("PR-ITEM")]
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
@@ -429,13 +524,85 @@ class TestOfferExemption(unittest.TestCase):
 
 	def test_manual_item_discount_still_gated_when_header_exempt(self):
 		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
-			mock_get_all.return_value = [SimpleNamespace(name="PR-TRANS", apply_on="Transaction")]
+			mock_get_all.return_value = [
+				self._rule(
+					"PR-TRANS",
+					apply_on="Transaction",
+					rate_or_discount="Discount Amount",
+					discount_percentage=0,
+					discount_amount=25000,
+				)
+			]
 			doc = FakeDoc(
 				is_pos=1,
 				company="Company A",
 				discount_amount=25000,
 				pos_applied_offer_rules='["PR-TRANS"]',
 				items=[FakeItem(item_code="IT1", discount_percentage=10)],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+	def test_product_type_transaction_rule_does_not_exempt_header(self):
+		# SEC-10: Product-type Transaction rules give free items — they must
+		# never be read as a header-discount exemption.
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				self._rule(
+					"PR-BOGO",
+					apply_on="Transaction",
+					price_or_product_discount="Product",
+					discount_percentage=10,
+				)
+			]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				additional_discount_percentage=10,
+				pos_applied_offer_rules='["PR-BOGO"]',
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+	def test_rule_for_other_company_does_not_exempt(self):
+		# SEC-10: the rule is enabled but scoped to another company.
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				self._rule("PR-OTHER-CO", apply_on="Transaction", company="Company B", discount_percentage=10)
+			]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				additional_discount_percentage=10,
+				pos_applied_offer_rules='["PR-OTHER-CO"]',
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
+	def test_expired_rule_does_not_exempt_item(self):
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [self._rule("PR-OLD", valid_upto="2000-01-01")]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				posting_date="2026-09-22",
+				items=[
+					FakeItem(
+						item_code="IT1",
+						discount_percentage=10,
+						price_list_rate=100,
+						rate=90,
+						pos_offer_item_rules='["PR-OLD"]',
+					)
+				],
 				discount_confirmation_code="",
 			)
 

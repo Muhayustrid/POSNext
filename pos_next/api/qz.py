@@ -21,6 +21,19 @@ import os
 
 import frappe
 from frappe import _
+from frappe.rate_limiter import rate_limit
+
+# SEC-21: signing (and the certificate it serves) is only for print-capable
+# POS roles. Rate limiting rides on frappe.rate_limiter, already used by
+# api/auth.py and api/printing.py.
+_PRINT_ROLES = ("POSNext Cashier", "Nexus POS Manager", "System Manager")
+
+
+def _require_print_role():
+	if frappe.session.user == "Administrator":
+		return
+	if not set(_PRINT_ROLES) & set(frappe.get_roles()):
+		frappe.throw(_("You don't have permission to use QZ Tray printing"), frappe.PermissionError)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -47,6 +60,7 @@ def _key_path():
 @frappe.whitelist()
 def get_certificate():
 	"""Return the public certificate PEM text for QZ Tray signing."""
+	_require_print_role()
 	path = _cert_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -61,6 +75,7 @@ def get_certificate():
 @frappe.whitelist()
 def get_certificate_download():
 	"""Return the certificate PEM and company name for download."""
+	_require_print_role()
 	path = _cert_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -76,6 +91,7 @@ def get_certificate_download():
 
 
 @frappe.whitelist()
+@rate_limit(limit=30, seconds=60)
 def sign_message(message):
 	"""Sign a message with the private key for QZ Tray.
 
@@ -85,6 +101,7 @@ def sign_message(message):
 	Returns:
 		Base64-encoded RSA-PKCS1v15-SHA512 signature.
 	"""
+	_require_print_role()
 	path = _key_path()
 	if not os.path.exists(path):
 		frappe.throw(

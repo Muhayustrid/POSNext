@@ -50,7 +50,14 @@ class POSInvoiceModeMixin:
 	def setUp(self):
 		self._created = []
 		self.profile = frappe.db.get_value(
-			"POS Profile", _PROFILE_FILTER, ["name", "company", "warehouse"], as_dict=True
+			"POS Profile",
+			_PROFILE_FILTER,
+			["name", "company", "warehouse"],
+			as_dict=True,
+			# creation-asc: an unordered first row can land on a leftover
+			# _Test POS Profile (no selling price list) whose invoices break
+			# every submit (same rationale as api/test_backdate_invoices.py)
+			order_by="creation asc",
 		)
 		if not self.profile:
 			self.skipTest("no schedule-safe POS Profile")

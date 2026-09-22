@@ -1228,6 +1228,7 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
+import { highlightSafe } from "@/utils/escapeHtml";
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
@@ -2269,21 +2270,16 @@ function clearSearch() {
 // ============================================
 
 /**
- * Escape special regex characters in a string
- */
-function escapeRegex(str) {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Highlight search matches in text with yellow background
+ * Highlight search matches in text with yellow background.
+ * Escaped via highlightSafe: data containing markup renders as text and the
+ * query is RegExp-escaped ("(" no longer throws).
  */
 function highlightSearchMatch(text, searchTerm) {
-	if (!text || !searchTerm) return text;
-	const escaped = escapeRegex(searchTerm.trim());
-	if (!escaped) return text;
-	const regex = new RegExp(`(${escaped})`, "gi");
-	return text.replace(regex, '<mark class="search-highlight">$1</mark>');
+	return highlightSafe(
+		text,
+		searchTerm.trim(),
+		'<mark class="search-highlight">$1</mark>'
+	);
 }
 </script>
 

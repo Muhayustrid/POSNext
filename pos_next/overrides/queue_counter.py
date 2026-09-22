@@ -10,7 +10,12 @@ printer. It never lowers the counter.
 """
 
 import frappe
-from frappe.utils import nowdate
+from frappe.utils import cint, nowdate
+
+# ponytail: flat daily clamp instead of per-number allocation records — a real
+# allocation ledger would need a new table; raise this only if a real outlet
+# ever legitimately prints past it in one day.
+MAX_QUEUE_NUMBER_PER_DAY = 10000
 
 
 def bump_queue_counter(doc, method=None):
@@ -19,6 +24,13 @@ def bump_queue_counter(doc, method=None):
 	number = doc.get("pos_queue_number")
 	company = doc.get("company")
 	if not number or not company:
+		return
+	number = cint(number)
+	# SEC-20: pos_queue_number rides on the client payload, so a forged huge
+	# number must not poison the shared counter. Real offline tills only ever
+	# advance a little past the counter; anything beyond the daily clamp is
+	# treated as tampering and ignored.
+	if number < 1 or number > MAX_QUEUE_NUMBER_PER_DAY:
 		return
 	date = doc.get("pos_queue_date") or nowdate()
 	name = frappe.db.get_value("POS Queue Counter", {"company": company, "date": date}, "name")

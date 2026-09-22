@@ -7,6 +7,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+# Shared implementation (union of both invoice doctypes, drafts included) —
+# the two modules used to drift, and wallet_transaction.py's balance checks
+# ride this one, so the pending math lives in exactly one place.
+from pos_next.api.wallet import get_pending_wallet_payments
+
 
 class Wallet(Document):
 	def validate(self):
@@ -120,40 +125,6 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Wallet Balance Error")
 		return 0.0
-
-
-def get_pending_wallet_payments(customer, exclude_invoice=None):
-	"""
-	Get total wallet payments from unconsolidated/pending POS invoices.
-	This prevents double-spending of wallet balance.
-	"""
-	# Get open Sales Invoices (draft or unconsolidated POS invoices)
-	filters = {
-		"customer": customer,
-		"docstatus": ["in", [0, 1]],  # Draft or Submitted
-		"outstanding_amount": [">", 0],
-		"is_pos": 1,
-	}
-
-	invoices = frappe.get_all("Sales Invoice", filters=filters, fields=["name"])
-
-	pending_amount = 0.0
-
-	for invoice in invoices:
-		if exclude_invoice and invoice.name == exclude_invoice:
-			continue
-
-		# Get wallet payments from this invoice
-		payments = frappe.get_all(
-			"Sales Invoice Payment", filters={"parent": invoice.name}, fields=["mode_of_payment", "amount"]
-		)
-
-		for payment in payments:
-			is_wallet = frappe.db.get_value("Mode of Payment", payment.mode_of_payment, "is_wallet_payment")
-			if is_wallet:
-				pending_amount += flt(payment.amount)
-
-	return pending_amount
 
 
 @frappe.whitelist()

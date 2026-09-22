@@ -48,6 +48,11 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			filters["disabled"] = 0
 
 		search_term = (search_term or "").strip()
+		# SEC-19: single-character probes make the search a cheap PII oracle;
+		# the POS UI never searches with fewer than two characters (it fetches
+		# the full list with an empty term for the offline cache).
+		if search_term and len(search_term) < 2:
+			return []
 		if search_term:
 			like_term = f"%{search_term}%"
 			or_filters = [
@@ -58,7 +63,8 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			]
 
 		customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
-		result = frappe.get_all(
+		# SEC-19: get_list (not get_all) so Customer read permissions apply.
+		result = frappe.get_list(
 			"Customer",
 			filters=filters,
 			or_filters=or_filters or None,
@@ -68,6 +74,10 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 		)
 		frappe.logger().debug(f"get_customers returned {len(result)} customers")
 		return result
+	except frappe.PermissionError:
+		# SEC-19: a permission denial must stay a 403, not be masked as a
+		# generic "Error fetching customers".
+		raise
 	except Exception as e:
 		frappe.logger().error(f"Error in get_customers: {e!s}")
 		frappe.logger().error(frappe.get_traceback())
@@ -275,4 +285,10 @@ def get_customer_details(customer):
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
-	return frappe.get_cached_doc("Customer", customer).as_dict()
+	doc = frappe.get_cached_doc("Customer", customer)
+	# SEC-19: the full customer document (contacts, loyalty, addresses, tax
+	# ids) is only for users with Customer read.
+	if not frappe.has_permission("Customer", "read", doc=doc):
+		frappe.throw(_("You don't have permission to view this customer"), frappe.PermissionError)
+
+	return doc.as_dict()

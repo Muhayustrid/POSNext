@@ -328,3 +328,52 @@ describe("printWithSilentFallback (doctype passthrough, POS Invoice mode)", () =
 		)
 	})
 })
+
+describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {
+	const evil = {
+		...doc,
+		name: 'SINV-1"><img src=x onerror=alert(1)>',
+		company: "<script>alert(1)</script>",
+		customer_name: "Bob <b>Evil</b>",
+		header: "HEADER<img src=x>",
+		footer: "FOOTER<img src=x>",
+		items: [
+			{
+				item_code: "A",
+				item_name: "<img src=x onerror=alert(1)>",
+				quantity: 1,
+				rate: 10000,
+				serial_no: "SN<img src=x>",
+			},
+		],
+		payments: [{ mode_of_payment: "<b>Cash</b>", amount: 10000 }],
+	}
+
+	it("escapes item names, customer, company, header/footer, serials and payment labels", () => {
+		const html = buildReceiptHTML(evil)
+		// no injected tag survives anywhere in the receipt
+		expect(html).not.toContain("<img")
+		expect(html).not.toContain("<script")
+		expect(html).not.toContain("<b>")
+		// the raw strings survive as text
+		expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;")
+		expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;")
+		expect(html).toContain("Bob &lt;b&gt;Evil&lt;/b&gt;")
+		expect(html).toContain("&lt;b&gt;Cash&lt;/b&gt;")
+		expect(html).toContain("SN&lt;img src=x&gt;")
+	})
+
+	it("escapes the popup document title as well", () => {
+		const html = buildReceiptDocumentHTML(evil, { dots: 384 })
+		expect(html).not.toContain("<img")
+		expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;")
+	})
+
+	it("keeps normal data untouched (no metacharacters -> byte-identical output)", () => {
+		const html = buildReceiptHTML(doc)
+		expect(html).not.toContain("&lt;")
+		expect(html).not.toContain("&amp;")
+		expect(html).not.toContain("&quot;")
+		expect(html).not.toContain("&#39;")
+	})
+})

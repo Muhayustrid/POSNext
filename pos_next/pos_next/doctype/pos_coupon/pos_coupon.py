@@ -5,7 +5,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, getdate, strip, today
+from frappe.utils import cint, flt, getdate, strip, today
 
 ONE_USE_COUPON_DOCTYPES = ("Sales Invoice", "POS Invoice")
 
@@ -179,29 +179,42 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 
 
 def increment_coupon_usage(coupon_code):
-	"""Increment the usage counter for a coupon"""
-	try:
-		coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
-		coupon.used = (coupon.used or 0) + 1
-		coupon.db_set("used", coupon.used)
-		frappe.db.commit()
-	except Exception as e:
-		frappe.log_error(
-			title="Coupon Usage Increment Failed",
-			message=f"Failed to increment usage for coupon {coupon_code}: {e!s}",
-		)
+	"""Increment the usage counter for a coupon under a row lock (SEC-15, PATTERN C).
+
+	Runs inside the caller's invoice submit transaction: the FOR UPDATE lock
+	serializes concurrent claims, and the max-use re-check under the lock
+	refuses to push `used` past `maximum_use`. No manual commit — the
+	increment commits (or rolls back) together with the invoice.
+	"""
+	coupon = frappe.db.get_value(
+		"POS Coupon",
+		{"coupon_code": coupon_code.upper()},
+		["name", "used", "maximum_use"],
+		as_dict=True,
+		for_update=True,
+	)
+	if not coupon:
+		return
+
+	used = cint(coupon.used)
+	if cint(coupon.maximum_use) and used >= cint(coupon.maximum_use):
+		frappe.throw(_("Sorry, this coupon code has been fully redeemed"))
+
+	frappe.db.set_value("POS Coupon", coupon.name, "used", used + 1, update_modified=False)
 
 
 def decrement_coupon_usage(coupon_code):
 	"""Decrement the usage counter for a coupon (for cancelled invoices)"""
-	try:
-		coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
-		if coupon.used and coupon.used > 0:
-			coupon.used = coupon.used - 1
-			coupon.db_set("used", coupon.used)
-			frappe.db.commit()
-	except Exception as e:
-		frappe.log_error(
-			title="Coupon Usage Decrement Failed",
-			message=f"Failed to decrement usage for coupon {coupon_code}: {e!s}",
-		)
+	coupon = frappe.db.get_value(
+		"POS Coupon",
+		{"coupon_code": coupon_code.upper()},
+		["name", "used"],
+		as_dict=True,
+		for_update=True,
+	)
+	if not coupon:
+		return
+
+	used = cint(coupon.used)
+	if used > 0:
+		frappe.db.set_value("POS Coupon", coupon.name, "used", used - 1, update_modified=False)

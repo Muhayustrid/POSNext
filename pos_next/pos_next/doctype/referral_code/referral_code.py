@@ -92,7 +92,6 @@ def create_referral_code(
 	doc.referee_discount_amount = referee_discount_amount
 
 	doc.insert()
-	frappe.db.commit()
 	return doc
 
 
@@ -111,11 +110,34 @@ def apply_referral_code(referral_code, referee_customer):
 	if not frappe.db.exists("Referral Code", {"referral_code": referral_code.upper()}):
 		frappe.throw(_("Invalid referral code"))
 
-	referral = frappe.get_doc("Referral Code", {"referral_code": referral_code.upper()})
+	referral_name = frappe.db.get_value("Referral Code", {"referral_code": referral_code.upper()}, "name")
+
+	# SEC-22 (PATTERN C): lock the referral row inside the request transaction
+	# so concurrent applies serialize here — the guards below and the counter
+	# update cannot be raced. No manual commit; the request transaction decides.
+	referral = frappe.get_doc("Referral Code", referral_name, for_update=True)
 
 	# Check if disabled
 	if referral.disabled:
 		frappe.throw(_("This referral code has been disabled"))
+
+	# SEC-22: self-referral — a code never rewards its own referrer
+	if referee_customer == referral.customer:
+		frappe.throw(_("You cannot use your own referral code"))
+
+	# SEC-22: "new customer" is derived server-side from purchase history, not
+	# from any client claim — a customer with submitted invoices for this
+	# company is not a new customer.
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		if (
+			frappe.db.table_exists(doctype)
+			and frappe.db.count(
+				doctype,
+				{"customer": referee_customer, "company": referral.company, "docstatus": 1},
+			)
+			> 0
+		):
+			frappe.throw(_("Referral codes can only be used by new customers"))
 
 	# Check if referee has already used this referral code
 	existing_coupon = frappe.db.exists(
@@ -128,18 +150,34 @@ def apply_referral_code(referral_code, referee_customer):
 
 	result = {"referrer_coupon": None, "referee_coupon": None}
 
-	# Generate Gift Card coupon for referrer (primary customer)
-	try:
-		referrer_coupon = generate_referrer_coupon(referral)
+	# SEC-22 cap: the referrer earns exactly one Gift Card per referral code —
+	# reuse the existing one instead of minting another on every apply.
+	existing_gift_card = frappe.db.get_value(
+		"POS Coupon",
+		{"referral_code": referral.name, "coupon_type": "Gift Card"},
+		["name", "coupon_code", "customer"],
+		as_dict=True,
+	)
+
+	if existing_gift_card:
 		result["referrer_coupon"] = {
-			"name": referrer_coupon.name,
-			"coupon_code": referrer_coupon.coupon_code,
-			"customer": referrer_coupon.customer,
+			"name": existing_gift_card.name,
+			"coupon_code": existing_gift_card.coupon_code,
+			"customer": existing_gift_card.customer,
 		}
-	except Exception as e:
-		frappe.log_error(
-			title="Referrer Coupon Generation Failed", message=f"Failed to generate referrer coupon: {e!s}"
-		)
+	else:
+		# Generate Gift Card coupon for referrer (primary customer)
+		try:
+			referrer_coupon = generate_referrer_coupon(referral)
+			result["referrer_coupon"] = {
+				"name": referrer_coupon.name,
+				"coupon_code": referrer_coupon.coupon_code,
+				"customer": referrer_coupon.customer,
+			}
+		except Exception as e:
+			frappe.log_error(
+				title="Referrer Coupon Generation Failed", message=f"Failed to generate referrer coupon: {e!s}"
+			)
 
 	# Generate Promotional coupon for referee (new customer)
 	try:
@@ -155,10 +193,10 @@ def apply_referral_code(referral_code, referee_customer):
 		)
 		frappe.throw(_("Failed to generate your welcome coupon"))
 
-	# Increment referrals count
+	# Increment referrals count — the row was locked with for_update above and
+	# the write rides the request transaction (PATTERN C, no manual commit).
 	referral.referrals_count = (referral.referrals_count or 0) + 1
-	referral.save()
-	frappe.db.commit()
+	referral.db_set("referrals_count", referral.referrals_count, update_modified=False)
 
 	return result
 
@@ -180,6 +218,9 @@ def generate_referrer_coupon(referral):
 			"company": referral.company,
 			"campaign": referral.campaign,
 			"referral_code": referral.name,
+			# coupon_code is unique — an explicit hash avoids the name-derived
+			# code colliding across referral codes ("REFERRAL" for every one)
+			"coupon_code": frappe.generate_hash()[:10].upper(),
 			# Discount configuration
 			"discount_type": referral.referrer_discount_type,
 			"discount_percentage": flt(referral.referrer_discount_percentage)
@@ -220,6 +261,9 @@ def generate_referee_coupon(referral, referee_customer):
 			"company": referral.company,
 			"campaign": referral.campaign,
 			"referral_code": referral.name,
+			# coupon_code is unique — the name-derived code is "WELCOME " for
+			# every referee, so the second referee on any code always collided
+			"coupon_code": frappe.generate_hash()[:10].upper(),
 			# Discount configuration
 			"discount_type": referral.referee_discount_type,
 			"discount_percentage": flt(referral.referee_discount_percentage)

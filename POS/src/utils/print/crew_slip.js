@@ -31,6 +31,7 @@
  * Pure string building — no DOM, no transport, unit-testable.
  */
 
+import { escapeHtml } from "@/utils/escapeHtml"
 import { DOTS_PER_MM } from "./paper"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 
@@ -94,7 +95,7 @@ function crewTimestamp(doc) {
 
 /** One header row: label in the fixed column, value after the aligned colon. */
 function rowHTML(label, value) {
-	return `<div class="slip-row"><span class="slip-label">${label}</span><span class="slip-value">${value}</span></div>`
+	return `<div class="slip-row"><span class="slip-label">${label}</span><span class="slip-value">${escapeHtml(value)}</span></div>`
 }
 
 export function buildCrewSlipHTML(invoiceData, { dots } = {}) {
@@ -123,7 +124,7 @@ export function buildCrewSlipHTML(invoiceData, { dots } = {}) {
 			// `??` keeps a deliberate 0 (a zero-qty line) from being replaced by
 			// the other field's value.
 			const qty = item.qty ?? item.quantity
-			return `<div class="slip-line">${qty == null ? "" : `${qty}x `}${label}</div>`
+			return `<div class="slip-line">${qty == null ? "" : `${escapeHtml(qty)}x `}${escapeHtml(label)}</div>`
 		})
 		.join("")
 
@@ -155,7 +156,7 @@ export function buildCrewSlipHTML(invoiceData, { dots } = {}) {
 		<html>
 		<head>
 			<meta charset="UTF-8">
-			<title>${__("Crew copy - {0}", [doc.name || ""])}</title>
+			<title>${__("Crew copy - {0}", [escapeHtml(doc.name || "")])}</title>
 			<style>${crewSlipStyles(dots ?? 576)}</style>
 		</head>
 		<body>

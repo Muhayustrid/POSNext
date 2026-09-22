@@ -242,3 +242,38 @@ describe("buildCrewSlipHTML", () => {
 		expect(buildCrewSlipHTML(doc, {})).toContain("72mm")
 	})
 })
+
+describe("crew slip escapes data-sourced HTML (SEC-11)", () => {
+	it("escapes item names, customer, cashier and invoice name", () => {
+		const html = buildCrewSlipHTML(
+			{
+				...doc,
+				name: 'SINV-1"><img src=x onerror=alert(1)>',
+				buyer_name: "",
+				customer_name: "Bob <b>Evil</b>",
+				cashier_name: "Cashier <script>alert(1)</script>",
+				items: [
+					{
+						item_code: "SKU-1",
+						item_name: "<img src=x onerror=alert(1)>",
+						qty: 2,
+					},
+				],
+			},
+			{ dots: 384 },
+		)
+		expect(html).not.toContain("<img")
+		expect(html).not.toContain("<script")
+		expect(html).not.toContain("<b>")
+		// the raw strings survive as text
+		expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;")
+		expect(html).toContain("Bob &lt;b&gt;Evil&lt;/b&gt;")
+	})
+
+	it("keeps normal data untouched (no metacharacters -> byte-identical output)", () => {
+		const html = buildCrewSlipHTML(doc, { dots: 384 })
+		expect(html).not.toContain("&lt;")
+		expect(html).not.toContain("&amp;")
+		expect(html).not.toContain("&quot;")
+	})
+})

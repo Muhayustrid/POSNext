@@ -660,6 +660,11 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> list[Offer]:
 @frappe.whitelist()
 def get_active_coupons(customer: str, company: str) -> list[dict]:
 	"""Get active gift card coupons for a customer"""
+	# SEC-08: coupon codes are bearer secrets; only users with POS Coupon read
+	# (POS front-end users) may list them.
+	if not frappe.has_permission("POS Coupon", "read"):
+		frappe.throw(_("Not permitted to read POS Coupons"), frappe.PermissionError)
+
 	if not frappe.db.table_exists("POS Coupon"):
 		return []
 
