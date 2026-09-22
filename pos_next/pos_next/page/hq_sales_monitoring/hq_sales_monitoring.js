@@ -1142,8 +1142,8 @@ class HQSalesMonitor {
 			colors: HQ_PALETTE,
 			// frappe-charts' pie reserves ~110px of vertical space before the
 			// radius is derived (radius = min(inner box)), so a taller config
-			// is what actually grows the ring: 260 -> ~150px ring.
-			height: 260,
+			// is what actually grows the ring: 190 -> ~80px ring.
+			height: 190,
 			// The page renders its own accessible value legend (.hq-legend);
 			// frappe-charts' built-in legend would duplicate and truncate it.
 			showLegend: false,
@@ -1158,13 +1158,26 @@ class HQSalesMonitor {
 		const recenter = () => {
 			try {
 				const svg = el.querySelector("svg");
-				const arc = svg && svg.querySelector("path");
+				const paths = svg ? svg.querySelectorAll("path") : [];
 				const fig = el.closest(".hq-donut-figure");
-				if (!svg || !arc || !fig) return;
-				const m = arc.getScreenCTM();
+				if (!svg || !paths.length || !fig) return;
+				const m = paths[0].getScreenCTM();
 				const sm = svg.getScreenCTM();
 				if (!m || !sm) return;
-				const bb = arc.getBBox();
+				// A multi-segment pie draws ONE path per segment; any single
+				// wedge's bbox is off-center, so the ring center comes from
+				// the union of every segment's bbox (a lone segment is a
+				// full circle and unions to itself).
+				let bb = paths[0].getBBox();
+				for (let i = 1; i < paths.length; i++) {
+					const b = paths[i].getBBox();
+					bb = {
+						x: Math.min(bb.x, b.x),
+						y: Math.min(bb.y, b.y),
+						width: Math.max(bb.x + bb.width, b.x + b.width) - Math.min(bb.x, b.x),
+						height: Math.max(bb.y + bb.height, b.y + b.height) - Math.min(bb.y, b.y),
+					};
+				}
 				const ringScreen = new DOMPoint(bb.x + bb.width / 2, bb.y + bb.height / 2).matrixTransform(m);
 				const ringLocal = ringScreen.matrixTransform(sm.inverse());
 				const dx = fig.clientWidth / 2 - ringLocal.x;

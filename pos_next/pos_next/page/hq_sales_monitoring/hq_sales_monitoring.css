@@ -527,15 +527,17 @@
    consolidated into the .hq-legend-sub rule above. */
 
 /* Donut figure: a fixed square slot — frappe-charts sizes the ring from
-   min(inner box dims) minus its reserved paddings, so the slot width is
-   what actually caps the ring (260 -> ~150px ring). The ring is re-centered
-   into the slot from its measured bbox (JS), so the label's CSS centering
-   lands in the hole. */
+   min(inner box dims) minus its reserved paddings (190 -> ~80px ring, the
+   size the page had before the tidy pass). The ring is re-centered into the
+   slot from its measured bbox (JS); overflow clips whatever the chart's
+   redraws paint beyond the slot, so no transform can ever cover the caption
+   below or spill past the card edge. */
 .hq-donut-figure {
 	position: relative;
-	flex: 0 0 260px;
-	width: 260px;
-	height: 260px;
+	flex: 0 0 190px;
+	width: 190px;
+	height: 190px;
+	overflow: hidden;
 }
 
 .hq-donut-chart {
@@ -563,7 +565,7 @@
 	justify-content: center;
 	pointer-events: none;
 	white-space: nowrap;
-	font-size: 14px;
+	font-size: 13px;
 	font-weight: 600;
 	color: var(--heading-color, var(--text-color));
 	font-variant-numeric: tabular-nums;
