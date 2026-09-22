@@ -24,7 +24,17 @@ _ROW_FIELDS = ("invoice_type", "monthly_target_basis", "overall_target_basis", "
 def execute():
 	# filters={} reads any row — the old controller kept every row in sync,
 	# so all rows agreed.
-	row_values = {f: frappe.db.get_value("POS Settings", {}, f) for f in _ROW_FIELDS}
+	row_values = {}
+	for fieldname in _ROW_FIELDS:
+		try:
+			row_values[fieldname] = frappe.db.get_value("POS Settings", {}, fieldname)
+		except Exception as e:
+			# Sites that never synced while c7a48a9..e2fb015 briefly put the
+			# target-basis columns on tabPOS Settings have no such column
+			# (MySQL error 1054); there is no stored value to copy.
+			if not e.args or e.args[0] != 1054:
+				raise
+			row_values[fieldname] = None
 	if row_values["allow_negative_stock"] is None:
 		# no POS Settings row at all: fall back to the core toggle the old
 		# per-profile bridge used to keep in sync
