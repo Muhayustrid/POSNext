@@ -180,6 +180,7 @@ doc_events = {
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.sales_invoice_hooks.release_one_time_offer_usage",
+			"pos_next.api.sales_invoice_hooks.release_coupon_usage_on_cancel",
 			"pos_next.overrides.pos_offer_usage.release_offer_usage_on_cancel",
 		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",

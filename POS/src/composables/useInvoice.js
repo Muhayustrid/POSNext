@@ -1343,13 +1343,15 @@ export function useInvoice() {
 		// Set default customer from POS Profile if available
 		setDefaultCustomer();
 
-		// Cleanup old draft invoices (older than 1 hour) in background
+		// Cleanup old draft invoices in background. The server clamps
+		// max_age_hours to a minimum of 24 (SEC-06), so 24 is the honest
+		// request — anything smaller is silently raised anyway.
 		// Skip if offline to avoid network errors
 		if (!isOffline()) {
 			try {
 				await cleanupDraftsResource.submit({
 					pos_profile: posProfile.value,
-					max_age_hours: 1,
+					max_age_hours: 24,
 				});
 			} catch (error) {
 				// Silent fail - don't block cart clearing

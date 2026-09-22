@@ -16,12 +16,17 @@ Run via pos_next/_pn_run_tests.py pos_next.api.test_money_race_security
 
 import inspect
 import unittest
+import uuid
+from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import flt, today
 
+from pos_next.api.invoices import submit_invoice
+from pos_next.api.promotions import apply_referral_code as gated_apply_referral_code
 from pos_next.api.wallet import get_customer_wallet_balance, get_or_create_wallet
+from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
 	decrement_coupon_usage,
 	increment_coupon_usage,
@@ -379,3 +384,279 @@ class TestNoManualCommitInMoneyPaths(IntegrationTestCase):
 		for path in self.LockPinned:
 			source = inspect.getsource(self._load(path))
 			self.assertIn("for_update=True", source, path)
+
+
+# Schedule-safe profile filter + site invoice-type flip, duplicated from
+# test_pos_invoice_submit.py on purpose (no cross-subpackage test imports).
+_PROFILE_FILTER = [
+	["disabled", "=", 0],
+	["pos_schedule_enforce_closing", "=", 0],
+]
+
+
+def _set_invoice_type(value):
+	frappe.db.set_single_value("POS Next Global Settings", "invoice_type", value)
+	try:
+		del frappe.local._pos_next_invoice_doctype
+	except AttributeError:
+		pass  # not cached yet (`in frappe.local` is unreliable on v16)
+
+
+class TestCouponReleaseOnCancel(IntegrationTestCase):
+	"""A1: cancel hands the claimed coupon use back through the real
+	on_cancel wiring — both the POS Invoice path (pos_invoice_events) and the
+	Sales Invoice path (hooks.py doc_events)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.company = get_default_company()
+
+	def setUp(self):
+		self._created = []
+		self.profile = frappe.db.get_value(
+			"POS Profile",
+			_PROFILE_FILTER,
+			["name", "company", "warehouse"],
+			as_dict=True,
+			order_by="creation asc",
+		)
+		if not self.profile:
+			raise unittest.SkipTest("no schedule-safe POS Profile")
+		item = frappe.get_all(
+			"Item",
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			pluck="name",
+			limit=1,
+		)
+		if not item:
+			raise unittest.SkipTest("no stock sales item")
+		self.item = item[0]
+		self.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		if not self.customer:
+			raise unittest.SkipTest("no non-internal customer")
+		self.mode = frappe.get_all(
+			"POS Payment Method",
+			{"parent": self.profile.name, "parenttype": "POS Profile"},
+			pluck="mode_of_payment",
+			limit=1,
+		)
+		if not self.mode:
+			raise unittest.SkipTest("profile has no payment methods")
+		# real Material Receipt so stock validation on submit passes
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"stock_entry_type": "Material Receipt",
+				"purpose": "Material Receipt",
+				"company": self.profile.company,
+				"items": [
+					{
+						"item_code": self.item,
+						"qty": 5,
+						"t_warehouse": self.profile.warehouse,
+						"allow_zero_valuation_rate": 1,
+					}
+				],
+			}
+		)
+		se.flags.ignore_permissions = True
+		se.insert()
+		se.submit()
+		self.stock_entry = se
+		self.shift = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": self.profile.name,
+				"company": self.profile.company,
+				"user": "Administrator",
+				"posting_date": frappe.utils.nowdate(),
+				"period_start_date": frappe.utils.now_datetime(),
+				"balance_details": [{"mode_of_payment": self.mode[0], "amount": 0}],
+			}
+		).insert(ignore_permissions=True)
+		self.shift.reload()
+		self.shift.submit()
+
+	def tearDown(self):
+		# sweep by shift link covers drafts left behind by a failed submit
+		for doctype in ("POS Invoice", "Sales Invoice"):
+			for name in frappe.get_all(
+				doctype, {"posa_pos_opening_shift": self.shift.name}, pluck="name"
+			):
+				self._created.append(name)
+		for name in dict.fromkeys(self._created):
+			for doctype in ("POS Invoice", "Sales Invoice"):
+				if frappe.db.exists(doctype, name):
+					doc = frappe.get_doc(doctype, name)
+					if doc.docstatus == 1:
+						doc.flags.ignore_permissions = True
+						doc.cancel()
+					frappe.delete_doc(doctype, name, force=1, ignore_permissions=True)
+					break
+		se = frappe.get_doc("Stock Entry", self.stock_entry.name)
+		if se.docstatus == 1:
+			se.cancel()
+		frappe.delete_doc("Stock Entry", se.name, force=1, ignore_permissions=True)
+		frappe.db.set_value(
+			"POS Opening Shift", self.shift.name, "docstatus", 2, update_modified=False
+		)
+		frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
+		_set_invoice_type(SALES_INVOICE)
+		frappe.db.commit()
+
+	def _payload(self, **overrides):
+		payload = {
+			"pos_profile": self.profile.name,
+			"posa_pos_opening_shift": self.shift.name,
+			"customer": self.customer,
+			"doctype": "Sales Invoice",  # server resolves the doctype
+			"items": [
+				{"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.profile.warehouse}
+			],
+			"payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+		}
+		payload.update(overrides)
+		return payload
+
+	def _make_coupon(self):
+		code = "SEC15" + frappe.generate_hash(length=6).upper()
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Coupon",
+				"coupon_name": f"_SEC15 Cancel Coupon {code}",
+				"coupon_code": code,
+				"coupon_type": "Promotional",
+				# the invoice's company, not the default one: check_coupon_code
+				# rejects coupons whose company differs from the invoice's
+				"company": self.profile.company,
+				"discount_type": "Percentage",
+				"discount_percentage": 10,
+				"maximum_use": 5,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.delete_doc("POS Coupon", doc.name, force=1, ignore_permissions=True))
+		return doc
+
+	def _used(self, coupon):
+		return frappe.db.get_value("POS Coupon", coupon.name, "used") or 0
+
+	def _round_trip(self, doctype):
+		"""Submit through the endpoint, claim the coupon use, cancel, watch it
+		come back. The coupon is stamped on the submitted doc via db.set_value:
+		update_invoice:1320 stamps the raw POS Coupon code into ERPNext's
+		coupon_code Link field (-> ERPNext "Coupon Code" doctype), which fails
+		link validation on insert — a PRE-EXISTING endpoint bug (reported, not
+		wired to the cancel release under test here)."""
+		_set_invoice_type(POS_INVOICE if doctype == "POS Invoice" else SALES_INVOICE)
+		coupon = self._make_coupon()
+		before = self._used(coupon)
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+		self.assertTrue(name)
+		frappe.db.set_value(doctype, name, "coupon_code", coupon.coupon_code)
+		increment_coupon_usage(coupon.coupon_code)  # the submit-side claim
+		self.assertEqual(self._used(coupon), before + 1)
+		doc = frappe.get_doc(doctype, name)  # cancel as Administrator
+		doc.flags.ignore_permissions = True
+		# ERPNext's own on_cancel coupon counter chokes on a POS Coupon code in
+		# its coupon_code field (same pre-existing endpoint bug); mute it so the
+		# pos_next cancel wiring under test runs for real.
+		with mock.patch(
+			"erpnext.accounts.doctype.pricing_rule.utils.update_coupon_code_count"
+		), mock.patch(
+			"erpnext.accounts.doctype.sales_invoice.sales_invoice.update_coupon_code_count"
+		):  # SI binds it at module level, POS Invoice at call time
+			doc.cancel()
+		self.assertEqual(self._used(coupon), before)
+
+	def test_pos_invoice_cancel_returns_coupon_use(self):
+		self._round_trip("POS Invoice")
+
+	def test_sales_invoice_cancel_returns_coupon_use(self):
+		self._round_trip("Sales Invoice")
+
+	def test_cancel_without_coupon_is_noop(self):
+		_set_invoice_type(POS_INVOICE)
+		result = submit_invoice(invoice=self._payload())
+		name = result.get("name")
+		self._created.append(name)
+		doc = frappe.get_doc("POS Invoice", name)
+		doc.flags.ignore_permissions = True
+		doc.cancel()  # invoice without a coupon: must not raise
+
+
+class TestApplyReferralCodeGate(IntegrationTestCase):
+	"""A3: promotions.apply_referral_code mints coupons, so it is a write on
+	the promotion stack and must carry the same gate as the sibling CRUD."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.company = get_default_company()
+		cls.referrer = _make_customer("_SEC1422 Gate Referrer")
+		if frappe.db.exists("Referral Code", {"customer": cls.referrer}):
+			cls.referral = frappe.get_doc("Referral Code", {"customer": cls.referrer})
+		else:
+			cls.referral = frappe.get_doc(
+				{
+					"doctype": "Referral Code",
+					"company": cls.company,
+					"customer": cls.referrer,
+					"referrer_discount_type": "Amount",
+					"referrer_discount_amount": 10,
+					"referee_discount_type": "Percentage",
+					"referee_discount_percentage": 10,
+				}
+			).insert(ignore_permissions=True)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user("Administrator")
+		super().tearDownClass()
+
+	def _make_user(self, roles):
+		email = f"ref-gate.{uuid.uuid4().hex[:8]}@example.com"
+		frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": "Ref Gate Tester"}
+		).insert(ignore_permissions=True)
+		for role in roles:
+			frappe.get_doc(
+				{
+					"doctype": "Has Role",
+					"parent": email,
+					"parenttype": "User",
+					"parentfield": "roles",
+					"role": role,
+				}
+			).insert(ignore_permissions=True)
+		frappe.clear_cache(user=email)
+		self.addCleanup(lambda: frappe.delete_doc("User", email, force=1, ignore_permissions=True))
+		return email
+
+	def test_roleless_user_blocked(self):
+		user = self._make_user([])  # only implicit All/Guest roles
+		frappe.set_user(user)
+		try:
+			with self.assertRaises(frappe.PermissionError) as ctx:
+				gated_apply_referral_code(self.referral.referral_code, self.referrer)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertIn("permission", str(ctx.exception).lower())
+
+	def test_user_with_write_passes_gate(self):
+		# Sales Manager holds Promotional Scheme write without the
+		# Administrator bypass — the smallest honest "allowed" probe
+		user = self._make_user(["Sales Manager"])
+		referee = _make_customer(f"_SEC1422 Gate Referee {frappe.generate_hash(length=4)}")
+		frappe.set_user(user)
+		try:
+			result = gated_apply_referral_code(self.referral.referral_code, referee)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertTrue(result.get("success"))
+		self.assertTrue(
+			frappe.db.exists("POS Coupon", {"referral_code": self.referral.name, "customer": referee})
+		)

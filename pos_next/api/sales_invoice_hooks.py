@@ -159,6 +159,23 @@ def release_one_time_offer_usage(doc, method=None):
 	frappe.db.delete("One Time Customer Offer Usage", {"sales_invoice": doc.name})
 
 
+def release_coupon_usage_on_cancel(doc, method=None):
+	"""Give a claimed coupon use back when its invoice is cancelled.
+
+	Counterpart of the SEC-15 increment in submit_invoice: no-op for invoices
+	without a coupon (decrement_coupon_usage already floors at zero and
+	ignores unknown codes).
+	"""
+	if doc.get("is_consolidated"):
+		return
+	coupon_code = doc.get("coupon_code")
+	if not coupon_code:
+		return
+	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import decrement_coupon_usage
+
+	decrement_coupon_usage(coupon_code)
+
+
 def before_cancel(doc, method=None):
 	"""
 	Before Cancel hook for Sales Invoice.

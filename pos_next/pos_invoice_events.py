@@ -48,6 +48,7 @@ def on_cancel(doc, method=None):
 	if not is_pos_next_owned(doc):
 		return
 	sales_invoice_hooks.release_one_time_offer_usage(doc, method)
+	sales_invoice_hooks.release_coupon_usage_on_cancel(doc, method)
 	pos_offer_usage.release_offer_usage_on_cancel(doc, method)
 
 

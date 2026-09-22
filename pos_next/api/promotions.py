@@ -1039,6 +1039,10 @@ def apply_referral_code(referral_code, customer):
 	"""
 	from pos_next.pos_next.doctype.referral_code.referral_code import apply_referral_code as apply_code
 
+	# Applying mints POS Coupons for both sides -> a write on the promotion
+	# stack, same gate as the sibling CRUD endpoints.
+	check_promotion_permissions("write")
+
 	try:
 		result = apply_code(referral_code, customer)
 		return {
