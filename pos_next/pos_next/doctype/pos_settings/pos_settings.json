@@ -7,6 +7,8 @@
   "pos_profile",
   "enabled",
   "invoice_type",
+  "monthly_target_basis",
+  "overall_target_basis",
   "section_break_localization",
   "allowed_locales",
   "section_break_wallet",
@@ -126,6 +128,22 @@
    "fieldtype": "Select",
    "label": "Invoice Type Created via POS Screen",
    "options": "Sales Invoice\nPOS Invoice"
+  },
+  {
+   "default": "Net Sales",
+   "description": "Global for all profiles: the metric monthly targets are measured against (Net Sales, Gross Profit, or Net Profit). Net Sales is the current behaviour (net including tax). Existing target numbers are not migrated when the basis changes.",
+   "fieldname": "monthly_target_basis",
+   "fieldtype": "Select",
+   "label": "Monthly Target Basis",
+   "options": "Net Sales\nGross Profit\nNet Profit"
+  },
+  {
+   "default": "Net Sales",
+   "description": "Global for all profiles: the metric the overall (payback) target is measured against (Net Sales, Gross Profit, or Net Profit). Net Profit reads the outlet company's full P&L and cannot be narrowed by POS Profile. Existing target numbers are not migrated when the basis changes.",
+   "fieldname": "overall_target_basis",
+   "fieldtype": "Select",
+   "label": "Overall (Payback) Target Basis",
+   "options": "Net Sales\nGross Profit\nNet Profit"
   },
   {
    "fieldname": "section_break_localization",
@@ -831,7 +849,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 22:30:00.000000",
+ "modified": "2026-09-22 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

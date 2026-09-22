@@ -29,10 +29,20 @@ from pos_next.api.hq_monitoring import (
 	ratio,
 	set_outlet_target,
 )
+from pos_next.api.invoices import submit_invoice
 from pos_next.install import sync_custom_fields
+from pos_next.target_basis import (
+	GROSS_PROFIT,
+	NET_PROFIT,
+	NET_SALES,
+	TARGET_BASIS_LABELS,
+	get_target_basis,
+)
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
 	get_default_currency,
+	get_default_account,
+	get_default_cost_center,
 	make_test_company,
 	make_test_item,
 	make_test_pos_profile,
@@ -898,3 +908,504 @@ class TestPOSMonthlyTarget(IntegrationTestCase):
 		)
 		with self.assertRaises(frappe.ValidationError):
 			doc.insert(ignore_permissions=True)
+
+
+class TestTargetBasis(IntegrationTestCase):
+	"""Configurable target basis (POS Settings): default parity, the
+	setter/sync/validation path, and the Gross Profit (Stock Ledger) and
+	Net Profit (GL) numerators.
+
+	Fixture dataset (all posted today, server tz):
+
+	GP company (currency IDR), profile TGP, POS Next sale through the real
+	submit pipeline (SLEs + GL posted by CustomPOSInvoice):
+	  Material Receipt  item_valued qty 10 @ basic_rate 400
+	  Material Receipt  item_costless qty 5, zero valuation allowed
+	  POS Invoice       item_valued qty 2 @ 1000 + item_costless qty 1 @ 500
+	    -> omzet 2500, HPP 800, one costless SLE row
+	NP company (currency IDR), plain is_pos Sales Invoice (GL income only):
+	  inv1  item_plain qty 1 @ 2000 -> GL income 2000
+
+	Two separate companies on purpose: the GP books carry stock-ledger noise
+	(a Material Receipt credits an expense-rooted Stock Adjustment account),
+	so Net Profit would not be a clean income-minus-expense figure there.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		# Company custom fields (overall target) must exist before the first
+		# migrate of a fresh checkout, same as the monitoring suite.
+		sync_custom_fields(quiet=True)
+		cls.currency = "IDR"
+		cls.company_gp = cls._make_company("_Test TB GP Co", "TBGP")
+		cls.company_np = cls._make_company("_Test TB NP Co", "TBNP")
+		for company in (cls.company_gp, cls.company_np):
+			cls._ensure_fiscal_year(company)
+			cls._wipe_company_books(company)
+
+		cls.warehouse_gp = make_test_warehouse("TBGP", cls.company_gp)
+		cls.profile_gp = make_test_pos_profile("TBGP", cls.company_gp, cls.warehouse_gp)
+		cls.profile_np = make_test_pos_profile(
+			"TBNP", cls.company_np, make_test_warehouse("TBNP", cls.company_np)
+		)
+		for profile in (cls.profile_gp, cls.profile_np):
+			if not frappe.db.exists("POS Settings", {"pos_profile": profile}):
+				frappe.get_doc(
+					{"doctype": "POS Settings", "pos_profile": profile, "require_refund_code": 0}
+				).insert(ignore_permissions=True)
+		cls.customer = cls._make_customer()
+		cls.price_list = cls._make_price_list()
+		cls.mode_gp = cls._profile_mode(cls.profile_gp)
+		cls.mode_np = cls._profile_mode(cls.profile_np)
+
+		cls.item_valued = make_test_item("TBGP VAL", is_stock_item=1)
+		cls.item_costless = make_test_item("TBGP FREE", is_stock_item=1)
+		cls.item_plain = make_test_item("TBNP PLAIN")
+
+		# GP books: valued stock + costless stock, then one POS Next sale
+		cls._make_receipt(cls.item_valued, qty=10, rate=400)
+		cls._make_receipt(cls.item_costless, qty=5, rate=None)
+		cls.shift = cls._open_shift()
+		cls.gp_invoice = cls._sell_pos(
+			[
+				{"item": cls.item_valued, "qty": 2, "rate": 1000},
+				{"item": cls.item_costless, "qty": 1, "rate": 500},
+			]
+		)
+		# NP books: one plain POS sale, GL income only
+		cls.np_invoice = cls._sell_si(
+			cls.company_np, cls.profile_np, [{"item": cls.item_plain, "qty": 1, "rate": 2000}]
+		)
+
+		for company in (cls.company_gp, cls.company_np):
+			cls._make_target(company)
+		# The basis cache lives on frappe.local, which survives every class in
+		# this process; never leak a non-default basis into sibling classes.
+		cls.addClassCleanup(cls._restore_default_basis)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user(ADMIN)
+		super().tearDownClass()
+
+	# ------------------------------------------------------------------
+	# fixtures
+	# ------------------------------------------------------------------
+
+	@classmethod
+	def _make_company(cls, name, abbr):
+		if frappe.db.exists("Company", name):
+			return name
+		frappe.get_doc(
+			{
+				"doctype": "Company",
+				"company_name": name,
+				"abbr": abbr,
+				"default_currency": cls.currency,
+				"country": "Indonesia",
+			}
+		).insert(ignore_permissions=True)
+		return name
+
+	@classmethod
+	def _ensure_fiscal_year(cls, company):
+		year = frappe.utils.nowdate()[:4]
+		name = f"_Test TB FY {year}"
+		if not frappe.db.exists("Fiscal Year", name):
+			frappe.get_doc(
+				{
+					"doctype": "Fiscal Year",
+					"year": name,
+					"year_start_date": f"{year}-01-01",
+					"year_end_date": f"{year}-12-31",
+					"companies": [{"company": company}],
+				}
+			).insert(ignore_permissions=True)
+		elif not frappe.db.exists("Fiscal Year Company", {"parent": name, "company": company}):
+			doc = frappe.get_doc("Fiscal Year", name)
+			doc.append("companies", {"company": company})
+			doc.save(ignore_permissions=True)
+
+	@classmethod
+	def _wipe_company_books(cls, company):
+		"""Drop leftover books of earlier runs that crashed after a stray
+		commit. Scoped strictly to the throwaway `_Test TB *` companies."""
+		for doctype in ("POS Invoice", "Sales Invoice"):
+			names = frappe.get_all(doctype, filters={"company": company}, pluck="name")
+			if names:
+				frappe.db.delete(f"{doctype} Item", {"parent": ["in", names]})
+				frappe.db.delete(f"{doctype} Payment", {"parent": ["in", names]})
+				frappe.db.delete(doctype, {"company": company})
+		names = frappe.get_all("Stock Entry", filters={"company": company}, pluck="name")
+		if names:
+			frappe.db.delete("Stock Entry Detail", {"parent": ["in", names]})
+			frappe.db.delete("Stock Entry", {"company": company})
+		names = frappe.get_all("Journal Entry", filters={"company": company}, pluck="name")
+		if names:
+			frappe.db.delete("Journal Entry Account", {"parent": ["in", names]})
+			frappe.db.delete("Journal Entry", {"company": company})
+		for doctype in ("GL Entry", "Payment Ledger Entry", "Stock Ledger Entry", "POS Opening Shift"):
+			frappe.db.delete(doctype, {"company": company})
+
+	@classmethod
+	def _make_customer(cls):
+		name = "_Test TB Customer"
+		existing = frappe.db.exists("Customer", {"customer_name": name})
+		if existing:
+			return existing
+		return (
+			frappe.get_doc(
+				{"doctype": "Customer", "customer_name": name, "customer_type": "Individual"}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+
+	@classmethod
+	def _make_price_list(cls):
+		name = "_Test TB PL"
+		if not frappe.db.exists("Price List", name):
+			frappe.get_doc(
+				{
+					"doctype": "Price List",
+					"price_list_name": name,
+					"currency": cls.currency,
+					"selling": 1,
+					"enabled": 1,
+				}
+			).insert(ignore_permissions=True)
+		return name
+
+	@classmethod
+	def _profile_mode(cls, profile):
+		return frappe.db.get_value("POS Payment Method", {"parent": profile}, "mode_of_payment")
+
+	@classmethod
+	def _make_target(cls, company):
+		if frappe.db.exists(
+			"POS Monthly Target",
+			{"company": company, "month_start": frappe.utils.get_first_day(frappe.utils.nowdate())},
+		):
+			return
+		frappe.get_doc(
+			{
+				"doctype": "POS Monthly Target",
+				"company": company,
+				"month_start": frappe.utils.get_first_day(frappe.utils.nowdate()),
+				"target_sales": 100000,
+				"target_transactions": 10,
+			}
+		).insert(ignore_permissions=True)
+
+	@classmethod
+	def _make_receipt(cls, item, qty, rate):
+		row = {"item_code": item, "qty": qty, "t_warehouse": cls.warehouse_gp}
+		if rate is None:
+			row["allow_zero_valuation_rate"] = 1
+		else:
+			row["basic_rate"] = rate
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"stock_entry_type": "Material Receipt",
+				"purpose": "Material Receipt",
+				"company": cls.company_gp,
+				"items": [row],
+			}
+		)
+		se.flags.ignore_permissions = True
+		se.insert()
+		se.submit()
+
+	@classmethod
+	def _open_shift(cls):
+		shift = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": cls.profile_gp,
+				"company": cls.company_gp,
+				"user": ADMIN,
+				"posting_date": frappe.utils.nowdate(),
+				"period_start_date": frappe.utils.now_datetime(),
+				"balance_details": [{"mode_of_payment": cls.mode_gp, "amount": 0}],
+			}
+		).insert(ignore_permissions=True)
+		# a concurrent writer can bump `modified` between insert and submit
+		shift.reload()
+		shift.submit()
+		return shift.name
+
+	@classmethod
+	def _sell_pos(cls, rows):
+		"""One POS Next sale through the real submit pipeline: CustomPOSInvoice
+		posts its own SLEs (voucher_type = the configured invoice doctype)
+		and GL entries at submit."""
+		total = sum(row["qty"] * row["rate"] for row in rows)
+		result = submit_invoice(
+			invoice={
+				"pos_profile": cls.profile_gp,
+				"posa_pos_opening_shift": cls.shift,
+				"customer": cls.customer,
+				"selling_price_list": cls.price_list,
+				"items": [
+					{
+						"item_code": row["item"],
+						"qty": row["qty"],
+						"rate": row["rate"],
+						"warehouse": cls.warehouse_gp,
+					}
+					for row in rows
+				],
+				"payments": [{"mode_of_payment": cls.mode_gp, "amount": total}],
+			}
+		)
+		return result["name"]
+
+	@classmethod
+	def _sell_si(cls, company, profile, rows):
+		inv = frappe.new_doc("Sales Invoice")
+		inv.company = company
+		inv.customer = cls.customer
+		inv.is_pos = 1
+		inv.selling_price_list = cls.price_list
+		paid = 0
+		for row in rows:
+			inv.append(
+				"items",
+				{
+					"item_code": row["item"],
+					"qty": row["qty"],
+					"rate": row["rate"],
+					"price_list_rate": row["rate"],
+				},
+			)
+			paid += row["qty"] * row["rate"]
+		inv.append(
+			"payments",
+			{"mode_of_payment": cls._profile_mode(profile), "amount": paid, "base_amount": paid},
+		)
+		inv.insert(ignore_permissions=True)
+		inv.submit()
+		return inv.name
+
+	@classmethod
+	def _make_expense_je(cls, company, amount, posting_date):
+		expense = get_default_account(company, "Expense")
+		cash = frappe.get_cached_value("Company", company, "default_cash_account")
+		cost_center = get_default_cost_center(company)
+		je = frappe.get_doc(
+			{
+				"doctype": "Journal Entry",
+				"voucher_type": "Journal Entry",
+				"posting_date": posting_date,
+				"company": company,
+				"accounts": [
+					{
+						"account": expense,
+						"cost_center": cost_center,
+						"debit_in_account_currency": amount,
+						"debit": amount,
+					},
+					{
+						"account": cash,
+						"cost_center": cost_center,
+						"credit_in_account_currency": amount,
+						"credit": amount,
+					},
+				],
+			}
+		)
+		je.insert(ignore_permissions=True)
+		je.submit()
+		return je.name
+
+	# ------------------------------------------------------------------
+	# helpers
+	# ------------------------------------------------------------------
+
+	@staticmethod
+	def _clear_basis_cache():
+		frappe.local._pos_next_target_bases = {}
+
+	@classmethod
+	def _set_basis(cls, monthly=None, overall=None):
+		for fieldname, value in (
+			("monthly_target_basis", monthly),
+			("overall_target_basis", overall),
+		):
+			if value:
+				frappe.db.set_value("POS Settings", {}, fieldname, value, update_modified=False)
+		cls._clear_basis_cache()
+
+	@classmethod
+	def _restore_default_basis(cls):
+		for fieldname in ("monthly_target_basis", "overall_target_basis"):
+			frappe.db.set_value("POS Settings", {}, fieldname, NET_SALES, update_modified=False)
+		cls._clear_basis_cache()
+
+	def _dashboard(self, company):
+		frappe.set_user(ADMIN)
+		return get_sales_monitoring(company=company, page_size=10)
+
+	def _targets_row(self, company):
+		rows = self._dashboard(company)["targets"]["by_company"]
+		return next(r for r in rows if r["company"] == company)
+
+	# ------------------------------------------------------------------
+	# default basis
+	# ------------------------------------------------------------------
+
+	def test_default_basis_reports_net_sales_and_legacy_numbers(self):
+		self._restore_default_basis()
+		data = self._dashboard(self.company_np)
+		basis = data["target_basis"]
+		self.assertEqual(basis["monthly"], NET_SALES)
+		self.assertEqual(basis["overall"], NET_SALES)
+		self.assertEqual(basis["monthly_label"], frappe._(TARGET_BASIS_LABELS[NET_SALES]))
+		self.assertEqual(basis["overall_label"], frappe._(TARGET_BASIS_LABELS[NET_SALES]))
+
+		# numbers identical to the pre-switch behaviour: the neutral key
+		# mirrors the legacy sales key on the default basis
+		row = self._targets_row(self.company_np)
+		self.assertEqual(row["mtd_value"], 2000.0)
+		self.assertEqual(row["mtd_value"], row["mtd_net_tax_incl"])
+		self.assertEqual(row["target_value"], row["target_sales"])
+		self.assertEqual(row["projected_value"], row["projected_sales"])
+		self.assertIsNone(row["zero_cost_rows"])
+		self.assertEqual(row["achievement_sales_pct"], round(2000 / 100000 * 100, 2))
+		self.assertEqual(
+			data["targets"]["mtd_value_by_currency"]["by_currency"][self.currency], 2000.0
+		)
+
+		# the outlet target sheet carries the same neutral keys
+		frappe.set_user(ADMIN)
+		out = get_outlet_targets()
+		self.assertEqual(out["target_basis"]["monthly"], NET_SALES)
+		sheet = next(r for r in out["rows"] if r["company"] == self.company_np)
+		self.assertEqual(sheet["mtd_value"], 2000.0)
+		self.assertEqual(sheet["mtd_net_tax_incl"], 2000.0)
+		self.assertEqual(sheet["target_value"], sheet["monthly"]["target_sales"])
+		self.assertEqual(sheet["projected_value"], sheet["projected_sales"])
+		self.assertIsNone(sheet["zero_cost_rows"])
+
+	# ------------------------------------------------------------------
+	# setter / sync / validation
+	# ------------------------------------------------------------------
+
+	def test_target_basis_setter_sync_and_validation(self):
+		frappe.set_user(ADMIN)
+		try:
+			row = frappe.db.get_value("POS Settings", {"pos_profile": self.profile_np}, "name")
+			doc = frappe.get_doc("POS Settings", row)
+			doc.monthly_target_basis = GROSS_PROFIT
+			doc.overall_target_basis = NET_PROFIT
+			doc.save(ignore_permissions=True)
+			self._clear_basis_cache()
+			self.assertEqual(get_target_basis("monthly"), GROSS_PROFIT)
+			self.assertEqual(get_target_basis("overall"), NET_PROFIT)
+
+			# on_update synced the global switch onto every other row
+			for name in frappe.get_all(
+				"POS Settings", filters={"name": ["!=", row]}, pluck="name"
+			):
+				self.assertEqual(
+					frappe.db.get_value("POS Settings", name, "monthly_target_basis"), GROSS_PROFIT
+				)
+				self.assertEqual(
+					frappe.db.get_value("POS Settings", name, "overall_target_basis"), NET_PROFIT
+				)
+
+			# invalid values are rejected by the controller
+			bad = frappe.get_doc("POS Settings", row)
+			bad.monthly_target_basis = "Bogus"
+			with self.assertRaises(frappe.ValidationError):
+				bad.save(ignore_permissions=True)
+
+			# junk that slipped into the DB reads back as the Net Sales default
+			frappe.db.set_value(
+				"POS Settings", row, "overall_target_basis", "Junk", update_modified=False
+			)
+			self._clear_basis_cache()
+			self.assertEqual(get_target_basis("overall"), NET_SALES)
+
+			with self.assertRaises(ValueError):
+				get_target_basis("bogus-slot")
+		finally:
+			self._restore_default_basis()
+
+	# ------------------------------------------------------------------
+	# gross profit basis
+	# ------------------------------------------------------------------
+
+	def test_gross_profit_basis_value_is_omzet_minus_hpp(self):
+		frappe.set_user(ADMIN)
+		try:
+			self._set_basis(monthly=GROSS_PROFIT)
+			data = self._dashboard(self.company_gp)
+			self.assertEqual(data["target_basis"]["monthly"], GROSS_PROFIT)
+			self.assertEqual(
+				data["target_basis"]["monthly_label"], frappe._(TARGET_BASIS_LABELS[GROSS_PROFIT])
+			)
+			row = self._targets_row(self.company_gp)
+			# omzet 2500 (2x1000 + 1x500) minus HPP 800 (2x400, valued FIFO)
+			# = 1700; the costless row adds sales but no cost
+			self.assertAlmostEqual(row["mtd_value"], 1700.0, places=2)
+			# sales columns keep their sales meaning on every basis
+			self.assertEqual(row["mtd_net_tax_incl"], 2500.0)
+			self.assertEqual(row["mtd_orders"], 1)
+			self.assertEqual(row["zero_cost_rows"], 1)  # the costless row is flagged
+			self.assertEqual(row["achievement_sales_pct"], round(1700 / 100000 * 100, 2))
+			self.assertEqual(
+				data["targets"]["mtd_value_by_currency"]["by_currency"][self.currency], 1700.0
+			)
+		finally:
+			self._restore_default_basis()
+
+	# ------------------------------------------------------------------
+	# net profit basis
+	# ------------------------------------------------------------------
+
+	def test_net_profit_basis_income_minus_expense_per_window(self):
+		frappe.set_user(ADMIN)
+		try:
+			self._set_basis(monthly=NET_PROFIT)
+			row = self._targets_row(self.company_np)
+			self.assertAlmostEqual(row["mtd_value"], 2000.0, places=2)  # GL income only so far
+
+			# a simple expense Journal Entry today: income minus expense
+			self._make_expense_je(self.company_np, 300, frappe.utils.nowdate())
+			row = self._targets_row(self.company_np)
+			self.assertAlmostEqual(row["mtd_value"], 1700.0, places=2)
+			self.assertEqual(row["mtd_net_tax_incl"], 2000.0)  # sales stays sales
+
+			# window: last month's expense is outside the MTD window
+			prev_month = frappe.utils.get_first_day(
+				frappe.utils.add_months(frappe.utils.nowdate(), -1)
+			)
+			self._make_expense_je(self.company_np, 111, prev_month)
+			row = self._targets_row(self.company_np)
+			self.assertAlmostEqual(row["mtd_value"], 1700.0, places=2)
+
+			# overall (payback) basis: same books, all-time window, no orders
+			self._set_basis(overall=NET_PROFIT)
+			frappe.db.set_value(
+				"Company",
+				self.company_np,
+				{"pos_overall_sales_target": 5000, "pos_overall_target_from": None},
+			)
+			overall = self._dashboard(self.company_np)["targets"]["overall"]
+			self.assertTrue(overall["available"])
+			orow = overall["by_company"][self.company_np]
+			self.assertAlmostEqual(orow["cumulative_value"], 1589.0, places=2)  # all time
+			self.assertIsNone(orow["cumulative_orders"])  # no order concept in the GL
+			self.assertEqual(orow["achievement_pct"], round(1589 / 5000 * 100, 2))
+		finally:
+			self._set_basis(monthly=NET_SALES, overall=NET_SALES)
+			frappe.db.set_value(
+				"Company",
+				self.company_np,
+				{"pos_overall_sales_target": 0, "pos_overall_target_from": None},
+			)
+			self._clear_basis_cache()

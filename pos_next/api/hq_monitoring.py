@@ -45,6 +45,14 @@ Period semantics (labeled explicitly in the UI):
 - Daily monitoring: ``to_date`` vs its prior weekday (same elapsed cutoff).
 - Hero cards, peak hours, rankings and donuts: the selected range
   ``from_date .. to_date`` (cutoff at "now" when ``to_date`` is today).
+
+Targets are measured against a configurable basis (POS Settings, see
+pos_next.target_basis): Net Sales (default — the behaviour before the switch),
+Gross Profit (HPP from the invoices' Stock Ledger Entries, net of returns,
+with a zero-cost-row count) or Net Profit (the outlet company's whole books
+from GL Entry; company level, so a POS Profile filter cannot narrow it).
+Formulas (achievement, linear projection, daily pro-rata) never change with
+the basis — only the numerator does.
 """
 
 from datetime import timedelta
@@ -59,7 +67,14 @@ from pos_next.hq_scope import (
 	get_permitted_pos_profiles,
 	resolve_company_scope,
 )
-from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
+from pos_next.invoice_type import get_pos_invoice_doctype, sales_invoice_item_union, sales_invoice_union
+from pos_next.target_basis import (
+	GROSS_PROFIT,
+	NET_PROFIT,
+	NET_SALES,
+	TARGET_BASIS_LABELS,
+	get_target_basis,
+)
 
 HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "Nexus POS Manager")
 
@@ -258,7 +273,10 @@ def get_sales_monitoring(
 			max(result["outlet_ranking"], key=lambda r: r["orders"]) if result["outlet_ranking"] else None
 		),
 	}
-	result["targets"] = _targets_section(scope["companies"], currency_map, default_ccy, window, monthly, mtd_rows)
+	result["target_basis"] = _target_basis_payload()
+	result["targets"] = _targets_section(
+		scope["companies"], currency_map, default_ccy, window, monthly, mtd_rows, profiles=scope["profiles"]
+	)
 	result["targets"]["overall"] = _overall_target_section(scope, currency_map)
 	return result
 
@@ -377,7 +395,19 @@ def get_outlet_targets(month_start=None):
 		window_end, cutoff = month_end, None
 
 	where, params = _si_window_where(companies, scope["profiles"], month, window_end, cutoff)
-	mtd_by_company = {r.company: r for r in _totals_rows(where, params)}
+	mtd_rows = _totals_rows(where, params)
+	mtd_by_company = {r.company: r for r in mtd_rows}
+	# The MTD numerator follows the configured monthly target basis; the sales
+	# columns below (mtd_net_tax_incl, mtd_orders) stay sales on every basis.
+	actuals = _basis_actuals(
+		companies,
+		scope["profiles"],
+		get_target_basis("monthly"),
+		month,
+		window_end,
+		cutoff,
+		totals_rows=mtd_rows,
+	)
 
 	targets_by_company = {
 		r.company: r
@@ -395,7 +425,13 @@ def get_outlet_targets(month_start=None):
 		actual = mtd_by_company.get(company)
 		net = flt(actual.net_tax_incl) if actual else 0.0
 		orders = int(actual.orders) if actual else 0
+		basis_row = actuals.get(company) or {}
+		value = flt(basis_row.get("value"))
 		target_sales = flt(target.target_sales) if target else None
+		# same linear projection as the monitoring targets section, on the basis
+		projected_value = (
+			round(value / days_elapsed * days_in_month, 2) if target and days_elapsed else None
+		)
 		rows.append(
 			{
 				"company": company,
@@ -407,11 +443,12 @@ def get_outlet_targets(month_start=None):
 				},
 				"mtd_net_tax_incl": round(net, 2),
 				"mtd_orders": orders,
-				"achievement_sales_pct": ratio(net, target_sales) if target else None,
-				# same linear projection as the monitoring targets section
-				"projected_sales": (
-					round(net / days_elapsed * days_in_month, 2) if target and days_elapsed else None
-				),
+				"achievement_sales_pct": ratio(value, target_sales) if target else None,
+				"projected_sales": projected_value,
+				"mtd_value": round(value, 2),
+				"target_value": target_sales,
+				"projected_value": projected_value,
+				"zero_cost_rows": basis_row.get("zero_cost_rows"),
 				"overall": overall_by_company.get(company),
 			}
 		)
@@ -420,6 +457,7 @@ def get_outlet_targets(month_start=None):
 		"month_start": str(month),
 		"month_end": str(month_end),
 		"days_elapsed": days_elapsed,
+		"target_basis": _target_basis_payload(),
 		"rows": rows,
 		"generated_at": now_datetime().strftime("%Y-%m-%d %H:%M:%S"),
 	}
@@ -1053,10 +1091,184 @@ def _category_top(companies, profiles, start, end, cutoff, currency_map, default
 # ---------------------------------------------------------------------------
 # Targets
 # ---------------------------------------------------------------------------
+# Targets are measured against a configurable basis (POS Settings): Net Sales
+# (default, the behaviour before the switch existed), Gross Profit (HPP from
+# the invoices' Stock Ledger Entries) or Net Profit (the outlet company's whole
+# books). Formulas never change with the basis — only the numerator does.
 
 
-def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_rows):
+def _actuals_from_totals(rows):
+	"""_totals_rows-style rows -> basis-actuals shape (Net Sales basis)."""
+	return {r.company: {"value": flt(r.net_tax_incl), "orders": int(r.orders)} for r in rows}
+
+
+def _gross_profit_actuals(companies, profiles, start, end, cutoff):
+	"""Gross Profit basis actuals: the POS invoices' own books (net sales,
+	tax incl) minus the HPP their submit-time Stock Ledger Entries carry
+	(voucher_type = the configured invoice doctype, see CustomPOSInvoice).
+
+	ERPNext v16 persists OUTGOING SLEs with incoming_rate = 0 (wiped in
+	StockLedgerEntry.process_sle) — the outgoing valuation lives only in
+	stock_value_difference (negative for goods out). The obvious
+	SUM(-actual_qty * incoming_rate) therefore always returns 0 on sales; do
+	NOT reintroduce it. HPP = -SUM(stock_value_difference), so gross profit
+	per company = SUM(base_grand_total) + SUM(stock_value_difference).
+
+	SLEs are pre-aggregated per voucher before the grand total is summed, so
+	an invoice's total is never multiplied by its SLE row count. Returns come
+	out right by sign: their grand total is negative and their stock returns
+	(stock_value_difference positive), reducing gross profit on both legs.
+
+	zero_cost_rows counts OUTGOING SLE rows with no valuation
+	(stock_value_difference = 0): sold item rows without HPP, whose sale
+	price is counted in full — so the figure overstates gross profit by
+	exactly those rows.
+	"""
+	dt = get_pos_invoice_doctype()
+	where = ["si.docstatus = 1", "si.company IN %(companies)s"]
+	params = {"voucher_type": dt, "companies": companies}
+	# Same window semantics as _si_window_where: the SLE's posting_datetime is
+	# copied from the voucher, so filtering si's date/time columns selects the
+	# identical ledger rows (a cutoff cuts today at "now"; without one the end
+	# date counts whole).
+	if start:
+		params["start"] = str(getdate(start))
+		where.append("si.posting_date >= %(start)s")
+	if end:
+		params["end"] = str(getdate(end))
+		where.append("si.posting_date <= %(end)s")
+	if cutoff:
+		params["cutoff"] = cutoff
+		where.append("TIMESTAMP(si.posting_date, si.posting_time) <= %(cutoff)s")
+	if profiles is not None:
+		params["profiles"] = list(profiles)
+		where.append("si.pos_profile IN %(profiles)s")
+	return {
+		r.company: {
+			"value": flt(r.value),
+			"orders": int(r.orders),
+			"zero_cost_rows": int(r.zero_cost_rows or 0),
+		}
+		for r in frappe.db.sql(
+			f"""
+			SELECT per_voucher.company,
+				ROUND(SUM(per_voucher.net + per_voucher.hpp), 2) AS value,
+				SUM(per_voucher.orders) AS orders,
+				SUM(per_voucher.zero_cost_rows) AS zero_cost_rows
+			FROM (
+				SELECT si.name, si.company, si.base_grand_total AS net,
+					IFNULL(SUM(sle.stock_value_difference), 0) AS hpp,
+					1 AS orders,
+					IFNULL(SUM(CASE WHEN sle.actual_qty < 0
+						AND sle.stock_value_difference = 0 THEN 1 ELSE 0 END), 0) AS zero_cost_rows
+				FROM `tab{dt}` si
+				LEFT JOIN `tabStock Ledger Entry` sle
+					ON sle.voucher_no = si.name
+					AND sle.voucher_type = %(voucher_type)s
+					AND sle.is_cancelled = 0
+				WHERE {" AND ".join(where)}
+				GROUP BY si.name, si.company, si.base_grand_total
+			) per_voucher
+			GROUP BY per_voucher.company
+			""",
+			params,
+			as_dict=True,
+		)
+	}
+
+
+def _net_profit_actuals(companies, start, end):
+	"""Net Profit basis actuals: the outlet company's whole books from GL
+	Entry (SUM(credit - debit) over Income+Expense accounts = income minus
+	expense).
+
+	Company level by nature — a POS Profile filter cannot narrow a company's
+	P&L, so none is applied; orders is None (there is no order concept in the
+	GL)."""
+	where = [
+		"gle.is_cancelled = 0",
+		"gle.is_opening = 'No'",
+		"acc.root_type IN ('Income', 'Expense')",
+		"gle.voucher_type != 'Period Closing Voucher'",
+		"gle.company IN %(companies)s",
+	]
+	params = {"companies": companies}
+	if start:
+		params["start"] = str(getdate(start))
+		where.append("gle.posting_date >= %(start)s")
+	if end:
+		params["end"] = str(getdate(end))
+		where.append("gle.posting_date <= %(end)s")
+	return {
+		r.company: {"value": flt(r.value), "orders": None}
+		for r in frappe.db.sql(
+			f"""
+			SELECT gle.company, ROUND(SUM(gle.credit - gle.debit), 2) AS value
+			FROM `tabGL Entry` gle
+			INNER JOIN `tabAccount` acc ON acc.name = gle.account
+			WHERE {" AND ".join(where)}
+			GROUP BY gle.company
+			""",
+			params,
+			as_dict=True,
+		)
+	}
+
+
+def _basis_actuals(companies, profiles, basis, start, end, cutoff, totals_rows=None):
+	"""Actuals per company on one target basis: {company: {value, orders,
+	zero_cost_rows}} (zero_cost_rows only exists on the Gross Profit basis).
+
+	- Net Sales: the shared POS totals window (net, tax incl). Pass the
+	  caller's existing ``totals_rows`` when that window was already queried —
+	  the dashboard and the outlet target sheet always have it.
+	- Gross Profit / Net Profit: the two helpers above.
+
+	``start``/``end`` are inclusive dates, ``cutoff`` (datetime) cuts the
+	window at "now" exactly like _si_window_where; either bound may be None
+	(open-ended) for the overall/payback window.
+	"""
+	if basis == GROSS_PROFIT:
+		return _gross_profit_actuals(companies, profiles, start, end, cutoff)
+	if basis == NET_PROFIT:
+		return _net_profit_actuals(companies, start, end)
+	if totals_rows is None:
+		where, params = _si_window_where(
+			companies, profiles, start or "1970-01-01", end or "9999-12-31", cutoff
+		)
+		totals_rows = _totals_rows(where, params)
+	return _actuals_from_totals(totals_rows)
+
+
+def _basis_label(basis):
+	"""Server-side translated basis label (POS Settings enum -> UI label)."""
+	return _(TARGET_BASIS_LABELS.get(basis) or basis)
+
+
+def _target_basis_payload():
+	"""The two configured bases plus their labels, for page headers/tooltips."""
+	monthly = get_target_basis("monthly")
+	overall = get_target_basis("overall")
+	return {
+		"monthly": monthly,
+		"overall": overall,
+		"monthly_label": _basis_label(monthly),
+		"overall_label": _basis_label(overall),
+	}
+
+
+def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_rows, profiles=None):
 	month_start = window["month_start"]
+	basis = get_target_basis("monthly")
+	actuals = _basis_actuals(
+		companies,
+		profiles,
+		basis,
+		month_start,
+		window["day"],
+		window["mtd_cutoff"],
+		totals_rows=mtd_rows,
+	)
 	rows = frappe.get_all(
 		"POS Monthly Target",
 		filters={"company": ["in", companies], "month_start": month_start},
@@ -1065,7 +1277,9 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 	missing = [c for c in companies if c not in {r.company for r in rows}]
 
 	# Per-outlet rows: unlike the aggregate below, a missing target only blanks
-	# that outlet's cells — the table shows whatever is configured.
+	# that outlet's cells — the table shows whatever is configured. Sales
+	# columns (mtd_net_tax_incl, mtd_apc) keep their sales meaning on every
+	# basis; achievement and projection follow the basis numerator.
 	targets_by_company = {r.company: r for r in rows}
 	mtd_by_company = {r.company: r for r in mtd_rows}
 	days_elapsed = window["days_elapsed"]
@@ -1076,10 +1290,12 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		actual = mtd_by_company.get(company)
 		net = flt(actual.net_tax_incl) if actual else 0.0
 		orders = int(actual.orders) if actual else 0
+		basis_row = actuals.get(company) or {}
+		value = flt(basis_row.get("value"))
 		target_sales = flt(target.target_sales) if target else None
 		target_tx = int(target.target_transactions or 0) if target else None
 		projected = (
-			round(net / days_elapsed * days_in_month, 2)
+			round(value / days_elapsed * days_in_month, 2)
 			if target and days_elapsed
 			else None
 		)
@@ -1093,12 +1309,16 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 				"mtd_net_tax_incl": round(net, 2),
 				"mtd_orders": orders,
 				"mtd_apc": round(net / orders, 2) if orders else None,
-				"achievement_sales_pct": ratio(net, target_sales) if target else None,
+				"achievement_sales_pct": ratio(value, target_sales) if target else None,
 				"achievement_transactions_pct": ratio(orders, target_tx) if target else None,
 				"projected_sales": projected,
 				"projected_achievement_pct": (
 					ratio(projected, target_sales) if target and projected is not None else None
 				),
+				"mtd_value": round(value, 2),
+				"target_value": target_sales,
+				"projected_value": projected,
+				"zero_cost_rows": basis_row.get("zero_cost_rows"),
 			}
 		)
 
@@ -1110,6 +1330,11 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 			sales_target[ccy] = sales_target.get(ccy, 0) + flt(r.target_sales)
 		tx_target += int(r.target_transactions or 0)
 
+	# Basis MTD per currency — same aggregation path as monthly["net_tax_incl"]
+	# so the two reconcile bit-for-bit on the default basis.
+	actual_rows = [{"company": c, "value": a.get("value") or 0} for c, a in actuals.items()]
+	mtd_value_metric = metric_from_rows(actual_rows, "value", currency_map, default_ccy)
+
 	if not rows or missing:
 		return {
 			"available": False,
@@ -1118,6 +1343,7 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 			"missing_count": len(missing),
 			"notice": _("Monthly target is not set for every scoped company, so achievement is not shown."),
 			"by_company": by_company,
+			"mtd_value_by_currency": mtd_value_metric,
 		}
 
 	target_metric = make_metric(sales_target, default_ccy)
@@ -1125,7 +1351,7 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 
 	achievement, surplus, projection = {}, {}, {}
 	for ccy, target in sales_target.items():
-		actual = monthly["net_tax_incl"]["by_currency"].get(ccy, 0)
+		actual = mtd_value_metric["by_currency"].get(ccy, 0)
 		achievement[ccy] = ratio(actual, target)
 		surplus[ccy] = round(actual - target, 2)
 		if window["days_elapsed"]:
@@ -1145,6 +1371,7 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		"by_company": by_company,
 		"target_sales": target_metric,
 		"target_transactions": tx_target,
+		"mtd_value_by_currency": mtd_value_metric,
 		"achievement_sales_pct": achievement,
 		"achievement_transactions_pct": ratio(monthly["orders"], tx_target),
 		"surplus_sales": surplus,
@@ -1175,17 +1402,21 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 
 
 def _overall_target_section(scope, currency_map):
-	"""Per-outlet payback ("balik modal") target: cumulative POS net sales
-	(tax incl.) vs the one-time Overall Sales Target on the Company master.
+	"""Per-outlet payback ("balik modal") target: cumulative actuals on the
+	overall target basis (default: POS net sales, tax incl.) vs the one-time
+	Overall Sales Target on the Company master.
 
-	Each outlet counts from its own "Counted From" date (empty = all time), so
-	one query pins every company's lower bound instead of one query per outlet.
-	Outlets without an overall target are simply absent from ``by_company``.
+	Each outlet counts from its own "Counted From" date (empty = all time).
+	On the default basis one query pins every company's lower bound instead of
+	one query per outlet; the profit bases resolve per outlet (few configure an
+	overall target). Outlets without an overall target are simply absent from
+	``by_company``.
 	"""
 	# Guard: before the app's first migrate the custom fields do not exist yet;
 	# reading them would error, so report the section unavailable instead.
 	if not frappe.get_meta("Company").has_field("pos_overall_sales_target"):
 		return {"available": False, "by_company": {}}
+	basis = get_target_basis("overall")
 	configured = {
 		r.name: r
 		for r in frappe.get_all(
@@ -1198,51 +1429,71 @@ def _overall_target_section(scope, currency_map):
 	if not configured:
 		return {"available": False, "by_company": {}}
 
-	where = ["si.docstatus = 1", "si.is_pos = 1", "si.company IN %(companies)s"]
-	params = {"companies": list(configured)}
-	if scope["profiles"] is not None:
-		params["profiles"] = list(scope["profiles"])
-		where.append("si.pos_profile IN %(profiles)s")
-	bounds = []
-	for i, (name, row) in enumerate(configured.items()):
-		if row.pos_overall_target_from:
-			params[f"c{i}"] = name
-			params[f"d{i}"] = row.pos_overall_target_from
-			bounds.append(f"(si.company = %(c{i})s AND si.posting_date >= %(d{i})s)")
-	if bounds:
-		where.append("(" + " OR ".join(bounds) + ")")
+	if basis == NET_SALES:
+		where = ["si.docstatus = 1", "si.is_pos = 1", "si.company IN %(companies)s"]
+		params = {"companies": list(configured)}
+		if scope["profiles"] is not None:
+			params["profiles"] = list(scope["profiles"])
+			where.append("si.pos_profile IN %(profiles)s")
+		bounds = []
+		for i, (name, row) in enumerate(configured.items()):
+			if row.pos_overall_target_from:
+				params[f"c{i}"] = name
+				params[f"d{i}"] = row.pos_overall_target_from
+				bounds.append(f"(si.company = %(c{i})s AND si.posting_date >= %(d{i})s)")
+		if bounds:
+			where.append("(" + " OR ".join(bounds) + ")")
 
-	cumulative = {}
-	for r in frappe.db.sql(
-		f"""
-		SELECT si.company,
-			SUM(si.base_grand_total) AS net_tax_incl,
-			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM {_invoice_from()}
-		WHERE {" AND ".join(where)}
-		GROUP BY si.company
-		""",
-		params,
-		as_dict=True,
-	):
-		cumulative[r.company] = r
+		cumulative = [
+			r
+			for r in frappe.db.sql(
+				f"""
+				SELECT si.company,
+					SUM(si.base_grand_total) AS net_tax_incl,
+					COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
+				FROM {_invoice_from()}
+				WHERE {" AND ".join(where)}
+				GROUP BY si.company
+				""",
+				params,
+				as_dict=True,
+			)
+		]
+		actuals = _actuals_from_totals(cumulative)
+	else:
+		actuals = {}
+		for company, row in configured.items():
+			actuals.update(
+				_basis_actuals(
+					[company], scope["profiles"], basis, row.pos_overall_target_from, None, None
+				)
+			)
 
 	by_company = {}
 	for company, row in configured.items():
-		cum = cumulative.get(company)
-		net = flt(cum.net_tax_incl) if cum else 0.0
-		orders = int(cum.orders) if cum else 0
+		actual = actuals.get(company) or {}
+		value = flt(actual.get("value"))
+		# Net Profit has no order concept; absent rows keep the old 0 figures.
+		orders = None if basis == NET_PROFIT else (int(actual["orders"]) if actual else 0)
 		target = flt(row.pos_overall_sales_target)
 		by_company[company] = {
 			"currency": currency_map.get(company),
 			"overall_target": target,
 			"from_date": str(row.pos_overall_target_from) if row.pos_overall_target_from else None,
-			"cumulative_net_tax_incl": round(net, 2),
+			"cumulative_value": round(value, 2),
 			"cumulative_orders": orders,
-			"achievement_pct": ratio(net, target),
-			"remaining": round(target - net, 2),
+			"achievement_pct": ratio(value, target),
+			"remaining": round(target - value, 2),
+			"zero_cost_rows": actual.get("zero_cost_rows"),
 		}
-	return {"available": True, "by_company": by_company}
+		if basis == NET_SALES:
+			by_company[company]["cumulative_net_tax_incl"] = round(value, 2)
+	note = None
+	if basis == NET_PROFIT and scope.get("profile_restricted"):
+		note = _(
+			"Net Profit is the outlet's whole books (income minus expense); the POS Profile filter does not apply."
+		)
+	return {"available": True, "by_company": by_company, "profile_note": note}
 
 
 def _empty_payload(scope, notice):
@@ -1264,5 +1515,6 @@ def _empty_payload(scope, notice):
 		"highlights": {},
 		"channels": {"available": False},
 		"pax": {"available": False},
+		"target_basis": _target_basis_payload(),
 		"targets": {"available": False, "by_company": [], "overall": {"available": False, "by_company": {}}},
 	}

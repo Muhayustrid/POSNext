@@ -6,6 +6,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 from pos_next.invoice_type import get_pos_invoice_doctype, validate_invoice_type_change
+from pos_next.target_basis import validate_target_bases
 
 
 class POSSettings(Document):
@@ -14,6 +15,8 @@ class POSSettings(Document):
 		# invoice_type is global: every row must agree, and switching it is
 		# gated (no open shifts, no pending offline invoices).
 		validate_invoice_type_change(self)
+		# target bases are global too: both values must be in the valid set.
+		validate_target_bases(self)
 		# Guard against None values and validate discount percentage
 		max_discount = flt(self.max_discount_allowed)
 		if max_discount < 0 or max_discount > 100:
@@ -42,6 +45,7 @@ class POSSettings(Document):
 		"""Sync allow_negative_stock with Stock Settings"""
 		self.sync_negative_stock_setting()
 		self.sync_invoice_type()
+		self.sync_target_bases()
 
 	def sync_invoice_type(self):
 		"""Keep the global invoice_type identical on every POS Settings row.
@@ -57,6 +61,22 @@ class POSSettings(Document):
 			self.invoice_type,
 			update_modified=False,
 		)
+
+	def sync_target_bases(self):
+		"""Keep the global target bases identical on every POS Settings row.
+
+		Same deal as sync_invoice_type: db.set_value skips controller hooks,
+		so this cannot recurse, and validate_target_bases already ran for the
+		row the user actually saved.
+		"""
+		for fieldname in ("monthly_target_basis", "overall_target_basis"):
+			frappe.db.set_value(
+				"POS Settings",
+				{"name": ["!=", self.name]},
+				fieldname,
+				self.get(fieldname),
+				update_modified=False,
+			)
 
 	def sync_negative_stock_setting(self):
 		"""
