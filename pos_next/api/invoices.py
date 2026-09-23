@@ -405,6 +405,12 @@ def _strip_server_managed_fields(payload):
 	# Same for the per-item attribution: it is recomputed server-side from the
 	# applied pricing rules; a client-supplied value could claim a fake
 	# exemption from the discount code gate (overrides/discount_code.py).
+	# ERPNext's coupon_code is a Link to its own "Coupon Code" doctype; the
+	# validated POS Coupon code is stamped server-side into pos_coupon_code
+	# in update_invoice. Neither may ride the payload — a client value would
+	# either crash link validation or poison the one_use/release accounting.
+	cleaned.pop("coupon_code", None)
+	cleaned.pop("pos_coupon_code", None)
 	items = cleaned.get("items")
 	if isinstance(items, list) and any(isinstance(item, dict) for item in items):
 		cleaned["items"] = [
@@ -935,6 +941,11 @@ def update_invoice(data):
 		# Read before the strip below: the client's doctype must not reach
 		# document creation; only its Sales Order-vs-invoice intent survives.
 		payload_doctype = data.get("doctype") if isinstance(data, dict) else None
+		# Same shape as the doctype capture: the coupon key decides whether the
+		# draft's coupon stamp is written (after re-validation) or cleared; the
+		# raw value itself must never reach the document (strip below).
+		payload_coupon_code = data.get("coupon_code") if isinstance(data, dict) else None
+		payload_has_coupon_key = isinstance(data, dict) and "coupon_code" in data
 		data = _strip_server_managed_fields(data)
 
 		pos_profile = data.get("pos_profile")
@@ -1297,27 +1308,43 @@ def update_invoice(data):
 				invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments))
 				invoice_doc.base_paid_amount = flt(sum(p.base_amount or 0 for p in invoice_doc.payments))
 
-		# Validate and track POS Coupon if coupon_code is provided
-		coupon_code = data.get("coupon_code")
-		if coupon_code:
-			# Validate POS Coupon exists and is valid
-			if frappe.db.table_exists("POS Coupon"):
-				from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
+		# Validate and track POS Coupon when the payload carries the coupon key
+		# (key-presence semantics: the frontend always sends the key, possibly
+		# null; the only internal caller, submit_invoice, re-injects it
+		# explicitly after capturing it pre-strip).
+		if payload_has_coupon_key:
+			if payload_coupon_code:
+				# Guard non-string payload values (e.g. a numeric code): fail
+				# as a clean ValidationError, not an AttributeError in str ops.
+				if not isinstance(payload_coupon_code, str):
+					frappe.throw(_("Invalid coupon code"))
+				# Validate POS Coupon exists and is valid
+				if frappe.db.table_exists("POS Coupon"):
+					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
 
-				coupon_result = check_coupon_code(
-					coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
-				)
-
-				if not coupon_result or not coupon_result.get("valid"):
-					error_msg = (
-						coupon_result.get("msg", "Invalid coupon code")
-						if coupon_result
-						else "Invalid coupon code"
+					coupon_result = check_coupon_code(
+						payload_coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
 					)
-					frappe.throw(_(error_msg))
 
-				# Store coupon code on invoice for tracking
-				invoice_doc.coupon_code = coupon_code
+					if not coupon_result or not coupon_result.get("valid"):
+						error_msg = (
+							coupon_result.get("msg", "Invalid coupon code")
+							if coupon_result
+							else "Invalid coupon code"
+						)
+						frappe.throw(_(error_msg))
+
+					# Store the CANONICAL coupon code (as stored on the POS
+					# Coupon), not the raw client value: one_use counting and
+					# the cancel release match on this exact string, so
+					# "save10"/"SAVE10" must not stamp differently and bypass
+					# the per-customer gate. Custom field; ERPNext's coupon_code
+					# Link must stay empty — see _strip_server_managed_fields.
+					invoice_doc.pos_coupon_code = coupon_result.get("coupon").get("coupon_code")
+			else:
+				# Cart has no coupon: mirror that honestly on the draft so a
+				# stale stamp can't burn quota at submit.
+				invoice_doc.pos_coupon_code = None
 
 		# Validate stock availability before saving draft
 		# is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
@@ -1635,6 +1662,11 @@ def submit_invoice(invoice=None, data=None):
 	# must not reach the document, but its Sales Order-vs-invoice intent has
 	# to survive — a "Sales Order" payload must resolve to the SO draft path.
 	payload_doctype = invoice.get("doctype")
+	# Same shape as the doctype capture: the coupon key is handed back to
+	# update_invoice (which re-validates and stamps pos_coupon_code); the raw
+	# value must not reach the document.
+	payload_coupon_code = invoice.get("coupon_code") if isinstance(invoice, dict) else None
+	payload_has_coupon_key = isinstance(invoice, dict) and "coupon_code" in invoice
 	invoice = _strip_server_managed_fields(invoice)
 
 	pos_profile = invoice.get("pos_profile")
@@ -1700,6 +1732,10 @@ def submit_invoice(invoice=None, data=None):
 			# update_invoice strips it again before doc creation.
 			if relayed_offer_rules:
 				invoice["pos_relayed_offer_rules"] = relayed_offer_rules
+			# Same for the coupon key: key-presence semantics so a coupon-less
+			# replay still clears (not just skips) the draft's stamp.
+			if payload_has_coupon_key:
+				invoice["coupon_code"] = payload_coupon_code
 			created = update_invoice(json.dumps(invoice))
 			if not created or not isinstance(created, dict):
 				frappe.throw(_("Failed to create invoice draft"))
@@ -1793,8 +1829,20 @@ def submit_invoice(invoice=None, data=None):
 						},
 					)
 
-		# Handle POS Coupon if coupon_code is provided
-		coupon_code = invoice.get("coupon_code") or data.get("coupon_code")
+		# Handle POS Coupon if the draft carries one: read the document, not
+		# the payload — the doc is the single source of truth (both branches
+		# above loaded or created it, with the server-stamped pos_coupon_code).
+		# Surface payload/doc divergence instead of silently ignoring it —
+		# this guards the existing-draft branch, where update_invoice never
+		# re-runs. The echoed draft dict from update_invoice legitimately
+		# carries coupon_code=None (as_dict() echoes every docfield) while the
+		# doc holds the stamp, so only a truthy mismatching payload counts as
+		# a divergence.
+		if payload_has_coupon_key and payload_coupon_code:
+			doc_stamp = invoice_doc.get("pos_coupon_code") or ""
+			if str(payload_coupon_code).upper() != doc_stamp.upper():
+				frappe.throw(_("Invalid coupon code"))
+		coupon_code = invoice_doc.get("pos_coupon_code")
 		if coupon_code and frappe.db.table_exists("POS Coupon"):
 			# SEC-15: increment under a row lock inside this submit transaction.
 			# A fully-redeemed coupon throws and aborts the submit — never
@@ -3388,7 +3436,12 @@ def _evaluate_transaction_offers(
 			"transaction_date": posting_date,
 			"posting_date": posting_date,
 			"pos_profile": invoice.get("pos_profile"),
-			"coupon_code": invoice.get("coupon_code") or None,
+			# No coupon_code here on purpose: a client coupon code would fire
+			# ERPNext's coupon_code_based pricing rules for an expired or
+			# exhausted ERPNext Coupon Code with no validation and no usage
+			# counting — inconsistent with the coupon_code_based exclusion in
+			# the POS offer filters. POS coupons land as discount_amount via
+			# the frontend instead.
 		}
 	)
 	doc.flags.ignore_mandatory = True

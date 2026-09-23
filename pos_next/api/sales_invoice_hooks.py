@@ -168,7 +168,7 @@ def release_coupon_usage_on_cancel(doc, method=None):
 	"""
 	if doc.get("is_consolidated"):
 		return
-	coupon_code = doc.get("coupon_code")
+	coupon_code = doc.get("pos_coupon_code")
 	if not coupon_code:
 		return
 	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import decrement_coupon_usage

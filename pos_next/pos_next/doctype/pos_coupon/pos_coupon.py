@@ -122,14 +122,14 @@ def _get_customer_coupon_usage_count(customer, coupon_code):
 			continue
 
 		meta = frappe.get_meta(doctype)
-		if not meta.has_field("coupon_code"):
+		if not meta.has_field("pos_coupon_code"):
 			continue
 
 		used_count += frappe.db.count(
 			doctype,
 			filters={
 				"customer": customer,
-				"coupon_code": coupon_code,
+				"pos_coupon_code": coupon_code,
 				"docstatus": 1,
 			},
 		)

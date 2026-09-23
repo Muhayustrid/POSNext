@@ -32,11 +32,11 @@ class TestPOSCoupon(unittest.TestCase):
 		self.assertEqual(used_count, 3)
 		mock_db.count.assert_any_call(
 			"Sales Invoice",
-			filters={"customer": "Customer A", "coupon_code": "SAVE10", "docstatus": 1},
+			filters={"customer": "Customer A", "pos_coupon_code": "SAVE10", "docstatus": 1},
 		)
 		mock_db.count.assert_any_call(
 			"POS Invoice",
-			filters={"customer": "Customer A", "coupon_code": "SAVE10", "docstatus": 1},
+			filters={"customer": "Customer A", "pos_coupon_code": "SAVE10", "docstatus": 1},
 		)
 
 	@patch("pos_next.pos_next.doctype.pos_coupon.pos_coupon.frappe.get_meta")
@@ -54,5 +54,5 @@ class TestPOSCoupon(unittest.TestCase):
 		self.assertEqual(used_count, 4)
 		mock_db.count.assert_called_once_with(
 			"Sales Invoice",
-			filters={"customer": "Customer A", "coupon_code": "SAVE10", "docstatus": 1},
+			filters={"customer": "Customer A", "pos_coupon_code": "SAVE10", "docstatus": 1},
 		)

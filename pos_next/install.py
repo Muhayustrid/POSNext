@@ -84,6 +84,18 @@ CUSTOM_FIELDS = {
 			"translatable": 0,
 			"description": "Calendar date the queue number belongs to.",
 		},
+		{
+			"fieldname": "pos_coupon_code",
+			"label": "POS Coupon Code",
+			"fieldtype": "Data",
+			"insert_after": "pos_queue_date",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"hidden": 1,
+			"translatable": 0,
+			"description": "POS Coupon code applied to this invoice; server-stamped after validation (ERPNext's own coupon_code Link field stays empty).",
+		},
 	],
 	"Sales Invoice Item": [
 		{
@@ -136,8 +148,8 @@ CUSTOM_FIELDS = {
 			"description": "Internal: JSON list of Pricing Rules applied to this item row. Lets the discount code gate exempt offer-driven discounts from the HQ code requirement.",
 		},
 	],
-	# POS Invoice mirrors the Sales Invoice field layout, so the same five
-	# field dicts apply verbatim (only insert_after anchors differ where noted).
+	# POS Invoice mirrors the Sales Invoice field layout, so the same field
+	# dicts apply verbatim (only insert_after anchors differ where noted).
 	"POS Invoice": [
 		{
 			"fieldname": "buyer_name",
@@ -204,6 +216,18 @@ CUSTOM_FIELDS = {
 			"no_copy": 1,
 			"print_hide": 1,
 			"translatable": 0,
+		},
+		{
+			"fieldname": "pos_coupon_code",
+			"label": "POS Coupon Code",
+			"fieldtype": "Data",
+			"insert_after": "posa_pos_opening_shift",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"hidden": 1,
+			"translatable": 0,
+			"description": "POS Coupon code applied to this invoice; server-stamped after validation (ERPNext's own coupon_code Link field stays empty).",
 		},
 	],
 	"POS Invoice Item": [

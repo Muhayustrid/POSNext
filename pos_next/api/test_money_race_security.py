@@ -15,15 +15,15 @@ Run via pos_next/_pn_run_tests.py pos_next.api.test_money_race_security
 """
 
 import inspect
+import json
 import unittest
 import uuid
-from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import flt, today
 
-from pos_next.api.invoices import submit_invoice
+from pos_next.api.invoices import submit_invoice, update_invoice
 from pos_next.api.promotions import apply_referral_code as gated_apply_referral_code
 from pos_next.api.wallet import get_customer_wallet_balance, get_or_create_wallet
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
@@ -505,7 +505,9 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 		_set_invoice_type(SALES_INVOICE)
 		frappe.db.commit()
 
-	def _payload(self, **overrides):
+	def _payload(self, coupon_code=None):
+		# The coupon_code key is always present (possibly null), mirroring the
+		# frontend contract: useInvoice.js sends it on every submit.
 		payload = {
 			"pos_profile": self.profile.name,
 			"posa_pos_opening_shift": self.shift.name,
@@ -515,8 +517,8 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 				{"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.profile.warehouse}
 			],
 			"payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+			"coupon_code": coupon_code,
 		}
-		payload.update(overrides)
 		return payload
 
 	def _make_coupon(self):
@@ -543,33 +545,102 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 		return frappe.db.get_value("POS Coupon", coupon.name, "used") or 0
 
 	def _round_trip(self, doctype):
-		"""Submit through the endpoint, claim the coupon use, cancel, watch it
-		come back. The coupon is stamped on the submitted doc via db.set_value:
-		update_invoice:1320 stamps the raw POS Coupon code into ERPNext's
-		coupon_code Link field (-> ERPNext "Coupon Code" doctype), which fails
-		link validation on insert — a PRE-EXISTING endpoint bug (reported, not
-		wired to the cancel release under test here)."""
+		"""Honest round trip through the endpoint: submit with the coupon in
+		the payload — update_invoice validates it, stamps the custom
+		pos_coupon_code field (ERPNext's own coupon_code Link stays empty) and
+		the SEC-15 increment claims one use inside the submit transaction;
+		cancel hands the use back through the real on_cancel wiring — both the
+		POS Invoice path (pos_invoice_events) and the Sales Invoice path
+		(hooks.py doc_events)."""
 		_set_invoice_type(POS_INVOICE if doctype == "POS Invoice" else SALES_INVOICE)
 		coupon = self._make_coupon()
 		before = self._used(coupon)
-		result = submit_invoice(invoice=self._payload())
+		result = submit_invoice(invoice=self._payload(coupon_code=coupon.coupon_code))
 		name = result.get("name")
 		self._created.append(name)
 		self.assertTrue(name)
-		frappe.db.set_value(doctype, name, "coupon_code", coupon.coupon_code)
-		increment_coupon_usage(coupon.coupon_code)  # the submit-side claim
 		self.assertEqual(self._used(coupon), before + 1)
+		self.assertEqual(
+			frappe.db.get_value(doctype, name, "pos_coupon_code"), coupon.coupon_code
+		)
+		self.assertIsNone(frappe.db.get_value(doctype, name, "coupon_code"))
 		doc = frappe.get_doc(doctype, name)  # cancel as Administrator
 		doc.flags.ignore_permissions = True
-		# ERPNext's own on_cancel coupon counter chokes on a POS Coupon code in
-		# its coupon_code field (same pre-existing endpoint bug); mute it so the
-		# pos_next cancel wiring under test runs for real.
-		with mock.patch(
-			"erpnext.accounts.doctype.pricing_rule.utils.update_coupon_code_count"
-		), mock.patch(
-			"erpnext.accounts.doctype.sales_invoice.sales_invoice.update_coupon_code_count"
-		):  # SI binds it at module level, POS Invoice at call time
-			doc.cancel()
+		doc.cancel()
+		self.assertEqual(self._used(coupon), before)
+
+	def test_client_cannot_stamp_coupon_fields(self):
+		"""A smuggled pos_coupon_code is stripped server-side (only the
+		validated code is stamped), and an invalid coupon_code throws instead
+		of riding the payload onto the document."""
+		_set_invoice_type(POS_INVOICE)
+		coupon = self._make_coupon()
+		before = self._used(coupon)
+		payload = self._payload(coupon_code=coupon.coupon_code)
+		payload["pos_coupon_code"] = "EVIL"
+		result = submit_invoice(invoice=payload)
+		name = result.get("name")
+		self._created.append(name)
+		self.assertEqual(
+			frappe.db.get_value("POS Invoice", name, "pos_coupon_code"), coupon.coupon_code
+		)
+		self.assertIsNone(frappe.db.get_value("POS Invoice", name, "coupon_code"))
+		self.assertEqual(self._used(coupon), before + 1)
+
+		with self.assertRaises(frappe.ValidationError):
+			submit_invoice(invoice=self._payload(coupon_code="NOT-A-COUPON"))
+
+	def test_coupon_cleared_when_payload_key_null(self):
+		"""Re-saving the draft with the coupon key present but null clears the
+		stamp, so the subsequent submit burns no quota (key-presence semantics
+		honestly mirrored on the document)."""
+		_set_invoice_type(POS_INVOICE)
+		coupon = self._make_coupon()
+		before = self._used(coupon)
+		# (a) draft save with a valid coupon stamps the canonical code
+		created = update_invoice(json.dumps(self._payload(coupon_code=coupon.coupon_code)))
+		name = created.get("name")
+		self._created.append(name)
+		self.assertEqual(
+			frappe.db.get_value("POS Invoice", name, "pos_coupon_code"), coupon.coupon_code
+		)
+		# (b) same draft, coupon key present but null: stamp must be cleared
+		payload = self._payload()
+		payload["name"] = name
+		update_invoice(json.dumps(payload))
+		self.assertIsNone(frappe.db.get_value("POS Invoice", name, "pos_coupon_code"))
+		# (c) submit the coupon-less draft: quota untouched
+		payload = self._payload()
+		payload["name"] = name
+		result = submit_invoice(invoice=payload)
+		self.assertEqual(result.get("name"), name)
+		self._created.append(result.get("name"))
+		self.assertEqual(self._used(coupon), before)
+
+	def test_submit_with_echoed_draft_payload(self):
+		"""Pins the real-frontend shape: Step 2 submits update_invoice's echoed
+		as_dict() verbatim — it carries coupon_code=None (every docfield is in
+		the echo) while the doc holds the stamped code. Submit must honour the
+		doc stamp, burn one use, and release it on cancel."""
+		_set_invoice_type(POS_INVOICE)
+		coupon = self._make_coupon()
+		before = self._used(coupon)
+		result = update_invoice(json.dumps(self._payload(coupon_code=coupon.coupon_code)))
+		name = result.get("name")
+		self._created.append(name)
+		# echo shape: coupon_code key present with None, stamp on the custom field
+		self.assertIn("coupon_code", result)
+		self.assertIsNone(result.get("coupon_code"))
+		self.assertEqual(result.get("pos_coupon_code"), coupon.coupon_code)
+		# submit the echoed dict verbatim (existing-draft branch)
+		result = submit_invoice(invoice=result)
+		self.assertEqual(result.get("name"), name)
+		self._created.append(result.get("name"))
+		self.assertEqual(self._used(coupon), before + 1)
+		# cancel hands the claim back
+		doc = frappe.get_doc("POS Invoice", name)
+		doc.flags.ignore_permissions = True
+		doc.cancel()
 		self.assertEqual(self._used(coupon), before)
 
 	def test_pos_invoice_cancel_returns_coupon_use(self):
