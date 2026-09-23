@@ -361,9 +361,9 @@ def extend_deadline(opening_shift, new_deadline):
 
 	The supported, audited alternative to a raw `frappe.db.set_value` bypass —
 	e.g. to let offline invoices stranded by the deadline sync before closing.
-	Forward-only, System Manager only, writes a Comment for the audit trail.
+	Forward-only, HQ roles only, writes a Comment for the audit trail.
 	"""
-	if "System Manager" not in frappe.get_roles():
+	if not {"System Manager", "Nexus POS Manager"} & set(frappe.get_roles()):
 		frappe.throw(_("Only System Managers can extend a shift schedule deadline"), frappe.PermissionError)
 
 	row = frappe.db.get_value(

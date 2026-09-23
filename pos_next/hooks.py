@@ -97,7 +97,7 @@ jinja = {
 # --------
 fixtures = [
 	{"dt": "Role", "filters": [["role_name", "in", ["POSNext Cashier", "Nexus POS Manager"]]]},
-	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier"]]]},
+	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier", "Nexus POS Manager"]]]},
 ]
 
 # Installation
