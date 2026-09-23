@@ -102,11 +102,16 @@ def check_opening_shift(user=None):
 		order_by="period_start_date desc",
 	)
 
-	if not open_shifts:
+	# Leftover test fixtures can leave open shifts whose POS Profile row was
+	# deleted: fetching it used to 500 this endpoint, which drove the SPA into
+	# its stale cached shift and a confusing close failure. Skip dangling
+	# profile links instead.
+	shift_data = next(
+		(row for row in open_shifts if frappe.db.exists("POS Profile", row.pos_profile)),
+		None,
+	)
+	if not shift_data:
 		return None
-
-	# Get the latest open shift
-	shift_data = open_shifts[0]
 	data = {}
 	data["pos_opening_shift"] = frappe.get_doc("POS Opening Shift", shift_data["name"])
 	data["pos_profile"] = frappe.get_doc("POS Profile", shift_data["pos_profile"])

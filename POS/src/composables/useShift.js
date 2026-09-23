@@ -65,24 +65,40 @@ export function useShift() {
 		},
 		onError(error) {
 			console.error("Error checking opening shift:", error);
-			// Try to load from localStorage
-			const cachedData = localStorage.getItem("pos_shift_data");
-			if (cachedData) {
-				try {
-					const data = JSON.parse(cachedData);
-					shiftState.value = {
-						pos_opening_shift: data.pos_opening_shift,
-						pos_profile: data.pos_profile,
-						company: data.company,
-						isOpen: true,
-						_initialElapsedMs: data._initialElapsedMs || 0,
-						_receivedAt: data._receivedAt || Date.now(),
-						_serverNowMs: parseServerDatetime(data.server_now) || 0,
-					};
-				} catch (e) {
-					console.error("Error parsing cached shift data:", e);
+			if (!navigator.onLine) {
+				// The cache exists for offline use: serve it only then.
+				const cachedData = localStorage.getItem("pos_shift_data");
+				if (cachedData) {
+					try {
+						const data = JSON.parse(cachedData);
+						shiftState.value = {
+							pos_opening_shift: data.pos_opening_shift,
+							pos_profile: data.pos_profile,
+							company: data.company,
+							isOpen: true,
+							_initialElapsedMs: data._initialElapsedMs || 0,
+							_receivedAt: data._receivedAt || Date.now(),
+							_serverNowMs: parseServerDatetime(data.server_now) || 0,
+						};
+					} catch (e) {
+						console.error("Error parsing cached shift data:", e);
+					}
 				}
+				return;
 			}
+			// Online failure means a server error: trusting the stale cache here
+			// once let the app close an already-closed shift. Reset to the empty
+			// state so the user is driven through an honest fresh check/open.
+			localStorage.removeItem("pos_shift_data");
+			shiftState.value = {
+				pos_opening_shift: null,
+				pos_profile: null,
+				company: null,
+				isOpen: false,
+				_initialElapsedMs: 0,
+				_receivedAt: 0,
+				_serverNowMs: 0,
+			};
 		},
 	});
 

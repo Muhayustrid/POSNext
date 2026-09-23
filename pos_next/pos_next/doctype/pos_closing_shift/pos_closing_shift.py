@@ -39,7 +39,7 @@ def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
 
 class POSClosingShift(Document):
 	def validate(self):
-		user = frappe.get_all(
+		existing = frappe.get_all(
 			"POS Closing Shift",
 			filters={
 				"user": self.user,
@@ -47,14 +47,16 @@ class POSClosingShift(Document):
 				"pos_opening_shift": self.pos_opening_shift,
 				"name": ["!=", self.name],
 			},
+			fields=["name"],
+			limit_page_length=1,
 		)
 
-		if user:
+		if existing:
 			frappe.throw(
-				_(
-					f"POS Closing Shift <strong>already exists</strong> against {frappe.bold(self.user)} between selected period"
+				_("A submitted POS Closing Shift ({0}) already exists for this opening shift").format(
+					frappe.bold(existing[0].name)
 				),
-				title=_("Invalid Period"),
+				title=_("Duplicate Closing Entry"),
 			)
 
 		if frappe.db.get_value("POS Opening Shift", self.pos_opening_shift, "status") != "Open":

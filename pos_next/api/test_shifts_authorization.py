@@ -126,6 +126,19 @@ class TestShiftsAuthorization(FrappeTestCase):
 	def _balance_details(self):
 		return json.dumps([{"mode_of_payment": self.mode[0], "opening_amount": OPENING_CASH}])
 
+	def _remove_shift(self, shift):
+		# tolerant cleanup (same spirit as tearDownClass): restore the
+		# possibly db-spoofed profile link, then cancel + delete so this run
+		# leaves no open shifts behind
+		try:
+			frappe.db.set_value("POS Opening Shift", shift.name, "pos_profile", self.profile.name)
+			doc = frappe.get_doc("POS Opening Shift", shift.name)
+			if doc.docstatus == 1:
+				doc.cancel()
+			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
+		except Exception:
+			pass
+
 	# ── get_closing_shift_data (PATTERN B) ───────────────────────────────────
 
 	def test_get_closing_shift_data_owner_allowed(self):
@@ -201,6 +214,38 @@ class TestShiftsAuthorization(FrappeTestCase):
 			self.assertEqual(data["pos_opening_shift"].name, shift.name)
 		finally:
 			frappe.set_user(ADMIN)
+
+	# ── check_opening_shift: dangling POS Profile links ─────────────────────
+	# Real incident: leftover test shifts referenced deleted POS Profiles and
+	# check_opening_shift 500'd, driving the SPA into a stale cached shift.
+
+	def test_check_opening_shift_skips_shift_with_deleted_profile(self):
+		shift = self._open_shift(user=self.cashier)
+		# db-level set, bypassing Link validation — mirrors what a bad
+		# test-fixture teardown left behind
+		frappe.db.set_value("POS Opening Shift", shift.name, "pos_profile", "_Deleted Profile XYZ")
+		frappe.set_user(self.cashier)
+		try:
+			# must not raise; the cashier has no other open shift
+			self.assertIsNone(check_opening_shift())
+		finally:
+			frappe.set_user(ADMIN)
+			self._remove_shift(shift)
+
+	def test_check_opening_shift_prefers_older_valid_shift(self):
+		older = self._open_shift(user=self.cashier)
+		newer = self._open_shift(user=self.cashier)
+		# the NEWER one dangles → the older valid shift must win
+		frappe.db.set_value("POS Opening Shift", newer.name, "pos_profile", "_Deleted Profile XYZ")
+		frappe.set_user(self.cashier)
+		try:
+			data = check_opening_shift()
+			self.assertIsNotNone(data)
+			self.assertEqual(data["pos_opening_shift"].name, older.name)
+		finally:
+			frappe.set_user(ADMIN)
+			self._remove_shift(older)
+			self._remove_shift(newer)
 
 	# ── create_opening_shift (PATTERN A + serialized PATTERN C) ──────────────
 
