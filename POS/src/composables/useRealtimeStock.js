@@ -12,6 +12,7 @@
 import { performanceConfig } from "@/utils/performanceConfig";
 import { logger } from "@/utils/logger";
 import { ref } from "vue";
+import { createProfileRoomBinding } from "@/composables/usePosProfileRoom";
 
 const log = logger.create("RealtimeStock");
 
@@ -20,6 +21,9 @@ const isListening = ref(false);
 const eventHandlers = new Set();
 const pendingUpdates = new Map();
 let batchTimeout = null;
+// PERF-06: events arrive in the active profile's room only, so the socket must
+// be joined while listening (and re-joined when the profile changes).
+const roomBinding = createProfileRoomBinding();
 
 /**
  * Batch update configuration - dynamically adjusted based on device performance
@@ -116,6 +120,7 @@ function startListening() {
 	// Subscribe to stock update events
 	window.frappe.realtime.on("pos_stock_update", handleStockUpdate);
 	window.frappe.realtime.on("pos_invoice_created", handleInvoiceCreated);
+	roomBinding.start();
 
 	isListening.value = true;
 }
@@ -132,6 +137,7 @@ function stopListening() {
 		window.frappe.realtime.off("pos_stock_update", handleStockUpdate);
 		window.frappe.realtime.off("pos_invoice_created", handleInvoiceCreated);
 	}
+	roomBinding.stop();
 
 	// Clear pending updates
 	if (batchTimeout) {

@@ -19,6 +19,7 @@
 
 import { logger } from "@/utils/logger";
 import { readonly, ref } from "vue";
+import { createProfileRoomBinding } from "@/composables/usePosProfileRoom";
 
 const log = logger.create("RealtimePosProfile");
 
@@ -30,6 +31,10 @@ const EVENT_NAME = "pos_profile_updated";
 const DEBOUNCE_DELAY_MS = 300; // Prevent rapid-fire updates
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000;
+
+// PERF-06: profile updates arrive in that profile's room only; join while
+// listening and follow profile switches.
+const roomBinding = createProfileRoomBinding();
 
 // ============================================================================
 // SINGLETON STATE (shared across all component instances)
@@ -193,6 +198,7 @@ function startListening() {
 
 		// Subscribe to POS Profile update events
 		window.frappe.realtime.on(EVENT_NAME, handlePosProfileUpdate);
+		roomBinding.start();
 
 		isListening.value = true;
 		isConnecting.value = false;
@@ -237,6 +243,7 @@ function stopListening() {
 		if (isSocketAvailable()) {
 			window.frappe.realtime.off(EVENT_NAME, handlePosProfileUpdate);
 		}
+		roomBinding.stop();
 
 		isListening.value = false;
 		retryAttempts = 0;

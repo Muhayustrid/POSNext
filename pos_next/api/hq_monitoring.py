@@ -563,23 +563,44 @@ def _si_window_where(companies, profiles, start, end, cutoff=None, alias="si"):
 		f"{alias}.posting_date <= %(end)s",
 	]
 	if cutoff:
-		params["cutoff"] = cutoff
-		where.append(f"TIMESTAMP({alias}.posting_date, {alias}.posting_time) <= %(cutoff)s")
+		# Sargable cutoff (PERF-01): TIMESTAMP(posting_date, posting_time)
+		# wraps the indexed column and disables the posting_date index, so the
+		# instant comparison is split into a date range plus a same-day time
+		# comparison. Deliberate superset: the old TIMESTAMP(date, NULL) is
+		# NULL, so NULL-time rows were dropped outright; the IS NULL arm now
+		# lets them through (a NULL-time invoice before the cutoff belongs in
+		# the window). Submitted invoices always carry a time, so this only
+		# affects hand-mangled rows.
+		params["cutoff_date"] = getdate(cutoff)
+		params["cutoff_time"] = cutoff.time()
+		where.append(
+			f"({alias}.posting_date < %(cutoff_date)s"
+			f" OR ({alias}.posting_date = %(cutoff_date)s"
+			f" AND ({alias}.posting_time <= %(cutoff_time)s OR {alias}.posting_time IS NULL)))"
+		)
 	if profiles is not None:
 		params["profiles"] = list(profiles)
 		where.append(f"{alias}.pos_profile IN %(profiles)s")
 	return " AND ".join(where), params
 
 
-def _invoice_from():
+def _invoice_from(where=""):
 	"""Invoice source for ``si`` aliases: report doctypes UNION ALL with the
 	columns this module reads; legacy consolidated SIs are dropped inside the
-	union (each one duplicates POS Invoices already present)."""
+	union (each one duplicates POS Invoices already present).
+
+	PERF-01: the caller's window ``where`` is pushed into every branch, so
+	each branch is index-sized on the invoice's posting_date/company instead
+	of filtering after the derived-table join. The outer WHERE keeps the
+	identical predicates, so results are unchanged."""
+	base = "si.docstatus = 1 AND si.is_pos = 1"
+	if where:
+		base += f" AND ({where})"
 	return sales_invoice_union(
 		"si.name, si.docstatus, si.is_pos, si.is_return, si.company, si.posting_date,"
 		" si.posting_time, si.pos_profile, si.base_grand_total, si.base_net_total,"
 		" si.base_total_taxes_and_charges",
-		where="si.docstatus = 1 AND si.is_pos = 1",
+		where=base,
 	)
 
 
@@ -595,7 +616,7 @@ def _totals_rows(where, params):
 			SUM(si.base_total_taxes_and_charges) AS taxes,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders,
 			COUNT(CASE WHEN si.is_return = 1 THEN 1 END) AS refund_orders
-		FROM {_invoice_from()}
+		FROM {_invoice_from(where)}
 		WHERE {where}
 		GROUP BY si.company
 		""",
@@ -720,7 +741,7 @@ def _hours_section(where, params):
 			HOUR(si.posting_time) AS hour,
 			SUM(si.base_grand_total) AS net_sales,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM {_invoice_from()}
+		FROM {_invoice_from(where)}
 		WHERE {where}
 		GROUP BY HOUR(si.posting_time)
 		ORDER BY hour
@@ -744,16 +765,18 @@ def _hours_section(where, params):
 
 
 def _item_from(where):
-	# ponytail: the item union is joined to the invoice union through derived
-	# tables (no indexes across them) — fine at POS volumes; push branches
-	# into a real view if EXPLAIN ever disagrees.
+	# PERF-01: the window predicates ride into BOTH union branches (see
+	# _invoice_from), so each branch is pruned on the invoice's posting_date /
+	# company index before the derived tables are joined — the outer WHERE
+	# keeps the identical predicates, so results are unchanged.
+	base = f"si.docstatus = 1 AND si.is_pos = 1 AND ({where})"
 	return f"""
 	FROM {sales_invoice_item_union(
 		"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
 		" sii.base_net_amount, sii.pos_package_role",
-		where="si.docstatus = 1 AND si.is_pos = 1",
+		where=base,
 	)}
-	INNER JOIN {_invoice_from()} ON si.name = sii.parent
+	INNER JOIN {_invoice_from(base)} ON si.name = sii.parent
 	WHERE {where}
 	  AND (sii.pos_package_role IS NULL OR sii.pos_package_role <> '{COMPONENT_ROLE}')
 """
@@ -977,7 +1000,7 @@ def _outlet_ranking(where, params, currency_map):
 			SUM(CASE WHEN si.is_return = 0 THEN si.base_grand_total ELSE 0 END) AS gross,
 			SUM(si.base_grand_total) AS net_tax_incl,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM {_invoice_from()}
+		FROM {_invoice_from(where)}
 		WHERE {where}
 		GROUP BY si.company
 		ORDER BY net_tax_incl DESC
@@ -994,7 +1017,7 @@ def _outlet_ranking(where, params, currency_map):
 			si.pos_profile,
 			SUM(si.base_grand_total) AS net_tax_incl,
 			COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-		FROM {_invoice_from()}
+		FROM {_invoice_from(where)}
 		WHERE {where}
 		GROUP BY si.company, si.pos_profile
 		ORDER BY net_tax_incl DESC
@@ -1138,8 +1161,16 @@ def _gross_profit_actuals(companies, profiles, start, end, cutoff):
 		params["end"] = str(getdate(end))
 		where.append("si.posting_date <= %(end)s")
 	if cutoff:
-		params["cutoff"] = cutoff
-		where.append("TIMESTAMP(si.posting_date, si.posting_time) <= %(cutoff)s")
+		# Same sargable split + deliberate NULL-time superset as
+		# _si_window_where (PERF-01): old TIMESTAMP(date, NULL) was NULL and
+		# dropped the row; the IS NULL arm now admits it.
+		params["cutoff_date"] = getdate(cutoff)
+		params["cutoff_time"] = cutoff.time()
+		where.append(
+			"(si.posting_date < %(cutoff_date)s"
+			" OR (si.posting_date = %(cutoff_date)s"
+			" AND (si.posting_time <= %(cutoff_time)s OR si.posting_time IS NULL)))"
+		)
 	if profiles is not None:
 		params["profiles"] = list(profiles)
 		where.append("si.pos_profile IN %(profiles)s")
@@ -1451,7 +1482,7 @@ def _overall_target_section(scope, currency_map):
 				SELECT si.company,
 					SUM(si.base_grand_total) AS net_tax_incl,
 					COUNT(CASE WHEN si.is_return = 0 THEN 1 END) AS orders
-				FROM {_invoice_from()}
+				FROM {_invoice_from(" AND ".join(where))}
 				WHERE {" AND ".join(where)}
 				GROUP BY si.company
 				""",

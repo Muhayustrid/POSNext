@@ -5,12 +5,13 @@ Handles customer search, creation, and management for POS operations
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
 
 
 @frappe.whitelist()
-def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
+def get_customers(search_term="", pos_profile=None, limit=20, start=0, modified_since=None):
 	"""
 	Search customers for inline customer selection in POS.
 
@@ -18,6 +19,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 	    search_term (str): Search query (name, mobile, or customer ID)
 	    pos_profile (str): POS Profile to filter by customer group
 	    limit (int): Maximum number of results to return
+	    start (int): Pagination offset (offline cache syncs in 500-row pages)
 	    modified_since (str): Fetch customers modified after this timestamp (ISO format)
 
 	Returns:
@@ -70,7 +72,10 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			or_filters=or_filters or None,
 			fields=["name", "customer_name", "mobile_no", "email_id", "disabled"],
 			limit=customer_limit,
-			order_by="customer_name asc",
+			start=cint(start),
+			# unique tiebreaker: offset pagination must be deterministic when
+			# customers share a name
+			order_by="customer_name asc, name asc",
 		)
 		frappe.logger().debug(f"get_customers returned {len(result)} customers")
 		return result

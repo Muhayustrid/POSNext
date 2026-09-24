@@ -77,17 +77,29 @@ class PriceGroup(Document):
 				)
 
 	def _set_uom(self) -> None:
+		# PERF-05: two bulk lookups replaced three queries per row; the row loop
+		# below keeps the original validation order and messages.
+		item_codes = [row.item_code for row in self.items]
+		stock_uoms = {
+			d.name: d.stock_uom
+			for d in frappe.get_all(
+				"Item", filters={"name": ["in", item_codes]}, fields=["name", "stock_uom"]
+			)
+		}
+		existing_uoms = set(
+			frappe.get_all("UOM", filters={"name": ["in", list(stock_uoms.values())]}, pluck="name")
+		)
 		for row in self.items:
-			if not frappe.db.exists("Item", row.item_code):
+			if row.item_code not in stock_uoms:
 				frappe.throw(_("Item {0} does not exist").format(row.item_code))
 			# Managed identity is (item_code, uom) with uom DERIVED from the Item's current
 			# stock UOM on every save. Derive unconditionally, never fill-if-blank: the child
 			# field is read_only, and preserving a stale value is what prevents identity from
 			# moving after a stock-UOM change.
-			row.uom = frappe.db.get_value("Item", row.item_code, "stock_uom")
+			row.uom = stock_uoms[row.item_code]
 			if not row.uom:
 				frappe.throw(_("Item {0} has no stock UOM").format(row.item_code))
-			if not frappe.db.exists("UOM", row.uom):
+			if row.uom not in existing_uoms:
 				frappe.throw(_("UOM {0} does not exist").format(row.uom))
 
 	def _currently_owned_profiles(self) -> list[str]:
@@ -304,52 +316,81 @@ class PriceGroup(Document):
 
 		# Stale detection using ONLY already locked marked rows
 		existing_marked_by_ident = {}
-		for ip_name in state.managed_item_prices:
-			ident = frappe.db.get_value("Item Price", ip_name, ["item_code", "uom"], as_dict=True)
-			if ident:
-				if (ident.item_code, ident.uom) in existing_marked_by_ident:
-					frappe.throw(
-						_("Two managed Item Prices share identity ({0}, {1}) on {2}").format(
-							ident.item_code, ident.uom, pl_name
-						)
+		# PERF-05: one query for every marked row instead of one get_value per name;
+		# order_by name matches the sorted state.managed_item_prices iteration order,
+		# so the duplicate-identity throw fires on the same row as before.
+		for ident in frappe.get_all(
+			"Item Price",
+			filters={"name": ["in", list(state.managed_item_prices)]},
+			fields=["name", "item_code", "uom"],
+			order_by="name asc",
+		):
+			if (ident.item_code, ident.uom) in existing_marked_by_ident:
+				frappe.throw(
+					_("Two managed Item Prices share identity ({0}, {1}) on {2}").format(
+						ident.item_code, ident.uom, pl_name
 					)
-				existing_marked_by_ident[(ident.item_code, ident.uom)] = ip_name
+				)
+			existing_marked_by_ident[(ident.item_code, ident.uom)] = ident.name
 
 		# Precheck for colliding unmanaged unscoped Item Prices before mutating.
 		# Deliberately broader than ItemPrice.check_duplicates on valid_from: SCOPE_FIELDS omits
 		# it (see its docstring), so this matches an unmanaged row on ANY start date rather than
 		# only today's. That is the conservative direction — an open-ended unmanaged row makes
 		# price resolution on a managed list ambiguous whatever its start date.
-		# The uom predicate is normalization-aware: a legacy NULL/empty-uom row on this list
-		# normalizes to the Item's stock UOM — exactly the identity being inserted — and
-		# ItemPrice.check_duplicates treats NULL and '' as equivalent, so catching it here
-		# produces the named validation error instead of ERPNext's late duplicate exception.
-		for item_code, uom in desired_identities:
-			if (item_code, uom) in existing_marked_by_ident:
-				continue
+		# PERF-05: one sweep over all unmanaged unscoped rows of the list replaced one
+		# get_all per identity. Shared predicates stay in SQL unchanged; only the
+		# per-identity item/uom pair moved to the Python match below, which mirrors
+		# the original `uom in [uom, None, '']` rendering (frappe turns it into
+		# ifnull(uom,'') IN (uom, '')) — a legacy NULL/empty-uom row still normalizes
+		# onto the identity being inserted and is caught here by name.
+		new_identities = [
+			(item_code, uom)
+			for (item_code, uom) in desired_identities
+			if (item_code, uom) not in existing_marked_by_ident
+		]
+		unmanaged_rows = []
+		if new_identities:
 			colliding_filters = {
 				"price_list": pl_name,
-				"item_code": item_code,
-				"uom": ["in", [uom, None, ""]],
+				"item_code": ["in", [item_code for item_code, _ in new_identities]],
 				ITEM_PRICE_OWNER_FIELD: ["is", "not set"],
 			}
 			for field in SCOPE_FIELDS:
 				colliding_filters[field] = ["in", [None, 0]] if field == "packing_unit" else ["is", "not set"]
-			colliding = frappe.get_all("Item Price", filters=colliding_filters, pluck="name", limit=1)
-			if colliding:
+			unmanaged_rows = frappe.get_all(
+				"Item Price", filters=colliding_filters, fields=["name", "item_code", "uom"]
+			)
+
+		for item_code, uom in new_identities:
+			for row in unmanaged_rows:
+				if row.item_code != item_code:
+					continue
+				row_uom = row.uom or ""
+				if row_uom != uom and row_uom != "":
+					continue
 				frappe.throw(
 					_(
 						"An existing unmanaged Item Price {0} already covers Item {1} with UOM {2} "
 						"on Price List {3}. Resolve it before this Price Group can manage that item."
-					).format(colliding[0], item_code, uom, pl_name)
+					).format(row.name, item_code, uom, pl_name)
 				)
+
+		# PERF-05: current rates fetched in one query instead of one get_value per row.
+		current_rates = {
+			d.name: d.price_list_rate
+			for d in frappe.get_all(
+				"Item Price",
+				filters={"name": ["in", list(existing_marked_by_ident.values())]},
+				fields=["name", "price_list_rate"],
+			)
+		}
 
 		# Update or insert desired marked rows
 		for (item_code, uom), rate in desired_identities.items():
 			if (item_code, uom) in existing_marked_by_ident:
 				ip_name = existing_marked_by_ident[(item_code, uom)]
-				curr_rate = frappe.db.get_value("Item Price", ip_name, "price_list_rate")
-				if curr_rate != rate:
+				if current_rates.get(ip_name) != rate:
 					frappe.db.set_value(
 						"Item Price",
 						ip_name,

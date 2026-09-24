@@ -177,25 +177,57 @@ export const cacheItemsFromServer = async (posProfile) => {
 	}
 };
 
+// PERF-03: page size for customer sync. One unbounded `limit: 0` pull of
+// 50k+ customers blocked the tab; the backend pages via start/limit instead.
+// Shared with stores/customerSearch.js so both full-pull loops page identically.
+export const CUSTOMER_SYNC_PAGE_SIZE = 500;
+
 // Load customers from server (returns data for worker to cache)
 export const cacheCustomersFromServer = async (posProfile) => {
 	try {
 		console.log("Fetching customers from server...");
 
-		const response = await call("pos_next.api.customers.get_customers", {
-			pos_profile: posProfile,
-			start: 0,
-			limit: 0, // Get all customers
-		});
+		// Delta sync when the local cache has a last-sync marker (epoch ms,
+		// set by the worker after a successful cache); full pull otherwise.
+		const modifiedSince = memory.customers_last_sync
+			? new Date(memory.customers_last_sync).toISOString()
+			: null;
 
-		if (response.message && Array.isArray(response.message)) {
-			const customers = response.message;
+		const customers = [];
+		const disabledNames = [];
+		let start = 0;
+		let fetching = true;
 
-			console.log(`Fetched ${customers.length} customers from server`);
-			return { customers };
+		while (fetching) {
+			const response = await call("pos_next.api.customers.get_customers", {
+				pos_profile: posProfile,
+				search_term: "",
+				start,
+				limit: CUSTOMER_SYNC_PAGE_SIZE,
+				...(modifiedSince ? { modified_since: modifiedSince } : {}),
+			});
+
+			const page = Array.isArray(response?.message) ? response.message : [];
+			for (const customer of page) {
+				// Delta pulls include disabled rows so they can be purged; the
+				// worker upsert path must never re-add them to IndexedDB.
+				if (customer.disabled) {
+					disabledNames.push(customer.name);
+				} else {
+					customers.push(customer);
+				}
+			}
+
+			start += CUSTOMER_SYNC_PAGE_SIZE;
+			fetching = page.length >= CUSTOMER_SYNC_PAGE_SIZE;
 		}
 
-		return { customers: [] };
+		if (disabledNames.length > 0) {
+			await db.customers.bulkDelete(disabledNames);
+		}
+
+		console.log(`Fetched ${customers.length} customers from server`);
+		return { customers };
 	} catch (error) {
 		console.error("Error fetching customers from server:", error);
 		throw error;

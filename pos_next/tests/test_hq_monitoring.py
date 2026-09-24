@@ -365,6 +365,31 @@ class TestHQMonitoring(IntegrationTestCase):
 		# Tuesday -> Monday
 		self.assertEqual(previous_weekday(monday + timedelta(days=1)), monday)
 
+	def test_window_where_sargable_and_pushed_into_union_branches(self):
+		"""PERF-01 regression: the cutoff must never wrap the indexed
+		posting_date in TIMESTAMP(...), and the window filters must ride into
+		every union branch (derived tables pre-filtered by the branch, not
+		after the join). String-level: no query is executed."""
+		from pos_next.api.hq_monitoring import _invoice_from, _item_from, _si_window_where
+
+		where, params = _si_window_where(
+			[self.company_a], None, "2026-09-01", "2026-09-22", frappe.utils.now_datetime()
+		)
+		self.assertNotIn("TIMESTAMP(", where)
+		self.assertIn("posting_date < %(cutoff_date)s", where)
+		self.assertIn("posting_time <= %(cutoff_time)s", where)
+		# NULL posting_time: old TIMESTAMP(date, NULL) was NULL and dropped
+		# the row; the IS NULL arm deliberately admits it instead
+		self.assertIn("posting_time IS NULL", where)
+		self.assertNotIn("cutoff", params)
+		self.assertIn("cutoff_date", params)
+		self.assertIn("cutoff_time", params)
+
+		# item branch + invoice branch + outer WHERE all carry the window
+		# (>= 3: single-branch unions; more in POS Invoice mode)
+		self.assertGreaterEqual(_item_from(where).count("si.posting_date >= %(start)s"), 3)
+		self.assertGreaterEqual(_invoice_from(where).count("si.posting_date >= %(start)s"), 1)
+
 	# ------------------------------------------------------------------
 	# endpoint metrics
 	# ------------------------------------------------------------------

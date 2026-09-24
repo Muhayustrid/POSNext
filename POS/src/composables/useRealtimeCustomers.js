@@ -10,6 +10,7 @@
 
 import { logger } from "@/utils/logger";
 import { readonly, ref } from "vue";
+import { createProfileRoomBinding } from "@/composables/usePosProfileRoom";
 
 const log = logger.create("RealtimeCustomers");
 
@@ -21,6 +22,10 @@ const EVENT_NAME = "pos_customer_changed";
 const DEBOUNCE_DELAY_MS = 300; // Prevent rapid-fire updates
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000;
+
+// PERF-06: customer events fan out to every enabled profile's room; a terminal
+// only receives its own profile's copy because it joins only that room.
+const roomBinding = createProfileRoomBinding();
 
 // ============================================================================
 // SINGLETON STATE (shared across all component instances)
@@ -153,6 +158,7 @@ function startListening() {
 	try {
 		isConnecting.value = true;
 		window.frappe.realtime.on(EVENT_NAME, handleCustomerUpdate);
+		roomBinding.start();
 		isListening.value = true;
 		isConnecting.value = false;
 		retryAttempts = 0;
@@ -184,6 +190,7 @@ function stopListening() {
 		if (isSocketAvailable()) {
 			window.frappe.realtime.off(EVENT_NAME, handleCustomerUpdate);
 		}
+		roomBinding.stop();
 		isListening.value = false;
 		retryAttempts = 0;
 		log.info("Stopped listening to Customer updates");

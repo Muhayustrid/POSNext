@@ -12,6 +12,26 @@ from frappe import _
 from pos_next.api.items import get_stock_quantities
 
 
+def publish_to_profile(event, message, pos_profile):
+	"""Publish to the pos_profile room, never site-wide.
+
+	PERF-06/SEC-NEW-04: invoice/customer events carry transaction and PII
+	details; publishing with user=None landed in the site room ("all") that
+	every System User's socket joins, leaking them to every logged-in session.
+	Rooms are joined only by sockets verified as POS Profile Users of that
+	profile (see pos_next/realtime/handlers.js). No profile means no safe
+	room, so the event is dropped instead of broadcast.
+	"""
+	if not pos_profile:
+		return
+	frappe.publish_realtime(
+		event=event,
+		message=message,
+		room=f"pos_profile:{pos_profile}",
+		after_commit=True,  # Only emit after successful DB commit
+	)
+
+
 def emit_stock_update_event(doc, method=None):
 	"""
 	Emit real-time stock update event when Sales Invoice is submitted.
@@ -28,6 +48,13 @@ def emit_stock_update_event(doc, method=None):
 
 	# Skip if not a POS invoice (check if field exists first)
 	if hasattr(doc, "is_pos") and not doc.is_pos:
+		return
+
+	# PERF-06: the event is only meaningful to terminals of this invoice's
+	# profile. Resolve the room before doing any work so non-POS invoices
+	# keep their early return and profile-less invoices skip the stock queries.
+	pos_profile = doc.get("pos_profile")
+	if not pos_profile:
 		return
 
 	try:
@@ -81,15 +108,9 @@ def emit_stock_update_event(doc, method=None):
 			"event_type": "cancel" if method == "on_cancel" else "submit",
 		}
 
-		# Emit event to all connected clients
+		# Emit to the terminals of the invoice's profile only
 		# Event name: pos_stock_update
-		# Clients can subscribe to this event and filter by warehouse
-		frappe.publish_realtime(
-			event="pos_stock_update",
-			message=event_data,
-			user=None,  # Broadcast to all users
-			after_commit=True,  # Only emit after successful DB commit
-		)
+		publish_to_profile(event="pos_stock_update", message=event_data, pos_profile=pos_profile)
 
 	except Exception as e:
 		# Log error but don't fail the transaction
@@ -124,7 +145,7 @@ def emit_invoice_created_event(doc, method=None):
 			"timestamp": frappe.utils.now(),
 		}
 
-		frappe.publish_realtime(event="pos_invoice_created", message=event_data, user=None, after_commit=True)
+		publish_to_profile(event="pos_invoice_created", message=event_data, pos_profile=doc.pos_profile)
 
 	except Exception as e:
 		frappe.log_error(
@@ -159,15 +180,10 @@ def emit_pos_profile_updated_event(doc, method=None):
 				"change_type": "item_groups_updated",
 			}
 
-			# Emit event to all connected clients
+			# Emit to the terminals of the updated profile; the payload is about
+			# this profile only, so its room is the exact audience.
 			# Event name: pos_profile_updated
-			# Clients can subscribe to this event and invalidate their cache
-			frappe.publish_realtime(
-				event="pos_profile_updated",
-				message=event_data,
-				user=None,  # Broadcast to all users
-				after_commit=True,  # Only emit after successful DB commit
-			)
+			publish_to_profile(event="pos_profile_updated", message=event_data, pos_profile=doc.name)
 
 			frappe.logger().info(f"Emitted pos_profile_updated event for {doc.name} - item groups changed")
 
@@ -207,15 +223,31 @@ def emit_customer_event(doc, method=None):
 			"timestamp": frappe.utils.now(),
 		}
 
-		frappe.publish_realtime(
-			event="pos_customer_changed",
-			message=event_data,
-			user=None,  # Broadcast to all users
-			after_commit=True,  # Only emit after successful DB commit
-		)
+		# PERF-06: Customer carries no POS Profile, so fan the event out to the
+		# room of every enabled profile — every terminal still syncs its cache,
+		# while sessions that belong to no profile stop receiving customer PII.
+		for pos_profile in frappe.get_all("POS Profile", filters={"disabled": 0}, pluck="name"):
+			publish_to_profile(event="pos_customer_changed", message=event_data, pos_profile=pos_profile)
 
 	except Exception as e:
 		frappe.log_error(
 			title=_("Real-time Customer Update Event Error"),
 			message=f"Failed to emit customer update event for {doc.name}: {e!s}",
 		)
+
+
+@frappe.whitelist()
+def has_pos_profile_access(pos_profile):
+	"""Join gate for the pos_profile:<name> room (pos_next/realtime/handlers.js).
+
+	Membership mirrors who the events are about: a cashier assigned to the
+	profile. Login alone must not be enough — these rooms carry payment and
+	customer details.
+	"""
+	if not pos_profile or not isinstance(pos_profile, str):
+		return False
+	return bool(
+		frappe.db.exists(
+			"POS Profile User", {"parent": pos_profile, "user": frappe.session.user}
+		)
+	)

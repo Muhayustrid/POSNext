@@ -367,14 +367,14 @@
 
 				<!-- Customer Dropdown -->
 				<div
-					v-if="customerSearchFocused || customerSearch.trim().length >= 2"
+					v-if="customerSearchFocused || debouncedCustomerSearch.trim().length >= 2"
 					class="absolute z-50 mt-0.5 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-hidden will-change-transform"
 				>
 					<!-- Frequent Customers Header (when showing suggestions) -->
 					<div
 						v-if="
 							customerSearchFocused &&
-							customerSearch.trim().length < 2 &&
+							debouncedCustomerSearch.trim().length < 2 &&
 							customerResults.length > 0
 						"
 						class="px-2 py-1 bg-gray-50 border-b border-gray-200"
@@ -422,18 +422,18 @@
 					</div>
 
 					<!-- No Results + Create New Option -->
-					<div v-else-if="customerSearch.trim().length >= 2">
+					<div v-else-if="debouncedCustomerSearch.trim().length >= 2">
 						<div
 							class="px-2 py-1.5 text-center text-[11px] font-medium text-gray-700 border-b border-gray-100"
 						>
-							{{ __('No results for "{0}"', [customerSearch]) }}
+							{{ __('No results for "{0}"', [debouncedCustomerSearch]) }}
 						</div>
 					</div>
 
 					<!-- Create New Customer Option -->
 					<button
 						type="button"
-						v-if="customerSearch.trim().length >= 2"
+						v-if="debouncedCustomerSearch.trim().length >= 2"
 						@mousedown.prevent="createNewCustomer"
 						class="w-full text-start px-2 py-1.5 hover:bg-green-50 active:bg-green-100 flex items-center gap-1.5 border-t border-gray-200 touch-manipulation select-none cursor-pointer"
 					>
@@ -458,7 +458,7 @@
 							<p class="text-[11px] font-medium text-green-700">
 								{{ __("Create New Customer") }}
 							</p>
-							<p class="text-[9px] text-green-600">"{{ customerSearch }}"</p>
+							<p class="text-[9px] text-green-600">"{{ debouncedCustomerSearch }}"</p>
 						</div>
 					</button>
 				</div>
@@ -1610,7 +1610,15 @@ import { FeatherIcon } from "frappe-ui";
 
 const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
+import {
+	computed,
+	onBeforeUnmount,
+	onMounted,
+	ref,
+	toRaw,
+	watch,
+	nextTick,
+} from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
 
 /**
@@ -1747,6 +1755,12 @@ function packageComponents(instance) {
  */
 // Customer search state
 const customerSearch = ref(""); // Current search query
+// PERF-04: filtering 50k+ customers on every keystroke blocked the main
+// thread. The dropdown reacts to this debounced copy of the query; the
+// input itself keeps its live value.
+const debouncedCustomerSearch = ref("");
+const CUSTOMER_SEARCH_DEBOUNCE_MS = 250;
+let customerSearchDebounceId = null;
 const customerSearchContainer = ref(null); // Ref to search container for click-outside detection
 const customerSearchFocused = ref(false); // Track if search input is focused
 // Use Pinia store for allCustomers (shared with CustomerDialog, synced on customer creation)
@@ -1867,7 +1881,10 @@ const customerMap = computed(() => {
  * @returns {Array} Filtered customer objects matching search query
  */
 const customerResults = computed(() => {
-	const searchValue = customerSearch.value.trim().toLowerCase();
+	const searchValue = debouncedCustomerSearch.value.trim().toLowerCase();
+	// Non-reactive snapshot: iterating the raw array keeps Vue from tracking
+	// every row, so a re-filter costs one plain scan instead of a tracked pass.
+	const source = toRaw(allCustomers.value);
 
 	// When focused with no/short search term, show frequent customers (top 5)
 	if (searchValue.length < 2) {
@@ -1883,13 +1900,13 @@ const customerResults = computed(() => {
 			// 	return frequentCustomers;
 			// }
 			// If no frequent customers, show first 5 from the list
-			return allCustomers.value.slice(0, 10);
+			return source.slice(0, 10);
 		}
 		return [];
 	}
 
 	// Instant in-memory filter
-	return allCustomers.value
+	return source
 		.filter((cust) => {
 			const name = (cust.customer_name || "").toLowerCase();
 			const mobile = (cust.mobile_no || "").toLowerCase();
@@ -1974,12 +1991,45 @@ const displayGrandTotal = computed(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Handle customer search input with instant reactivity.
- * Updates the customerSearch ref which triggers computed filtering.
+ * Handle customer search input with debounced reactivity.
+ * The input keeps its live value; the dropdown filter reads the debounced
+ * copy so the full customer list is scanned once typing pauses, not on
+ * every keystroke (PERF-04). Emptying the field flushes instantly so the
+ * clear/empty-state behavior stays unchanged.
  * @param {Event} event - Input event from search field
  */
 function handleSearchInput(event) {
-	customerSearch.value = event.target.value;
+	const value = event.target.value;
+	customerSearch.value = value;
+
+	if (customerSearchDebounceId) {
+		clearTimeout(customerSearchDebounceId);
+		customerSearchDebounceId = null;
+	}
+
+	if (!value.trim()) {
+		debouncedCustomerSearch.value = value;
+		return;
+	}
+
+	customerSearchDebounceId = setTimeout(() => {
+		customerSearchDebounceId = null;
+		debouncedCustomerSearch.value = customerSearch.value;
+	}, CUSTOMER_SEARCH_DEBOUNCE_MS);
+}
+
+/**
+ * Clear the search field and its debounced copy immediately.
+ * Used by selection, Escape, create-new, and outside-click paths so the
+ * dropdown never shows stale results after a clear.
+ */
+function resetCustomerSearchField() {
+	if (customerSearchDebounceId) {
+		clearTimeout(customerSearchDebounceId);
+		customerSearchDebounceId = null;
+	}
+	customerSearch.value = "";
+	debouncedCustomerSearch.value = "";
 }
 
 // Track if customer history has been loaded this session
@@ -2035,7 +2085,7 @@ function handleKeydown(event) {
 			selectCustomer(customerResults.value[0]);
 		}
 	} else if (event.key === "Escape") {
-		customerSearch.value = "";
+		resetCustomerSearchField();
 	}
 }
 
@@ -2049,7 +2099,7 @@ function selectCustomer(cust) {
 	// Track selection for frequent customers feature
 	customerSearchStore.trackCustomerSelection(cust.name);
 	emit("select-customer", cust);
-	customerSearch.value = "";
+	resetCustomerSearchField();
 	selectedIndex.value = -1;
 	customerSearchFocused.value = false;
 	previousCustomer.value = null;
@@ -2084,7 +2134,7 @@ async function clearCustomer() {
 function createNewCustomer() {
 	const searchValue = customerSearch.value;
 	// Close dropdown immediately
-	customerSearch.value = "";
+	resetCustomerSearchField();
 	customerSearchFocused.value = false;
 	// Emit event to open customer creation dialog
 	emit("create-customer", searchValue);
@@ -2331,7 +2381,7 @@ function handleOutsideClick(event) {
 		target instanceof Node &&
 		!customerSearchContainer.value.contains(target)
 	) {
-		customerSearch.value = "";
+		resetCustomerSearchField();
 
 		// Restore previous customer if set and no customer selected
 		if (previousCustomer.value && !props.customer) {
@@ -2376,6 +2426,11 @@ onMounted(() => {
  * Prevents memory leaks by removing event listener.
  */
 onBeforeUnmount(() => {
+	// PERF-04: drop any pending customer-search debounce timer
+	if (customerSearchDebounceId) {
+		clearTimeout(customerSearchDebounceId);
+		customerSearchDebounceId = null;
+	}
 	if (typeof document === "undefined") return;
 	document.removeEventListener("mousedown", handleOutsideClick);
 });

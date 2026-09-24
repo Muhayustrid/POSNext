@@ -310,6 +310,56 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 	return result
 
 
+# PERF-02: header columns actually consumed downstream. Readers audited:
+# _process_invoice / make_closing_shift_from_opening (this file) and the Desk
+# script pos_closing_shift.js (set_form_data / add_to_payments / add_to_taxes /
+# get_conversion_rate). Child rows: payments and taxes, same two readers.
+INVOICE_HEADER_FIELDS = (
+	"name",
+	"customer",
+	"posting_date",
+	"currency",
+	"conversion_rate",
+	"plc_conversion_rate",
+	"grand_total",
+	"base_grand_total",
+	"net_total",
+	"base_net_total",
+	"total_qty",
+	"is_return",
+	"return_against",
+	"change_amount",
+	"base_change_amount",
+)
+
+# POS Invoice reuses the Sales Invoice child doctypes (see pos_invoice.json),
+# so one mapping serves both parents.
+INVOICE_CHILD_FIELDS = {
+	"payments": ("Sales Invoice Payment", ("mode_of_payment", "amount", "base_amount")),
+	"taxes": ("Sales Taxes and Charges", ("account_head", "rate", "tax_amount", "base_tax_amount")),
+}
+
+
+def _bulk_get_invoice_children(doctype, names):
+	"""Fetch payments/taxes child rows for many invoices in one query per table."""
+	grouped = {name: {} for name in names}
+	for parentfield, (child_dt, fields) in INVOICE_CHILD_FIELDS.items():
+		rows = frappe.get_all(
+			child_dt,
+			filters={"parent": ["in", names], "parenttype": doctype},
+			fields=["parent", "idx", *fields],
+			order_by="parent, idx",
+		)
+		for row in rows:
+			grouped[row.parent].setdefault(parentfield, []).append(
+				frappe._dict({field: row[field] for field in fields})
+			)
+	for name in names:
+		for parentfield in INVOICE_CHILD_FIELDS:
+			grouped[name].setdefault(parentfield, [])
+	return grouped
+
+
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
 	"""Every submitted invoice on the shift, across BOTH invoice doctypes.
@@ -356,11 +406,30 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 			`tab{dt}`
 		where
 			docstatus = 1 and posa_pos_opening_shift = %s{cond}
+		order by name
 		""",
 			(pos_opening_shift),
 			as_dict=1,
 		)
-		data.extend(frappe.get_doc(dt, d.name).as_dict() for d in rows)
+		names = [d.name for d in rows]
+		if not names:
+			continue
+
+		# PERF-02: one bulk header fetch + one query per child table replaced
+		# frappe.get_doc(...).as_dict() per invoice (N+1 that stalled long
+		# shifts). Headers keep the raw query's order and are frappe._dict, so
+		# attribute access in _process_invoice still works; the response shape
+		# (dict with header fields plus payments/taxes arrays) is unchanged.
+		headers = {
+			d.name: d
+			for d in frappe.get_all(dt, filters={"name": ["in", names]}, fields=INVOICE_HEADER_FIELDS)
+		}
+		children = _bulk_get_invoice_children(dt, names)
+		for name in names:
+			invoice = headers[name]
+			invoice["doctype"] = dt  # get_all omits it; as_dict carried it
+			invoice.update(children[name])
+			data.append(invoice)
 
 	return data
 

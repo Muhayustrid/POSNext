@@ -1,4 +1,5 @@
 import { call } from "@/utils/apiWrapper";
+import { CUSTOMER_SYNC_PAGE_SIZE } from "@/utils/offline/cache";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
@@ -219,14 +220,36 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			if (!isOffline()) {
 				const lastSync = forceReload ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
 
-				const response = await call("pos_next.api.customers.get_customers", {
-					pos_profile: posProfile,
-					search_term: "",
-					start: 0,
-					limit: 0,
-					modified_since: lastSync,
-				});
-				const delta = response?.message || response || [];
+				let delta;
+				if (lastSync) {
+					// Delta sync: bounded by the changes since the last stamp,
+					// so a single call is fine.
+					const response = await call("pos_next.api.customers.get_customers", {
+						pos_profile: posProfile,
+						search_term: "",
+						start: 0,
+						limit: 0,
+						modified_since: lastSync,
+					});
+					delta = response?.message || response || [];
+				} else {
+					// Full pull (PERF-03): page through instead of one
+					// unbounded limit:0 request that hangs at production scale.
+					delta = [];
+					let start = 0;
+					for (;;) {
+						const response = await call("pos_next.api.customers.get_customers", {
+							pos_profile: posProfile,
+							search_term: "",
+							start,
+							limit: CUSTOMER_SYNC_PAGE_SIZE,
+						});
+						const page = response?.message || response || [];
+						delta.push(...page);
+						if (page.length < CUSTOMER_SYNC_PAGE_SIZE) break;
+						start += CUSTOMER_SYNC_PAGE_SIZE;
+					}
+				}
 
 				if (delta.length > 0) {
 					const active = delta.filter((c) => !c.disabled);

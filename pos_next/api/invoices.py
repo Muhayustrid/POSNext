@@ -4,6 +4,7 @@
 from __future__ import unicode_literals
 
 import json
+from collections import defaultdict
 from functools import lru_cache
 
 import frappe
@@ -2288,14 +2289,21 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			)
 
 	# Load items for each invoice for filtering purposes
+	# PERF-02: one bulk query per row doctype (POS Invoice Item vs Sales Invoice
+	# Item) replaced the per-invoice query; grouping keeps per-invoice idx order
+	# and the item row shape (5 fields) identical.
+	items_by_invoice = {}
+	names_by_row_type = defaultdict(list)
 	for invoice in invoices:
 		# per-row doctype: the union returns both kinds in one list, and the
 		# child tables differ (POS Invoice Item vs Sales Invoice Item)
-		row_doctype = invoice.get("doctype") or doctype
-		invoice.payments = payments_by_invoice.get(invoice.name, [])
-		items = frappe.db.sql(
+		names_by_row_type[invoice.get("doctype") or doctype].append(invoice.name)
+
+	for row_doctype, names in names_by_row_type.items():
+		item_rows = frappe.db.sql(
 			f"""
 			SELECT
+				parent,
 				item_code,
 				item_name,
 				qty,
@@ -2304,14 +2312,28 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			FROM
 				`tab{row_doctype} Item`
 			WHERE
-				parent = %(invoice_name)s
+				parent IN %(names)s
 			ORDER BY
+				parent,
 				idx
 		""",
-			{"invoice_name": invoice.name},
+			{"names": tuple(names)},
 			as_dict=True,
 		)
-		invoice.items = items
+		for row in item_rows:
+			items_by_invoice.setdefault(row.parent, []).append(
+				{
+					"item_code": row.item_code,
+					"item_name": row.item_name,
+					"qty": row.qty,
+					"rate": row.rate,
+					"amount": row.amount,
+				}
+			)
+
+	for invoice in invoices:
+		invoice.payments = payments_by_invoice.get(invoice.name, [])
+		invoice.items = items_by_invoice.get(invoice.name, [])
 
 	return invoices
 
