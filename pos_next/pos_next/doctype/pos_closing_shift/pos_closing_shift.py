@@ -352,23 +352,38 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 
 @frappe.whitelist()
 def get_payments_entries(pos_opening_shift):
-	return frappe.get_all(
-		"Payment Entry",
-		filters={
-			"docstatus": 1,
-			"reference_no": pos_opening_shift,
-			"payment_type": "Receive",
-		},
-		fields=[
-			"name",
-			"mode_of_payment",
-			"paid_amount",
-			"base_paid_amount",
-			"target_exchange_rate",
-			"reference_no",
-			"posting_date",
-			"party",
-		],
+	"""Submitted Receive Payment Entries that pay an invoice of this shift.
+
+	Production never stamps reference_no with the shift name: partial_payments
+	writes "POS-<invoice>" (or a client-supplied value), so the shift link must
+	go through the reference rows - a PE belongs here when it references any
+	invoice scoped to the shift, in either doctype (the invoice_type switch
+	means one shift can hold both). Consolidated legacy POS Invoices stay in:
+	they still moved drawer cash, and one PE references one invoice name, so
+	nothing is counted twice. Same match shape as sales_recap
+	_aggregate_payments - keep the two in sync when the scoping rules change.
+	"""
+	return frappe.db.sql(
+		"""
+		SELECT pe.name, pe.mode_of_payment, pe.paid_amount, pe.base_paid_amount,
+			pe.target_exchange_rate, pe.reference_no, pe.posting_date, pe.party
+		FROM `tabPayment Entry` pe
+		WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive'
+			AND EXISTS (
+				SELECT 1 FROM `tabPayment Entry Reference` per
+				WHERE per.parent = pe.name
+					AND per.reference_doctype IN ('Sales Invoice', 'POS Invoice')
+					AND per.reference_name IN (
+						SELECT name FROM `tabPOS Invoice`
+						WHERE docstatus = 1 AND posa_pos_opening_shift = %s
+						UNION
+						SELECT name FROM `tabSales Invoice`
+						WHERE docstatus = 1 AND posa_pos_opening_shift = %s
+					)
+			)
+		""",
+		(pos_opening_shift, pos_opening_shift),
+		as_dict=True,
 	)
 
 

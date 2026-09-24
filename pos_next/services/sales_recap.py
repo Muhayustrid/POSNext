@@ -437,14 +437,36 @@ def _aggregate_payments(scope, cash_mode, pos_profile=None):
 		payments[row.mode_of_payment] = payments.get(row.mode_of_payment, 0) + flt(row.amount)
 
 	# Payment Entries (partial payments) also enter the drawer, same as closing.
-	# ponytail: reference_no is unindexed — fine at partial-payment volumes;
-	# index the column if period recaps ever show up in the slow log.
+	# Production never stamps PE.reference_no with the shift name (it holds
+	# "POS-<invoice>" or a client value), so the match goes through the
+	# reference rows: the PE must reference an invoice scoped to one of the
+	# shifts, in either doctype. MariaDB probes per.parent first (the child
+	# table's parent index); the v2_12_0 index on (reference_name,
+	# reference_doctype) is what lets the planner flip to a reference-driven
+	# semijoin once tabPayment Entry grows. Same match shape as
+	# pos_closing_shift.get_payments_entries - keep the two in sync.
+	# ponytail: a hand-built Desk PE referencing invoices of two shifts is
+	# counted in full by EACH shift's scope (EXISTS is boolean per scope);
+	# production only mints single-invoice PEs, so allocating by
+	# per.allocated_amount can wait for a real case.
 	if scope.shifts:
 		for row in frappe.db.sql(
 			"""
 			SELECT pe.mode_of_payment, SUM(pe.base_paid_amount) AS amount
 			FROM `tabPayment Entry` pe
-			WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive' AND pe.reference_no IN %(shifts)s
+			WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive'
+				AND EXISTS (
+					SELECT 1 FROM `tabPayment Entry Reference` per
+					WHERE per.parent = pe.name
+						AND per.reference_doctype IN ('Sales Invoice', 'POS Invoice')
+						AND per.reference_name IN (
+							SELECT name FROM `tabPOS Invoice`
+							WHERE docstatus = 1 AND posa_pos_opening_shift IN %(shifts)s
+							UNION
+							SELECT name FROM `tabSales Invoice`
+							WHERE docstatus = 1 AND posa_pos_opening_shift IN %(shifts)s
+						)
+				)
 			GROUP BY pe.mode_of_payment
 			""",
 			{"shifts": scope.shifts},

@@ -19,3 +19,4 @@ pos_next.patches.v2_9_0.reorder_pos_settings_fields
 pos_next.patches.v2_10_0.reorder_pos_settings_fields
 pos_next.patches.v2_11_0.copy_global_settings_to_single
 pos_next.patches.v2_11_0.reorder_pos_settings_fields
+pos_next.patches.v2_12_0.add_payment_entry_reference_index

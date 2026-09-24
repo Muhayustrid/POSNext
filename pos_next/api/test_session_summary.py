@@ -24,6 +24,25 @@ from pos_next.tests.price_group_helpers import (
 )
 
 
+def _make_production_payment_entry(invoice, amount, cash_mode, cash_account):
+	"""Create a Payment Entry the way production does
+	(api/partial_payments.create_payment_entry): reference_no stamped
+	"POS-<invoice>" plus a reference row to the invoice - never the shift
+	name the old hand-stamped helper used, which masked COR-BE-01."""
+	from pos_next.api.partial_payments import create_payment_entry
+
+	prev_user = frappe.session.user
+	# the shift owner lacks Payment Entry rights; the session owner posts
+	# these from the POS in production
+	frappe.set_user("Administrator")
+	try:
+		return create_payment_entry(
+			invoice, amount, mode_of_payment=cash_mode, payment_account=cash_account
+		)
+	finally:
+		frappe.set_user(prev_user)
+
+
 def _make_item(code, rate):
 	"""Create a priced test item; return its actual item_code.
 
@@ -405,33 +424,9 @@ class TestSessionSummary(IntegrationTestCase):
 		frappe.set_user(self.user)
 
 	def _make_payment_entry(self, invoice, amount, shift):
-		pe = frappe.new_doc("Payment Entry")
-		pe.payment_type = "Receive"
-		pe.company = self.company
-		pe.party_type = "Customer"
-		pe.party = self.customer
-		pe.paid_from = self.debtors_account
-		pe.paid_to = self.cash_account
-		pe.paid_amount = amount
-		pe.received_amount = amount
-		pe.mode_of_payment = self.cash_mode
-		pe.reference_no = shift
-		pe.reference_date = frappe.utils.nowdate()
-		pe.append(
-			"references",
-			{
-				"reference_doctype": "Sales Invoice",
-				"reference_name": invoice,
-				"allocated_amount": amount,
-			},
-		)
-		# the shift-owner test user lacks Payment Entry rights; the session
-		# owner posts these from the POS in production
-		frappe.set_user("Administrator")
-		pe.insert(ignore_permissions=True)
-		pe.submit()
-		frappe.set_user(self.user)
-		return pe.name
+		# shift stays in the signature for call-site shape only: production
+		# never puts it on the PE (that was the stamp masking COR-BE-01)
+		return _make_production_payment_entry(invoice, amount, self.cash_mode, self.cash_account)
 
 	# gross 2000 + 500 + 50000 = 52500; return -2000; net 50500
 	GROSS = 52500
@@ -1174,3 +1169,198 @@ class TestSessionSummary(IntegrationTestCase):
 		# a full leap year is the accepted maximum
 		full_year = get_period_summary(self.pos_profile, frappe.utils.add_days(today, -366), today)
 		self.assertIn("period_from", full_year)
+
+
+class TestPartialPaymentDrawerMatching(IntegrationTestCase):
+	"""COR-BE-01: production-stamped Payment Entries must reach the drawer.
+
+	Production PEs carry reference_no "POS-<invoice>" (api/partial_payments),
+	never the shift name, so closing and the recap must match them through
+	their invoice reference rows. A 0-paid 100000 invoice plus a 40000
+	partial and a 60000 settle PE must surface in get_payments_entries, the
+	session recap drawer and the closing cash expected.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		# everything runs as Administrator: this class tests the money
+		# matching, not the shift-ownership gates the other class covers
+		frappe.set_user("Administrator")
+		cls.company = get_default_company()
+		cls.customer = get_default_customer()
+		if not cls.customer:
+			raise unittest.SkipTest("no non-internal customer")
+		cls.cash_mode = (
+			frappe.db.get_value(
+				"Mode of Payment", {"name": "Cash", "enabled": 1, "type": "Cash"}, "name"
+			)
+		) or frappe.db.get_value("Mode of Payment", {"enabled": 1}, "name")
+		cls.cash_account = frappe.get_cached_value("Company", cls.company, "default_cash_account")
+		cls.pos_profile = make_test_pos_profile(
+			f"PEDrawer{uuid.uuid4().hex[:6]}",
+			cls.company,
+			make_test_warehouse("PEDrawer", cls.company),
+		)
+		cls.item = _make_item("_SESSUM_ITEM_A", 1000)
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user("Administrator")
+		super().tearDownClass()
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		# tracked up front so a mid-test failure still tears everything down
+		self.pes = []
+
+	def tearDown(self):
+		# cancel+delete in dependency order: PEs first (they hold the invoice
+		# reference and block the invoice cancel), then invoice, then shift.
+		# One leftover must never abort the remaining cleanup on this shared
+		# dev site (same _safe pattern as test_backdate_invoices).
+		frappe.set_user("Administrator")
+
+		def _safe(step):
+			try:
+				step()
+			except Exception:
+				frappe.log_error("PEDrawer teardown step failed")
+
+		invoice = getattr(self, "invoice", None)
+		for name in getattr(self, "pes", []):
+			_safe(lambda name=name: self._purge_payment_entry(name))
+		if invoice:
+			# sweep drafts the failure path leaves behind (insert ok, submit
+			# threw) - they are never in self.pes
+			for name in frappe.get_all(
+				"Payment Entry",
+				filters={
+					"docstatus": 0,
+					"name": (
+						"in",
+						frappe.get_all(
+							"Payment Entry Reference",
+							filters={"reference_name": invoice},
+							pluck="parent",
+						),
+					),
+				},
+				pluck="name",
+			):
+				_safe(lambda name=name: self._purge_payment_entry(name))
+			if frappe.db.exists("Sales Invoice", invoice):
+				_safe(lambda: self._purge_sales_invoice(invoice))
+		shift = getattr(self, "shift", None)
+		if shift and frappe.db.exists("POS Opening Shift", shift):
+			_safe(lambda: self._purge_opening_shift(shift))
+		frappe.db.commit()
+
+	@staticmethod
+	def _purge_payment_entry(name):
+		if not frappe.db.exists("Payment Entry", name):
+			return
+		doc = frappe.get_doc("Payment Entry", name)
+		if doc.docstatus == 1:
+			doc.cancel()
+		frappe.delete_doc("Payment Entry", name, force=1, ignore_permissions=True)
+
+	@staticmethod
+	def _purge_sales_invoice(name):
+		doc = frappe.get_doc("Sales Invoice", name)
+		if doc.docstatus == 1:
+			doc.cancel()
+		frappe.delete_doc("Sales Invoice", name, force=1, ignore_permissions=True)
+
+	@staticmethod
+	def _purge_opening_shift(name):
+		doc = frappe.get_doc("POS Opening Shift", name)
+		if doc.docstatus == 1:
+			doc.cancel()
+		frappe.delete_doc("POS Opening Shift", name, force=1, ignore_permissions=True)
+
+	def _make_opening_shift(self):
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"company": self.company,
+				"pos_profile": self.pos_profile,
+				"user": "Administrator",
+				"period_start_date": frappe.utils.now_datetime(),
+				"balance_details": [{"mode_of_payment": self.cash_mode, "amount": 0}],
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		doc.submit()
+		return doc.name
+
+	def _make_zero_paid_invoice(self, shift, rate):
+		"""POS invoice whose entire total moves later via Payment Entries, so
+		every rupiah in the drawer can only come from PE matching."""
+		inv = frappe.new_doc("Sales Invoice")
+		inv.company = self.company
+		inv.customer = self.customer
+		inv.is_pos = 1
+		inv.posa_pos_opening_shift = shift
+		inv.pos_profile = self.pos_profile
+		inv.append(
+			"items", {"item_code": self.item, "qty": 1, "rate": rate, "price_list_rate": rate}
+		)
+		# a zero row satisfies ERPNext's "at least one mode of payment" POS
+		# check while moving no money at sale time
+		inv.append("payments", {"mode_of_payment": self.cash_mode, "amount": 0})
+		inv.insert(ignore_permissions=True)
+		# track before submit: a submit failure must not orphan the draft
+		self.invoice = inv.name
+		inv.submit()
+		return inv.name
+
+	def test_production_stamped_pes_reach_drawer_and_closing(self):
+		self.shift = self._make_opening_shift()
+		self.invoice = self._make_zero_paid_invoice(self.shift, 100000)
+
+		for amount in (40000, 60000):
+			self.pes.append(
+				_make_production_payment_entry(
+					self.invoice, amount, self.cash_mode, self.cash_account
+				)
+			)
+		pe_partial, pe_settle = self.pes
+		# the production stamp really is not the shift name (the old masking
+		# helper used to write it there)
+		for name in self.pes:
+			reference_no = frappe.db.get_value("Payment Entry", name, "reference_no")
+			self.assertTrue(reference_no)
+			self.assertNotEqual(reference_no, self.shift)
+
+		# 1) the closing PE picker sees both entries
+		entries = frappe.get_attr(
+			"pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift"
+			".get_payments_entries"
+		)(self.shift)
+		self.assertEqual({row.name for row in entries}, {pe_partial, pe_settle})
+		self.assertEqual(sum(row.paid_amount for row in entries), 100000)
+
+		# 2) the recap drawer counts both
+		summary = get_session_summary(self.shift)
+		cash = next(p for p in summary["payments"] if p["mode_of_payment"] == self.cash_mode)
+		self.assertEqual(cash["amount"], 100000)
+		self.assertEqual(summary["cash_expected"], 100000)
+
+		# 3) the closing cash expected counts both
+		opening = frappe.get_doc("POS Opening Shift", self.shift).as_dict()
+		closing = frappe.get_attr(
+			"pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift"
+			".make_closing_shift_from_opening"
+		)(json.dumps(opening, default=str))
+		expected = next(
+			p
+			for p in closing["payment_reconciliation"]
+			if p["mode_of_payment"] == self.cash_mode
+		)
+		self.assertEqual(expected["expected_amount"], 100000)
+		self.assertEqual(
+			{row.payment_entry for row in closing["pos_payments"]},
+			{pe_partial, pe_settle},
+		)

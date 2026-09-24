@@ -12,7 +12,7 @@
 | Grup | Cakupan | Status | Keterangan |
 |---|---|---|---|
 | 1 | REL-01, REL-02, REL-04, REL-05 (+ paket belum-commit "Nexus POS Manager" + perbaikan infra test) | **SELESAI & terverifikasi** (22 Sep) | Commit "audit grup 1". Migrate 2× idempoten (105 Custom DocPerm = 27 fixture + 78 mirror); suite 740 = 728 lolos + 12 known-issue pra-ada (test_promotions ×2 vs gate R3 083cbf3; test_invoice_authorization_security ×7 + test_medium_gates ×3 = profil bersama OUTLET TRAINING vs core `validate_pos_opening_entry`; proper fix = profil khusus per modul — utang follow-up) |
-| 2 | COR-BE-01 + PERF-08 (match Payment Entry via child reference, index patch v2_12_0) | **BERJALAN** | |
+| 2 | COR-BE-01 + PERF-08 (match Payment Entry via child reference, index patch v2_12_0) | **SELESAI & terverifikasi** (22 Sep) | BELUM commit. Matcher `reference_no = shift` (mati di produksi: stamp asli `"POS-<invoice>"`) diganti EXISTS via `tabPayment Entry Reference` di `get_payments_entries` + `_aggregate_payments` (bentuk SQL identik keduanya); index `payment_entry_reference_name_doctype_idx`; TDD gagal-2 → hijau-37; review APPROVE (2 MINOR sudah diterapkan). **Cek pre-deploy di produksi**: `SELECT name FROM \`tabPayment Entry\` WHERE docstatus=1 AND payment_type='Receive' AND reference_no IN (SELECT name FROM \`tabPOS Opening Shift\`) AND NOT EXISTS (SELECT 1 FROM \`tabPayment Entry Reference\` WHERE parent=\`tabPayment Entry\`.name)` — hasil > 0 berarti ada PE legacy ber-stamp nama shift tanpa reference rows yang akan berhenti terhitung (di dev: 0 baris). |
 | 3 | COR-FE-01, COR-BE-02..05, SEC-NEW-01..03 | MENUNGGU | |
 | 4 | COR-FE-02..05 (frontend correctness) | MENUNGGU | |
 | 5 | PERF-01..06 + SEC-NEW-04 | MENUNGGU | |
