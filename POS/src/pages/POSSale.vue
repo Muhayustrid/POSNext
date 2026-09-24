@@ -1027,6 +1027,8 @@
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
 let _initializedKey = null
 let _posInitPromise = null
+// Profile whose shift session was last opened through handleShiftOpened.
+let _initializedProfile = null
 </script>
 
 <script setup>
@@ -1900,8 +1902,16 @@ async function handleShiftOpened() {
 	uiStore.showOpenShiftDialog = false;
 	if (!shiftStore.currentProfile) return;
 
+	// A cart is priced under the profile it was built on (price list, taxes,
+	// offers) — when the shift opens for a DIFFERENT profile it must not ride
+	// into the new session (COR-FE-03). A same-profile reopen keeps the cart.
+	const previousProfile = cartStore.posProfile;
 	cartStore.posProfile = shiftStore.profileName;
 	cartStore.posOpeningShift = shiftStore.currentShift?.name;
+
+	if (previousProfile && previousProfile !== shiftStore.profileName) {
+		cartStore.clearCart();
+	}
 
 	// Set warehouse context early (synchronous, no API call)
 	if (shiftStore.profileWarehouse) {
@@ -1947,6 +1957,11 @@ async function handleShiftOpened() {
 async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
 	showSuccess(__("Shift closed successfully"));
+
+	// The shift boundary ends the active cart: its items were priced under
+	// the closed shift's session (COR-FE-03). Saved drafts live in their own
+	// store and are not touched — only the active cart is cleared.
+	cartStore.clearCart();
 
 	// Check if logout should happen after closing shift
 	if (logoutAfterClose.value) {
@@ -2658,7 +2673,9 @@ async function handleSaveDraft() {
 		cartStore.buyerName,
 		cartStore.posProfile,
 		cartStore.appliedOffers,
-		cartStore.currentDraftId
+		cartStore.currentDraftId,
+		cartStore.appliedCoupon,
+		cartStore.additionalDiscount
 	);
 	if (savedDraft) {
 		cartStore.clearCart();
@@ -2677,7 +2694,9 @@ async function handleLoadDraft(draft) {
 				cartStore.buyerName,
 				cartStore.posProfile,
 				cartStore.appliedOffers,
-				cartStore.currentDraftId
+				cartStore.currentDraftId,
+				cartStore.appliedCoupon,
+				cartStore.additionalDiscount
 			);
 
 			if (!saved) {
@@ -2692,6 +2711,12 @@ async function handleLoadDraft(draft) {
 		}
 
 		const draftData = await draftsStore.loadDraft(draft);
+
+		// Reset the replaced cart's header discount and coupon BEFORE filling
+		// in the draft (COR-FE-02): a discount that only lived on the old cart
+		// must not survive the switch and leak into this draft's submission.
+		cartStore.resetDiscounts();
+
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.buyerName = draftData.buyer_name || "";
@@ -2699,6 +2724,26 @@ async function handleLoadDraft(draft) {
 
 		// Rebuild incremental cache to recalculate totals
 		cartStore.rebuildIncrementalCache();
+
+		// Restore the draft's own discount. The coupon goes through the shared
+		// apply path so the amount is recomputed against the restored items;
+		// a manual header discount is set directly. Legacy drafts carry empty
+		// values here, which simply keeps the reset above in effect.
+		if (draftData.applied_coupon) {
+			cartStore.applyDiscountToCart(draftData.applied_coupon);
+			// The shared apply path has no max_amount clamp (CouponDialog
+			// clamps only at apply time), so a capped coupon would restore
+			// above its cap once its percentage is recomputed.
+			const couponCap = Number(draftData.applied_coupon.max_amount) || 0;
+			if (couponCap > 0 && cartStore.additionalDiscount > couponCap) {
+				cartStore.additionalDiscount = couponCap;
+				cartStore.rebuildIncrementalCache();
+			}
+		} else if (draftData.additional_discount) {
+			cartStore.additionalDiscount = draftData.additional_discount;
+			cartStore.headerDiscountFromOffer = false;
+			cartStore.rebuildIncrementalCache();
+		}
 
 		// Restore applied offers if they were saved
 		if (draftData.applied_offers && draftData.applied_offers.length > 0) {

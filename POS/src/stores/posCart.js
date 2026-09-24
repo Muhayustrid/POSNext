@@ -428,6 +428,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		showSuccess(__("Discount has been removed from cart"));
 	}
 
+	/**
+	 * Silently clear the header discount and coupon, leaving items, customer
+	 * and offers untouched. Use when the cart is being REPLACED wholesale
+	 * (draft load, profile switch): the previous cart's discount must not ride
+	 * into the replacement's submission. Routes through useInvoice.removeDiscount
+	 * so the submission-level couponCode is cleared too, not just the UI state.
+	 */
+	function resetDiscounts() {
+		removeDiscount();
+		appliedCoupon.value = null;
+		headerDiscountFromOffer.value = false;
+	}
+
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value);
@@ -2001,6 +2014,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		submitInvoice,
 		applyDiscountToCart,
 		removeDiscountFromCart,
+		resetDiscounts,
 		applyOffer,
 		removeOffer,
 		reapplyOffer,

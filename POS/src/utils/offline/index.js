@@ -19,6 +19,7 @@ export {
 	getOfflineInvoices,
 	getOfflineInvoiceCount,
 	syncOfflineInvoices,
+	retryOfflineInvoice,
 	deleteOfflineInvoice,
 	updateLocalStock,
 	getLocalStock,

@@ -20,6 +20,7 @@ import {
 	cachePaymentMethodsFromServer,
 	cacheSalesPersonsFromServer,
 	syncOfflineInvoices,
+	retryOfflineInvoice as requeueFailedInvoice,
 	cacheInvoiceHistory,
 	cacheUnpaidInvoices,
 	cacheUnpaidSummary,
@@ -214,6 +215,37 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		} catch (error) {
 			log.error("Failed to delete offline invoice", error);
 			showError(error.message || __("Failed to delete offline invoice"));
+			throw error;
+		}
+	}
+
+	/**
+	 * Re-queue a sync_failed offline invoice (manual Retry action from
+	 * OfflineInvoicesDialog) and attempt a sync immediately when online.
+	 * @param {number} invoiceId - Invoice queue id (Dexie key) to retry
+	 */
+	async function retryOfflineInvoice(invoiceId) {
+		try {
+			const ok = await requeueFailedInvoice(invoiceId);
+			if (!ok) {
+				throw new Error(__("Failed to re-queue offline invoice"));
+			}
+
+			if (isOffline.value) {
+				showWarning(__("Invoice re-queued. It will sync when you're back online"));
+			} else {
+				const result = await syncPending();
+				if (result.failed > 0) {
+					showWarning(__("Retry failed. Check the offline invoice details"));
+				} else {
+					showSuccess(__("Offline invoice synced successfully"));
+				}
+			}
+
+			await loadPendingInvoices();
+		} catch (error) {
+			log.error("Failed to retry offline invoice", error);
+			showError(error.message || __("Failed to retry offline invoice"));
 			throw error;
 		}
 	}
@@ -426,6 +458,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		loadPendingInvoices,
 		updatePendingCount,
 		deleteOfflineInvoice,
+		retryOfflineInvoice,
 		syncAllPending,
 		preloadDataForOffline,
 		checkOfflineCacheAvailability,

@@ -103,6 +103,12 @@
 										{{ invoice.data.customer || __("Walk-in Customer") }}
 									</h4>
 									<span
+										v-if="invoice.sync_failed"
+										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-red-100 text-red-700 rounded-full flex-shrink-0 font-semibold"
+									>
+										{{ __("Sync failed") }}
+									</span>
+									<span
 										v-if="invoice.retry_count > 0"
 										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-red-100 text-red-700 rounded-full flex-shrink-0"
 									>
@@ -133,6 +139,14 @@
 										<span class="text-[10px] sm:text-xs text-gray-500">
 											{{ formatDate(invoice.timestamp) }}
 										</span>
+									</div>
+									<div
+										v-if="
+											invoice.sync_failed && invoice.error
+										"
+										class="mt-1 text-xs text-red-600 break-words"
+									>
+										{{ invoice.error }}
 									</div>
 									<div
 										v-if="invoice.data.payments?.length > 0"
@@ -228,6 +242,31 @@
 											stroke-linejoin="round"
 											stroke-width="2"
 											d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+										/>
+									</svg>
+								</button>
+								<button
+									v-if="invoice.sync_failed"
+									@click="retryInvoice(invoice)"
+									:disabled="isSyncing || retryingId === invoice.id"
+									class="p-1.5 sm:p-2 hover:bg-blue-50 rounded-lg transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+									:title="
+										isSyncing || retryingId === invoice.id
+											? __('Sync in progress')
+											: __('Retry sync')
+									"
+								>
+									<svg
+										class="w-4 h-4 sm:w-5 sm:h-5 text-blue-600"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
 										/>
 									</svg>
 								</button>
@@ -420,6 +459,7 @@
 
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { usePOSSyncStore } from "@/stores/posSync";
 import { Button, Dialog } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 
@@ -456,6 +496,24 @@ const show = computed({
 	get: () => props.modelValue,
 	set: (val) => emit("update:modelValue", val),
 });
+
+// Retry is handled directly through the sync store: resetting a sync_failed
+// entry needs the store action, and POSSale.vue already consumes this store
+// for every other dialog event.
+const offlineStore = usePOSSyncStore();
+const retryingId = ref(null);
+
+async function retryInvoice(invoice) {
+	if (props.isSyncing || retryingId.value !== null) return;
+	retryingId.value = invoice.id;
+	try {
+		await offlineStore.retryOfflineInvoice(invoice.id);
+	} catch (error) {
+		// Toast and logging are handled by the store action.
+	} finally {
+		retryingId.value = null;
+	}
+}
 
 const loading = ref(false);
 const invoices = ref([]);

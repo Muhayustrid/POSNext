@@ -20,6 +20,23 @@ import { defineComponent, reactive } from "vue"
 
 const resources = vi.hoisted(() => ({ instances: [] }))
 
+// IndexedDB draft store: every method becomes a resolved no-op, but saveDraft
+// records its payload so the draft round-trip tests can assert exactly what a
+// real save would persist.
+const draftManagerMock = vi.hoisted(() => ({
+	saveDraft: vi.fn(async (data) => ({ draft_id: "DRAFT-SAVED", ...data })),
+	updateDraft: vi.fn(async (draftId, data) => ({ draft_id: draftId, ...data })),
+	getAllDrafts: vi.fn(async () => []),
+	getDraftById: vi.fn(async () => null),
+	getDraftsCount: vi.fn(async () => 0),
+	deleteDraft: vi.fn(async () => {}),
+	clearAllDrafts: vi.fn(async () => {}),
+}))
+
+// Payload handed to the page by the DraftInvoicesDialog stub on load-draft;
+// each test plants the draft it wants to load before clicking.
+const draftEmits = vi.hoisted(() => ({ loadDraft: null }))
+
 vi.hoisted(() => {
 	// jsdom has no matchMedia; usePWAInstall reads it in an onMounted hook.
 	if (typeof window !== "undefined" && !window.matchMedia) {
@@ -66,6 +83,8 @@ const offlineWorkerMock = vi.hoisted(() => {
 vi.mock("@/utils/offline/workerClient", () => ({
 	offlineWorker: offlineWorkerMock.offlineWorker,
 }))
+
+vi.mock("@/utils/draftManager", () => draftManagerMock)
 
 vi.mock("@/utils/apiWrapper", () => ({
 	call: vi.fn(async () => ({})),
@@ -190,6 +209,9 @@ const CART_ITEM = {
 	is_resolved_barcode: false,
 }
 
+// Coupon-shaped discount the CouponDialog would hand to applyDiscountToCart.
+const COUPON = { name: "DISKON10RB", code: "DISKON10RB", amount: 10000 }
+
 // Fixed payload a real completePayment() would emit for a fully-paid cash sale.
 const PAYMENT_PAYLOAD = {
 	payments: [{ mode_of_payment: "Cash", amount: 25000, type: "Cash" }],
@@ -214,6 +236,38 @@ const PaymentDialogStub = defineComponent({
 	setup() {
 		return { PAYMENT_PAYLOAD }
 	},
+})
+
+// Emit-only stubs for the dialogs the shift and draft regressions are driven
+// through, mirroring how the real dialogs emit into the page's handlers.
+const ShiftOpeningDialogStub = defineComponent({
+	name: "ShiftOpeningDialog",
+	props: { modelValue: { type: Boolean, default: false } },
+	emits: ["shift-opened"],
+	template: `<button data-test="shift-opened" @click="$emit('shift-opened')"></button>`,
+})
+
+const ShiftClosingDialogStub = defineComponent({
+	name: "ShiftClosingDialog",
+	props: { modelValue: { type: Boolean, default: false } },
+	emits: ["shift-closed"],
+	template: `<button data-test="shift-closed" @click="$emit('shift-closed')"></button>`,
+})
+
+const DraftInvoicesDialogStub = defineComponent({
+	name: "DraftInvoicesDialog",
+	props: { modelValue: { type: Boolean, default: false } },
+	emits: ["load-draft", "drafts-updated"],
+	template: `<button data-test="load-draft" @click="$emit('load-draft', draftEmits.loadDraft)"></button>`,
+	setup() {
+		return { draftEmits }
+	},
+})
+
+const InvoiceCartSaveStub = defineComponent({
+	name: "InvoiceCart",
+	emits: ["save-draft"],
+	template: `<button data-test="save-draft" @click="$emit('save-draft')"></button>`,
 })
 
 const ALL_DIALOG_STUBS = {
@@ -248,7 +302,7 @@ let offlineStore
 let uiStore
 let wrapper
 
-async function mountPOS() {
+async function mountPOS(stubOverrides = {}) {
 	const pinia = createPinia()
 	setActivePinia(pinia)
 
@@ -263,7 +317,7 @@ async function mountPOS() {
 		global: {
 			plugins: [pinia],
 			config: { globalProperties: { __: globalThis.__ } },
-			stubs: ALL_DIALOG_STUBS,
+			stubs: { ...ALL_DIALOG_STUBS, ...stubOverrides },
 		},
 	})
 	await flushPromises()
@@ -292,6 +346,9 @@ async function mountPOS() {
 	cartStore.posOpeningShift = "POS-OPEN-1"
 	cartStore.customer = { name: "CUST-1", customer_name: "Walk-in Customer" }
 	cartStore.invoiceItems = [{ ...CART_ITEM }]
+	// Real cart mutations keep the incremental cache warm; direct seeding must
+	// do the same or discount clamping sees a zero subtotal.
+	cartStore.rebuildIncrementalCache()
 	offlineStore.isOffline = true
 	uiStore.showPaymentDialog = true
 	await flushPromises()
@@ -348,5 +405,138 @@ describe("offline checkout double-tap guard (COR-FE-01)", () => {
 
 		expect(uiStore.showPaymentDialog).toBe(false)
 		expect(cartStore.invoiceItems).toHaveLength(0)
+	})
+})
+
+describe("draft load discount isolation (COR-FE-02)", () => {
+	it("resets the live cart's coupon and header discount when loading a draft without them", async () => {
+		await mountPOS({ DraftInvoicesDialog: DraftInvoicesDialogStub })
+
+		cartStore.applyDiscountToCart({ ...COUPON })
+		expect(cartStore.additionalDiscount).toBe(10000)
+		expect(cartStore.appliedCoupon).not.toBeNull()
+
+		draftEmits.loadDraft = {
+			draft_id: "DRAFT-B",
+			items: [{ ...CART_ITEM, item_code: "ITEM-B" }],
+			customer: { name: "CUST-2", customer_name: "Budi" },
+			buyer_name: "",
+		}
+		await wrapper.find('[data-test="load-draft"]').trigger("click")
+		await flushPromises()
+
+		// The displaced cart's discount must not ride into draft B's cart...
+		expect(cartStore.appliedCoupon).toBeNull()
+		expect(cartStore.additionalDiscount).toBe(0)
+		expect(cartStore.invoiceItems[0].item_code).toBe("ITEM-B")
+		// ...and the displaced cart was saved as a draft with its discount intact.
+		const displaced = draftManagerMock.saveDraft.mock.calls.at(-1)[0]
+		expect(displaced.applied_coupon).toEqual(COUPON)
+		expect(displaced.additional_discount).toBe(10000)
+	})
+
+	it("restores the coupon and header discount when a discounted draft is reloaded", async () => {
+		await mountPOS({
+			InvoiceCart: InvoiceCartSaveStub,
+			DraftInvoicesDialog: DraftInvoicesDialogStub,
+		})
+
+		cartStore.applyDiscountToCart({ ...COUPON })
+		await wrapper.find('[data-test="save-draft"]').trigger("click")
+		await flushPromises()
+
+		// Saving as draft clears the cart and the payload carries the discount.
+		expect(cartStore.isEmpty).toBe(true)
+		const payload = draftManagerMock.saveDraft.mock.calls.at(-1)[0]
+		expect(payload.applied_coupon).toEqual(COUPON)
+		expect(payload.additional_discount).toBe(10000)
+
+		draftEmits.loadDraft = { ...payload }
+		await wrapper.find('[data-test="load-draft"]').trigger("click")
+		await flushPromises()
+
+		expect(cartStore.appliedCoupon).toEqual(COUPON)
+		expect(cartStore.additionalDiscount).toBe(10000)
+	})
+
+	it("caps a percentage coupon at its max_amount when restoring a draft", async () => {
+		await mountPOS({ DraftInvoicesDialog: DraftInvoicesDialogStub })
+
+		// CouponDialog clamps only at apply time; restoring the draft reruns
+		// the raw percentage (10% of 25000 = 2500), which must stay capped.
+		const capped = { name: "PCT10MAX", code: "PCT10MAX", percentage: 10, max_amount: 2000 }
+		draftEmits.loadDraft = {
+			draft_id: "DRAFT-CAP",
+			items: [{ ...CART_ITEM, item_code: "ITEM-CAP" }],
+			customer: { name: "CUST-2", customer_name: "Budi" },
+			buyer_name: "",
+			applied_coupon: capped,
+			additional_discount: 2000,
+		}
+		await wrapper.find('[data-test="load-draft"]').trigger("click")
+		await flushPromises()
+
+		expect(cartStore.appliedCoupon).toEqual(capped)
+		expect(cartStore.additionalDiscount).toBe(2000)
+	})
+
+	it("restores a manual header discount from a draft that has no coupon", async () => {
+		await mountPOS({ DraftInvoicesDialog: DraftInvoicesDialogStub })
+
+		draftEmits.loadDraft = {
+			draft_id: "DRAFT-C",
+			items: [{ ...CART_ITEM, item_code: "ITEM-C" }],
+			customer: { name: "CUST-2", customer_name: "Budi" },
+			buyer_name: "",
+			additional_discount: 7000,
+		}
+		await wrapper.find('[data-test="load-draft"]').trigger("click")
+		await flushPromises()
+
+		expect(cartStore.appliedCoupon).toBeNull()
+		expect(cartStore.additionalDiscount).toBe(7000)
+	})
+})
+
+describe("shift boundary cart isolation (COR-FE-03)", () => {
+	it("clears the active cart when the shift is closed", async () => {
+		await mountPOS({ ShiftClosingDialog: ShiftClosingDialogStub })
+
+		cartStore.applyDiscountToCart({ ...COUPON })
+		expect(cartStore.invoiceItems).toHaveLength(1)
+
+		await wrapper.find('[data-test="shift-closed"]').trigger("click")
+		await flushPromises()
+
+		expect(cartStore.invoiceItems).toHaveLength(0)
+		expect(cartStore.appliedCoupon).toBeNull()
+		expect(cartStore.additionalDiscount).toBe(0)
+	})
+
+	it("clears the cart when a new shift opens under a different profile", async () => {
+		await mountPOS({ ShiftOpeningDialog: ShiftOpeningDialogStub })
+
+		shiftState.value = {
+			...shiftState.value,
+			pos_profile: { ...shiftState.value.pos_profile, name: "Profile 2" },
+		}
+		await flushPromises()
+		expect(cartStore.posProfile).toBe("Profile 1")
+
+		await wrapper.find('[data-test="shift-opened"]').trigger("click")
+		await flushPromises()
+
+		expect(cartStore.posProfile).toBe("Profile 2")
+		expect(cartStore.invoiceItems).toHaveLength(0)
+	})
+
+	it("keeps the cart when the same profile reopens a shift", async () => {
+		await mountPOS({ ShiftOpeningDialog: ShiftOpeningDialogStub })
+
+		await wrapper.find('[data-test="shift-opened"]').trigger("click")
+		await flushPromises()
+
+		expect(cartStore.posProfile).toBe("Profile 1")
+		expect(cartStore.invoiceItems).toHaveLength(1)
 	})
 })

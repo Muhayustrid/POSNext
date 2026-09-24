@@ -54,14 +54,40 @@ if ("serviceWorker" in navigator) {
 	window.addEventListener(
 		"load",
 		() => {
-			import("virtual:pwa-register").then(({ registerSW }) => {
-				registerSW({
-					immediate: true,
-					onNeedRefresh: () => log.info("New content available, reloading..."),
-					onOfflineReady: () => log.info("App ready to work offline"),
-					onRegistered: (reg) => log.info("Service Worker registered", reg),
-					onRegisterError: (err) => log.error("Service Worker registration error", err),
+			import("workbox-window").then(({ Workbox }) => {
+				// COR-FE-05: register from /sw.js (the pos_next/www/sw.py controller
+				// adds the required "Service-Worker-Allowed: /" header) with scope
+				// "/", so the SW controls the cashier page at /pos and not just the
+				// build output under /assets/pos_next/pos/. Scope cannot be passed
+				// through vite-plugin-pwa's registerSW(); it bakes the URL and scope
+				// into its virtual module, and buildBase also feeds the manifest link.
+				const wb = new Workbox("/sw.js", { scope: "/" });
+				wb.addEventListener("installed", (event) => {
+					if (!event.isUpdate) log.info("App ready to work offline");
 				});
+				wb.addEventListener("activated", (event) => {
+					// autoUpdate behavior: an updated SW activating means new content.
+					if (event.isUpdate || event.isExternal) window.location.reload();
+				});
+				wb.register({ immediate: true }).then(
+					(reg) => {
+						log.info("Service Worker registered", reg);
+						// One-time sweep: clients upgraded from the old
+						// registration (/assets/pos_next/pos/ scope) would keep
+						// two live registrations double-caching the same assets.
+						navigator.serviceWorker
+							.getRegistrations()
+							.then((regs) =>
+								Promise.all(
+									regs
+										.filter((r) => r.scope.includes("/assets/pos_next/pos/"))
+										.map((r) => r.unregister()),
+								),
+							)
+							.catch((err) => log.warn("Old SW sweep failed", err));
+					},
+					(err) => log.error("Service Worker registration error", err),
+				);
 			});
 		},
 		{ passive: true }

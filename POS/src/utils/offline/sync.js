@@ -23,6 +23,9 @@ const SYNC_CONFIG = {
 	MAX_RETRY_COUNT: 3,
 	CLEANUP_AGE_DAYS: 7,
 	PING_TIMEOUT_MS: 3000,
+	// Exponential backoff between transient retries: base * 2^retry_count ms
+	// since the last attempt (10s after the 1st failure, 20s after the 2nd).
+	RETRY_BACKOFF_BASE_MS: 5000,
 };
 
 // Duplicate error patterns to detect already-synced invoices
@@ -106,12 +109,17 @@ export const saveOfflineInvoice = async (invoiceData) => {
 };
 
 /**
- * Get all pending (unsynced) offline invoices
+ * Get pending (unsynced) offline invoices eligible for auto-sync.
+ * Entries flagged sync_failed are excluded: a permanent 4xx must not be
+ * retried on every reconnect nor block the invoices queued behind it.
+ * The cashier resolves them manually via OfflineInvoicesDialog.
  * @returns {Promise<Array>}
  */
 export const getOfflineInvoices = async () => {
 	try {
-		return await db.invoice_queue.filter((inv) => !inv.synced && !inv.superseded).toArray();
+		return await db.invoice_queue
+			.filter((inv) => !inv.synced && !inv.superseded && !inv.sync_failed)
+			.toArray();
 	} catch (error) {
 		log.error("Failed to get offline invoices", error);
 		return [];
@@ -137,12 +145,15 @@ export const getOfflineInvoiceByOfflineId = async (offlineId) => {
 };
 
 /**
- * Get count of pending offline invoices
+ * Get count of pending offline invoices eligible for auto-sync
+ * (excludes sync_failed entries, see getOfflineInvoices)
  * @returns {Promise<number>}
  */
 export const getOfflineInvoiceCount = async () => {
 	try {
-		return await db.invoice_queue.filter((inv) => !inv.synced && !inv.superseded).count();
+		return await db.invoice_queue
+			.filter((inv) => !inv.synced && !inv.superseded && !inv.sync_failed)
+			.count();
 	} catch (error) {
 		log.error("Failed to get offline invoice count", error);
 		return 0;
@@ -243,13 +254,26 @@ const markInvoiceSynced = async (id, serverInvoice, offlineId) => {
 };
 
 /**
+ * Whether an invoice is due for another auto-sync attempt. After a failure
+ * the next attempt waits an exponential backoff since the last attempt
+ * (see SYNC_CONFIG.RETRY_BACKOFF_BASE_MS).
+ * @param {Object} invoice - Invoice queue record
+ * @returns {boolean}
+ */
+const isRetryDue = (invoice) => {
+	if (!invoice.last_attempt) return true;
+	const delayMs = SYNC_CONFIG.RETRY_BACKOFF_BASE_MS * 2 ** (invoice.retry_count || 0);
+	return Date.now() - invoice.last_attempt >= delayMs;
+};
+
+/**
  * Increment retry count and optionally mark as failed
  * @param {Object} invoice - Invoice record
  * @param {string} errorMessage - Error message
  */
 const handleSyncFailure = async (invoice, errorMessage) => {
 	const newRetryCount = (invoice.retry_count || 0) + 1;
-	const updates = { retry_count: newRetryCount };
+	const updates = { retry_count: newRetryCount, last_attempt: Date.now() };
 
 	if (newRetryCount >= SYNC_CONFIG.MAX_RETRY_COUNT) {
 		updates.sync_failed = true;
@@ -257,6 +281,28 @@ const handleSyncFailure = async (invoice, errorMessage) => {
 	}
 
 	await db.invoice_queue.update(invoice.id, updates);
+};
+
+/**
+ * Clear the sync_failed flag on a queued invoice so it rejoins the auto-sync
+ * queue (manual Retry action in OfflineInvoicesDialog).
+ * @param {number} id - Invoice queue ID
+ * @returns {Promise<boolean>}
+ */
+export const retryOfflineInvoice = async (id) => {
+	try {
+		await db.invoice_queue.update(id, {
+			sync_failed: false,
+			retry_count: 0,
+			last_attempt: 0,
+			error: null,
+		});
+		log.info(`Invoice re-queued for sync`, { id });
+		return true;
+	} catch (error) {
+		log.error("Failed to re-queue offline invoice", { id, error });
+		return false;
+	}
 };
 
 /**
@@ -372,7 +418,10 @@ export const syncOfflineInvoices = async () => {
 	}
 
 	return await syncMutex.withLock(async () => {
-		const pendingInvoices = await getOfflineInvoices();
+		// getOfflineInvoices already excludes sync_failed entries; the backoff
+		// gate here skips entries whose next transient retry is not due yet.
+		// Both are skips, never blocks: the loop below continues past them.
+		const pendingInvoices = (await getOfflineInvoices()).filter((inv) => isRetryDue(inv));
 
 		if (!pendingInvoices.length) {
 			return { success: 0, failed: 0, skipped: 0, errors: [] };

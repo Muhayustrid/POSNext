@@ -43,6 +43,49 @@ function posNextBuildVersionPlugin(version) {
 	};
 }
 
+/**
+ * Vite plugin to make the generated service worker servable from /sw.js
+ * (COR-FE-05). The SW is registered from /sw.js (see POS/src/main.js and the
+ * pos_next/www/sw.py controller) so it can claim scope "/" over the cashier
+ * page at /pos, but workbox generates precache URLs relative to the SW script
+ * URL: served from /sw.js, "index.html" would resolve to "/index.html"
+ * (404) and the SW install would fail. After VitePWA writes sw.js, rewrite
+ * every relative precache URL (and the workbox runtime import, if not
+ * inlined) to the absolute /assets/pos_next/pos/ base.
+ */
+function posNextSwPathFixPlugin() {
+	const swFile = path.resolve(__dirname, "../pos_next/public/pos/sw.js");
+	const assetBase = "/assets/pos_next/pos/";
+	return {
+		name: "pos-next-sw-path-fix",
+		apply: "build",
+		closeBundle: {
+			sequential: true,
+			order: "post", // run after VitePWA's closeBundle, which writes sw.js
+			async handler() {
+				let source = await fs.readFile(swFile, "utf8");
+				// Workbox runtime chunk import (no-op when the runtime is inlined).
+				source = source.replaceAll('define(["./workbox-', `define(["${assetBase}workbox-`);
+				// The precache manifest is the array literal handed to workbox's
+				// precache call (precacheAndRoute([...]) or an inlined IIFE).
+				const listStart = source.indexOf('[{url:"');
+				if (listStart === -1 || !source.slice(listStart, listStart + 256).includes('revision:"')) {
+					throw new Error("pos-next-sw-path-fix: precache manifest not found in generated sw.js");
+				}
+				const listEnd = source.indexOf("])", listStart);
+				const manifest = source.slice(listStart, listEnd + 1);
+				const fixedManifest = manifest.replace(
+					/(url:")([^"/][^"]*)(")/g,
+					(_match, prefix, url, suffix) => `${prefix}${assetBase}${url}${suffix}`
+				);
+				source = source.slice(0, listStart) + fixedManifest + source.slice(listEnd + 1);
+				await fs.writeFile(swFile, source);
+				console.log("\n✓ SW precache URLs rewritten to absolute /assets/pos_next/pos/ base");
+			},
+		},
+	};
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
 	plugins: [
@@ -69,6 +112,9 @@ export default defineConfig({
 		}),
 		VitePWA({
 			registerType: "autoUpdate",
+			// Registration is handled in src/main.js (/sw.js, scope "/"); keep the
+			// plugin from injecting its own register script for the static SW URL.
+			injectRegister: false,
 			includeAssets: ["favicon.png", "icon.svg", "icon-maskable.svg"],
 			manifest: {
 				name: "POSNext",
@@ -81,7 +127,8 @@ export default defineConfig({
 				// Manifest scope must contain start_url or Chrome rejects installability.
 				// Canonical app URL is /pos (www/pos.html); the previous scope was the
 				// build-output path (/assets/pos_next/pos/), which Chrome rejects for install.
-				// Service worker scope is separate and unchanged (/assets/pos_next/pos/).
+				// The service worker is served from /sw.js with scope "/" (see src/main.js),
+				// which now contains this manifest scope.
 				scope: "/pos",
 				start_url: "/pos",
 				icons: [
@@ -131,6 +178,10 @@ export default defineConfig({
 			workbox: {
 				globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
 				maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 3 MB
+				// The SW is served from /sw.js (pos_next/www/sw.py); inline the workbox
+				// runtime so sw.js carries no relative ./workbox-*.js import (which
+				// would resolve against / instead of /assets/pos_next/pos/).
+				inlineWorkboxRuntime: true,
 				navigateFallback: null,
 				navigateFallbackDenylist: [/^\/api/, /^\/app/],
 				runtimeCaching: [
@@ -220,6 +271,7 @@ export default defineConfig({
 				type: "module",
 			},
 		}),
+		posNextSwPathFixPlugin(),
 	],
 	build: {
 		chunkSizeWarningLimit: 1500,

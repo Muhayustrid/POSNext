@@ -373,6 +373,10 @@ async function getOfflineInvoiceCount() {
 			return 0;
 		}
 
+		// Display-side filter only, deliberately WITHOUT the sync_failed
+		// exclusion that utils/offline/sync.js applies to auto-sync batches:
+		// failed entries must stay visible (badge) until the cashier retries
+		// or deletes them. Do not "unify" the two filters.
 		const count = await db
 			.table("invoice_queue")
 			.filter((invoice) => invoice.synced === false && !invoice.superseded)
@@ -401,6 +405,9 @@ async function getOfflineInvoices() {
 			return [];
 		}
 
+		// Display-side filter only, deliberately WITHOUT the sync_failed
+		// exclusion that utils/offline/sync.js applies to auto-sync batches:
+		// failed entries must stay listed here for manual retry/delete.
 		const invoices = await db
 			.table("invoice_queue")
 			.filter((invoice) => invoice.synced === false && !invoice.superseded)
