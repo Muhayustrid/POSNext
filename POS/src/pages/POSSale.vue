@@ -2157,7 +2157,17 @@ async function handleErrorRetry() {
 	}
 }
 
+// COR-FE-01: a double-tap on "Complete Payment" emits `payment-completed`
+// twice before the dialog unmounts; each emit that reached the handler used
+// to enqueue/submit on its own — two invoice_queue rows with different
+// offline_ids that server-side dedupe cannot collapse on replay.
+const submitInFlight = ref(false);
+
 async function handlePaymentCompleted(paymentData) {
+	// Only the first completion attempt proceeds; later ones while the
+	// checkout is still in flight are dropped silently.
+	if (submitInFlight.value) return;
+	submitInFlight.value = true;
 	try {
 		// Shift schedule: refuse checkouts (online and offline queue) after a
 		// mandatory deadline. Already queued offline invoices are preserved.
@@ -2226,6 +2236,10 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
+			// Hold the PaymentDialog's :is-submitting lock for the whole
+			// offline enqueue — mirrors the online path, where submitInvoice()
+			// owns the same flag. Released in the finally below.
+			cartStore.isSubmitting = true;
 			// Use the same item transformation as online flow for consistency
 			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
 			// are all correctly formatted for ERPNext
@@ -2467,6 +2481,11 @@ async function handlePaymentCompleted(paymentData) {
 		} else {
 			showWarning(errorContext.message);
 		}
+	} finally {
+		// Every exit path (error included) must release the checkout lock,
+		// otherwise a thrown enqueue would block all future checkouts.
+		submitInFlight.value = false;
+		cartStore.isSubmitting = false;
 	}
 }
 

@@ -394,3 +394,70 @@ class TestCreateProduction(FrappeTestCase):
 		se = frappe.get_doc("Stock Entry", result["stock_entry"])
 		fg_row = next(d for d in se.items if d.is_finished_item)
 		self.assertTrue(fg_row.serial_and_batch_bundle or fg_row.batch_no)
+
+	# ---- SEC-NEW-03: create_production profile-membership gate ----
+
+	def _make_user(self, first_name):
+		# uuid users: any granted role's redis cache outlives the class
+		# rollback, so users must never be reused across runs/classes
+		user = f"prod-sec.{uuid.uuid4().hex[:8]}@example.com"
+		frappe.get_doc(
+			{"doctype": "User", "email": user, "first_name": first_name}
+		).insert(ignore_permissions=True)
+		return user
+
+	def test_profile_user_mismatch_rejected(self):
+		# SEC-NEW-03: pos_profile selects the warehouse the manufacture entry
+		# posts to. Without the gate a roleless user could post a Manufacture
+		# Stock Entry against another outlet's warehouse just by naming that
+		# profile in the call.
+		outsider = self._make_user("Prod Sec Intruder")
+		_seed_stock(self.mat, self.warehouse, 10)
+		frappe.set_user(outsider)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				create_production(recipe=self.recipe.name, qty=1, pos_profile=self.pos_profile)
+		finally:
+			frappe.set_user("Administrator")
+		# the gate fired before any stock moved
+		self.assertEqual(
+			frappe.db.count("Stock Entry", {"remarks": ["like", f"%{self.recipe.recipe_name}%"]}), 0
+		)
+
+	def test_assigned_cashier_can_produce_on_own_profile(self):
+		# acceptance branch of the gate: a user assigned to the profile (via
+		# POS Profile User) still produces on it. Nexus POS Manager rather than
+		# POSNext Cashier because the permission-enforced POS Production Log
+		# submit needs write, which the cashier role does not carry.
+		if not frappe.db.exists("Role", "Nexus POS Manager"):
+			self.skipTest("Nexus POS Manager role missing")
+		cashier = self._make_user("Prod Sec Cashier")
+		frappe.get_doc(
+			{
+				"doctype": "Has Role",
+				"parent": cashier,
+				"parenttype": "User",
+				"parentfield": "roles",
+				"role": "Nexus POS Manager",
+			}
+		).insert(ignore_permissions=True)
+		# membership is exactly what the gate checks
+		frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.pos_profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": cashier,
+				"default": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.clear_cache(user=cashier)
+		_seed_stock(self.mat, self.warehouse, 10)
+		frappe.set_user(cashier)
+		try:
+			result = create_production(recipe=self.recipe.name, qty=1, pos_profile=self.pos_profile)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertTrue(result["stock_entry"])
+		self.assertTrue(result["production_log"])

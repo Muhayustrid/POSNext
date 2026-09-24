@@ -10,6 +10,8 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from frappe import ValidationError, _
 from frappe.utils import flt, getdate
 
+from pos_next.api.packages import _assert_profile_access
+
 
 def _resolve_profile(pos_profile):
 	"""Company + warehouse come from the POS Profile server-side, never the client."""
@@ -160,6 +162,12 @@ def create_production(recipe, qty, pos_profile, items=None, batches=None):
 	items/batches params are accepted (stale cached POS clients still send them)
 	but intentionally ignored — clients cannot override BOM quantities.
 	"""
+	# IDOR gate (SEC-NEW-03): pos_profile selects the warehouse the Manufacture
+	# Stock Entry posts to, so the caller must be assigned to that profile (or
+	# manage POS Profiles) before anything is resolved or posted. Deliberately
+	# outside the try: the generic handler below would swallow the
+	# PermissionError into a 500-style ValidationError.
+	_assert_profile_access(pos_profile)
 	try:
 		company, warehouse = _resolve_profile(pos_profile)
 		qty = flt(qty)

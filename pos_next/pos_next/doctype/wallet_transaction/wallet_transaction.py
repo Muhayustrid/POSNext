@@ -454,13 +454,21 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	Args:
 		original_invoice: Original Sales Invoice name
 		return_invoice: Return Sales Invoice name (is_return=1)
+
+	Returns:
+		list: one {"wallet_transaction", "action", "success"} dict per reversal
+		row; empty when there was nothing to reverse. COR-BE-03: a failed row
+		reports success=False instead of vanishing into the error log — the
+		caller must fail the whole return rather than credit the wallet anyway
+		(the old swallow produced a double credit: old credit kept + refund
+		credit granted).
 	"""
 	# Get the return invoice to calculate return ratio
 	return_doc = frappe.get_doc("Sales Invoice", return_invoice)
 	original_doc = frappe.get_doc("Sales Invoice", original_invoice)
 
 	if not return_doc.is_return or return_doc.return_against != original_invoice:
-		return
+		return []
 
 	existing = frappe.db.exists(
 		"Wallet Transaction",
@@ -473,7 +481,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 		},
 	)
 	if existing:
-		return
+		return []
 	# Find all submitted Wallet Transactions linked to the original invoice
 	wallet_transactions = frappe.get_all(
 		"Wallet Transaction",
@@ -496,14 +504,14 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	)
 
 	if not wallet_transactions:
-		return
+		return []
 
 	# return grand_total is negative, original is positive
 	original_total = abs(flt(original_doc.grand_total))
 	returned_amount = abs(flt(return_doc.grand_total))
 
 	if original_total <= 0:
-		return
+		return []
 
 	# Check if this is a full return
 	# Keep full precision for ratio; only round the final reverse_amount
@@ -538,6 +546,8 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	# Determine the applicable tier for the post-return effective amount
 	new_tier = _find_tier(invoiced_amount_after_return) if tiers else None
 
+	# ── Execute the reversal ──
+	results = []
 	for wt in wallet_transactions:
 		# ── Decide: cancel entirely  OR  create a partial Debit ──
 		should_cancel = False
@@ -567,8 +577,16 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 			# Regular Credit (or Loyalty Credit without tiers) → proportional reversal
 			reverse_amount = flt(wt.amount * return_ratio, 2)
 
+		if not should_cancel and reverse_amount <= 0:
+			# nothing to reverse for this row (already fully offset) — not a
+			# failure, and nothing to report
+			continue
+
+		row_result = {"wallet_transaction": wt.name, "success": False}
+
 		# ── Execute the reversal ──
 		if should_cancel:
+			row_result["action"] = "cancel"
 			try:
 				wt_doc = frappe.get_doc("Wallet Transaction", wt.name)
 				wt_doc.flags.ignore_permissions = True
@@ -578,6 +596,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 					alert=True,
 					indicator="blue",
 				)
+				row_result["success"] = True
 			except Exception as e:
 				frappe.log_error(
 					title="Wallet Transaction Cancel on Return Error",
@@ -585,6 +604,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 				)
 
 		elif reverse_amount > 0:
+			row_result["action"] = "debit"
 			try:
 				reverse_wt = frappe.get_doc(
 					{
@@ -619,6 +639,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 					alert=True,
 					indicator="blue",
 				)
+				row_result["success"] = True
 			except Exception as e:
 				frappe.log_error(
 					title="Wallet Transaction Reverse on Partial Return Error",
@@ -628,3 +649,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 						f"Error: {e!s}\n{frappe.get_traceback()}"
 					),
 				)
+
+		results.append(row_result)
+
+	return results

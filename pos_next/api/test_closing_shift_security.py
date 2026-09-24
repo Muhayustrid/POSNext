@@ -22,6 +22,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt, now_datetime, nowdate
 
 from pos_next.api.shifts import get_closing_shift_data, submit_closing_shift
+from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import get_pos_invoices
 
 ADMIN = "Administrator"
 
@@ -183,3 +184,51 @@ class TestClosingShiftSubmitSecurity(FrappeTestCase):
 		name = submit_closing_shift(json.dumps(payload))["name"]
 		self.assertEqual(frappe.db.get_value("POS Closing Shift", name, "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("POS Opening Shift", shift.name, "status"), "Closed")
+
+	# ---- SEC-NEW-01: get_pos_invoices read gate ----
+
+	def test_non_owner_without_role_cannot_read_shift_invoices(self):
+		# get_pos_invoices returns every invoice of the shift (customer,
+		# payments, totals) AND posts its printed drafts as a side effect, so a
+		# roleless non-owner must be rejected before any of that runs
+		shift = self._open_shift()
+		frappe.set_user(self.intruder)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_pos_invoices(shift.name)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_owner_can_read_own_shift_invoices(self):
+		# ownership branch of the gate: the shift owner keeps reading their own
+		# invoices (empty shift returns an empty list)
+		shift = self._open_shift()
+		self.assertEqual(get_pos_invoices(shift.name), [])
+
+	def test_user_with_closing_read_can_read_shift_invoices(self):
+		# manager branch of the gate: closing-shift read access substitutes for
+		# ownership. Idempotent grant — the submit test below may have granted
+		# the same role, and its redis role cache outlives the class rollback.
+		if not frappe.db.exists("Has Role", {"parent": self.manager, "role": "System Manager"}):
+			frappe.get_doc(
+				{
+					"doctype": "Has Role",
+					"parent": self.manager,
+					"parenttype": "User",
+					"parentfield": "roles",
+					"role": "System Manager",
+				}
+			).insert(ignore_permissions=True)
+		frappe.clear_cache(user=self.manager)
+		shift = self._open_shift()
+		frappe.set_user(self.manager)
+		try:
+			self.assertEqual(get_pos_invoices(shift.name), [])
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_unknown_shift_rejected_with_clear_error(self):
+		# a bogus shift name must fail loudly (DoesNotExistError), not answer
+		# with an empty shift that the client would render as zero takings
+		with self.assertRaises(frappe.DoesNotExistError):
+			get_pos_invoices("POS Opening Shift does-not-exist")

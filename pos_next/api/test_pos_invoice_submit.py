@@ -404,18 +404,31 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		from pos_next.api.invoices import get_draft_invoices
 
 		# no doctype passed (the HTTP shape) -> resolves to the mode doctype;
-		# neither doctype has a standard pos_opening_shift column, so the shift
-		# filter is dropped and the result tracks all drafts of that doctype
+		# the shift filter is live (posa_pos_opening_shift, SEC-NEW-02), so the
+		# result is exactly this shift's drafts, whatever else is pending
+		# site-wide on the doctype
 		drafts = get_draft_invoices(self.shift.name)
 		self.assertEqual(
 			{d.name for d in drafts},
-			set(frappe.get_all("POS Invoice", filters={"docstatus": 0}, pluck="name")),
+			set(
+				frappe.get_all(
+					"POS Invoice",
+					filters={"docstatus": 0, "posa_pos_opening_shift": self.shift.name},
+					pluck="name",
+				)
+			),
 		)
 		# explicit doctype callers keep their behavior
 		drafts = get_draft_invoices(self.shift.name, doctype="Sales Invoice")
 		self.assertEqual(
 			{d.name for d in drafts},
-			set(frappe.get_all("Sales Invoice", filters={"docstatus": 0}, pluck="name")),
+			set(
+				frappe.get_all(
+					"Sales Invoice",
+					filters={"docstatus": 0, "posa_pos_opening_shift": self.shift.name},
+					pluck="name",
+				)
+			),
 		)
 
 

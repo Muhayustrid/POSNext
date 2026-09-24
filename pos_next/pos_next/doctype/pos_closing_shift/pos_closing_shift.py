@@ -320,6 +320,21 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 	still link here). Reading only the current mode's doctype would silently
 	drop the other half from every closing total, so both are always read.
 	"""
+	# read gate (SEC-NEW-01): the response exposes every invoice of the shift
+	# (customer, payments, totals) and submit_printed_invoices below posts the
+	# shift's printed drafts as a side effect, so only the shift owner or a
+	# user with closing-shift read access may call it. Same ownership rule as
+	# make_closing_shift_from_opening; sits above any query so a bogus shift
+	# fails loudly instead of answering with an empty shift.
+	shift_user = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "user")
+	if shift_user is None:
+		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
+	if (
+		shift_user != frappe.session.user
+		and not frappe.has_permission("POS Closing Shift", "read")
+	):
+		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
+
 	# whitelist gate: client input is interpolated into the SQL table name
 	if doctype in ("Sales Invoice", "POS Invoice"):
 		doctypes = [doctype]

@@ -3487,6 +3487,14 @@ async function completePayment() {
 		},
 	});
 
+	// COR-FE-01 second layer: the checkout page holds the in-flight lock; a
+	// duplicate completePayment() (double-tap racing the dialog teardown) must
+	// not emit a second payment-completed.
+	if (props.isSubmitting) {
+		log.warn("[PaymentDialog] Submission already in progress, ignoring duplicate");
+		return;
+	}
+
 	if (!canComplete.value) {
 		log.warn("[PaymentDialog] Cannot complete - validation failed");
 		return;

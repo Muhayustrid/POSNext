@@ -264,6 +264,137 @@ def log_manual_rate_edit(item, invoice_name, user=None):
 	).insert(ignore_permissions=True)
 
 
+def _validate_item_rates(invoice_doc, pos_profile, pos_settings_cache, pos_profile_doc=None):
+	"""SEC-04 price verification loop, shared by update_invoice and the
+	existing-draft branch of submit_invoice.
+
+	COR-BE-02: that submit branch used to jump straight from the payload to
+	save(), so a crafted submit carrying rate == price_list_rate (list price
+	forged) slipped an in-discount past the discount-code gate and
+	max_discount_allowed entirely. Both paths run this loop now.
+
+	The server resolves its own list price for every row — the basis for
+	manual-discount detection and the max-discount cap; the client's
+	price_list_rate stays a display hint. When the server has no Item Price
+	for the row (server_plr empty), a client-flagged manual edit is still
+	gated against the payload's price_list_rate as the only basis available.
+
+	Returns the set of applied pricing rule names seen on the rows (the
+	caller feeds them into the offer stash).
+	"""
+	price_list = (
+		(pos_profile_doc.selling_price_list if pos_profile_doc else None)
+		or invoice_doc.get("selling_price_list")
+	)
+	server_prices = _server_price_list_rates(
+		invoice_doc.get("items"), price_list, invoice_doc.get("posting_date")
+	)
+	# Same rounding the client applies to rates (System Settings
+	# currency_precision, exactly what bootstrap.py feeds roundCurrency),
+	# so an honest row's rate equals the server list price exactly.
+	rate_precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
+	# Collect applied pricing rule names before we clear item.pricing_rules
+	applied_rule_names_seen = set()
+	for item in invoice_doc.get("items", []):
+		item_rate = flt(item.rate or 0)
+		discount_pct = flt(item.discount_percentage or 0)
+		frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
+		is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
+
+		# POS Next computes offers itself (via apply_offers) and sends each
+		# item with discount_percentage / discount_amount / rate already set.
+		# We pair that with invoice_doc.ignore_pricing_rule = 1 so ERPNext's
+		# own pricing engine stays out of the way.
+		#
+		# However, ERPNext's get_pricing_rule_for_item() has a branch that
+		# fires when ignore_pricing_rule=1 AND the doc already exists in DB
+		# AND item.pricing_rules is non-empty — it interprets that as the
+		# user disabling pricing rules on an invoice that previously had
+		# them, calls remove_pricing_rule_for_item(), and silently zeroes
+		# discount_percentage / discount_amount / rate on the next save.
+		# That branch fires on the 2nd save (submit step), producing
+		# "Partly Paid" invoices where the cashier collected the discounted
+		# amount but the saved grand_total reverted to the pre-discount
+		# price. See erpnext/accounts/doctype/pricing_rule/pricing_rule.py
+		# around line 421.
+		#
+		# Clearing item.pricing_rules here avoids that branch entirely. The
+		# discount itself is preserved via the discount_percentage /
+		# discount_amount fields we already set above.
+		if item.get("pricing_rules"):
+			item_rule_names = _derive_item_offer_rules(item.pricing_rules)
+			applied_rule_names_seen.update(item_rule_names)
+			# Per-item offer attribution for the discount code gate: an item
+			# whose discount comes from an applied pricing rule is offer-driven,
+			# not manual (pos_next.overrides.discount_code verifies the rules).
+			# Always rewritten (never read from the payload — see
+			# _strip_server_managed_fields) so a re-save of a manually edited
+			# row cannot inherit a stale exemption.
+			item.pos_offer_item_rules = json.dumps(sorted(item_rule_names)) if item_rule_names else ""
+			item.pricing_rules = ""
+		else:
+			item_rule_names = []
+			item.pos_offer_item_rules = ""
+
+		# SEC-04: manual-edit detection is server-side — a rate below the
+		# server's own list price is a discount even when the client omits
+		# the flag (the flag itself only feeds the audit lane). Rule-
+		# attributed rows are offer-driven, not manual; free rows and
+		# package rows are priced server-side elsewhere; returns mirror the
+		# original invoice's prices.
+		server_plr = _resolve_server_price_list_rate(server_prices, item)
+		server_detected = (
+			bool(pos_profile)
+			and not invoice_doc.get("is_return")
+			and not item_rule_names
+			and not cint(item.get("is_free_item") or 0)
+			and not item.get("pos_package")
+			and server_plr > 0
+			and 0 < item_rate < flt(server_plr, rate_precision)
+		)
+
+		if is_manual_edit or server_detected:
+			# MANUAL RATE EDIT: the server's list price is the cap/audit
+			# basis when known; the client-declared original is the legacy
+			# fallback (flagged rows only).
+			if server_detected:
+				item.price_list_rate = flt(server_plr, rate_precision)
+				# The server's list price is the cap basis — a forged
+				# client original_rate must not shrink the measured cut.
+				item.original_rate = item.price_list_rate
+			else:
+				original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
+				if original_rate > 0:
+					item.price_list_rate = original_rate
+
+			# Validate manual rate edit against business rules (uses cached settings)
+			validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
+			if not validation.get("valid"):
+				frappe.throw(validation.get("message"))
+		else:
+			# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
+			if frontend_price_list_rate > 0:
+				item.price_list_rate = frontend_price_list_rate
+			# Fallback: reverse-calculate if discount exists but no price_list_rate
+			elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
+				item.price_list_rate = calculate_price_list_rate(
+					item_rate, discount_pct, frontend_price_list_rate
+				)
+			else:
+				# No discount or price_list_rate - use rate as is
+				item.price_list_rate = item_rate
+
+			# Ensure price_list_rate is never less than rate (data integrity)
+			if flt(item.price_list_rate) < item_rate:
+				item.price_list_rate = item_rate
+
+		# IMPORTANT: Keep the rate from frontend (do NOT set to 0)
+		# ERPNext will recalculate if needed, but preserving frontend rate
+		# prevents rounding issues and ensures UI matches invoice
+
+	return applied_rule_names_seen
+
+
 def standardize_pricing_rules(items):
 	"""
 	Standardize pricing_rules field on invoice items.
@@ -1083,118 +1214,12 @@ def update_invoice(data):
 		# Formula: rate = price_list_rate * (1 - discount_percentage/100)
 		# Reverse: price_list_rate = rate / (1 - discount_percentage/100)
 		# ========================================================================
-		# SEC-04: the server resolves its own list price for every row — the
-		# basis for manual-discount detection and the max-discount cap. The
-		# client's price_list_rate stays a display hint.
-		price_list = (
-			(pos_profile_doc.selling_price_list if pos_profile_doc else None)
-			or invoice_doc.get("selling_price_list")
+		# SEC-04 / COR-BE-02: the per-row rate verification lives in
+		# _validate_item_rates (shared with submit_invoice's existing-draft
+		# branch); it returns every applied rule name for the offer stash.
+		applied_rule_names_seen = _validate_item_rates(
+			invoice_doc, pos_profile, pos_settings_cache, pos_profile_doc=pos_profile_doc
 		)
-		server_prices = _server_price_list_rates(
-			invoice_doc.get("items"), price_list, invoice_doc.get("posting_date")
-		)
-		# Same rounding the client applies to rates (System Settings
-		# currency_precision, exactly what bootstrap.py feeds roundCurrency),
-		# so an honest row's rate equals the server list price exactly.
-		rate_precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
-		# Collect applied pricing rule names before we clear item.pricing_rules
-		applied_rule_names_seen = set()
-		for item in invoice_doc.get("items", []):
-			item_rate = flt(item.rate or 0)
-			discount_pct = flt(item.discount_percentage or 0)
-			frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
-			is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
-
-			# POS Next computes offers itself (via apply_offers) and sends each
-			# item with discount_percentage / discount_amount / rate already set.
-			# We pair that with invoice_doc.ignore_pricing_rule = 1 so ERPNext's
-			# own pricing engine stays out of the way.
-			#
-			# However, ERPNext's get_pricing_rule_for_item() has a branch that
-			# fires when ignore_pricing_rule=1 AND the doc already exists in DB
-			# AND item.pricing_rules is non-empty — it interprets that as the
-			# user disabling pricing rules on an invoice that previously had
-			# them, calls remove_pricing_rule_for_item(), and silently zeroes
-			# discount_percentage / discount_amount / rate on the next save.
-			# That branch fires on the 2nd save (submit step), producing
-			# "Partly Paid" invoices where the cashier collected the discounted
-			# amount but the saved grand_total reverted to the pre-discount
-			# price. See erpnext/accounts/doctype/pricing_rule/pricing_rule.py
-			# around line 421.
-			#
-			# Clearing item.pricing_rules here avoids that branch entirely. The
-			# discount itself is preserved via the discount_percentage /
-			# discount_amount fields we already set above.
-			if item.get("pricing_rules"):
-				item_rule_names = _derive_item_offer_rules(item.pricing_rules)
-				applied_rule_names_seen.update(item_rule_names)
-				# Per-item offer attribution for the discount code gate: an item
-				# whose discount comes from an applied pricing rule is offer-driven,
-				# not manual (pos_next.overrides.discount_code verifies the rules).
-				# Always rewritten (never read from the payload — see
-				# _strip_server_managed_fields) so a re-save of a manually edited
-				# row cannot inherit a stale exemption.
-				item.pos_offer_item_rules = json.dumps(sorted(item_rule_names)) if item_rule_names else ""
-				item.pricing_rules = ""
-			else:
-				item_rule_names = []
-				item.pos_offer_item_rules = ""
-
-			# SEC-04: manual-edit detection is server-side — a rate below the
-			# server's own list price is a discount even when the client omits
-			# the flag (the flag itself only feeds the audit lane). Rule-
-			# attributed rows are offer-driven, not manual; free rows and
-			# package rows are priced server-side elsewhere; returns mirror the
-			# original invoice's prices.
-			server_plr = _resolve_server_price_list_rate(server_prices, item)
-			server_detected = (
-				bool(pos_profile)
-				and not invoice_doc.get("is_return")
-				and not item_rule_names
-				and not cint(item.get("is_free_item") or 0)
-				and not item.get("pos_package")
-				and server_plr > 0
-				and 0 < item_rate < flt(server_plr, rate_precision)
-			)
-
-			if is_manual_edit or server_detected:
-				# MANUAL RATE EDIT: the server's list price is the cap/audit
-				# basis when known; the client-declared original is the legacy
-				# fallback (flagged rows only).
-				if server_detected:
-					item.price_list_rate = flt(server_plr, rate_precision)
-					# The server's list price is the cap basis — a forged
-					# client original_rate must not shrink the measured cut.
-					item.original_rate = item.price_list_rate
-				else:
-					original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
-					if original_rate > 0:
-						item.price_list_rate = original_rate
-
-				# Validate manual rate edit against business rules (uses cached settings)
-				validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
-				if not validation.get("valid"):
-					frappe.throw(validation.get("message"))
-			else:
-				# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
-				if frontend_price_list_rate > 0:
-					item.price_list_rate = frontend_price_list_rate
-				# Fallback: reverse-calculate if discount exists but no price_list_rate
-				elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
-					item.price_list_rate = calculate_price_list_rate(
-						item_rate, discount_pct, frontend_price_list_rate
-					)
-				else:
-					# No discount or price_list_rate - use rate as is
-					item.price_list_rate = item_rate
-
-				# Ensure price_list_rate is never less than rate (data integrity)
-				if flt(item.price_list_rate) < item_rate:
-					item.price_list_rate = item_rate
-
-			# IMPORTANT: Keep the rate from frontend (do NOT set to 0)
-			# ERPNext will recalculate if needed, but preserving frontend rate
-			# prevents rounding issues and ensures UI matches invoice
 
 		# offer stashes are POS Invoice/Sales Invoice custom fields (Tasks 2/3);
 		# on POS Invoice pos_applied_one_time_rules is not a column — the
@@ -1410,10 +1435,19 @@ def _sync_existing_invoice(sync):
 
 
 def _reuse_sync_record(sync_record_name):
-	"""Reset an existing sync record to Pending status for retry."""
+	"""Reset an existing sync record to Pending status for retry.
+
+	The invoice pointer columns are cleared too: reuse only happens when the
+	pointed-at invoice is no longer live-submitted, and a stale pointer left
+	in place would make _complete_offline_sync's fill-only write refuse to
+	record the new invoice — every later replay of the same offline_id would
+	then mint a fresh duplicate instead of deduping.
+	"""
 	sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name)
 	sync_doc.status = "Pending"
 	sync_doc.synced_at = None
+	sync_doc.sales_invoice = ""
+	sync_doc.pos_invoice = ""
 	sync_doc.flags.ignore_permissions = True
 	sync_doc.save()
 	return {"already_synced": False, "sync_record_name": sync_record_name}
@@ -1535,9 +1569,14 @@ def _complete_offline_sync(sync_record_name, invoice_name, doctype):
 	if not sync_record_name:
 		return
 
+	column = _sync_invoice_field(doctype)
 	try:
+		# COR-BE-05: the invoice pointer lands first, written directly and
+		# idempotently — only fill an empty column, so a re-run can never
+		# repoint a record that already names another invoice.
+		if not frappe.db.get_value("Offline Invoice Sync", sync_record_name, column):
+			frappe.db.set_value("Offline Invoice Sync", sync_record_name, column, invoice_name)
 		sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name)
-		setattr(sync_doc, _sync_invoice_field(doctype), invoice_name)
 		sync_doc.status = "Synced"
 		sync_doc.synced_at = frappe.utils.now_datetime()
 		sync_doc.flags.ignore_permissions = True
@@ -1546,6 +1585,17 @@ def _complete_offline_sync(sync_record_name, invoice_name, doctype):
 		frappe.log_error(
 			title="Offline Sync Completion Error",
 			message=f"Failed to complete sync record {sync_record_name} for invoice {invoice_name}: {error!s}",
+		)
+		# COR-BE-05: never swallow this — a record left Pending without a
+		# pointer went stale after PENDING_TIMEOUT_MINUTES and
+		# _reuse_sync_record let the same offline_id submit again (duplicate
+		# sale + stock move). One request = one DB transaction: the throw
+		# rolls the submitted invoice back with the reservation, so the
+		# client's retry starts from a clean slate.
+		frappe.throw(
+			_("Offline sync record {0} could not be marked as synced. The invoice was not saved; please retry the offline submission.").format(
+				sync_record_name
+			)
 		)
 
 
@@ -1763,6 +1813,22 @@ def submit_invoice(invoice=None, data=None):
 			}
 			invoice_doc.update(invoice)
 			_reapply_item_offer_attribution(invoice_doc, invoice.get("items"), db_item_attribution)
+			# COR-BE-02: this branch used to jump straight to save(), skipping
+			# the whole price verification loop — a crafted submit carrying
+			# rate == price_list_rate (list price forged) slipped an
+			# in-discount past the discount-code gate / max_discount_allowed
+			# (extends SEC-04). Same loop update_invoice runs, before save.
+			# No settings cache here: the cold path lets
+			# validate_manual_rate_edit resolve POS Settings itself. The profile
+			# doc MUST be passed: without it the helper falls back to
+			# invoice_doc.selling_price_list, which is client-controlled at
+			# submit time and would neutralize the server price basis.
+			_validate_item_rates(
+				invoice_doc,
+				pos_profile,
+				None,
+				pos_profile_doc=frappe.get_cached_doc("POS Profile", pos_profile) if pos_profile else None,
+			)
 
 		# Permission bypass only for the owner's own draft (mirrors
 		# update_invoice); submitting another user's draft runs under the real
@@ -1935,26 +2001,25 @@ def submit_invoice(invoice=None, data=None):
 				reverse_wallet_transactions_for_return,
 			)
 
-			try:
-				reverse_wallet_transactions_for_return(
-					original_invoice=invoice_doc.return_against, return_invoice=invoice_doc.name
+			# COR-BE-03: the helper reports per-row success; the old caller
+			# swallowed every per-row failure and still flipped
+			# wallet_reversal_ok, so a return whose reversal failed went on to
+			# credit_return_to_wallet — customer kept the old credit AND got
+			# the refund credit (double credit). Any failed row now fails the
+			# whole return: one request = one DB transaction, so this throw
+			# rolls the submit above back with it.
+			reversal_results = reverse_wallet_transactions_for_return(
+				original_invoice=invoice_doc.return_against, return_invoice=invoice_doc.name
+			)
+			wallet_reversal_ok = all(r.get("success") for r in reversal_results or [])
+			if not wallet_reversal_ok:
+				failed_rows = ", ".join(
+					str(r.get("wallet_transaction")) for r in reversal_results or [] if not r.get("success")
 				)
-				wallet_reversal_ok = True
-			except Exception as wallet_reversal_error:
-				frappe.log_error(
-					title="Wallet Reversal Error",
-					message=(
-						f"Return invoice: {invoice_doc.name}, "
-						f"Original invoice: {invoice_doc.return_against}, "
-						f"Error: {wallet_reversal_error!s}\n{frappe.get_traceback()}"
-					),
-				)
-				frappe.msgprint(
-					_(
-						"Return invoice submitted successfully, but wallet reversal failed. Please contact administrator."
-					),
-					alert=True,
-					indicator="orange",
+				frappe.throw(
+					_("Wallet reversal failed for return {0} (failed rows: {1}). The return was not saved; please contact administrator.").format(
+						invoice_doc.name, failed_rows
+					)
 				)
 
 		# Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled.
@@ -1968,46 +2033,28 @@ def submit_invoice(invoice=None, data=None):
 					credit_return_to_wallet,
 				)
 
-				try:
-					credit_return_to_wallet(
-						return_invoice=invoice_doc.name, amount=abs(flt(invoice_doc.grand_total))
-					)
-				except Exception as wallet_credit_error:
-					frappe.log_error(
-						title="Wallet Credit on Return Error",
-						message=(
-							f"Return invoice: {invoice_doc.name}, "
-							f"Error: {wallet_credit_error!s}\n{frappe.get_traceback()}"
-						),
-					)
-					frappe.msgprint(
-						_("Return submitted but wallet credit failed. Please contact administrator."),
-						alert=True,
-						indicator="orange",
-					)
+				# Fail closed, same rule as the reversal above: a swallowed
+				# failure here silently dropped the customer's refund credit
+				# while the return still submitted. One request = one DB
+				# transaction, so raising rolls the submit back with it.
+				credit_return_to_wallet(
+					return_invoice=invoice_doc.name, amount=abs(flt(invoice_doc.grand_total))
+				)
 		# Complete the offline sync record
 		if sync_record_name:
 			_complete_offline_sync(sync_record_name, invoice_doc.name, invoice_doc.doctype)
 
 		# Handle credit redemption after successful submission
 		if redeemed_customer_credit and customer_credit_dict:
-			try:
-				from pos_next.api.credit_sales import redeem_customer_credit
+			from pos_next.api.credit_sales import redeem_customer_credit
 
-				redeem_customer_credit(invoice_doc.name, customer_credit_dict)
-			except Exception as credit_error:
-				frappe.log_error(
-					title="Credit Redemption Error",
-					message=f"Invoice: {invoice_doc.name}, Error: {credit_error!s}\n{frappe.get_traceback()}",
-				)
-				# Don't fail the entire transaction, just log the error
-				frappe.msgprint(
-					_(
-						"Invoice submitted successfully but credit redemption failed. Please contact administrator."
-					),
-					alert=True,
-					indicator="orange",
-				)
+			# COR-BE-04: redeem_customer_credit requires the invoice to be
+			# already submitted (it throws on docstatus != 1), so the call
+			# cannot move before submit(). Its failure is no longer swallowed
+			# either — one request is one DB transaction, so the exception
+			# rolls the whole checkout back: no issued invoice without its
+			# JE allocation, no half-consumed credit left reusable.
+			redeem_customer_credit(invoice_doc.name, customer_credit_dict)
 
 		# Log manual rate edits for audit trail (only after successful submission)
 		if doctype == DOCTYPE_SALES_INVOICE:
@@ -2284,9 +2331,24 @@ def get_draft_invoices(pos_opening_shift, doctype=None):
 		"docstatus": 0,
 	}
 
-	# Add pos_opening_shift filter if the field exists
-	if frappe.db.has_column(doctype, "pos_opening_shift"):
-		filters["pos_opening_shift"] = pos_opening_shift
+	# SEC-NEW-02: the shift filter was dead — has_column checked
+	# "pos_opening_shift" but the real column (install.py) is
+	# "posa_pos_opening_shift" — so the filter below never applied and no
+	# ownership gate existed: every cashier received every cashier's drafts
+	# and could resume (overwrite) a peer's cart. The response contract (a
+	# list of draft docs for one shift) is unchanged; only the row set is.
+	if frappe.db.has_column(doctype, "posa_pos_opening_shift"):
+		filters["posa_pos_opening_shift"] = pos_opening_shift
+
+	# Ownership lane: a cashier only resumes their own drafts; System/Nexus
+	# POS Managers (same role set shift_schedule.py gates deadline extensions
+	# with) still see the whole shift. Deliberately NOT
+	# frappe.has_permission(doctype, "read") — that grant is doc-wide on this
+	# site, so it cannot separate cashier from manager here.
+	if frappe.session.user != "Administrator" and not (
+		{"System Manager", "Nexus POS Manager"} & set(frappe.get_roles())
+	):
+		filters["owner"] = frappe.session.user
 
 	# Performance: Get all invoice names first
 	invoices_list = frappe.get_list(
