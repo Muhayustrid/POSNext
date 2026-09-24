@@ -39,6 +39,7 @@ from pos_next.api.invoices import (
 )
 from pos_next.api.shifts import get_closing_shift_data, submit_closing_shift
 from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
 
@@ -312,7 +313,7 @@ class TestBackdateEntryFlow(FrappeTestCase):
 			pluck="name",
 			limit=1,
 		)
-		cls.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		cls.customer = get_default_customer()
 		cls.mode = frappe.get_all(
 			"POS Payment Method",
 			{"parent": cls.profile.name, "parenttype": "POS Profile"},

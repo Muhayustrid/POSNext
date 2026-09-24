@@ -191,6 +191,12 @@ def _ensure_test_items(company, warehouse, price_list):
 			)
 			item.flags.from_integration = True
 			item.insert(ignore_permissions=True)
+			# This site names items by series (Stock Settings item_naming_by),
+			# so the requested code is ignored on insert — rename back so the
+			# module-wide ITEM_* constants stay valid. Item renames update all
+			# link references.
+			if item.name != item_code:
+				frappe.rename_doc("Item", item.name, item_code, force=True)
 
 		# Ensure Item Price exists
 		ip_filters = {"item_code": item_code, "price_list": price_list}
@@ -296,7 +302,7 @@ def _resolve_territory():
 
 def _ensure_customer():
 	if not frappe.db.exists("Customer", CUSTOMER):
-		frappe.get_doc(
+		cust = frappe.get_doc(
 			{
 				"doctype": "Customer",
 				"customer_name": CUSTOMER,
@@ -305,6 +311,11 @@ def _ensure_customer():
 				"customer_type": "Individual",
 			}
 		).insert(ignore_permissions=True)
+		# Customer naming on this site is name-based (autoname appends a hash
+		# when the display name is taken), so pin the docname the module
+		# references everywhere.
+		if cust.name != CUSTOMER:
+			frappe.rename_doc("Customer", cust.name, CUSTOMER, force=True)
 
 
 def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
@@ -315,7 +326,10 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 	outstanding_amount and turn 100%-paid invoices into "Partly Paid"
 	(unrelated to the promotion logic under test).
 	"""
-	profile_name = f"_PNXT_TEST_POS_PROFILE_{company}"
+	# Distinct namespace from test_packages' `_PNXT_TEST_POS_PROFILE_*`:
+	# both modules otherwise re-patch the same profile with conflicting
+	# company/price-list currency assumptions.
+	profile_name = f"_PNXT_PROMO_TEST_PROFILE_{company}"
 	if frappe.db.exists("POS Profile", profile_name):
 		# Re-patch fields each run so prior mutations don't leak across tests.
 		profile = frappe.get_doc("POS Profile", profile_name)
@@ -332,6 +346,7 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 			{"mode_of_payment": mode_of_payment, "default": 1, "amount": 0},
 		)
 		profile.save(ignore_permissions=True)
+		_ensure_profile_gate_off(profile.name)
 		return profile.name
 
 	profile = frappe.get_doc(
@@ -356,7 +371,32 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 		{"mode_of_payment": mode_of_payment, "default": 1, "amount": 0},
 	)
 	profile.insert(ignore_permissions=True)
+	_ensure_profile_gate_off(profile.name)
 	return profile.name
+
+
+def _ensure_profile_gate_off(profile_name):
+	"""Keep the HO discount-code gate off for the promotions profile.
+
+	Profile rows override the global single; without one the resolver falls
+	back to the site's global require_refund_code and the gate rejects this
+	module's discount scenarios.
+	"""
+	if frappe.db.exists("POS Settings", {"pos_profile": profile_name}):
+		frappe.db.set_value(
+			"POS Settings",
+			{"pos_profile": profile_name},
+			{"enabled": 1, "require_refund_code": 0},
+		)
+	else:
+		frappe.get_doc(
+			{
+				"doctype": "POS Settings",
+				"pos_profile": profile_name,
+				"enabled": 1,
+				"require_refund_code": 0,
+			}
+		).insert(ignore_permissions=True)
 
 
 def _ctx():

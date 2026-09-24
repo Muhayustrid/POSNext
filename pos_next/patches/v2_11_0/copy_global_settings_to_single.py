@@ -26,14 +26,12 @@ def execute():
 	# so all rows agreed.
 	row_values = {}
 	for fieldname in _ROW_FIELDS:
-		try:
+		if frappe.db.has_column("POS Settings", fieldname):
 			row_values[fieldname] = frappe.db.get_value("POS Settings", {}, fieldname)
-		except Exception as e:
+		else:
 			# Sites that never synced while c7a48a9..e2fb015 briefly put the
-			# target-basis columns on tabPOS Settings have no such column
-			# (MySQL error 1054); there is no stored value to copy.
-			if not e.args or e.args[0] != 1054:
-				raise
+			# target-basis columns on tabPOS Settings have no such column;
+			# there is no stored value to copy.
 			row_values[fieldname] = None
 	if row_values["allow_negative_stock"] is None:
 		# no POS Settings row at all: fall back to the core toggle the old
@@ -58,13 +56,8 @@ def execute():
 			single.set(fieldname, value)
 			changed = True
 
-	if not single.get("allowed_locales"):
-		name = frappe.db.get_value("POS Settings", {"enabled": 1}, "name")
-		if name:
-			doc = frappe.get_doc("POS Settings", name)
-			for row in doc.get("allowed_locales") or []:
-				single.append("allowed_locales", {"language": row.language})
-				changed = True
+	if _migrate_allowed_locales(single):
+		changed = True
 
 	if changed:
 		# Copying the site's current values must not trip the invoice-type
@@ -72,3 +65,29 @@ def execute():
 		# semantically changing, it is moving house.
 		single.flags.ignore_validate = True
 		single.save(ignore_permissions=True)
+
+
+def _migrate_allowed_locales(single):
+	"""Copy allowed_locales from the first enabled legacy POS Settings row.
+
+	The allowed_locales field no longer exists on the POS Settings meta (this
+	patch runs in [post_model_sync]), so the old child rows are read straight
+	from the table instead of through the doctype — get_doc would always
+	return an empty list.
+
+	Appends to `single` in place; returns True when rows were appended.
+	"""
+	if single.get("allowed_locales"):
+		return False
+	name = frappe.db.get_value("POS Settings", {"enabled": 1}, "name")
+	if not name:
+		return False
+	languages = frappe.db.get_all(
+		"POS Allowed Locale",
+		filters={"parent": name, "parentfield": "allowed_locales", "parenttype": "POS Settings"},
+		pluck="language",
+		order_by="idx asc",
+	)
+	for language in languages:
+		single.append("allowed_locales", {"language": language})
+	return bool(languages)

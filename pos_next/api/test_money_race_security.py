@@ -33,7 +33,7 @@ from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
 )
 from pos_next.pos_next.doctype.referral_code.referral_code import apply_referral_code
 from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import create_wallet_credit
-from pos_next.tests.price_group_helpers import get_default_company
+from pos_next.tests.price_group_helpers import get_default_company, get_default_customer
 
 CUSTOMER = "_SEC1422 Wallet Race Customer"
 REFERRER = "_SEC1422 Referrer Customer"
@@ -432,7 +432,7 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 		if not item:
 			raise unittest.SkipTest("no stock sales item")
 		self.item = item[0]
-		self.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		self.customer = get_default_customer()
 		if not self.customer:
 			raise unittest.SkipTest("no non-internal customer")
 		self.mode = frappe.get_all(

@@ -16,6 +16,7 @@ from pos_next.api.shifts import (
 )
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
+	get_default_customer,
 	make_test_item,
 	make_test_pos_profile,
 	make_test_warehouse,
@@ -65,7 +66,7 @@ class TestSessionSummary(IntegrationTestCase):
 		) or frappe.db.get_value("Mode of Payment", {"enabled": 1}, "name")
 		# internal customers only transact with their 'Allowed To Transact With'
 		# companies (ERPNext check) — the shared site's first row is internal
-		cls.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		cls.customer = get_default_customer()
 		if not cls.customer:
 			raise unittest.SkipTest("no non-internal customer")
 		cls.user = "session.summary.tester@example.com"

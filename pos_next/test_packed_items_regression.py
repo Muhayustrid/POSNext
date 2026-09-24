@@ -106,17 +106,34 @@ def _sales_invoice_bundle_context():
 	# prefer a customer that is not internal and not restricted to other
 	# companies ("Allowed To Transact With"); live sites commonly have
 	# inter-company customers limited to specific companies
+	# prefer customers carrying their own default price list: this module
+	# inserts Sales Invoices directly, and without a resolvable price list the
+	# mandatory selling_price_list/price_list_currency/plc_conversion_rate
+	# trio stays empty and the insert is rejected
 	customer = frappe.db.sql(
 		"""
 		select c.name from `tabCustomer` c
 		where c.disabled = 0
 		  and not coalesce(c.is_internal_customer, 0)
+		  and coalesce(c.default_price_list, '') != ''
 		  and not exists (
 			select 1 from `tabAllowed To Transact With` a where a.parent = c.name
 		  )
 		order by c.modified desc limit 1
 		"""
 	)
+	if not customer:
+		customer = frappe.db.sql(
+			"""
+			select c.name from `tabCustomer` c
+			where c.disabled = 0
+			  and not coalesce(c.is_internal_customer, 0)
+			  and not exists (
+				select 1 from `tabAllowed To Transact With` a where a.parent = c.name
+			  )
+			order by c.modified desc limit 1
+			"""
+		)
 	customer = customer[0][0] if customer else None
 	if not customer:
 		customer = frappe.db.get_value("Customer", {"disabled": 0}, "name", order_by="modified desc")

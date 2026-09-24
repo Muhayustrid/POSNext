@@ -48,7 +48,11 @@ def _make_test_item(code_suffix="", **extra):
 		"stock_uom": "Nos",
 	}
 	doc.update(extra)
-	frappe.get_doc(doc).insert(ignore_permissions=True)
+	item = frappe.get_doc(doc).insert(ignore_permissions=True)
+	# Naming-series sites re-code items on insert; pin the requested code so
+	# every later reference (recipe links, bins, receipts) resolves.
+	if item.name != code:
+		frappe.rename_doc("Item", item.name, code, force=True)
 	return code
 
 

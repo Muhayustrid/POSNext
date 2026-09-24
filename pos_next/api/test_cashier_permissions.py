@@ -20,7 +20,7 @@ import uuid
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from pos_next.tests.price_group_helpers import get_default_company
+from pos_next.tests.price_group_helpers import get_default_company, get_default_customer
 
 ADMIN = "Administrator"
 
@@ -112,7 +112,7 @@ class TestCashierPermissions(FrappeTestCase):
         """A4: kasir may delete their OWN draft (if_owner grant), never
         another user's draft."""
         company = get_default_company()
-        customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+        customer = get_default_customer()
         item = frappe.get_all(
             "Item", filters={"disabled": 0, "is_sales_item": 1}, pluck="name", limit=1
         )
@@ -195,6 +195,29 @@ class TestCashierPermissions(FrappeTestCase):
     def test_pos_coupon_read_only(self):
         # dependency of SEC-08: get_active_coupons gates on POS Coupon read
         self._assert_matrix("POS Coupon", granted=("read", "select"), denied=("write", "create", "export"))
+
+    def test_promotional_scheme_read_only(self):
+        # unblocks the POS Promotions dialog (get_promotions checks read)
+        self._assert_matrix("Promotional Scheme", granted=("read",), denied=("write", "create"))
+
+    def test_production_recipe_read_only(self):
+        self._assert_matrix("POS Production Recipe", granted=("read",), denied=("write", "create"))
+
+    def test_no_purchasing(self):
+        # design decision: cashiers sell and produce, they do not purchase
+        self._assert_matrix("Purchase Order", granted=(), denied=("create",))
+        self._assert_matrix("Purchase Receipt", granted=(), denied=("create",))
+
+    def test_direct_print_permissions(self):
+        from pos_next.api.qz import _PRINT_ROLES
+
+        self.assertTrue(
+            {"POSNext Cashier", "Nexus POS Manager"}.issubset(set(_PRINT_ROLES)),
+            "both POS roles must stay in the QZ direct-print gate",
+        )
+        self._assert_matrix("Sales Invoice", granted=("print",), denied=())
+        self._assert_matrix("POS Closing Shift", granted=("print",), denied=())
+        self._assert_matrix("POS Print Log", granted=("create", "read"), denied=())
 
     # ------------------------------------------------- role permission evidence
 

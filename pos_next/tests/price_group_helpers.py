@@ -29,6 +29,54 @@ def get_default_company() -> str:
 	return doc.name
 
 
+def get_default_customer(company: str | None = None, require_price_list: bool = True) -> str:
+	"""Pick a shared customer that can seed price-list fields on direct inserts.
+
+	An unordered first-row pick once landed on a site customer without
+	`default_price_list` (and a customer group without one either), so
+	directly-inserted Sales Invoices ended up with mandatory-but-empty
+	selling_price_list/price_list_currency/plc_conversion_rate. Require a
+	customer that carries its own default price list, deterministically
+	ordered; when `company` is given, also require currency compatibility
+	(default currency unset or matching the company). Callers whose invoice
+	resolves the price list from its POS Profile instead (the party-details
+	POS branch prefers the customer default, then the profile) pass
+	`require_price_list=False` so the profile's list wins.
+	Fall back to any non-internal customer as a last resort (raise SkipTest
+	when the site has none at all).
+	"""
+	company_currency = None
+	if company:
+		company_currency = frappe.get_cached_value("Company", company, "default_currency")
+
+	def _currency_ok(row):
+		return not company_currency or row.default_currency in (None, "", company_currency)
+
+	def _pick(pl_mode: str):
+		filters = {"is_internal_customer": 0, "disabled": 0}
+		if pl_mode == "required":
+			filters["default_price_list"] = ("is", "set")
+		elif pl_mode == "absent":
+			filters["default_price_list"] = ("is", "not set")
+		rows = frappe.get_all(
+			"Customer",
+			filters=filters,
+			fields=["name", "default_currency"],
+			order_by="creation asc",
+		)
+		return next((r.name for r in rows if _currency_ok(r)), None)
+
+	customer = (
+		_pick("required" if require_price_list else "absent")
+		or _pick("any")
+	)
+	if not customer:
+		import unittest
+
+		raise unittest.SkipTest("no non-internal customer")
+	return customer
+
+
 def make_test_company(suffix: str) -> str:
 	"""Create a dedicated Company with no POS Profiles, for outlet-claiming tests.
 

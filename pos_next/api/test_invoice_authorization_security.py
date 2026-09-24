@@ -32,6 +32,7 @@ from pos_next.api.invoices import (
 	update_invoice,
 )
 from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
 
@@ -70,7 +71,7 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 			pluck="name",
 			limit=1,
 		)
-		cls.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		cls.customer = get_default_customer()
 		if not (cls.profile and cls.mode and cls.item and cls.customer):
 			raise unittest.SkipTest("no usable POS Profile / item / customer")
 

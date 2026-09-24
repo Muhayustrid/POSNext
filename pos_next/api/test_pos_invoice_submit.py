@@ -22,6 +22,7 @@ from pos_next.api.invoices import (
 	submit_invoice,
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
+from pos_next.tests.price_group_helpers import get_default_customer
 
 # Schedule-safe profile: inserting a POS Opening Shift must never throw for
 # being outside a scheduled window. Enforced closing is the only scheduling
@@ -71,7 +72,7 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		self.item = item[0]
 		# non-internal customer: internal ones only transact with their
 		# 'Allowed To Transact With' companies (ERPNext inter-company check)
-		self.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		self.customer = get_default_customer()
 		if not self.customer:
 			self.skipTest("no non-internal customer")
 		self.mode = frappe.get_all(

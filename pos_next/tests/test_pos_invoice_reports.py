@@ -23,6 +23,7 @@ from pos_next.tests._posi_test_utils import (
 	POSInvoiceModeMixin,
 	_set_invoice_type,
 )
+from pos_next.tests.price_group_helpers import get_default_company, get_default_customer
 
 
 class TestReportUnionCountsOnce(POSInvoiceModeMixin, FrappeTestCase):
@@ -162,8 +163,14 @@ class TestSIModeCountsConsolidated(FrappeTestCase):
 	def test_si_mode_union_counts_consolidated(self):
 		from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
+		# An unordered pick can land on an ERPNext fixture profile whose
+		# company keeps INR ledger accounts (Debtors - _TC), which the IDR
+		# invoice below then trips over — pin to the default company.
 		profile = frappe.db.get_value(
-			"POS Profile", _PROFILE_FILTER, ["name", "company"], as_dict=True
+			"POS Profile",
+			_PROFILE_FILTER + [["company", "=", get_default_company()]],
+			["name", "company"],
+			as_dict=True,
 		)
 		if not profile:
 			self.skipTest("no schedule-safe POS Profile")
@@ -172,7 +179,7 @@ class TestSIModeCountsConsolidated(FrappeTestCase):
 		)
 		if not item:
 			self.skipTest("no sales item")
-		customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		customer = get_default_customer()
 		if not customer:
 			self.skipTest("no non-internal customer")
 		mode = frappe.db.get_value(

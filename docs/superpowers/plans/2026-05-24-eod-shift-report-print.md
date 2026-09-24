@@ -73,7 +73,7 @@ Feature: EOD shift report print on closing shift
 - Run migrate to sync print format:
   - `bench --site <site> migrate`
 - Run backend tests:
-  - `bench --site <site> run-tests pos_next.utils.tests.test_pos_closing_print`
+  - `bench --site <site> run-tests pos_next.pos_next.utils.tests.test_pos_closing_print`
 - Run frontend build:
   - `cd POS && npm run build`
 

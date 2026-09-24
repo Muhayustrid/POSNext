@@ -20,6 +20,7 @@ from pos_next.api.packages import (
 	quote,
 	validate_invoice_packages,
 )
+from pos_next.tests.price_group_helpers import get_default_customer
 
 PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
 COMPANY = "_Test Company"
@@ -43,7 +44,7 @@ def _ensure_item(item_code, item_name, is_stock_item):
 	if frappe.db.exists("Item", item_code):
 		return
 
-	frappe.get_doc(
+	item = frappe.get_doc(
 		{
 			"doctype": "Item",
 			"item_code": item_code,
@@ -54,10 +55,21 @@ def _ensure_item(item_code, item_name, is_stock_item):
 			"is_sales_item": 1,
 		}
 	).insert(ignore_permissions=True)
+	# Naming-series sites re-code items on insert; pin the requested code so
+	# the package definition's fixed item codes resolve.
+	if item.name != item_code:
+		frappe.rename_doc("Item", item.name, item_code, force=True)
 
 
 def _ensure_profile():
 	if frappe.db.exists("POS Profile", PROFILE):
+		# The party-details POS branch seeds the invoice price list (and its
+		# currency) from the profile when the customer carries no default;
+		# keep it pointing at an INR list so it matches the INR ledger
+		# accounts of _Test Company.
+		frappe.db.set_value(
+			"POS Profile", PROFILE, "selling_price_list", _ensure_inr_price_list(), update_modified=False
+		)
 		return
 
 	if not frappe.db.exists("Company", COMPANY):
@@ -89,9 +101,27 @@ def _ensure_profile():
 			"write_off_cost_center": frappe.db.get_value(
 				"Cost Center", {"company": COMPANY, "is_group": 0}, "name"
 			),
+			"selling_price_list": _ensure_inr_price_list(),
 			"payments": [{"mode_of_payment": mode_of_payment, "default": 1}] if mode_of_payment else [],
 		}
 	).insert(ignore_permissions=True)
+
+
+def _ensure_inr_price_list() -> str:
+	"""An INR-currency selling list matching _Test Company's INR ledger."""
+	name = "_PNXT_PKG_INR_SELLING"
+	if not frappe.db.exists("Price List", name):
+		frappe.get_doc(
+			{
+				"doctype": "Price List",
+				"price_list_name": name,
+				"selling": 1,
+				"buying": 0,
+				"enabled": 1,
+				"currency": frappe.db.get_value("Company", COMPANY, "default_currency") or "INR",
+			}
+		).insert(ignore_permissions=True)
+	return name
 
 
 def _ensure_package():
@@ -106,10 +136,12 @@ def _ensure_package():
 
 	_ensure_item(PARENT_ITEM, "PNXT Year End Laptop Package", is_stock_item=False)
 
+	# Runs before the package-exists early return so the profile's price
+	# list is (re)pinned even when the package survives from an earlier run.
+	_ensure_profile()
+
 	if frappe.db.exists("POS Package", PACKAGE):
 		return
-
-	_ensure_profile()
 	vals = frappe.db.get_value("POS Profile", PROFILE, ["company", "warehouse"], as_dict=True)
 	profile_company = (vals or {}).get("company") or COMPANY
 	profile_warehouse = (vals or {}).get("warehouse")
@@ -438,11 +470,15 @@ class TestPackageGrandTotal(unittest.TestCase):
 		)
 
 		inv = frappe.new_doc("Sales Invoice")
-		inv.customer = frappe.db.get_value("Customer", {}, "name")
+		inv.customer = get_default_customer(self.company, require_price_list=False)
 		inv.company = self.company
 		inv.pos_profile = PROFILE
 		inv.is_pos = 0
 		inv.set_posting_time = 1
+		# The site-wide `currency` global default (IDR) pre-fills new_doc and
+		# would clash with _Test Company's INR ledger accounts.
+		inv.currency = frappe.db.get_value("Company", self.company, "default_currency")
+		inv.selling_price_list = frappe.db.get_value("POS Profile", PROFILE, "selling_price_list")
 
 		for idx, line in enumerate(result["lines"]):
 			inv.append(
@@ -510,11 +546,13 @@ class TestReturnExportPath(unittest.TestCase):
 		)
 
 		inv = frappe.new_doc("Sales Invoice")
-		inv.customer = frappe.db.get_value("Customer", {}, "name")
+		inv.customer = get_default_customer(cls.company, require_price_list=False)
 		inv.company = cls.company
 		inv.pos_profile = PROFILE
 		inv.is_pos = 0
 		inv.set_posting_time = 1
+		inv.currency = frappe.db.get_value("Company", cls.company, "default_currency")
+		inv.selling_price_list = frappe.db.get_value("POS Profile", PROFILE, "selling_price_list")
 
 		for idx, line in enumerate(result["lines"]):
 			inv.append(

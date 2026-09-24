@@ -25,6 +25,7 @@ from pos_next.api.credit_sales import (
 	redeem_customer_credit,
 )
 from pos_next.api.offers import get_active_coupons
+from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
 
@@ -46,7 +47,7 @@ class TestCreditAuthorizationSecurity(FrappeTestCase):
 			as_dict=True,
 			order_by="creation asc",
 		)
-		cls.customer = frappe.db.get_value("Customer", {"is_internal_customer": 0}, "name")
+		cls.customer = get_default_customer()
 		cls.item = frappe.get_all(
 			"Item",
 			filters={"disabled": 0, "is_sales_item": 1},

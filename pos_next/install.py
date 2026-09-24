@@ -11,9 +11,12 @@ The fixtures are defined in hooks.py and synced automatically during install/mig
 This module handles post-fixture tasks like setting defaults and clearing cache.
 """
 
+import json
 import logging
+import os
 
 import frappe
+from frappe.utils import cint, now_datetime
 
 from pos_next.price_group_ownership import (
 	ITEM_PRICE_OWNER_FIELD,
@@ -414,6 +417,7 @@ def after_install():
 
 		sync_custom_fields()
 		ensure_price_group_custom_fields()
+		mirror_standard_perms_for_custom_doctypes(quiet=True)
 
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
@@ -441,6 +445,7 @@ def after_migrate():
 
 		sync_custom_fields(quiet=True)
 		ensure_price_group_custom_fields(quiet=True)
+		mirror_standard_perms_for_custom_doctypes(quiet=True)
 
 		# Clear cache
 		frappe.clear_cache()
@@ -633,6 +638,66 @@ def log_message(message, level="info", indent=0):
 		logger.info(message)
 
 
+def _pos_settings_meta_drift():
+	"""Detect POS Settings meta drift from POS Next ownership.
+
+	Returns the live (module, issingle) row when the doctype drifted
+	(ERPNext re-imported its Single over ours), None when healthy.
+	"""
+	row = frappe.db.get_value("DocType", "POS Settings", ["module", "issingle"], as_dict=True)
+	if row and row.module == "POS Next" and not row.issingle:
+		return None
+	return row or frappe._dict(module=None, issingle=None)
+
+
+def _reclaim_allowed():
+	# Default-off: an unrelated meta drift in production must never silently
+	# wipe all per-profile + global POS Settings data. The site-config flag is
+	# the explicit opt-in for the destructive reclaim.
+	return bool(frappe.conf.get("allow_settings_reclaim"))
+
+
+def _backup_pos_settings():
+	"""Dump POS Settings rows + singles to JSON in private/backups.
+
+	Raises on failure so the caller can abort before any destructive SQL.
+	"""
+	backup_dir = frappe.get_site_path("private", "backups")
+	os.makedirs(backup_dir, exist_ok=True)
+	path = os.path.join(
+		backup_dir,
+		f"pos_settings_reclaim_{now_datetime().strftime('%Y%m%d_%H%M%S')}.json",
+	)
+	payload = {
+		"tabPOS Settings": (
+			frappe.db.sql("SELECT * FROM `tabPOS Settings`", as_dict=True)
+			if frappe.db.table_exists("POS Settings")
+			else []
+		),
+		"tabSingles": frappe.db.sql(
+			"SELECT * FROM `tabSingles` WHERE doctype = 'POS Settings'", as_dict=True
+		),
+	}
+	with open(path, "w") as f:
+		json.dump(payload, f, default=str, indent=2)
+	return path
+
+
+def _destroy_pos_settings_schema():
+	"""Drop the drifted POS Settings table and its meta rows."""
+	# Commit any open transaction first — DROP TABLE is DDL and would
+	# otherwise trigger ImplicitCommitError under Frappe's safety check.
+	frappe.db.commit()
+	frappe.db.sql("DROP TABLE IF EXISTS `tabPOS Settings`")
+	frappe.db.commit()
+	frappe.db.sql("DELETE FROM `tabSingles` WHERE doctype = 'POS Settings'")
+	frappe.db.sql("DELETE FROM `tabDocField` WHERE parent = 'POS Settings'")
+	frappe.db.sql("DELETE FROM `tabDocPerm` WHERE parent = 'POS Settings'")
+	frappe.db.sql("DELETE FROM `tabDocType` WHERE name = 'POS Settings'")
+	frappe.db.commit()
+	log_message("Dropped legacy POS Settings meta + table", level="info", indent=1)
+
+
 def reclaim_pos_settings_doctype(quiet=False):
 	"""Reclaim the `POS Settings` DocType from ERPNext.
 
@@ -647,37 +712,53 @@ def reclaim_pos_settings_doctype(quiet=False):
 	Runs from `after_migrate`. Idempotent: if the live doctype already
 	belongs to POS Next (module == 'POS Next' and not Single), exits
 	without touching anything.
+
+	The destructive step is guarded by the site-config flag
+	`allow_settings_reclaim` and only runs after a JSON backup of the
+	existing POS Settings data has been written to private/backups.
 	"""
 	if not frappe.db.exists("DocType", "POS Settings"):
 		if not quiet:
 			log_message("POS Settings DocType missing, skipping reclaim", level="warning")
 		return
 
-	row = frappe.db.get_value("DocType", "POS Settings", ["module", "issingle"], as_dict=True)
-	if row and row.module == "POS Next" and not row.issingle:
+	drift = _pos_settings_meta_drift()
+	if not drift:
 		if not quiet:
 			log_message("POS Settings already owned by POS Next, nothing to reclaim", level="info")
 		return
 
+	if not _reclaim_allowed():
+		frappe.logger("pos_next").warning(
+			f"POS Settings drift detected (module={drift.module}, issingle={drift.issingle}) "
+			"but reclaim is disabled — POS Settings data left untouched. To enable the "
+			"destructive reclaim, set `allow_settings_reclaim: 1` in the site config "
+			"(bench --site <site> set-config allow_settings_reclaim 1)."
+		)
+		return
+
 	if not quiet:
 		log_message(
-			f"Reclaiming POS Settings DocType (was module={row.module if row else '?'}, "
-			f"issingle={row.issingle if row else '?'})",
+			f"Reclaiming POS Settings DocType (was module={drift.module}, "
+			f"issingle={drift.issingle})",
 			level="warning",
 		)
 
 	try:
-		# Commit any open transaction first — DROP TABLE is DDL and would
-		# otherwise trigger ImplicitCommitError under Frappe's safety check.
-		frappe.db.commit()
-		frappe.db.sql("DROP TABLE IF EXISTS `tabPOS Settings`")
-		frappe.db.commit()
-		frappe.db.sql("DELETE FROM `tabSingles` WHERE doctype = 'POS Settings'")
-		frappe.db.sql("DELETE FROM `tabDocField` WHERE parent = 'POS Settings'")
-		frappe.db.sql("DELETE FROM `tabDocPerm` WHERE parent = 'POS Settings'")
-		frappe.db.sql("DELETE FROM `tabDocType` WHERE name = 'POS Settings'")
-		frappe.db.commit()
-		log_message("Dropped legacy POS Settings meta + table", level="info", indent=1)
+		_backup_pos_settings()
+	except Exception:
+		frappe.log_error(
+			title="POS Settings Reclaim Error",
+			message="Backup failed — reclaim aborted, POS Settings left untouched\n\n"
+			+ frappe.get_traceback(),
+		)
+		frappe.logger("pos_next").error(
+			"POS Settings backup failed — destructive reclaim aborted, nothing was destroyed"
+		)
+		return
+
+	try:
+		_destroy_pos_settings_schema()
 	except Exception:
 		frappe.log_error(
 			title="POS Settings Reclaim Error",
@@ -714,3 +795,83 @@ def reclaim_pos_settings_doctype(quiet=False):
 			f"POS Settings reclaimed (module={after.module}, issingle={after.issingle})",
 			level="success",
 		)
+
+
+MIRROR_NAME_PREFIX = "posnext-mirror::"
+
+
+def _mirror_target_parents():
+	"""Doctypes our own custom_docperm fixture carries rows for.
+
+	The mirror deliberately only repairs doctypes whose standard perms OUR
+	fixture replaced; custom perms of other apps on this site may be
+	least-privilege BY OMISSION and must not be silently re-granted.
+	"""
+	fixture_path = frappe.get_app_path("pos_next", "fixtures", "custom_docperm.json")
+	try:
+		with open(fixture_path) as f:
+			entries = json.load(f)
+	except OSError:
+		return []
+	return sorted({e.get("parent") for e in entries if e.get("parent")})
+
+
+def mirror_standard_perms_for_custom_doctypes(quiet=False):
+	"""Copy standard DocPerms into Custom DocPerm for roles that have no custom row.
+
+	Frappe ignores EVERY standard DocPerm of a doctype as soon as it has a
+	single Custom DocPerm row (permissions.py::get_valid_perms drops standard
+	rows for doctypes in get_doctypes_with_custom_docperms). Our fixture
+	crafts least-privilege rows for the POS personas on some core doctypes,
+	which would silently lock every other role out after migrate. Rows are
+	copied under deterministic `posnext-mirror::` names and re-created from
+	the live standard set on every migrate, so ERPNext upgrades that change
+	standard perms are picked up. Roles that already have a custom row (the
+	POS personas, and any hand-added row) are never touched.
+	"""
+	parents = _mirror_target_parents()
+	if not parents:
+		return 0
+
+	# Drop the previous migrate's mirrors first: this is a re-sync, not an
+	# accumulate (perm values and permlevel rows changed upstream get fresh
+	# copies; removed standard roles drop out).
+	frappe.db.delete("Custom DocPerm", {"name": ("like", f"{MIRROR_NAME_PREFIX}%")})
+
+	covered = {
+		(d.parent, d.role)
+		for d in frappe.get_all("Custom DocPerm", fields=["parent", "role"], filters={"parent": ["in", parents]})
+	}
+
+	inserted = 0
+	for std in frappe.get_all("DocPerm", fields="*", filters={"parent": ["in", parents]}):
+		if (std.parent, std.role) in covered:
+			continue
+
+		row = dict(std)
+		for key in ("name", "doctype", "creation", "modified", "owner", "modified_by", "docstatus", "idx"):
+			row.pop(key, None)
+		row["doctype"] = "Custom DocPerm"
+		row["name"] = "{prefix}{parent}::{role}::{permlevel}::{if_owner}".format(
+			prefix=MIRROR_NAME_PREFIX,
+			parent=std.parent,
+			role=std.role,
+			permlevel=cint(std.permlevel),
+			if_owner=1 if std.if_owner else 0,
+		)
+		row["parent"] = std.parent
+		row["parenttype"] = "DocType"
+		row["parentfield"] = "permissions"
+		row["creation"] = row["modified"] = now_datetime()
+		row["owner"] = row["modified_by"] = "Administrator"
+		frappe.get_doc(row).db_insert()
+		inserted += 1
+
+	if inserted:
+		for doctype in parents:
+			frappe.clear_cache(doctype=doctype)
+
+	if not quiet:
+		log_message(f"Mirrored {inserted} standard DocPerm row(s) into Custom DocPerm", level="info")
+
+	return inserted
