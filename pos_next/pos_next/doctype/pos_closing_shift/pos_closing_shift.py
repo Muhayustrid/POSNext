@@ -242,10 +242,10 @@ class POSClosingShift(Document):
 				continue
 
 			doctype = "Sales Invoice" if row.get("sales_invoice") else "POS Invoice"
-			if not frappe.db.exists(doctype, invoice):
+			try:
+				invoice_doc = frappe.get_cached_doc(doctype, invoice)
+			except frappe.DoesNotExistError:
 				continue
-
-			invoice_doc = frappe.get_cached_doc(doctype, invoice)
 			currency = invoice_doc.get("currency") or company_currency
 			conversion_rate = (
 				invoice_doc.get("conversion_rate")
@@ -282,10 +282,13 @@ class POSClosingShift(Document):
 
 		for row in self.get("pos_payments", []):
 			payment_entry = row.get("payment_entry")
-			if not payment_entry or not frappe.db.exists("Payment Entry", payment_entry):
+			if not payment_entry:
 				continue
 
-			payment_doc = frappe.get_cached_doc("Payment Entry", payment_entry)
+			try:
+				payment_doc = frappe.get_cached_doc("Payment Entry", payment_entry)
+			except frappe.DoesNotExistError:
+				continue
 			currency = (
 				payment_doc.get("paid_from_account_currency")
 				or payment_doc.get("paid_to_account_currency")

@@ -64,22 +64,34 @@ def period_scope(pos_profile, from_date, to_date):
 	surface (closing, session summary) uses — never through the invoice's own
 	pos_profile column, which ERPNext may fill with a default profile.
 	"""
-	shifts = frappe.get_all(
+	# One query serves both lists. scope.shifts (drawers, shift_count) keeps
+	# the posting-date window; invoice attribution accepts EVERY submitted
+	# shift of the profile, so a backdated invoice on a shift opened outside
+	# the window still posts inside it — the same universe the old
+	# `IN (SELECT os.name ...)` subquery selected, minus the subquery itself,
+	# which used to re-probe tabPOS Opening Shift in every union branch of
+	# every recap query.
+	rows = frappe.get_all(
 		"POS Opening Shift",
-		filters={
-			"docstatus": 1,
-			"pos_profile": pos_profile,
-			"posting_date": ["between", [from_date, to_date]],
-		},
-		pluck="name",
+		filters={"docstatus": 1, "pos_profile": pos_profile},
+		fields=["name", "posting_date"],
+	)
+	shifts = [
+		row.name
+		for row in rows
+		if getdate(from_date) <= getdate(row.posting_date) <= getdate(to_date)
+	]
+	invoice_shifts = [row.name for row in rows]
+	# No shifts at all means no invoice can match (an empty `IN ()` list
+	# would not even parse).
+	shift_filter = (
+		"si.posa_pos_opening_shift IN %(invoice_shifts)s" if invoice_shifts else "1 = 0"
 	)
 	return RecapScope(
 		"si.docstatus = 1"
 		" AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s"
-		" AND si.posa_pos_opening_shift IN ("
-		"SELECT os.name FROM `tabPOS Opening Shift` os"
-		" WHERE os.docstatus = 1 AND os.pos_profile = %(pos_profile)s)",
-		{"pos_profile": pos_profile, "from_date": from_date, "to_date": to_date},
+		f" AND {shift_filter}",
+		{"invoice_shifts": invoice_shifts, "from_date": from_date, "to_date": to_date},
 		shifts,
 	)
 

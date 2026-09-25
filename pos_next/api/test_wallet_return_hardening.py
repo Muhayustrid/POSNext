@@ -31,6 +31,45 @@ _PROFILE_FILTER = [
     ["pos_schedule_enforce_closing", "=", 0],
 ]
 
+# the oldest stock sales item, ignoring other clusters' reserved fixtures
+# (`_` is a LIKE wildcard — escape it) so tax-template context is stable
+_ITEM_FILTER = [
+    ["disabled", "=", 0],
+    ["is_sales_item", "=", 1],
+    ["is_stock_item", "=", 1],
+    ["name", "not like", "\\_PNXT\\_%"],
+]
+
+
+def _pick_item():
+    item = frappe.get_all("Item", filters=_ITEM_FILTER, order_by="creation asc", pluck="name", limit=1)
+    return item[0] if item else None
+
+
+def _cancel_wallet_transactions_for(invoice_names):
+    """Cancel + delete every live Wallet Transaction that references any of
+    these invoices — the credits the test tracked AND the loyalty credits an
+    invoice submit mints on its own when the customer carries a loyalty
+    program; cancelling an invoice under a linked WT complains
+    (frappe.LinkExistsError)."""
+    names = list(dict.fromkeys(n for n in invoice_names if n))
+    if not names:
+        return
+    for wt_name in frappe.get_all(
+        "Wallet Transaction",
+        filters={
+            "reference_doctype": ("in", ("Sales Invoice", "POS Invoice")),
+            "reference_name": ("in", names),
+            "docstatus": ("!=", 2),
+        },
+        pluck="name",
+    ):
+        wt = frappe.get_doc("Wallet Transaction", wt_name)
+        if wt.docstatus == 1:
+            wt.flags.ignore_permissions = True
+            wt.cancel()
+        frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+
 
 def _set_invoice_type(value):
     frappe.db.set_single_value("POS Next Global Settings", "invoice_type", value)
@@ -56,15 +95,9 @@ class TestWalletReturnReversal(FrappeTestCase):
         )
         if not cls.profile:
             raise unittest.SkipTest("no schedule-safe POS Profile")
-        item = frappe.get_all(
-            "Item",
-            filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
-            pluck="name",
-            limit=1,
-        )
-        if not item:
+        cls.item = _pick_item()
+        if not cls.item:
             raise unittest.SkipTest("no stock sales item on site")
-        cls.item = item[0]
         cls.customer = frappe.db.get_value(
             "Customer", {"is_internal_customer": 0}, "name", order_by="creation asc"
         )
@@ -131,14 +164,17 @@ class TestWalletReturnReversal(FrappeTestCase):
 
     def tearDown(self):
         frappe.set_user("Administrator")
-        # wallet rows first: cancelling an invoice under a linked WT complains
-        for wt_name in self._wallet_txns:
-            if frappe.db.exists("Wallet Transaction", wt_name):
-                wt = frappe.get_doc("Wallet Transaction", wt_name)
-                if wt.docstatus == 1:
-                    wt.flags.ignore_permissions = True
-                    wt.cancel()
-                frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+        # wallet rows first: cancelling an invoice under a linked WT complains.
+        # The sweep covers the credits the test tracked AND the loyalty credits
+        # an invoice submit mints on its own (the shared customer carries a
+        # loyalty program).
+        names = list(dict.fromkeys(self._created))
+        names += frappe.get_all(
+            "Sales Invoice",
+            filters={"return_against": getattr(self, "original", ""), "docstatus": ["!=", 2]},
+            pluck="name",
+        )
+        _cancel_wallet_transactions_for(names)
         # a return that failed mid-submit is not tracked in _created; sweep it
         # BEFORE the original (return_against links block the original's cancel)
         for name in frappe.get_all(
@@ -284,6 +320,7 @@ class TestWalletReturnReversal(FrappeTestCase):
         )
 
         self._credit_wallet_against_original(50)
+        original_doc = frappe.get_doc("Sales Invoice", self.original)
         return_doc = frappe.get_doc(
             {
                 "doctype": "Sales Invoice",
@@ -295,6 +332,23 @@ class TestWalletReturnReversal(FrappeTestCase):
                 "items": [{"item_code": self.item, "qty": -1, "rate": 100}],
             }
         )
+        # tax parity: this raw return must sit in the same tax context as the
+        # original (the profile's template taxed the submitted original, e.g.
+        # 111 incl. VAT) or the reversal ratio reads a partial return and the
+        # helper (correctly) takes the partial-debit lane instead of cancel
+        if original_doc.taxes_and_charges:
+            return_doc.taxes_and_charges = original_doc.taxes_and_charges
+            for row in original_doc.get("taxes") or []:
+                return_doc.append(
+                    "taxes",
+                    {
+                        "charge_type": row.charge_type,
+                        "account_head": row.account_head,
+                        "rate": row.rate,
+                        "description": row.description,
+                        "included_in_print_rate": row.get("included_in_print_rate", 0),
+                    },
+                )
         return_doc.flags.ignore_permissions = True
         return_doc.insert()
         self._created.append(return_doc.name)
@@ -372,15 +426,9 @@ class TestLoyaltyConversionFailure(FrappeTestCase):
         )
         if not cls.profile:
             raise unittest.SkipTest("no schedule-safe POS Profile")
-        item = frappe.get_all(
-            "Item",
-            filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
-            pluck="name",
-            limit=1,
-        )
-        if not item:
+        cls.item = _pick_item()
+        if not cls.item:
             raise unittest.SkipTest("no stock sales item on site")
-        cls.item = item[0]
         cls.mode = frappe.get_all(
             "POS Payment Method",
             {"parent": cls.profile.name, "parenttype": "POS Profile"},
@@ -473,20 +521,7 @@ class TestLoyaltyConversionFailure(FrappeTestCase):
         # sweep every wallet row linked to this test's invoices first:
         # cancelling an invoice under a linked WT complains (same discovery
         # as the sibling class above)
-        for name in self._invoices:
-            for wt_name in frappe.get_all(
-                "Wallet Transaction",
-                filters={"reference_doctype": "Sales Invoice", "reference_name": name},
-                pluck="name",
-            ):
-                self._wallet_txns.append(wt_name)
-        for wt_name in dict.fromkeys(self._wallet_txns):
-            if frappe.db.exists("Wallet Transaction", wt_name):
-                wt = frappe.get_doc("Wallet Transaction", wt_name)
-                if wt.docstatus == 1:
-                    wt.flags.ignore_permissions = True
-                    wt.cancel()
-                frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+        _cancel_wallet_transactions_for(self._invoices)
         for name in self._invoices:
             if frappe.db.exists("Sales Invoice", name):
                 doc = frappe.get_doc("Sales Invoice", name)

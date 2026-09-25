@@ -6,11 +6,16 @@ from collections import defaultdict
 
 import frappe
 from erpnext.stock.doctype.batch.batch import get_batch_qty
+from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
+	get_available_batches,
+	get_serial_batch_ledgers,
+	get_stock_ledgers_batches,
+)
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
-from frappe.query_builder.functions import IfNull
+from frappe.query_builder.functions import IfNull, Sum
 from frappe.utils import flt, getdate, nowdate
 
 ITEM_RESULT_FIELDS = [
@@ -1181,6 +1186,44 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 	return dict(result)
 
 
+# innodb_ft_min_token_size is 3 in production (Frappe Cloud) and not tunable
+# there, so shorter search words cannot hit the FULLTEXT index and keep the
+# old substring match (they are common in Indonesian F&B: "es", "mi", "ay").
+FULLTEXT_MIN_TOKEN_SIZE = 3
+# boolean-mode operators; stripped from the word so what a user types is
+# searched for, not interpreted (e.g. "-teh" must not exclude "teh")
+_BOOLEAN_MODE_SPECIALS = set('+-><()~*"@')
+
+
+def build_item_search_condition(search_words):
+	"""Build the word predicate for POS item search over
+	name/item_name/item_group/description (all words ANDed, word-order
+	independent, same semantics as the old per-word CONCAT LIKE).
+
+	Words of FULLTEXT_MIN_TOKEN_SIZE+ characters become MATCH ... AGAINST
+	'+word*' IN BOOLEAN MODE against ft_item_pos_search (prefix match at
+	token start, so "gor" still finds "Goreng"); shorter words keep the
+	substring LIKE.
+
+	Returns:
+		tuple: (sql_fragment, params) in placeholder order.
+	"""
+	search_text = "CONCAT(COALESCE(i.name, ''), ' ', COALESCE(i.item_name, ''), ' ', COALESCE(i.item_group, ''), ' ', COALESCE(i.description, ''))"
+	word_conditions = []
+	params = []
+	for word in search_words:
+		ft_word = "".join(ch for ch in word if ch not in _BOOLEAN_MODE_SPECIALS)
+		if len(ft_word) >= FULLTEXT_MIN_TOKEN_SIZE:
+			word_conditions.append(
+				"MATCH(i.name, i.item_name, i.item_group, i.description) AGAINST(%s IN BOOLEAN MODE)"
+			)
+			params.append(f"+{ft_word}*")
+		else:
+			word_conditions.append(f"{search_text} LIKE %s")
+			params.append(f"%{word}%")
+	return " AND ".join(word_conditions), params
+
+
 @frappe.whitelist()
 def get_items(
 	pos_profile,
@@ -1253,17 +1296,28 @@ def get_items(
 			# Split search term into words for fuzzy matching
 			search_words = [word.strip() for word in effective_search_term.split() if word.strip()]
 
-			# Word-order independent: all words must appear somewhere in item fields
-			search_text = "CONCAT(COALESCE(i.name, ''), ' ', COALESCE(i.item_name, ''), ' ', COALESCE(i.item_group, ''), ' ', COALESCE(i.description, ''))"
-			word_conditions = " AND ".join([f"{search_text} LIKE %s"] * len(search_words))
+			# Word-order independent hybrid: FULLTEXT prefix for words >= 3 chars,
+			# substring LIKE for shorter ones (see build_item_search_condition)
+			word_condition, word_params = build_item_search_condition(search_words)
 
-			# Also match if barcode contains the search term
-			barcode_condition = "ib.barcode = %s"
+			# Also match if a barcode equals the search term. That OR can only
+			# ever match when some barcode equals the whole term, and its mere
+			# presence stops MariaDB using the FULLTEXT index (no index_merge
+			# for FULLTEXT), so probe the indexed barcode column first and keep
+			# the OR only when it is productive.
+			barcode_exists = frappe.db.sql(
+				"SELECT 1 FROM `tabItem Barcode` WHERE barcode = %s LIMIT 1",
+				(effective_search_term,),
+			)
+			if barcode_exists:
+				search_condition = f"(({word_condition}) OR ib.barcode = %s)"
+				word_params.append(effective_search_term)
+			else:
+				search_condition = f"({word_condition})"
 
 			# Combine: match item fields OR match barcode
-			conditions.append(f"(({word_conditions}) OR {barcode_condition})")
-			params.extend([f"%{word}%" for word in search_words])
-			params.append(effective_search_term)  # For barcode matching
+			conditions.append(search_condition)
+			params.extend(word_params)
 
 			# Relevance scoring with case-insensitive comparison
 			# Exact barcode match gets highest priority, use MAX() for grouping
@@ -2328,6 +2382,141 @@ def get_product_bundle_availability(item_code, warehouse):
 		frappe.throw(_("Error fetching bundle availability for {0}: {1}").format(item_code, str(e)))
 
 
+def _pos_reserved_batches_bulk(item_codes, company=None):
+	"""PERF-14: get_reserved_batches_for_pos() with an item_code list.
+
+	Upstream hardcodes a single item_code in its WHERE, so the batch pipeline
+	would need one call per item. Same submitted, unconsolidated POS Invoice
+	rows, only the item filter becomes isin.
+	"""
+	pos_batches = frappe._dict()
+	POS_Invoice = DocType("POS Invoice")
+	POS_Invoice_Item = DocType("POS Invoice Item")
+
+	pos_invoices = (
+		frappe.qb.from_(POS_Invoice)
+		.inner_join(POS_Invoice_Item)
+		.on(POS_Invoice.name == POS_Invoice_Item.parent)
+		.select(
+			POS_Invoice_Item.batch_no,
+			POS_Invoice_Item.qty,
+			POS_Invoice_Item.warehouse,
+			POS_Invoice_Item.use_serial_batch_fields,
+			POS_Invoice_Item.serial_and_batch_bundle,
+		)
+		.where(
+			(POS_Invoice.consolidated_invoice.isnull())
+			& (POS_Invoice.docstatus == 1)
+			& (POS_Invoice_Item.item_code.isin(item_codes))
+		)
+	)
+	if company:
+		pos_invoices = pos_invoices.where(POS_Invoice.company == company)
+
+	pos_invoices = pos_invoices.run(as_dict=True)
+
+	ids = [
+		row.serial_and_batch_bundle
+		for row in pos_invoices
+		if row.serial_and_batch_bundle and not row.use_serial_batch_fields
+	]
+	if ids:
+		# Bundle ids are already item-scoped by the invoice rows above.
+		for d in get_serial_batch_ledgers(docstatus=1, name=ids):
+			key = (d.batch_no, d.warehouse)
+			if key not in pos_batches:
+				pos_batches[key] = frappe._dict({"qty": d.qty, "warehouse": d.warehouse})
+			else:
+				pos_batches[key].qty += d.qty
+
+	# POS invoices having batch without bundle (to handle old POS invoices)
+	for row in pos_invoices:
+		if not row.batch_no:
+			continue
+		key = (row.batch_no, row.warehouse)
+		if key in pos_batches:
+			pos_batches[key]["qty"] += row.qty * -1
+		else:
+			pos_batches[key] = frappe._dict({"qty": row.qty * -1, "warehouse": row.warehouse})
+
+	return pos_batches
+
+
+def _sre_reserved_batches_bulk(item_codes, company=None):
+	"""PERF-14: get_reserved_batches_for_sre() with an item_code list."""
+	sre = DocType("Stock Reservation Entry")
+	sb_entry = DocType("Serial and Batch Entry")
+	query = (
+		frappe.qb.from_(sre)
+		.inner_join(sb_entry)
+		.on(sre.name == sb_entry.parent)
+		.select(
+			sb_entry.batch_no,
+			sre.warehouse,
+			(-1 * Sum(sb_entry.qty - sb_entry.delivered_qty)).as_("qty"),
+		)
+		.where(
+			(sre.docstatus == 1)
+			& (sre.item_code.isin(item_codes))
+			& (sre.delivered_qty < sre.reserved_qty)
+			& (sre.reservation_based_on == "Serial and Batch")
+		)
+		.groupby(sb_entry.batch_no, sre.warehouse)
+	)
+	if company:
+		query = query.where(sre.company == company)
+
+	rows = query.run(as_dict=True)
+	if not rows:
+		return frappe._dict()
+	return frappe._dict(
+		{(d.batch_no, d.warehouse): frappe._dict({"warehouse": d.warehouse, "qty": d.qty}) for d in rows}
+	)
+
+
+def _available_batches_bulk(item_codes, warehouse):
+	"""PERF-14: one sweep of erpnext's batch pipeline for several items.
+
+	get_batch_qty(warehouse=..., item_code=...) runs the whole get_auto_batch_nos()
+	pipeline once per item; its stock queries accept item_code lists, so those
+	builders are reused verbatim and only the two reservation lookups that
+	hardcode a single item_code are re-implemented above. The merge, ordering and
+	qty>0 filter mirror get_auto_batch_nos so per-item results stay identical.
+	"""
+	kwargs = frappe._dict(
+		{
+			"item_code": item_codes,
+			"warehouse": warehouse,
+			"based_on": frappe.get_single_value("Stock Settings", "pick_serial_and_batch_based_on"),
+		}
+	)
+
+	available_batches = get_available_batches(kwargs)
+	stock_ledgers_batches = get_stock_ledgers_batches(kwargs)
+	pos_reserved_batches = _pos_reserved_batches_bulk(item_codes)
+	sre_reserved_batches = _sre_reserved_batches_bulk(item_codes)
+
+	# update_available_batches(): merge reservations into the available rows,
+	# appending keys not seen yet, in upstream iteration order.
+	for reserved_batches in (stock_ledgers_batches, pos_reserved_batches, sre_reserved_batches):
+		for (batch_no, wh), data in reserved_batches.items():
+			batch_not_exists = True
+			for batch in available_batches:
+				if batch.batch_no == batch_no and batch.warehouse == wh:
+					batch.qty += data.qty
+					batch_not_exists = False
+			if batch_not_exists:
+				available_batches.append(data)
+
+	if kwargs.based_on == "Expiry":
+		available_batches = sorted(
+			available_batches, key=lambda x: x.expiry_date or getdate("9999-12-31")
+		)
+
+	precision = frappe.get_precision("Stock Ledger Entry", "actual_qty")
+	return [d for d in available_batches if flt(d.qty, precision) > 0]
+
+
 @frappe.whitelist()
 def get_batch_serial_data_for_items(item_codes, warehouse):
 	"""
@@ -2388,30 +2577,53 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 
 		# Fetch batch data for batch-tracked items
 		if batch_items:
-			for item_code in batch_items:
-				batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
-				if batch_list:
-					for batch in batch_list:
-						if batch.qty > 0 and batch.batch_no:
-							batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
-							is_not_expired = str(batch_doc.expiry_date) > str(
-								today
-							) or batch_doc.expiry_date in ["", None]
-							is_enabled = batch_doc.disabled == 0
+			# PERF-14: one pipeline sweep for every item plus one bulk Batch
+			# metadata fetch (was get_batch_qty(...) + get_cached_doc("Batch")
+			# per item). Semantics of the per-item results are unchanged.
+			available_batches = _available_batches_bulk(batch_items, warehouse)
+			batch_docs = (
+				{
+					d.name: d
+					for d in frappe.get_all(
+						"Batch",
+						filters={"name": ["in", [b.batch_no for b in available_batches]]},
+						fields=["name", "item", "expiry_date", "disabled", "manufacturing_date"],
+					)
+				}
+				if available_batches
+				else {}
+			)
 
-							if is_not_expired and is_enabled:
-								result[item_code]["batch_no_data"].append(
-									{
-										"batch_no": batch.batch_no,
-										"batch_qty": batch.qty,
-										"expiry_date": str(batch_doc.expiry_date)
-										if batch_doc.expiry_date
-										else None,
-										"manufacturing_date": str(batch_doc.manufacturing_date)
-										if batch_doc.manufacturing_date
-										else None,
-									}
-								)
+			for batch in available_batches:
+				if not (batch.qty > 0 and batch.batch_no):
+					continue
+				batch_doc = batch_docs.get(batch.batch_no)
+				if not batch_doc:
+					continue
+
+				is_not_expired = str(batch_doc.expiry_date) > str(
+					today
+				) or batch_doc.expiry_date in ["", None]
+				is_enabled = batch_doc.disabled == 0
+
+				if is_not_expired and is_enabled:
+					# A batch belongs to one item; stock-ledger rows carry the item,
+					# bundle rows fall back to the Batch's own item link.
+					target = result.get(batch_doc.item) or result.get(batch.get("item_code"))
+					if not target:
+						continue
+					target["batch_no_data"].append(
+						{
+							"batch_no": batch.batch_no,
+							"batch_qty": batch.qty,
+							"expiry_date": str(batch_doc.expiry_date)
+							if batch_doc.expiry_date
+							else None,
+							"manufacturing_date": str(batch_doc.manufacturing_date)
+							if batch_doc.manufacturing_date
+							else None,
+						}
+					)
 
 		# Fetch serial data for serial-tracked items in bulk
 		if serial_items:

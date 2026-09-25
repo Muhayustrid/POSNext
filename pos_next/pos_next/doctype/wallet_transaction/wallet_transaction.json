@@ -44,7 +44,8 @@
    "in_standard_filter": 1,
    "label": "Transaction Type",
    "options": "\nCredit\nDebit\nLoyalty Credit",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "wallet",
@@ -111,7 +112,8 @@
    "fieldname": "reference_name",
    "fieldtype": "Dynamic Link",
    "label": "Reference Name",
-   "options": "reference_doctype"
+   "options": "reference_doctype",
+   "search_index": 1
   },
   {
    "fieldname": "section_break_details",

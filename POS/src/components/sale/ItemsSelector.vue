@@ -610,8 +610,8 @@
 					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
 						{{
 							__("{0} - {1} of {2}", [
-								(currentPage - 1) * itemsPerPage + 1,
-								Math.min(currentPage * itemsPerPage, paginationTotal),
+								(currentPage - 1) * activePageSize + 1,
+								Math.min(currentPage * activePageSize, paginationTotal),
 								paginationTotal,
 							])
 						}}
@@ -922,8 +922,8 @@
 					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
 						{{
 							__("{0} - {1} of {2}", [
-								(currentPage - 1) * itemsPerPage + 1,
-								Math.min(currentPage * itemsPerPage, paginationTotal),
+								(currentPage - 1) * activePageSize + 1,
+								Math.min(currentPage * activePageSize, paginationTotal),
 								paginationTotal,
 							])
 						}}
@@ -1139,10 +1139,27 @@ const currentPage = ref(1);
 const itemsPerPage = ref(performanceConfig.get("itemsPerPage") || 100);
 const lastFilterSignature = ref("");
 
-// Computed paginated items — server fetches one page at a time,
-// so filteredItems already contains only the current page's items.
+// PERF-12: search returns up to searchBatchSize (500) scored results at once;
+// slice them client-side into pages of 50 instead of rendering everything.
+// Server browse pagination (itemsPerPage / fetchPage) is untouched.
+const SEARCH_PAGE_SIZE = 50;
+
+const isSearching = computed(() => Boolean(searchTerm.value?.trim()));
+
+const activePageSize = computed(() =>
+	isSearching.value ? SEARCH_PAGE_SIZE : itemsPerPage.value
+);
+
+// Computed paginated items — during browse, the server fetches one page at a
+// time so filteredItems already holds only the current page's items; during
+// search it holds every hit, so slice off the active page client-side.
 const displayedItems = computed(() => {
 	if (!filteredItems.value) return [];
+	if (isSearching.value) {
+		const page = Math.min(currentPage.value, totalPages.value) || 1;
+		const start = (page - 1) * SEARCH_PAGE_SIZE;
+		return filteredItems.value.slice(start, start + SEARCH_PAGE_SIZE);
+	}
 	return filteredItems.value;
 });
 
@@ -1153,11 +1170,10 @@ const paginationTotal = computed(() => {
 });
 
 // Total pages is based on server-side total count (not local array length).
-// During search, fall back to local results since server count is for browsing.
+// During search, paginate the local results at SEARCH_PAGE_SIZE per page.
 const totalPages = computed(() => {
-	if (searchTerm.value?.trim()) {
-		// During search, we don't paginate server-side — show all results
-		return 1;
+	if (isSearching.value) {
+		return Math.ceil((filteredItems.value?.length || 0) / SEARCH_PAGE_SIZE);
 	}
 	if (totalServerItems.value > 0) {
 		return Math.ceil(totalServerItems.value / itemsPerPage.value);
@@ -1558,29 +1574,22 @@ function handleFilterClick(value) {
 	itemStore.setSelectedItemGroup(value);
 }
 
-// Pagination functions — each page fetches fresh data from server
+// Pagination functions — browse mode fetches each page from the server;
+// search mode only moves the client-side slice window (no fetch).
 function goToPage(page) {
-	if (page >= 1 && page <= totalPages.value && page !== currentPage.value) {
-		skipPageReset.value = true;
-		currentPage.value = page;
-		itemStore.fetchPage(page);
-	}
+	if (page < 1 || page > totalPages.value || page === currentPage.value) return;
+	currentPage.value = page;
+	if (isSearching.value) return;
+	skipPageReset.value = true;
+	itemStore.fetchPage(page);
 }
 
 function nextPage() {
-	if (currentPage.value < totalPages.value) {
-		skipPageReset.value = true;
-		currentPage.value++;
-		itemStore.fetchPage(currentPage.value);
-	}
+	goToPage(currentPage.value + 1);
 }
 
 function previousPage() {
-	if (currentPage.value > 1) {
-		skipPageReset.value = true;
-		currentPage.value--;
-		itemStore.fetchPage(currentPage.value);
-	}
+	goToPage(currentPage.value - 1);
 }
 
 function getPaginationRange() {

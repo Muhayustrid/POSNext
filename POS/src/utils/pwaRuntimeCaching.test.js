@@ -26,4 +26,14 @@ describe("workbox runtimeCaching in vite.config.js (SEC-17)", () => {
 	it("no longer configures the 24h api-cache", () => {
 		expect(config).not.toContain("api-cache");
 	});
+
+	it("PERF-20: no runtime cache doubles the precached build assets", () => {
+		// Every /assets/pos_next/pos/ file is hashed and already in the workbox
+		// precache manifest (globPatterns **/*.js/css/...). A runtime
+		// CacheFirst route over the same URLs is a redundant second cache
+		// that can hold stale versions the precache has already replaced.
+		expect(config).not.toContain("pos-assets-cache");
+		// The hashed-asset URL pattern that fed it must be gone too.
+		expect(config).not.toContain("/assets/pos_next/pos/.*/i");
+	});
 });

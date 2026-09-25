@@ -222,17 +222,11 @@ export default defineConfig({
 							},
 						},
 					},
-					{
-						urlPattern: /\/assets\/pos_next\/pos\/.*/i,
-						handler: "CacheFirst",
-						options: {
-							cacheName: "pos-assets-cache",
-							expiration: {
-								maxEntries: 500,
-								maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
-							},
-						},
-					},
+					// PERF-20: no runtime cache for /assets/pos_next/pos/ — every
+					// file there is content-hashed and already in the workbox
+					// precache manifest (globPatterns). A second CacheFirst route
+					// over the same URLs would double-store each asset and could
+					// pin a stale version the precache has already replaced.
 					// Cache product images with StaleWhileRevalidate for better UX
 					{
 						urlPattern: /\/files\/.*\.(jpg|jpeg|png|gif|webp|svg)$/i,
@@ -279,6 +273,22 @@ export default defineConfig({
 		emptyOutDir: true,
 		target: "es2015",
 		sourcemap: enableSourceMap,
+		rollupOptions: {
+			output: {
+				// PERF-13: split the heavyweight vendors out of the entry/app
+				// chunks so the initial chunk stays cacheable and parseable.
+				// Only the four biggest deps are split; everything else keeps
+				// Rollup's default chunking.
+				manualChunks(id) {
+					if (!id.includes("node_modules")) return undefined;
+					if (id.includes("node_modules/qz-tray")) return "vendor-qz-tray";
+					if (id.includes("node_modules/html2canvas")) return "vendor-html2canvas";
+					if (id.includes("node_modules/dexie")) return "vendor-dexie";
+					if (id.includes("node_modules/frappe-ui")) return "vendor-frappe-ui";
+					return undefined;
+				},
+			},
+		},
 	},
 	worker: {
 		format: "es",

@@ -114,8 +114,9 @@ def check_opening_shift(user=None):
 		return None
 	data = {}
 	data["pos_opening_shift"] = frappe.get_doc("POS Opening Shift", shift_data["name"])
-	data["pos_profile"] = frappe.get_doc("POS Profile", shift_data["pos_profile"])
-	data["company"] = frappe.get_doc("Company", data["pos_profile"].company)
+	# read-only masters come from the cache (never mutated here, only serialized)
+	data["pos_profile"] = frappe.get_cached_doc("POS Profile", shift_data["pos_profile"])
+	data["company"] = frappe.get_cached_doc("Company", data["pos_profile"].company)
 	# Include server timestamp so frontend can compute shift duration
 	# without timezone mismatch (period_start_date is in server timezone)
 	data["server_now"] = str(get_datetime())
@@ -173,8 +174,9 @@ def create_opening_shift(pos_profile, company, balance_details):
 
 	data = {}
 	data["pos_opening_shift"] = new_pos_opening.as_dict()
-	data["pos_profile"] = frappe.get_doc("POS Profile", pos_profile)
-	data["company"] = frappe.get_doc("Company", company)
+	# read-only masters come from the cache (never mutated here, only serialized)
+	data["pos_profile"] = frappe.get_cached_doc("POS Profile", pos_profile)
+	data["company"] = frappe.get_cached_doc("Company", company)
 	# Server timestamp so the frontend can anchor the schedule deadline clock
 	data["server_now"] = str(get_datetime())
 

@@ -241,34 +241,43 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 	Drafts are counted deliberately: their outstanding_amount is 0 until
 	submit, yet the wallet payment already reserves the balance. The old
 	``outstanding_amount > 0`` filter let the same balance be spent twice.
-	"""
-	pending_amount = 0.0
 
+	This sum feeds the double-spend guard, so it counts EVERY open invoice:
+	one aggregate query per doctype — never a row-limited window (which let a
+	customer with many open wallet invoices overspend the earmarked balance)
+	and never a lookup per payment row.
+	"""
+	wallet_modes = frappe.get_all("Mode of Payment", filters={"is_wallet_payment": 1}, pluck="name")
+	if not wallet_modes:
+		return 0.0
+
+	pending_amount = 0.0
 	for doctype in ("Sales Invoice", "POS Invoice"):
 		if not frappe.db.table_exists(doctype):
 			continue
 
-		invoice_names = frappe.get_all(
-			doctype,
-			filters={"customer": customer, "docstatus": ["in", [0, 1]], "is_pos": 1},
-			pluck="name",
-		)
-		if not invoice_names:
-			continue
+		values = {"parenttype": doctype, "customer": customer, "wallet_modes": wallet_modes}
+		exclude_condition = ""
+		if exclude_invoice:
+			exclude_condition = "AND sip.parent != %(exclude_invoice)s"
+			values["exclude_invoice"] = exclude_invoice
 
-		payments = frappe.get_all(
-			"Sales Invoice Payment",  # child doctype shared by both invoice types
-			filters={"parenttype": doctype, "parent": ["in", invoice_names]},
-			fields=["parent", "mode_of_payment", "amount"],
-		)
-
-		for payment in payments:
-			if exclude_invoice and payment.parent == exclude_invoice:
-				continue
-
-			is_wallet = frappe.db.get_value("Mode of Payment", payment.mode_of_payment, "is_wallet_payment")
-			if is_wallet:
-				pending_amount += flt(payment.amount)
+		pending = frappe.db.sql(
+			f"""
+			SELECT SUM(sip.amount) AS pending
+			FROM `tabSales Invoice Payment` sip
+			JOIN `tab{doctype}` si ON si.name = sip.parent
+			WHERE sip.parenttype = %(parenttype)s
+				AND si.customer = %(customer)s
+				AND si.docstatus IN (0, 1)
+				AND si.is_pos = 1
+				AND sip.mode_of_payment IN %(wallet_modes)s
+				{exclude_condition}
+			""",
+			values,
+			as_dict=True,
+		)[0].pending
+		pending_amount += flt(pending)
 
 	return pending_amount
 

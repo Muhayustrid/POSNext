@@ -5,6 +5,7 @@ import re
 
 import frappe
 from frappe import _
+from frappe.query_builder.functions import Count
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 
@@ -79,6 +80,64 @@ def _items_with_names(codes):
 		)
 	}
 	return [{"item_code": code, "item_name": rows.get(code) or code} for code in codes]
+
+
+# PERF-16: child table per enriched fieldname (get_promotions reads only these).
+PROMOTIONAL_SCHEME_CHILDREN = {
+	"Promotional Scheme Price Discount": "price_discount_slabs",
+	"Promotional Scheme Product Discount": "product_discount_slabs",
+	"Pricing Rule Item Code": "items",
+	"Pricing Rule Item Group": "item_groups",
+	"Pricing Rule Brand": "brands",
+}
+
+PRICING_RULE_CHILDREN = {
+	"Pricing Rule Item Code": "items",
+	"Pricing Rule Item Group": "item_groups",
+	"Pricing Rule Brand": "brands",
+}
+
+
+def _children_by_parent(doctype, parents, child_tables):
+	"""PERF-16: child rows of many parents in one query per table, idx order
+	inside each parent — the rows get_doc would have loaded."""
+	rows_by_parent = {}
+	if not parents:
+		return rows_by_parent
+	for child_doctype, fieldname in child_tables.items():
+		for row in frappe.get_all(
+			child_doctype,
+			filters={"parenttype": doctype, "parent": ["in", parents]},
+			fields=["*"],
+			order_by="parent asc, idx asc",
+		):
+			rows_by_parent.setdefault(row.parent, {}).setdefault(fieldname, []).append(row)
+	return rows_by_parent
+
+
+def _bulk_rule_counts_and_caps(scheme_names, need_caps):
+	"""PERF-16: pricing-rule counts per scheme (one GROUP BY) plus campaign
+	pos_offer_max_discount first-row lookup, both for all schemes at once."""
+	if not scheme_names:
+		return {}, {}
+	_rule = frappe.qb.DocType("Pricing Rule")
+	count_rows = (
+		frappe.qb.from_(_rule)
+		.select(_rule.promotional_scheme, Count(_rule.name).as_("cnt"))
+		.where(_rule.promotional_scheme.isin(scheme_names))
+		.groupby(_rule.promotional_scheme)
+		.run(as_dict=True)
+	)
+	counts = {row.promotional_scheme: row.cnt for row in count_rows}
+	caps = {}
+	if need_caps:
+		for row in frappe.get_all(
+			"Pricing Rule",
+			filters={"promotional_scheme": ["in", scheme_names]},
+			fields=["promotional_scheme", "pos_offer_max_discount"],
+		):
+			caps.setdefault(row.promotional_scheme, row.pos_offer_max_discount)
+	return counts, caps
 
 
 def _reject_campaign_mutation():
@@ -202,25 +261,34 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 	# Enrich with pricing rules count and details
 	today = getdate(nowdate())
 
+	# PERF-16: bulk enrichment (was db.count + get_doc + get_value per scheme).
+	scheme_names = [scheme.name for scheme in schemes]
+	scheme_children = _children_by_parent("Promotional Scheme", scheme_names, PROMOTIONAL_SCHEME_CHILDREN)
+	rule_counts, pos_offer_caps = _bulk_rule_counts_and_caps(
+		scheme_names, need_caps=any(scheme.get("pos_offer") for scheme in schemes)
+	)
+
 	for scheme in schemes:
 		# Mark as Promotional Scheme
 		scheme["source"] = "Promotional Scheme"
 
 		# Get pricing rules count
-		scheme["pricing_rules_count"] = frappe.db.count("Pricing Rule", {"promotional_scheme": scheme.name})
+		scheme["pricing_rules_count"] = rule_counts.get(scheme.name, 0)
 
-		# Get discount slabs
-		scheme_doc = frappe.get_doc("Promotional Scheme", scheme.name)
+		# Get discount slabs (apply_on rides along for _target_summary)
+		scheme_doc = frappe._dict(
+			{**scheme_children.get(scheme.name, {}), "apply_on": scheme.apply_on}
+		)
 		scheme["price_slabs"] = len(scheme_doc.price_discount_slabs or [])
 		scheme["product_slabs"] = len(scheme_doc.product_discount_slabs or [])
 
-		# Get items/groups/brands count
+		# Get items/groups/brands count (.get: "items" collides with dict.items)
 		if scheme.apply_on == "Item Code":
-			scheme["items_count"] = len(scheme_doc.items or [])
+			scheme["items_count"] = len(scheme_doc.get("items") or [])
 		elif scheme.apply_on == "Item Group":
-			scheme["items_count"] = len(scheme_doc.item_groups or [])
+			scheme["items_count"] = len(scheme_doc.get("item_groups") or [])
 		elif scheme.apply_on == "Brand":
-			scheme["items_count"] = len(scheme_doc.brands or [])
+			scheme["items_count"] = len(scheme_doc.get("brands") or [])
 		else:
 			scheme["items_count"] = 0
 
@@ -229,14 +297,7 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 		scheme["targets"] = _target_summary(scheme_doc)
 		if scheme.get("pos_offer"):
 			# POS Offer campaigns stamp the per-unit cap on their rules
-			scheme["max_discount"] = flt(
-				frappe.db.get_value(
-					"Pricing Rule",
-					{"promotional_scheme": scheme.name},
-					"pos_offer_max_discount",
-				)
-				or 0
-			)
+			scheme["max_discount"] = flt(pos_offer_caps.get(scheme.name) or 0)
 
 		# Calculate status based on dates and disable flag
 		if scheme.disable:
@@ -278,6 +339,27 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 		order_by="modified desc",
 	)
 
+	# PERF-16: bulk fetch of parent extras and child rows (was get_doc per rule).
+	pr_names = [pr.name for pr in pricing_rules]
+	pr_children = _children_by_parent("Pricing Rule", pr_names, PRICING_RULE_CHILDREN)
+	pr_extras = {
+		d.name: d
+		for d in frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", pr_names]},
+			fields=[
+				"name",
+				"apply_on",
+				"rate_or_discount",
+				"discount_percentage",
+				"discount_amount",
+				"price_or_product_discount",
+				"free_item",
+				"free_qty",
+			],
+		)
+	}
+
 	# Transform pricing rules to match promotional scheme structure
 	for pr in pricing_rules:
 		# Mark as Pricing Rule
@@ -287,13 +369,13 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 		pr["product_slabs"] = 0
 
 		# Get items/groups/brands count
-		pr_doc = frappe.get_doc("Pricing Rule", pr.name)
+		pr_doc = frappe._dict({**(pr_extras.get(pr.name) or {}), **pr_children.get(pr.name, {})})
 		if pr.apply_on == "Item Code":
-			pr["items_count"] = len(pr_doc.items or [])
+			pr["items_count"] = len(pr_doc.get("items") or [])
 		elif pr.apply_on == "Item Group":
-			pr["items_count"] = len(pr_doc.item_groups or [])
+			pr["items_count"] = len(pr_doc.get("item_groups") or [])
 		elif pr.apply_on == "Brand":
-			pr["items_count"] = len(pr_doc.brands or [])
+			pr["items_count"] = len(pr_doc.get("brands") or [])
 		else:
 			pr["items_count"] = 0
 

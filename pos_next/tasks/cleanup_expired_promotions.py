@@ -4,7 +4,7 @@
 """Scheduled tasks for POS Next."""
 
 import frappe
-from frappe.utils import getdate, nowdate
+from frappe.utils import getdate, nowdate, now
 
 
 def disable_expired_pricing_rules():
@@ -32,23 +32,26 @@ def disable_expired_pricing_rules():
 			frappe.logger().info("No expired pricing rules found")
 			return {"success": True, "disabled_count": 0, "message": "No expired pricing rules to disable"}
 
-		disabled_count = 0
 		errors = []
 
-		for rule in expired_rules:
-			try:
-				# Use SQL update for better performance
-				frappe.db.set_value("Pricing Rule", rule.name, "disable", 1, update_modified=True)
-				disabled_count += 1
-
-				frappe.logger().info(
-					f"Disabled expired pricing rule: {rule.name} - {rule.title} (expired: {rule.valid_upto})"
-				)
-
-			except Exception as e:
-				error_msg = f"Failed to disable pricing rule {rule.name}: {e!s}"
-				frappe.logger().error(error_msg)
-				errors.append(error_msg)
+		# One bulk UPDATE carries the same predicate the SELECT above applied;
+		# per-rule set_value round trips (and per-rule error handling) collapsed
+		# into a single statement. Non-empty: the early return above guarantees it.
+		try:
+			frappe.db.sql(
+				"""
+				UPDATE `tabPricing Rule`
+				SET disable = 1, modified = %(now)s
+				WHERE name IN %(names)s
+				""",
+				{"names": [rule.name for rule in expired_rules], "now": now()},
+			)
+			disabled_count = len(expired_rules)
+		except Exception as e:
+			error_msg = f"Failed to disable expired pricing rules: {e!s}"
+			frappe.logger().error(error_msg)
+			errors.append(error_msg)
+			disabled_count = 0
 
 		# Commit all changes
 		frappe.db.commit()
@@ -105,23 +108,25 @@ def disable_expired_promotional_schemes():
 				"message": "No expired promotional schemes to disable",
 			}
 
-		disabled_count = 0
 		errors = []
 
-		for scheme in expired_schemes:
-			try:
-				# Use SQL update for better performance
-				frappe.db.set_value("Promotional Scheme", scheme.name, "disable", 1, update_modified=True)
-				disabled_count += 1
-
-				frappe.logger().info(
-					f"Disabled expired promotional scheme: {scheme.name} (expired: {scheme.valid_upto})"
-				)
-
-			except Exception as e:
-				error_msg = f"Failed to disable promotional scheme {scheme.name}: {e!s}"
-				frappe.logger().error(error_msg)
-				errors.append(error_msg)
+		# One bulk UPDATE, same predicate as the SELECT above; see the pricing
+		# rules loop for the rationale. Non-empty: the early return guarantees it.
+		try:
+			frappe.db.sql(
+				"""
+				UPDATE `tabPromotional Scheme`
+				SET disable = 1, modified = %(now)s
+				WHERE name IN %(names)s
+				""",
+				{"names": [scheme.name for scheme in expired_schemes], "now": now()},
+			)
+			disabled_count = len(expired_schemes)
+		except Exception as e:
+			error_msg = f"Failed to disable expired promotional schemes: {e!s}"
+			frappe.logger().error(error_msg)
+			errors.append(error_msg)
+			disabled_count = 0
 
 		# Commit all changes
 		frappe.db.commit()

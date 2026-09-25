@@ -72,23 +72,30 @@ def _package_is_valid_on(package, on_date):
 	return True
 
 
-def _serialize_package(doc):
-	"""Full package definition — enough for the POS to render and price offline."""
-	component_codes = {row.item_code for row in doc.items or []}
-	component_codes |= {row.item_code for row in doc.options or []}
-	stock_flags = (
+def _stock_flags_map(item_codes):
+	"""PERF-05/15 pattern: one bulk is_stock_item lookup instead of per row.
+	Missing items resolve through .get() (None), so callers keep their old
+	default semantics."""
+	return (
 		{
 			code: cint(flag)
 			for code, flag in frappe.get_all(
 				"Item",
-				filters={"name": ["in", list(component_codes)]},
+				filters={"name": ["in", list(item_codes)]},
 				fields=["name", "is_stock_item"],
 				as_list=True,
 			)
 		}
-		if component_codes
+		if item_codes
 		else {}
 	)
+
+
+def _serialize_package(doc):
+	"""Full package definition — enough for the POS to render and price offline."""
+	component_codes = {row.item_code for row in doc.items or []}
+	component_codes |= {row.item_code for row in doc.options or []}
+	stock_flags = _stock_flags_map(component_codes)
 
 	return {
 		"name": doc.name,
@@ -236,6 +243,11 @@ def quote(package_name, choices, pos_profile, warehouse=None):
 	doc = frappe.get_cached_doc("POS Package", package_name)
 	indexed = _index_choices(choices)
 
+	# PERF-15: one bulk lookup for every component row (was db.get_value per row).
+	component_codes = {row.item_code for row in doc.items or []}
+	component_codes |= {row.item_code for row in doc.options or []}
+	stock_flags = _stock_flags_map(component_codes)
+
 	options_by_id = {row.name: row for row in doc.options or []}
 	group_keys = {group.group_key for group in doc.groups or []}
 
@@ -283,7 +295,7 @@ def quote(package_name, choices, pos_profile, warehouse=None):
 					"uom": option.uom,
 					"rate": 0.0,
 					"role": COMPONENT_ROLE,
-					"is_stock_item": cint(frappe.db.get_value("Item", option.item_code, "is_stock_item")),
+					"is_stock_item": cint(stock_flags.get(option.item_code)),
 				}
 			)
 			snapshot_selections.append(
@@ -307,7 +319,7 @@ def quote(package_name, choices, pos_profile, warehouse=None):
 				"uom": row.uom,
 				"rate": 0.0,
 				"role": COMPONENT_ROLE,
-				"is_stock_item": cint(frappe.db.get_value("Item", row.item_code, "is_stock_item")),
+				"is_stock_item": cint(stock_flags.get(row.item_code)),
 			}
 		)
 
@@ -453,12 +465,17 @@ def _validate_return_packages(doc):
 
 	precision = frappe.get_precision("Sales Invoice Item", "qty") or 3
 
+	# PERF-15: one fetch for every package instance (was one get_all per instance).
+	original_rows_by_instance = {instance: [] for instance in instances}
+	for row in frappe.get_all(
+		"Sales Invoice Item",
+		filters={"parent": doc.return_against, "pos_package_instance": ["in", list(instances)]},
+		fields=["item_code", "qty", "rate", "pos_package_role", "pos_package_instance"],
+	):
+		original_rows_by_instance[row["pos_package_instance"]].append(row)
+
 	for instance, rows in instances.items():
-		original_rows = frappe.get_all(
-			"Sales Invoice Item",
-			filters={"parent": doc.return_against, "pos_package_instance": instance},
-			fields=["item_code", "qty", "rate", "pos_package_role"],
-		)
+		original_rows = original_rows_by_instance[instance]
 		if not original_rows:
 			frappe.throw(
 				_("Package {0} does not exist on invoice {1}.").format(

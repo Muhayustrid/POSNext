@@ -402,6 +402,30 @@ def _set_invoice_type(value):
 		pass  # not cached yet (`in frappe.local` is unreliable on v16)
 
 
+def _cancel_wallet_transactions_for(invoice_names):
+	"""Cancel + delete every live Wallet Transaction that references any of
+	these invoices: cancelling an invoice under a linked WT complains
+	(frappe.LinkExistsError), and a submit mints loyalty credits on its own
+	when the customer carries a loyalty program."""
+	names = list(dict.fromkeys(n for n in invoice_names if n))
+	if not names:
+		return
+	for wt_name in frappe.get_all(
+		"Wallet Transaction",
+		filters={
+			"reference_doctype": ("in", ("Sales Invoice", "POS Invoice")),
+			"reference_name": ("in", names),
+			"docstatus": ("!=", 2),
+		},
+		pluck="name",
+	):
+		wt = frappe.get_doc("Wallet Transaction", wt_name)
+		if wt.docstatus == 1:
+			wt.flags.ignore_permissions = True
+			wt.cancel()
+		frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+
+
 class TestCouponReleaseOnCancel(IntegrationTestCase):
 	"""A1: cancel hands the claimed coupon use back through the real
 	on_cancel wiring — both the POS Invoice path (pos_invoice_events) and the
@@ -430,7 +454,13 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 			raise unittest.SkipTest("no schedule-safe POS Profile")
 		item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters=[
+				["disabled", "=", 0],
+				["is_sales_item", "=", 1],
+				["is_stock_item", "=", 1],
+				["name", "not like", "\\_PNXT\\_%"],
+			],
+			order_by="creation asc",
 			pluck="name",
 			limit=1,
 		)
@@ -440,6 +470,32 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 		self.customer = get_default_customer()
 		if not self.customer:
 			raise unittest.SkipTest("no non-internal customer")
+		# the shared default customer may carry a loyalty program (residue of
+		# a crashed COR-BE-16 run or a real assignment): a submit would then
+		# mint a loyalty Wallet Transaction for the invoice, and for a POS
+		# Invoice that WT's Sales Invoice reference does not even validate.
+		# Coupon quota is orthogonal — park the program for the test.
+		self._loyalty_backup = frappe.db.get_value("Customer", self.customer, "loyalty_program")
+		frappe.db.set_value(
+			"Customer", self.customer, "loyalty_program", None, update_modified=False
+		)
+
+		def _restore_loyalty():
+			# guaranteed restore even if setUp raises after the park (unittest
+			# runs cleanups when setUp fails; tearDown would be skipped) — and
+			# it must COMMIT: tearDown has already committed the parked (NULL)
+			# state, so an uncommitted restore here would be rolled back by
+			# the test framework and strand NULL on this real customer
+			frappe.db.set_value(
+				"Customer",
+				self.customer,
+				"loyalty_program",
+				self._loyalty_backup,
+				update_modified=False,
+			)
+			frappe.db.commit()
+
+		self.addCleanup(_restore_loyalty)
 		self.mode = frappe.get_all(
 			"POS Payment Method",
 			{"parent": self.profile.name, "parenttype": "POS Profile"},
@@ -490,6 +546,8 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 				doctype, {"posa_pos_opening_shift": self.shift.name}, pluck="name"
 			):
 				self._created.append(name)
+		# wallet rows first: cancelling an invoice under a linked WT complains
+		_cancel_wallet_transactions_for(dict.fromkeys(self._created))
 		for name in dict.fromkeys(self._created):
 			for doctype in ("POS Invoice", "Sales Invoice"):
 				if frappe.db.exists(doctype, name):
