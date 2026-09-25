@@ -414,6 +414,11 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 
 	def setUp(self):
 		self._created = []
+		# restore target captured before any flip in this test (tearDown must
+		# leave the site in the mode it started in, not force Sales mode)
+		self._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
 		self.profile = frappe.db.get_value(
 			"POS Profile",
 			_PROFILE_FILTER,
@@ -502,7 +507,7 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 			"POS Opening Shift", self.shift.name, "docstatus", 2, update_modified=False
 		)
 		frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
-		_set_invoice_type(SALES_INVOICE)
+		_set_invoice_type(getattr(self, "_invoice_type_baseline", None) or SALES_INVOICE)
 		frappe.db.commit()
 
 	def _payload(self, coupon_code=None):

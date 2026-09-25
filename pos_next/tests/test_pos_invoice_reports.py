@@ -156,9 +156,24 @@ class TestSIModeCountsConsolidated(FrappeTestCase):
 	anti-double-count behavior in POS Invoice mode is covered by
 	TestReportUnionCountsOnce.)"""
 
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
+
 	def setUp(self):
 		# deterministic on the shared site: default mode (guard mock-neutralised)
 		_set_invoice_type(SALES_INVOICE)
+
+	@classmethod
+	def tearDownClass(cls):
+		# leave the site in the mode this module found it in — a forced Sales
+		# mode leak poisons later modules' doctype resolution
+		_set_invoice_type(getattr(cls, "_invoice_type_baseline", None) or SALES_INVOICE)
+		frappe.db.commit()
+		super().tearDownClass()
 
 	def test_si_mode_union_counts_consolidated(self):
 		from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union

@@ -36,10 +36,19 @@ def apply_tax_inclusive(doc):
 	This function reads the tax_inclusive setting from POS Settings
 	and applies it to all taxes in the invoice (except Actual charge type).
 
+	For returns with a return_against, the original invoice's
+	included_in_print_rate flags are copied instead of today's setting, so the
+	return's tax numbers always match the invoice it corrects (COR-BE-08).
+
 	Args:
 		doc: Sales Invoice document
 	"""
 	if not doc.pos_profile:
+		return
+
+	if doc.get("is_return") and doc.get("return_against"):
+		if _copy_tax_inclusive_from_original(doc):
+			doc.calculate_taxes_and_totals()
 		return
 
 	try:
@@ -68,6 +77,40 @@ def apply_tax_inclusive(doc):
 	# Recalculate if we made changes
 	if has_changes:
 		doc.calculate_taxes_and_totals()
+
+
+def _copy_tax_inclusive_from_original(doc):
+	"""COR-BE-08: mirror the original invoice's included_in_print_rate flags.
+
+	A return is a correction of an existing invoice: its taxes must carry the
+	inclusivity the ORIGINAL was made with, not the toggle as it happens to be
+	set today. Rows are matched by account_head; rows the original doesn't
+	have are left as the (honest, copied-from-original) client sent them.
+
+	Returns True when any flag changed (caller recalculates).
+	"""
+	original = {
+		row.account_head: cint(row.included_in_print_rate)
+		for row in frappe.get_all(
+			"Sales Taxes and Charges",
+			filters={"parenttype": "Sales Invoice", "parent": doc.get("return_against")},
+			fields=["account_head", "included_in_print_rate"],
+		)
+	}
+	if not original:
+		return False
+
+	has_changes = False
+	for tax in doc.get("taxes", []):
+		if tax.charge_type == "Actual":
+			continue
+		value = original.get(tax.account_head)
+		if value is None:
+			continue
+		if cint(tax.included_in_print_rate) != value:
+			tax.included_in_print_rate = value
+			has_changes = True
+	return has_changes
 
 
 def auto_assign_loyalty_program_on_invoice(doc):

@@ -454,7 +454,14 @@ export function useInvoice() {
 			const oldDiscount = item.discount_amount || 0;
 			const oldQuantity = item.quantity;
 
-			const newQuantity = Number.parseFloat(quantity) || 1;
+			// COR-FE-12: absent values keep the old default of 1, but an
+			// explicit 0 or negative is rejected instead of being silently
+			// "fixed" to 1 (which would sell a unit nobody asked for).
+			const parsedQuantity = Number.parseFloat(quantity);
+			const newQuantity = Number.isFinite(parsedQuantity) ? parsedQuantity : 1;
+			if (newQuantity <= 0) {
+				throw new Error("Quantity must be at least 1. Please enter a valid quantity.");
+			}
 
 			// Handle serial number items - adjust serials when quantity changes
 			if (item.has_serial_no && item.serial_no) {

@@ -62,9 +62,6 @@ const CURRENT_SCHEMA = {
 	// Sales persons cache
 	sales_persons: "&name, pos_profile",
 
-	// Payment queue for offline payments
-	payment_queue: "++id, timestamp, synced",
-
 	// Drafts (already handled by draftManager, but keeping for consistency)
 	drafts: "++id, draft_id, timestamp",
 
@@ -143,6 +140,11 @@ const schemaVersion = getSchemaVersion();
 log.debug(`Initializing database with schema version: ${schemaVersion}`);
 db.version(schemaVersion).stores(CURRENT_SCHEMA);
 
+// COR-FE-11: payment_queue was written by saveOfflinePayment but never read.
+// Declaring it null in a NEW version makes Dexie drop the dead table from
+// databases that still carry it; fresh installs simply never create it.
+db.version(schemaVersion + 1).stores({ payment_queue: null });
+
 /**
  * Opens the database connection.
  * Called automatically on module import.
@@ -160,8 +162,78 @@ export const initDB = async () => {
 };
 
 /**
+ * localStorage keys holding the queue export written before a destructive
+ * reset (COR-FE-08). Removed once the rows are back in the fresh database.
+ */
+const QUEUE_BACKUP_KEYS = [
+	"pos_next_invoice_queue_backup",
+	"pos_next_drafts_backup",
+];
+
+/**
+ * Export the money tables (offline invoice queue + drafts) to localStorage so
+ * a database recreation cannot silently drop a cashier's queued invoices.
+ *
+ * Two distinct failure modes, deliberately not both fatal:
+ * - the tables themselves cannot be read (broken VersionError-style
+ *   database): nothing an export could save is reachable, so the caller may
+ *   proceed with the reset ({ reason: "unreadable" });
+ * - localStorage refuses the copy (quota): the data IS still readable in
+ *   place, so the caller must abort the reset ({ reason: "quota" }).
+ * @returns {Promise<{exported: boolean, reason?: string, invoices: Array, drafts: Array}>}
+ */
+async function exportQueuesToLocalStorage() {
+	let invoices
+	let drafts
+	try {
+		;[invoices, drafts] = await Promise.all([db.invoice_queue.toArray(), db.drafts.toArray()])
+	} catch (readError) {
+		log.error("Queue tables unreadable, nothing left to export:", readError)
+		return { exported: false, reason: "unreadable", invoices: [], drafts: [] }
+	}
+	try {
+		localStorage.setItem(QUEUE_BACKUP_KEYS[0], JSON.stringify(invoices || []))
+		localStorage.setItem(QUEUE_BACKUP_KEYS[1], JSON.stringify(drafts || []))
+	} catch (writeError) {
+		log.error("Queue export refused by localStorage, aborting the reset:", writeError)
+		return { exported: false, reason: "quota", invoices: [], drafts: [] }
+	}
+	return { exported: true, invoices: invoices || [], drafts: drafts || [] }
+}
+
+/**
+ * Re-import the queue export into the recreated database and drop the
+ * localStorage copy. The export stays behind when the import fails so a later
+ * recovery can retry.
+ * @returns {Promise<void>}
+ */
+async function restoreQueuesFromLocalStorage() {
+	try {
+		const invoices = JSON.parse(
+			localStorage.getItem(QUEUE_BACKUP_KEYS[0]) || "null"
+		);
+		const drafts = JSON.parse(
+			localStorage.getItem(QUEUE_BACKUP_KEYS[1]) || "null"
+		);
+		if (Array.isArray(invoices) && invoices.length > 0) {
+			await db.invoice_queue.bulkPut(invoices);
+		}
+		if (Array.isArray(drafts) && drafts.length > 0) {
+			await db.drafts.bulkPut(drafts);
+		}
+		QUEUE_BACKUP_KEYS.forEach((key) => localStorage.removeItem(key));
+		log.info("Restored queued invoices/drafts after database reset");
+	} catch (error) {
+		log.error("Failed to restore queued data after database reset:", error);
+	}
+}
+
+/**
  * Verifies database health and attempts recovery if needed.
  * Handles VersionError and InvalidStateError by recreating the database.
+ * Before a recreation the invoice queue and drafts are exported to
+ * localStorage (COR-FE-08) and re-imported afterwards; the reset never runs
+ * when the export cannot read them.
  * @returns {Promise<boolean>} True if database is healthy or recovered
  */
 export const checkDBHealth = async () => {
@@ -184,15 +256,27 @@ export const checkDBHealth = async () => {
 
 			// If corrupted, recreate
 			if (reopenError.name === "VersionError" || reopenError.name === "InvalidStateError") {
-				log.warn("Database appears corrupted, recreating...");
+				log.warn("Database appears corrupted, recreating...")
 				try {
-					await Dexie.delete("pos_next_offline");
-					await db.open();
-					log.success("Database recreated successfully");
-					return true;
+					// COR-FE-08: no delete without an export. A quota failure on
+					// the localStorage copy aborts the reset (the data is still
+					// reachable in place, a manual recovery stays possible). An
+					// unreadable database exports nothing because nothing CAN be
+					// read: the data is gone either way, so the reset proceeds
+					// rather than bricking the till on a failure no backup could
+					// ever fix.
+					const exportResult = await exportQueuesToLocalStorage()
+					if (exportResult.reason === "quota") {
+						return false
+					}
+					await Dexie.delete("pos_next_offline")
+					await db.open()
+					await restoreQueuesFromLocalStorage()
+					log.success("Database recreated successfully")
+					return true
 				} catch (recreateError) {
-					log.error("Failed to recreate database:", recreateError);
-					return false;
+					log.error("Failed to recreate database:", recreateError)
+					return false
 				}
 			}
 			return false;
@@ -301,7 +385,6 @@ export const clearCachedData = async (options = {}) => {
 		payment_methods: 0,
 		sales_persons: 0,
 		invoices: 0,
-		payments: 0,
 		drafts: 0,
 		settings: 0,
 	};
@@ -315,10 +398,9 @@ export const clearCachedData = async (options = {}) => {
 		results.payment_methods = await db.payment_methods.clear();
 		results.sales_persons = await db.sales_persons.clear();
 
-		// Conditionally clear invoice and payment queues
+		// Conditionally clear invoice queue
 		if (!preserveInvoices) {
 			results.invoices = await db.invoice_queue.clear();
-			results.payments = await db.payment_queue.clear();
 		}
 
 		// Conditionally clear drafts
@@ -382,11 +464,17 @@ export const clearBrowserCache = () => {
 	};
 
 	try {
-		// Clear POS-specific localStorage items
+		// COR-FE-16: clear ONLY the keys owned by this app. The old filter
+		// also removed frappe_* keys (frappe_user, frappe_csrf_token, ...),
+		// which logged the cashier out mid-shift. Session keys are protected
+		// by simply never matching the prefix (same idea as the explicit
+		// USER_KEYS list in sessionCleanup.js).
+		const POS_STORAGE_PREFIX = "pos_next_";
+
 		const keysToRemove = [];
 		for (let i = 0; i < localStorage.length; i++) {
 			const key = localStorage.key(i);
-			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
+			if (key?.startsWith(POS_STORAGE_PREFIX)) {
 				keysToRemove.push(key);
 			}
 		}
@@ -400,7 +488,7 @@ export const clearBrowserCache = () => {
 		const sessionKeys = [];
 		for (let i = 0; i < sessionStorage.length; i++) {
 			const key = sessionStorage.key(i);
-			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
+			if (key?.startsWith(POS_STORAGE_PREFIX)) {
 				sessionKeys.push(key);
 			}
 		}

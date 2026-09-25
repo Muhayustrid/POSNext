@@ -50,6 +50,11 @@ def _set_invoice_type(value):
 class TestSubmitInvoicePOSIMode(FrappeTestCase):
 	def setUp(self):
 		self._created = []
+		# restore target captured before the POS Invoice flip below (see
+		# tests/_posi_test_utils.py — this file is its kept-in-sync twin)
+		self._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
 		# creation-asc: an unordered first row can land on a demo/test-chart
 		# profile (INR _Test Company) whose party accounts break every submit
 		self.profile = frappe.db.get_value(
@@ -156,7 +161,7 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
 		for offline_id in getattr(self, "_sync_rows", []):
 			frappe.db.delete("Offline Invoice Sync", {"offline_id": offline_id})
-		_set_invoice_type(SALES_INVOICE)
+		_set_invoice_type(getattr(self, "_invoice_type_baseline", None) or SALES_INVOICE)
 		frappe.db.commit()
 
 	def _payload(self, **overrides):

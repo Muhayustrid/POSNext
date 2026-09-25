@@ -53,7 +53,7 @@ const SYMBOLS = {
 	CNY: "¥",
 	INR: "₹",
 	EGP: "E£",
-	SAR: "\u00EA",
+	SAR: "SR",
 	AED: "د.إ",
 };
 
@@ -87,6 +87,15 @@ export { getSymbol as getCurrencySymbol };
 
 const _formatterCache = new Map();
 
+// Display decimals follow the currency, not Intl defaults (CLDR gives IDR 2
+// decimals, but rupiah prices are integers). IDR stays 0, everything else 2.
+const CURRENCY_DECIMALS = { IDR: 0 };
+const DEFAULT_CURRENCY_DECIMALS = 2;
+
+function getCurrencyDecimals(currency) {
+	return CURRENCY_DECIMALS[currency] ?? DEFAULT_CURRENCY_DECIMALS;
+}
+
 function getFormatter(precision, locale = DEFAULT_LOCALE) {
 	const key = `${locale}:${precision}`;
 	if (!_formatterCache.has(key)) {
@@ -105,14 +114,15 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = CURRENCY_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "";
 	const abs = Math.abs(value);
-	const formatted = `${getSymbol(currency)} ${getFormatter(0, locale).format(abs)}`;
+	const formatted = `${getSymbol(currency)} ${getFormatter(getCurrencyDecimals(currency), locale).format(abs)}`;
 	return value < 0 ? `-${formatted}` : formatted;
 }
 
 /** Format value as number string (no symbol) */
-export function formatCurrencyNumber(value, locale = CURRENCY_LOCALE) {
+export function formatCurrencyNumber(value, locale = CURRENCY_LOCALE, currency = null) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "0";
-	return getFormatter(0, locale).format(value);
+	const decimals = currency ? getCurrencyDecimals(currency) : 0;
+	return getFormatter(decimals, locale).format(value);
 }
 
 /** Get CSS class for positive/negative values */

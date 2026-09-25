@@ -29,6 +29,13 @@ vi.mock("@/utils/print/transport", () => ({
 	getTransport: vi.fn(() => ({ getConfig: () => ({ paper: "58mm" }) })),
 	initTransportFromServer: vi.fn().mockResolvedValue({ driver: "browser" }),
 	printHTML: vi.fn().mockResolvedValue(undefined),
+	PostPrintError: class PostPrintError extends Error {
+		constructor(message) {
+			super(message)
+			this.name = "PostPrintError"
+			this.postPrint = true
+		}
+	},
 }))
 
 // Provide a trivial global translation helper the way packageQuote.test does.
@@ -216,6 +223,39 @@ describe("buildReceiptHTML (queue block)", () => {
 	})
 })
 
+describe("receipt money decimals follow the invoice currency (COR-FE-06)", () => {
+	it("keeps IDR amounts integer-formatted", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			currency: "IDR",
+			grand_total: 12500,
+			paid_amount: 12500,
+			items: [{ ...doc.items[0], rate: 12500, price_list_rate: 12500 }],
+			payments: [{ mode_of_payment: "Cash", amount: 12500 }],
+		})
+		expect(html).toContain("12.500")
+		expect(html).not.toContain("12.500,00")
+	})
+
+	it("prints two decimals for non-IDR currencies", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			currency: "USD",
+			grand_total: 12.5,
+			total_taxes_and_charges: 0,
+			paid_amount: 12.5,
+			items: [{ ...doc.items[0], rate: 12.5, price_list_rate: 12.5 }],
+			payments: [{ mode_of_payment: "Cash", amount: 12.5 }],
+		})
+		expect(html).toContain("12,50")
+	})
+
+	it("keeps the legacy integer display when the currency is unknown", () => {
+		expect(buildReceiptHTML(doc)).toContain("10.000")
+		expect(buildReceiptHTML(doc)).not.toContain("10.000,00")
+	})
+})
+
 describe("hydrateLocalOnlyInvoice (queue-stamp passthrough)", () => {
 	it("rebuilds a page-reloaded offline receipt with its queue number", async () => {
 		getOfflineInvoiceByOfflineId.mockResolvedValueOnce({
@@ -326,6 +366,31 @@ describe("printWithSilentFallback (doctype passthrough, POS Invoice mode)", () =
 				}),
 			}),
 		)
+	})
+})
+
+describe("printWithSilentFallback (post-print failure stops the fallback, COR-FE-10)", () => {
+	it("rethrows for a local receipt instead of opening a duplicate browser copy", async () => {
+		const { PostPrintError } = await import("@/utils/print/transport")
+		transport.printHTML.mockRejectedValueOnce(
+			new PostPrintError("cut failed after the receipt printed"),
+		)
+		globalThis.window.open = vi.fn()
+		const localDoc = { ...doc, name: "pos_offline_dup" }
+
+		await expect(printWithSilentFallback(localDoc)).rejects.toThrow("cut failed")
+		expect(window.open).not.toHaveBeenCalled()
+	})
+
+	it("rethrows for a server invoice instead of opening a duplicate browser copy", async () => {
+		const { PostPrintError } = await import("@/utils/print/transport")
+		transport.printHTML.mockRejectedValueOnce(
+			new PostPrintError("cut failed after the receipt printed"),
+		)
+		globalThis.window.open = vi.fn()
+
+		await expect(printWithSilentFallback(doc)).rejects.toThrow("cut failed")
+		expect(window.open).not.toHaveBeenCalled()
 	})
 })
 

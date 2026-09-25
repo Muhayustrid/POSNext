@@ -291,3 +291,41 @@ it("falls back to transport paper when the driver does not report the effective 
 	await t.printHTML("<html/>")
 	expect(log.attempts.at(-1).paper_width).toBe("58mm")
 })
+
+it("stops the chain without fallback when a driver fails after printing (COR-FE-10)", async () => {
+	const printed = new Error("cut jammed after the receipt printed")
+	printed.postPrint = true
+	const imin = okDriver("imin")
+	imin.printHTML = vi.fn().mockRejectedValue(printed)
+	const qz = okDriver("qz")
+	const browser = okDriver("browser")
+	const t = createTransport({
+		drivers: { imin, qz, browser },
+		config: { driver: "imin", fallback_enabled: true },
+		logSink: log,
+	})
+	await expect(t.printHTML("<html/>")).rejects.toThrow("cut jammed")
+	// The paper was already out of the iMin: no second driver may print a copy.
+	expect(qz.printHTML).not.toHaveBeenCalled()
+	expect(browser.printHTML).not.toHaveBeenCalled()
+	// POS Print Log still records the successful sheet, with the reason.
+	const row = log.attempts.at(-1)
+	expect(row.status).toBe("Success")
+	expect(row.driver).toBe("imin")
+	expect(row.error_message).toContain("cut jammed")
+})
+
+it("stops the chain for PostPrintError instances even without the flag", async () => {
+	const { PostPrintError } = await import("./transport")
+	const imin = okDriver("imin")
+	// A PostPrintError instance is treated as post-print even without the flag.
+	imin.printHTML = vi.fn().mockRejectedValue(new PostPrintError("status poll failed"))
+	const browser = okDriver("browser")
+	const t = createTransport({
+		drivers: { imin, browser },
+		config: { driver: "imin", fallback_enabled: true },
+		logSink: log,
+	})
+	await expect(t.printHTML("<html/>")).rejects.toThrow("status poll failed")
+	expect(browser.printHTML).not.toHaveBeenCalled()
+})

@@ -44,11 +44,17 @@ class POSInvoiceModeMixin:
 	tearDown: cancels the closing shift via the app's own on_cancel path
 	(when the test created one) so merge logs / consolidated Sales Invoices
 	are cleaned by production code, then sweeps invoices, stock and the
-	shift, and restores Sales Invoice mode.
+	shift, and restores the invoice-type mode the site started from.
 	"""
 
 	def setUp(self):
 		self._created = []
+		# captured before the POS Invoice flip below: the site must be left in
+		# the mode it started in, never force-flipped to Sales mode (a leaked
+		# flip poisons the doctype resolution of every module that runs after)
+		self._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
 		self.profile = frappe.db.get_value(
 			"POS Profile",
 			_PROFILE_FILTER,
@@ -190,5 +196,5 @@ class POSInvoiceModeMixin:
 			frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
 		for offline_id in getattr(self, "_sync_rows", []):
 			frappe.db.delete("Offline Invoice Sync", {"offline_id": offline_id})
-		_set_invoice_type(SALES_INVOICE)
+		_set_invoice_type(getattr(self, "_invoice_type_baseline", None) or SALES_INVOICE)
 		frappe.db.commit()

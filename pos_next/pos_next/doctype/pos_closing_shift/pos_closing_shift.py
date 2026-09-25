@@ -39,7 +39,12 @@ def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
 
 class POSClosingShift(Document):
 	def validate(self):
-		existing = frappe.get_all(
+		# COR-BE-06: the duplicate check must be a locking read (SELECT ... FOR
+		# UPDATE). submit_closing_shift holds the opening row's lock while this
+		# runs, so a concurrent close that committed while we waited must be
+		# visible here; a consistent read could still answer from a stale
+		# snapshot and let two closings through.
+		existing = frappe.db.get_value(
 			"POS Closing Shift",
 			filters={
 				"user": self.user,
@@ -47,14 +52,14 @@ class POSClosingShift(Document):
 				"pos_opening_shift": self.pos_opening_shift,
 				"name": ["!=", self.name],
 			},
-			fields=["name"],
-			limit_page_length=1,
+			fieldname="name",
+			for_update=True,
 		)
 
 		if existing:
 			frappe.throw(
 				_("A submitted POS Closing Shift ({0}) already exists for this opening shift").format(
-					frappe.bold(existing[0].name)
+					frappe.bold(existing)
 				),
 				title=_("Duplicate Closing Entry"),
 			)
@@ -72,6 +77,72 @@ class POSClosingShift(Document):
 		precision = frappe.get_cached_value("System Settings", None, "currency_precision") or 3
 		for d in self.payment_reconciliation:
 			d.difference = +flt(d.closing_amount, precision) - flt(d.expected_amount, precision)
+
+	def before_submit(self):
+		"""COR-BE-15: printed drafts join the close in the submit path itself.
+
+		The read endpoints (get_pos_invoices / the preview) are pure now, so a
+		Desk-built closing filled from the preview can be missing the shift's
+		printed drafts. Submit them here and merge their rows on top of what
+		the doc already carries. The API close (submit_closing_shift) computes
+		its rows after the same submit step, so the merge is a no-op there.
+		"""
+		for dt in ("POS Invoice", "Sales Invoice"):
+			submit_printed_invoices(self.pos_opening_shift, dt)
+		self._merge_late_submitted_invoices()
+		self.update_payment_reconciliation()
+
+	def _merge_late_submitted_invoices(self):
+		"""Append transactions for invoices that only became submitted at
+		close time (the printed drafts before_submit just submitted).
+
+		Additive on purpose: rows already on the doc — including references a
+		user added by hand in Desk — are kept; only invoices of this shift
+		that are submitted but not on the doc yet are appended, with their
+		totals, taxes and expected payments folded into the existing values.
+		"""
+		existing_names = {
+			(d.get("sales_invoice") or d.get("pos_invoice")) for d in self.pos_transactions
+		}
+		missing = [
+			invoice
+			for invoice in get_pos_invoices(self.pos_opening_shift)
+			if invoice.get("name") not in existing_names
+		]
+		if not missing:
+			return
+
+		company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
+		cash_mode = _get_cash_mode_of_payment(self.pos_profile)
+		# seed the aggregators with the doc's current values so the late rows
+		# add on top of the preview instead of replacing it
+		payments = [frappe._dict(row.as_dict()) for row in self.payment_reconciliation]
+		taxes = [frappe._dict(row.as_dict()) for row in self.taxes]
+		summary = {
+			"grand_total": flt(self.grand_total),
+			"net_total": flt(self.net_total),
+			"total_quantity": flt(self.total_quantity),
+			"returns_total": 0,
+			"returns_count": 0,
+			"sales_total": 0,
+			"sales_count": 0,
+		}
+		for invoice in missing:
+			invoice_field = (
+				"pos_invoice" if invoice.get("doctype") == "POS Invoice" else "sales_invoice"
+			)
+			txn = _process_invoice(
+				invoice, invoice_field, company_currency, cash_mode, payments, taxes, summary
+			)
+			self.append(
+				"pos_transactions",
+				{k: v for k, v in txn.items() if k not in ("is_return", "return_against")},
+			)
+		self.grand_total = summary["grand_total"]
+		self.net_total = summary["net_total"]
+		self.total_quantity = summary["total_quantity"]
+		self.set("payment_reconciliation", payments)
+		self.set("taxes", taxes)
 
 	def on_submit(self):
 		opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
@@ -298,8 +369,28 @@ class POSClosingShift(Document):
 		)
 
 
+# SEC-NEW-11: the only caller is the Desk "user" link query on POS Closing
+# Shift (pos_closing_shift.js), which sends the profile name as `parent`.
+# Any other filter key is client input and is dropped, never forwarded.
+CASHIER_FILTER_KEYS = ("parent",)
+
+
 @frappe.whitelist()
 def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
+	# read gate (SEC-NEW-11), same shape as get_pos_invoices: a profile cashier
+	# may list their own profile's cashiers for the close dialog, anyone else
+	# needs closing-shift read access.
+	if isinstance(filters, str):
+		filters = json.loads(filters or "{}")
+	filters = {k: v for k, v in (filters or {}).items() if k in CASHIER_FILTER_KEYS}
+
+	profile = filters.get("parent")
+	is_profile_member = profile and frappe.db.exists(
+		"POS Profile User", {"parent": profile, "user": frappe.session.user}
+	)
+	if not is_profile_member and not frappe.has_permission("POS Closing Shift", "read"):
+		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
+
 	cashiers_list = frappe.get_all("POS Profile User", filters=filters, fields=["user"])
 	result = []
 	for cashier in cashiers_list:
@@ -371,11 +462,12 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 	drop the other half from every closing total, so both are always read.
 	"""
 	# read gate (SEC-NEW-01): the response exposes every invoice of the shift
-	# (customer, payments, totals) and submit_printed_invoices below posts the
-	# shift's printed drafts as a side effect, so only the shift owner or a
-	# user with closing-shift read access may call it. Same ownership rule as
+	# (customer, payments, totals), so only the shift owner or a user with
+	# closing-shift read access may call it. Same ownership rule as
 	# make_closing_shift_from_opening; sits above any query so a bogus shift
-	# fails loudly instead of answering with an empty shift.
+	# fails loudly instead of answering with an empty shift. This endpoint is
+	# a pure read: printed drafts are submitted by submit_closing_shift
+	# (COR-BE-15), never here.
 	shift_user = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "user")
 	if shift_user is None:
 		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
@@ -393,7 +485,6 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 
 	data = []
 	for dt in doctypes:
-		submit_printed_invoices(pos_opening_shift, dt)
 		# A consolidated POS Invoice (legacy data only — parity rows are never
 		# consolidated) already had its books posted to the Sales Invoice that
 		# absorbed it, so counting it here would double it.
@@ -712,6 +803,17 @@ def make_closing_shift_from_opening(opening_shift):
 			"sales_total": summary["sales_total"],
 			"sales_count": summary["sales_count"],
 			"pos_transactions": pos_transactions,  # Include return info for display
+			# COR-BE-15: the preview no longer submits printed drafts (reads
+			# are pure), so surface how many are still pending so the close
+			# dialog can warn that the final numbers will include them.
+			"pending_printed_drafts": frappe.db.count(
+				"Sales Invoice",
+				{
+					"posa_pos_opening_shift": opening_shift_name,
+					"docstatus": 0,
+					"posa_is_printed": 1,
+				},
+			),
 		}
 	)
 
@@ -726,6 +828,16 @@ def submit_closing_shift(closing_shift):
 	if not opening_shift_name:
 		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
 
+	# COR-BE-06: serialize concurrent closes of the same opening. This must be
+	# the first DB statement of the request: the row lock blocks a second
+	# submit until the first one commits, and validate's locking duplicate
+	# check then sees the committed closing and refuses the second one.
+	if not frappe.db.get_value("POS Opening Shift", opening_shift_name, "name", for_update=True):
+		frappe.throw(
+			_("POS Opening Shift {0} not found").format(opening_shift_name),
+			frappe.DoesNotExistError,
+		)
+
 	opening_shift = frappe.get_doc("POS Opening Shift", opening_shift_name)
 
 	# The payload is untrusted client JSON: only the shift owner (or a user
@@ -735,6 +847,13 @@ def submit_closing_shift(closing_shift):
 		and not frappe.has_permission("POS Closing Shift", "submit")
 	):
 		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
+
+	# COR-BE-15: printed drafts join the closing here, in the explicit close
+	# flow, before the server recomputes the totals below. The read endpoints
+	# (get_pos_invoices / make_closing_shift_from_opening as a preview) no
+	# longer submit anything as a GET side effect.
+	for dt in ("POS Invoice", "Sales Invoice"):
+		submit_printed_invoices(opening_shift_name, dt)
 
 	# The server holds the numbers: rebuild the closing shift from the opening
 	# shift's real transactions so expected_amount, totals and taxes can never

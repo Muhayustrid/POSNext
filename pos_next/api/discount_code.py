@@ -13,6 +13,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.rate_limiter import rate_limit
 from frappe.utils import flt
 
 from pos_next.overrides.discount_code import (
@@ -20,6 +21,14 @@ from pos_next.overrides.discount_code import (
 	refund_code_required,
 	validate_code,
 )
+
+# SEC-NEW-12b: these endpoints answer "is this code value valid?" for inline
+# feedback, so an unthrottled client could brute-force discount code values.
+# 20 attempts / 5 min per client IP covers a cashier typing by hand (the
+# frontend degrades to "please try again" on 429); the authoritative gate
+# stays in the Sales Invoice doc_events.
+RATE_LIMIT = 20
+RATE_LIMIT_SECONDS = 300
 
 
 @frappe.whitelist(methods=["POST"])
@@ -35,6 +44,7 @@ def get_status(company: str = None, pos_profile: str = None):
 
 
 @frappe.whitelist(methods=["POST"])
+@rate_limit(key=None, limit=RATE_LIMIT, seconds=RATE_LIMIT_SECONDS)
 def validate_confirmation_code(code: str, company: str, items=None, additional_discount: float = 0):
 	"""Live-validate a discount code against the cart about to be saved.
 
@@ -72,6 +82,7 @@ def validate_confirmation_code(code: str, company: str, items=None, additional_d
 
 
 @frappe.whitelist(methods=["POST"])
+@rate_limit(key=None, limit=RATE_LIMIT, seconds=RATE_LIMIT_SECONDS)
 def check_code(code: str, company: str):
 	"""Validate a discount code VALUE alone — no cart context.
 

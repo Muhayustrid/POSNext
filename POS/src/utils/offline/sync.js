@@ -328,6 +328,25 @@ const stringifyPricingRules = (value) => {
 };
 
 /**
+ * Resolve the quantity for a sync row. Legacy rows may carry only `quantity`,
+ * and absent values stay at the old default of 1. An explicit 0, negative, or
+ * non-numeric quantity is refused (COR-FE-12): the invoice is rejected instead
+ * of being sent with a fabricated quantity.
+ */
+const resolveSyncQty = (item) => {
+	const raw = item.qty ?? item.quantity;
+	if (raw == null) return 1;
+	const qty = Number(raw);
+	if (!Number.isFinite(qty) || qty <= 0) {
+		const itemName = item.item_name || item.item_code || "unknown item";
+		throw new Error(
+			`Invalid quantity for "${itemName}": ${JSON.stringify(raw)}. Quantity must be at least 1.`
+		);
+	}
+	return raw;
+};
+
+/**
  * Normalize invoice data for server sync.
  * Items should already be formatted by formatItemsForSubmission() when saved.
  * This provides a safety net for legacy data.
@@ -337,7 +356,7 @@ const normalizeInvoiceForSync = (invoiceData, offlineId) => ({
 	offline_id: offlineId || invoiceData.offline_id,
 	items: invoiceData.items?.map((item) => ({
 		...item,
-		qty: item.qty || item.quantity || 1,
+		qty: resolveSyncQty(item),
 		pricing_rules: stringifyPricingRules(item.pricing_rules),
 	})),
 });
@@ -539,29 +558,6 @@ export const getLocalStock = async (itemCode, warehouse) => {
 		log.error("Failed to get local stock", { item_code: itemCode, warehouse, error });
 		return 0;
 	}
-};
-
-// ============================================================================
-// OFFLINE PAYMENT OPERATIONS
-// ============================================================================
-
-/**
- * Save payment to offline queue
- * @param {Object} paymentData - Payment data
- * @returns {Promise<boolean>}
- */
-export const saveOfflinePayment = async (paymentData) => {
-	const cleanData = JSON.parse(JSON.stringify(paymentData));
-
-	await db.payment_queue.add({
-		data: cleanData,
-		timestamp: Date.now(),
-		synced: false,
-		retry_count: 0,
-	});
-
-	log.info("Payment saved to offline queue");
-	return true;
 };
 
 // ============================================================================

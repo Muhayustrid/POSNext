@@ -115,43 +115,44 @@ def process_loyalty_to_wallet(doc, method=None):
 	if credit_amount <= 0:
 		return
 
-	try:
-		# Get or create customer wallet
-		wallet = get_or_create_wallet(doc.customer, doc.company, pos_settings)
+	# COR-BE-16: this runs post-submit (it reads the Loyalty Point Entry the
+	# submit just created), so the only way to keep one request = one
+	# transaction is to let a conversion failure propagate: the throw rolls
+	# back the whole request including the submit. Swallowing here silently
+	# dropped the customer's wallet credit with no retryable trace.
+	wallet = get_or_create_wallet(doc.customer, doc.company, pos_settings)
 
-		if not wallet:
-			return
-
-		# Create wallet transaction
-		from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import create_wallet_credit
-
-		create_wallet_credit(
-			wallet=wallet.name,
-			amount=credit_amount,
-			source_type="Loyalty Program",
-			remarks=_("Loyalty points conversion from {0}: {1} points = {2}").format(
-				doc.name,
-				loyalty_entry.loyalty_points,
-				frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
-			),
-			reference_doctype="Sales Invoice",
-			reference_name=doc.name,
-			submit=True,
+	if not wallet:
+		frappe.throw(
+			_("Could not convert loyalty points to wallet for invoice {0}: no wallet available").format(
+				doc.name
+			)
 		)
 
-		frappe.msgprint(
-			_("Loyalty points converted to wallet: {0} points = {1}").format(
-				loyalty_entry.loyalty_points, frappe.format_value(credit_amount, {"fieldtype": "Currency"})
-			),
-			alert=True,
-			indicator="green",
-		)
+	# Create wallet transaction
+	from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import create_wallet_credit
 
-	except Exception as e:
-		frappe.log_error(
-			title="Loyalty to Wallet Conversion Error",
-			message=f"Invoice: {doc.name}, Error: {e!s}\n{frappe.get_traceback()}",
-		)
+	create_wallet_credit(
+		wallet=wallet.name,
+		amount=credit_amount,
+		source_type="Loyalty Program",
+		remarks=_("Loyalty points conversion from {0}: {1} points = {2}").format(
+			doc.name,
+			loyalty_entry.loyalty_points,
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
+		),
+		reference_doctype="Sales Invoice",
+		reference_name=doc.name,
+		submit=True,
+	)
+
+	frappe.msgprint(
+		_("Loyalty points converted to wallet: {0} points = {1}").format(
+			loyalty_entry.loyalty_points, frappe.format_value(credit_amount, {"fieldtype": "Currency"})
+		),
+		alert=True,
+		indicator="green",
+	)
 
 
 def get_wallet_amount_from_payments(payments):
@@ -172,6 +173,14 @@ def get_wallet_amount_from_payments(payments):
 	return wallet_amount
 
 
+def _check_customer_read(customer):
+	"""Wallet reads are customer financial data: require Customer read on the
+	probed customer (SEC-NEW-08). The cashier's own lane (Customer read) and
+	the internal hook callers pass; probing arbitrary customers fails."""
+	if not frappe.has_permission("Customer", "read", doc=customer):
+		frappe.throw(_("Not permitted to read customer {0}").format(customer), frappe.PermissionError)
+
+
 @frappe.whitelist()
 def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 	"""
@@ -189,6 +198,10 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 	Returns:
 		float: Available wallet balance
 	"""
+	# SEC-NEW-08: before the try block so the gate cannot be swallowed into
+	# the 0.0 fallback below
+	_check_customer_read(customer)
+
 	try:
 		from erpnext.accounts.utils import get_balance_on
 
@@ -263,6 +276,9 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 @frappe.whitelist()
 def get_customer_wallet(customer, company=None):
 	"""Get wallet details for a customer."""
+	# SEC-NEW-08
+	_check_customer_read(customer)
+
 	filters = {"customer": customer}
 	if company:
 		filters["company"] = company
@@ -306,6 +322,9 @@ def create_wallet_on_customer_insert(doc, method=None):
 @frappe.whitelist()
 def get_or_create_wallet(customer, company, pos_settings=None, force_create=False):
 	"""Get existing wallet or create a new one."""
+	# SEC-NEW-08: wallet creation is still reserved to Customer readers; the
+	# internal hook/flow callers run as the acting user and pass
+	_check_customer_read(customer)
 
 	# Check if wallet exists
 	wallet = frappe.db.get_value(

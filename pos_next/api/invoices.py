@@ -672,19 +672,17 @@ def _set_payment_accounts(payments, company):
 		mode_of_payment = payment.get("mode_of_payment")
 		if not mode_of_payment or payment.get("account"):
 			continue
-		try:
-			account_info = get_payment_account(mode_of_payment, company)
-			if account_info:
-				account = account_info.get("account")
-				if hasattr(payment, "set") and callable(payment.set):
-					payment.set("account", account)
-				else:
-					payment["account"] = account
-		except Exception as e:
-			frappe.log_error(
-				f"Failed to get payment account for {mode_of_payment}: {e}",
-				"Payment Account Lookup",
-			)
+		# COR-BE-13: get_payment_account ends in frappe.throw when no cash/bank
+		# account can be resolved. The old blanket except swallowed that, left
+		# the payment row without an account and let the payment JE post to the
+		# wrong account silently. Let the configuration error surface.
+		account_info = get_payment_account(mode_of_payment, company)
+		if account_info:
+			account = account_info.get("account")
+			if hasattr(payment, "set") and callable(payment.set):
+				payment.set("account", account)
+			else:
+				payment["account"] = account
 
 
 # ==========================================
@@ -777,11 +775,13 @@ def _should_block(pos_profile):
 
 	# Fall back to the POS Profile's block toggle
 	if pos_profile:
-		# Try to get custom field (may not exist in vanilla ERPNext)
-		block_sale = cint(
-			frappe.db.get_value("POS Profile", pos_profile, "posa_block_sale_beyond_available_qty") or 1
-		)
-		return bool(block_sale)
+		# COR-BE-10: an explicit 0 (toggle off) must survive — the old
+		# `cint(value or 1)` flipped every 0 back into a block. Only an
+		# unset/empty value defaults to blocking.
+		value = frappe.db.get_value("POS Profile", pos_profile, "posa_block_sale_beyond_available_qty")
+		if value in (None, ""):
+			return True
+		return bool(cint(value))
 
 	# Default to blocking if no profile specified
 	return True
@@ -805,6 +805,21 @@ def _validate_stock_on_invoice(invoice_doc):
 	# Throw error if stock insufficient and blocking is enabled
 	if errors and _should_block(invoice_doc.pos_profile):
 		frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
+
+
+def _require_return_against(invoice_doc):
+	"""COR-BE-09: a return must name its original invoice.
+
+	Without return_against the return skips validate_return_items entirely (no
+	quantity cap against the original sale) and skips the wallet-reversal and
+	credit-note lanes. The honest UI always sends return_against
+	(ReturnInvoiceDialog falls back to the source invoice), so a payload
+	without one is rejected instead of accepted as an uncapped standalone
+	return. Called from both update_invoice and submit_invoice so every lane
+	is closed.
+	"""
+	if invoice_doc.get("is_return") and not invoice_doc.get("return_against"):
+		frappe.throw(_("Return invoice requires a return_against invoice"))
 
 
 def _auto_set_return_batches(invoice_doc):
@@ -1060,6 +1075,41 @@ def _check_draft_owner_access(doc, doctype):
 	frappe.throw(_("You can only modify your own drafts"), frappe.PermissionError)
 
 
+def _validate_draft_conflict(invoice_doc, data):
+	"""COR-BE-11: a second device must not blindly win on one draft.
+
+	Old behaviour was last-writer-wins: the payload's `modified` was never
+	compared, so a device holding a stale copy silently overwrote the other
+	device's edits. When the payload carries `modified` and the draft's DB
+	value is newer, reject with a ValidationError marked HTTP 409. The same
+	modified value is an idempotent retry and passes. Payloads without
+	`modified` are not compared (the honest UI builds fresh payloads and never
+	echoes the timestamp). `force_update` in the payload is an explicit
+	server-API escape hatch; no UI sends it.
+
+	The payload's `modified` copy is always dropped afterwards — the server
+	owns the timestamp.
+	"""
+	payload_modified = data.pop("modified", None)
+	if not payload_modified or cint(data.get("force_update")):
+		return
+	try:
+		payload_ts = get_datetime(payload_modified)
+		db_ts = get_datetime(invoice_doc.modified)
+	except Exception:
+		# junk timestamp from a non-UI client (e.g. the literal string "None"):
+		# nothing comparable, behave as if the payload carried no modified
+		return
+	if payload_ts and db_ts and payload_ts < db_ts:
+		conflict = frappe.ValidationError(
+			_("Draft {0} was updated in another session. Please reload the draft and try again.").format(
+				invoice_doc.name
+			)
+		)
+		conflict.http_status_code = 409
+		raise conflict
+
+
 @frappe.whitelist()
 def update_invoice(data):
 	"""Create or update invoice draft (Step 1)."""
@@ -1102,12 +1152,17 @@ def update_invoice(data):
 			# doc-level writer) may update it, and identity/docstatus can never
 			# ride the payload (mass-assignment).
 			_check_draft_owner_access(invoice_doc, doctype)
+			_validate_draft_conflict(invoice_doc, data)
 			invoice_doc.update(data)
 			own_draft = invoice_doc.owner == frappe.session.user
 		else:
 			# insert-own-draft: the new document is owned by the session user
 			invoice_doc = frappe.get_doc(data)
 			own_draft = True
+
+		# COR-BE-09: reject uncapped standalone returns on both branches
+		if doctype != "Sales Order":
+			_require_return_against(invoice_doc)
 
 		# Important: set before set_missing_values()/pricing/validation paths that may
 		# read linked docs (e.g., Customer) and trigger controller permission checks.
@@ -1831,6 +1886,11 @@ def submit_invoice(invoice=None, data=None):
 				pos_profile_doc=frappe.get_cached_doc("POS Profile", pos_profile) if pos_profile else None,
 			)
 
+		# COR-BE-09: the create branch delegates to update_invoice (which runs
+		# the same gate); the existing-draft branch must not be a way around it
+		if doctype != "Sales Order":
+			_require_return_against(invoice_doc)
+
 		# Permission bypass only for the owner's own draft (mirrors
 		# update_invoice); submitting another user's draft runs under the real
 		# permissions verified by _check_draft_owner_access above.
@@ -1916,7 +1976,9 @@ def submit_invoice(invoice=None, data=None):
 			# swallowed, and the increment commits with the invoice or not at all.
 			from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
 
-			increment_coupon_usage(coupon_code)
+			# customer rides along for the COR-BE-07 one-use-per-customer
+			# re-check under the same row lock
+			increment_coupon_usage(coupon_code, invoice_doc.customer)
 
 		# Auto-set batch numbers for returns
 		_auto_set_return_batches(invoice_doc)

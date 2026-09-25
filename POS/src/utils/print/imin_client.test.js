@@ -66,8 +66,35 @@ describe("createIminDriver", () => {
 		)
 	})
 
-	it("advances paper after the bitmap so the receipt clears the tear bar (probe v3)", async () => {
-		await driver.printHTML("<div/>", {
+	it("tags post-print failures after the first sheet is queued (COR-FE-10)", async () => {
+		printer.printAndFeedPaper = vi.fn(() => {
+			throw new Error("feed died")
+		})
+		// The sheet was queued (printSingleBitmap resolved) before the feed
+		// failed: paper is already moving, so the error must carry the
+		// postPrint flag for the transport to stop the chain.
+		await expect(
+			driver.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			}),
+		).rejects.toMatchObject({ postPrint: true })
+	})
+
+	it("leaves pre-queue failures untagged", async () => {
+		printer.printSingleBitmap.mockRejectedValue(new Error("queue refused"))
+		let caught
+		await driver
+			.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			})
+			.catch((err) => {
+				caught = err
+			})
+		expect(caught?.message).toBe("queue refused")
+		expect(caught).not.toHaveProperty("postPrint")
+	})
+
+	it("advances paper after the bitmap so the receipt clears the tear bar (probe v3)", async () => {		await driver.printHTML("<div/>", {
 			render: async () => ({ dataURL: "data:,", width: 384 }),
 		})
 		// The vendored v1.4.0 build does NOT auto-feed inside printSingleBitmap.

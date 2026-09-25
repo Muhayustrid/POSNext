@@ -35,11 +35,13 @@ function cleanErrorMessage(rawMessage) {
 
 	let text = typeof rawMessage === "string" ? rawMessage : String(rawMessage);
 
-	// Remove HTML tags
-	if (typeof window !== "undefined" && typeof document !== "undefined") {
-		const container = document.createElement("div");
-		container.innerHTML = text;
-		text = container.textContent || container.innerText || "";
+	// Remove HTML tags. DOMParser never touches the live DOM; assigning
+	// innerHTML on a detached element still executes payload handlers
+	// (SEC-NEW-06, e.g. <img src=x onerror=...>).
+	if (typeof window !== "undefined" && typeof DOMParser !== "undefined") {
+		text =
+			new DOMParser().parseFromString(text, "text/html").documentElement
+				.textContent || "";
 	} else {
 		text = text.replace(/<[^>]*>/g, " ");
 	}

@@ -1759,6 +1759,13 @@ onUnmounted(() => {
 	window.removeEventListener("resize", handleWindowResize);
 	stopResize();
 
+	// Kill the pending offer-reapply timer: without this it fires after the
+	// page is gone and hits the offers API for an unmounted view.
+	if (offerReapplyTimer.value) {
+		clearTimeout(offerReapplyTimer.value);
+		offerReapplyTimer.value = null;
+	}
+
 	// Stop periodic stock sync on unmount
 	offlineWorker.stopStockSync().catch(() => {});
 });

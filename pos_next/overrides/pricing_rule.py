@@ -288,6 +288,12 @@ def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
 		if hasattr(doc, "calculate_taxes_and_totals") and callable(doc.calculate_taxes_and_totals):
 			doc.calculate_taxes_and_totals()
 	except Exception:
+		# COR-BE-12b: on the submit path (docstatus 0 -> 1) a swallowed failure
+		# would post double/inconsistent prices silently, so re-raise. Draft
+		# saves and the apply_offers preview (mock doc, no docstatus) keep the
+		# soft warning: nothing is final there yet.
+		if doc.get("docstatus") == 1:
+			raise
 		frappe.log_error(frappe.get_traceback(), "Min/Max Pricing Rule Failed")
 		if not frappe.flags.in_test:
 			frappe.msgprint(

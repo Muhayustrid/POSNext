@@ -8,6 +8,35 @@ from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
+# Role manajemen POS (SEC-NEW-10): management-level endpoints and profile
+# settings are for these roles, or for the profile's own users.
+_MANAGEMENT_ROLES = {"System Manager", "Nexus POS Manager"}
+
+
+def _is_management_user():
+	if frappe.session.user == "Administrator":
+		return True
+	return bool(_MANAGEMENT_ROLES.intersection(frappe.get_roles()))
+
+
+def _assert_management_role():
+	"""Gate for endpoints that expose app-wide master data (User list, Mode of
+	Payment list). Not for cashiers."""
+	if not _is_management_user():
+		frappe.throw(_("You don't have permission to access this resource"), frappe.PermissionError)
+
+
+def _assert_profile_or_manager(pos_profile):
+	"""Gate for profile-scoped reads (SEC-NEW-10): members of the POS Profile
+	or a management role. The booting cashier of their ACTIVE profile passes."""
+	if not pos_profile:
+		return
+	if frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user}):
+		return
+	if _is_management_user():
+		return
+	frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
+
 
 def _resolve_schedule_params(parameters):
 	"""Shift schedule defaults for create_pos_profile.
@@ -87,6 +116,11 @@ def get_pos_profile_data(pos_profile):
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
+	# SEC-NEW-10: per-profile settings leak to any logged-in user without
+	# this gate. No profile requested: generic defaults only, nothing
+	# profile-scoped, so no gate is needed there.
+	_assert_profile_or_manager(pos_profile)
+
 	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 	from pos_next.api.settings_resolver import get_effective_pos_settings
 
@@ -440,6 +474,11 @@ def get_create_pos_profile(*args, **kwargs):
 		- customer_groups: Available customer groups
 		- brands: Available brands
 	"""
+	# SEC-NEW-10: this picker dumps the User list and Mode of Payment list,
+	# so it is management-only (before the try block so the gate is not
+	# swallowed into the generic error wrapper below)
+	_assert_management_role()
+
 	try:
 		user_company = check_user_company()
 		user_company = user_company.get("company")

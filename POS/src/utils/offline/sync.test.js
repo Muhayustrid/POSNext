@@ -220,3 +220,54 @@ describe("COR-FE-04 sync_failed handling", () => {
 		expect(await getOfflineInvoiceCount()).toBe(1);
 	});
 });
+
+// COR-FE-11: payment_queue was written by saveOfflinePayment but never read
+// by anyone. The offline save path is the worker's invoice_queue only.
+describe("single offline save path (COR-FE-11)", () => {
+	it("no longer exports saveOfflinePayment", async () => {
+		const mod = await import("@/utils/offline/sync");
+
+		expect(mod.saveOfflinePayment).toBeUndefined();
+	});
+});
+
+// COR-FE-12: a queued item with qty 0 must never be sent with a fabricated
+// quantity; the row is marked as failed instead. Absent qty stays at the
+// legacy default of 1.
+describe("zero quantity is rejected at sync time (COR-FE-12)", () => {
+	it("does not submit a zero-qty invoice and marks the attempt failed", async () => {
+		store.rows.push(
+			seedRow({
+				data: {
+					customer: "Walk-in Customer",
+					items: [{ item_code: "ITEM-1", qty: 0 }],
+					grand_total: 100,
+				},
+			})
+		);
+
+		const result = await syncOfflineInvoices();
+
+		expect(submittedInvoices()).toHaveLength(0);
+		expect(result.failed).toBe(1);
+		expect(store.rows[0].retry_count).toBe(1);
+	});
+
+	it("keeps the legacy default of 1 for an absent qty", async () => {
+		store.rows.push(
+			seedRow({
+				data: {
+					customer: "Walk-in Customer",
+					items: [{ item_code: "ITEM-1" }],
+					grand_total: 100,
+				},
+			})
+		);
+
+		const result = await syncOfflineInvoices();
+
+		expect(result.success).toBe(1);
+		const payload = JSON.parse(submittedInvoices()[0].data);
+		expect(payload.invoice.items[0].qty).toBe(1);
+	});
+});

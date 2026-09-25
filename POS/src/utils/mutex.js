@@ -16,6 +16,24 @@
  */
 
 /**
+ * Race an already-started work promise against a timeout.
+ *
+ * COR-FE-07: rejecting the race does NOT stop the work. The timeout is a
+ * signal to the caller only; the fn keeps running and the lock stays held
+ * until it settles.
+ * @private
+ */
+function raceWithTimeout(work, timeoutMs, name) {
+	let timeoutId;
+	const timeout = new Promise((_, reject) => {
+		timeoutId = setTimeout(() => {
+			reject(new Error(`${name}: Operation timed out after ${timeoutMs}ms`));
+		}, timeoutMs);
+	});
+	return Promise.race([work, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+/**
  * Coalescing mutex that ensures only one operation runs at a time.
  *
  * Behavior:
@@ -62,44 +80,47 @@ export class CoalescingMutex {
 		if (this._activePromise) {
 			logFn?.(`${this._name}: Waiting for ongoing operation to complete...`);
 			try {
-				await this._activePromise;
+				// Bounded wait slices: the lock promise only ever resolves, so
+				// any rejection here is the slice timeout. Swallow it and
+				// recurse - the next slice re-checks the lock and eventually
+				// runs this caller's fn once the work settles. No single
+				// eternal await, and the lock stays with the running work.
+				await raceWithTimeout(
+					this._activePromise,
+					this._timeout,
+					`${this._name} (waiting)`,
+				);
 			} catch {
-				// Ignore errors from the previous run, we'll do our own
+				// slice timed out: fall through to the recursive wait below
 			}
 			// Recursive call - will either start fresh or wait again
 			return this.withLock(fn, logFn);
 		}
 
-		// Create the guarded promise with timeout
-		this._activePromise = this._executeWithTimeout(fn);
-
-		try {
-			return await this._activePromise;
-		} finally {
-			this._activePromise = null;
-		}
-	}
-
-	/**
-	 * Execute function with timeout protection
-	 * @private
-	 */
-	async _executeWithTimeout(fn) {
-		return new Promise((resolve, reject) => {
-			const timeoutId = setTimeout(() => {
-				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`));
-			}, this._timeout);
-
-			fn()
-				.then((result) => {
-					clearTimeout(timeoutId);
-					resolve(result);
-				})
-				.catch((error) => {
-					clearTimeout(timeoutId);
-					reject(error);
-				});
+		// COR-FE-07: the lock is held by the WORK, not by the waiter. The
+		// timeout below only abandons the caller; releasing the lock there
+		// used to let a second sync loop start while this one still ran.
+		// Promise.resolve().then(fn): a synchronous throw from fn becomes a
+		// rejected work promise instead of an escaped synchronous error that
+		// would skip the release wiring below.
+		const work = Promise.resolve().then(fn);
+		// If the caller already timed out, its rejection must stay handled.
+		work.catch(() => {});
+		let openLock;
+		const lock = new Promise((resolve) => {
+			openLock = resolve;
 		});
+		const release = () => {
+			openLock();
+			if (this._activePromise === lock) {
+				this._activePromise = null;
+			}
+		};
+		work.then(release, release);
+
+		this._activePromise = lock;
+
+		return raceWithTimeout(work, this._timeout, this._name);
 	}
 }
 
@@ -155,40 +176,41 @@ export class QueuedMutex {
 			logFn?.(`${this._name}: Queued (${this._pendingCount - 1} ahead)`);
 		}
 
-		// Chain onto the queue
-		const result = this._queue.then(async () => {
-			try {
-				return await this._executeWithTimeout(fn);
-			} finally {
-				this._pendingCount--;
-			}
+		// COR-FE-07: the queue advances when the WORK settles, not when a
+		// timed-out caller stops waiting - otherwise the next queued job
+		// would overlap the one still running.
+		let settleWork;
+		const workDone = new Promise((resolve, reject) => {
+			settleWork = { resolve, reject };
 		});
 
-		// Update queue to include this operation
-		this._queue = result.catch(() => {});
+		const prev = this._queue;
+		const result = prev.then(() => {
+			// Promise.resolve().then(fn): a synchronous throw from fn must
+			// become a rejected work promise. An escaped synchronous error
+			// would leave workDone forever pending and kill the whole queue.
+			const work = Promise.resolve().then(fn);
+			work.catch(() => {});
+			work.then(settleWork.resolve, settleWork.reject);
+			work.then(
+				() => {
+					this._pendingCount--;
+				},
+				() => {
+					this._pendingCount--;
+				},
+			);
+			// The timeout races the CALLER only; it starts when the job
+			// reaches the head of the queue, and it never opens the queue.
+			return raceWithTimeout(work, this._timeout, this._name);
+		});
+
+		this._queue = prev
+			.then(() => workDone)
+			.catch(() => {});
+		// A rejection after the caller timed out must stay handled.
+		workDone.catch(() => {});
 
 		return result;
-	}
-
-	/**
-	 * Execute function with timeout protection
-	 * @private
-	 */
-	async _executeWithTimeout(fn) {
-		return new Promise((resolve, reject) => {
-			const timeoutId = setTimeout(() => {
-				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`));
-			}, this._timeout);
-
-			fn()
-				.then((result) => {
-					clearTimeout(timeoutId);
-					resolve(result);
-				})
-				.catch((error) => {
-					clearTimeout(timeoutId);
-					reject(error);
-				});
-		});
 	}
 }

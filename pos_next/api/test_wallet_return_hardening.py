@@ -11,6 +11,7 @@ pos_next/_pn_run_tests.py pos_next.api.test_wallet_return_hardening
 """
 
 import unittest
+import uuid
 from unittest import mock
 
 import frappe
@@ -349,3 +350,276 @@ class TestWalletReturnReversal(FrappeTestCase):
         for name in rows:
             self._wallet_txns.append(name)
         self.assertTrue(rows, "refund credit must exist for the return")
+
+
+class TestLoyaltyConversionFailure(FrappeTestCase):
+    """COR-BE-16: a failed loyalty-to-wallet conversion after invoice submit
+    must fail the whole submit (one request = one transaction), not be
+    swallowed into a silently missing wallet credit."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.original_invoice_type = frappe.db.get_single_value(
+            "POS Next Global Settings", "invoice_type"
+        )
+        cls.profile = frappe.db.get_value(
+            "POS Profile",
+            _PROFILE_FILTER,
+            ["name", "company", "warehouse"],
+            as_dict=True,
+            order_by="creation asc",
+        )
+        if not cls.profile:
+            raise unittest.SkipTest("no schedule-safe POS Profile")
+        item = frappe.get_all(
+            "Item",
+            filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+            pluck="name",
+            limit=1,
+        )
+        if not item:
+            raise unittest.SkipTest("no stock sales item on site")
+        cls.item = item[0]
+        cls.mode = frappe.get_all(
+            "POS Payment Method",
+            {"parent": cls.profile.name, "parenttype": "POS Profile"},
+            pluck="mode_of_payment",
+            limit=1,
+        )
+        if not cls.mode:
+            raise unittest.SkipTest("profile has no payment methods")
+
+        suffix = uuid.uuid4().hex[:8]
+        cls.loyalty_program = frappe.get_doc(
+            {
+                "doctype": "Loyalty Program",
+                "loyalty_program_name": f"COR-BE-16 LP {suffix}",
+                "company": cls.profile.company,
+                "from_date": nowdate(),
+                "conversion_factor": 1,
+                "expiry_duration": 100,
+                "collection_rules": [{"tier_name": "Silver", "min_spent": 0, "collection_factor": 1}],
+            }
+        ).insert(ignore_permissions=True)
+
+        # reuse the site's first wallet-backed customer (a fresh customer would
+        # have its after-insert wallet created against the GLOBAL default
+        # company, and Wallet names are unique per customer across companies,
+        # so forcing a second wallet for the profile's company collides)
+        cls.customer = frappe.db.get_value(
+            "Customer", {"is_internal_customer": 0}, "name", order_by="creation asc"
+        )
+        if not cls.customer:
+            raise unittest.SkipTest("no non-internal customer")
+        cls._original_loyalty_program = frappe.db.get_value(
+            "Customer", cls.customer, "loyalty_program"
+        )
+        frappe.db.set_value(
+            "Customer", cls.customer, "loyalty_program", cls.loyalty_program.name, update_modified=False
+        )
+        cls.wallet = get_or_create_wallet(cls.customer, cls.profile.company, force_create=True)
+        if not cls.wallet:
+            raise unittest.SkipTest("no wallet account configured on company")
+
+        # turn on loyalty-to-wallet conversion for the profile (an enabled
+        # row wins whole, else the global single) and restore afterwards
+        cls._settings_row = frappe.db.get_value(
+            "POS Settings", {"pos_profile": cls.profile.name, "enabled": 1}, "name"
+        )
+        cls._settings_backup = {}
+        if cls._settings_row:
+            for field in ("enable_loyalty_program", "loyalty_to_wallet"):
+                cls._settings_backup[field] = frappe.db.get_value("POS Settings", cls._settings_row, field)
+                frappe.db.set_value("POS Settings", cls._settings_row, field, 1, update_modified=False)
+        else:
+            for field in ("enable_loyalty_program", "loyalty_to_wallet"):
+                cls._settings_backup[field] = frappe.db.get_single_value("POS Next Global Settings", field)
+                frappe.db.set_single_value("POS Next Global Settings", field, 1)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._settings_row:
+            for field, value in cls._settings_backup.items():
+                frappe.db.set_value("POS Settings", cls._settings_row, field, value, update_modified=False)
+        else:
+            for field, value in cls._settings_backup.items():
+                frappe.db.set_single_value("POS Next Global Settings", field, value)
+        frappe.db.delete("Loyalty Point Entry", {"loyalty_program": cls.loyalty_program.name})
+        frappe.db.set_value(
+            "Customer",
+            cls.customer,
+            "loyalty_program",
+            cls._original_loyalty_program,
+            update_modified=False,
+        )
+        frappe.delete_doc(
+            "Loyalty Program", cls.loyalty_program.name, force=1, ignore_permissions=True
+        )
+        _set_invoice_type(cls.original_invoice_type or POS_INVOICE)
+        frappe.db.commit()
+        super().tearDownClass()
+
+    def setUp(self):
+        frappe.set_user("Administrator")
+        _set_invoice_type(SALES_INVOICE)
+        self._invoices = []
+        self._wallet_txns = []
+        self.shift = self._make_shift()
+        self._make_stock()
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        # sweep every wallet row linked to this test's invoices first:
+        # cancelling an invoice under a linked WT complains (same discovery
+        # as the sibling class above)
+        for name in self._invoices:
+            for wt_name in frappe.get_all(
+                "Wallet Transaction",
+                filters={"reference_doctype": "Sales Invoice", "reference_name": name},
+                pluck="name",
+            ):
+                self._wallet_txns.append(wt_name)
+        for wt_name in dict.fromkeys(self._wallet_txns):
+            if frappe.db.exists("Wallet Transaction", wt_name):
+                wt = frappe.get_doc("Wallet Transaction", wt_name)
+                if wt.docstatus == 1:
+                    wt.flags.ignore_permissions = True
+                    wt.cancel()
+                frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+        for name in self._invoices:
+            if frappe.db.exists("Sales Invoice", name):
+                doc = frappe.get_doc("Sales Invoice", name)
+                if doc.docstatus == 1:
+                    doc.flags.ignore_permissions = True
+                    doc.cancel()
+                frappe.delete_doc("Sales Invoice", name, force=1, ignore_permissions=True)
+        if getattr(self, "stock_entry", None):
+            se = frappe.get_doc("Stock Entry", self.stock_entry.name)
+            if se.docstatus == 1:
+                se.cancel()
+            frappe.delete_doc("Stock Entry", se.name, force=1, ignore_permissions=True)
+        if getattr(self, "shift", None):
+            frappe.db.set_value(
+                "POS Opening Shift", self.shift.name, "docstatus", 2, update_modified=False
+            )
+            frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
+        # the OLD (buggy) code logs the swallowed conversion failure; sweep
+        # the log rows this test's invoices produced
+        for name in self._invoices:
+            frappe.db.delete("Error Log", {"method": ["like", f"%{name}%"]})
+        frappe.db.commit()
+
+    def _make_shift(self):
+        shift = frappe.get_doc(
+            {
+                "doctype": "POS Opening Shift",
+                "pos_profile": self.profile.name,
+                "company": self.profile.company,
+                "user": "Administrator",
+                "posting_date": nowdate(),
+                "period_start_date": frappe.utils.now_datetime(),
+                "balance_details": [{"mode_of_payment": self.mode[0], "amount": 0}],
+            }
+        )
+        shift.flags.ignore_permissions = True
+        shift.insert()
+        shift.reload()
+        shift.submit()
+        return shift
+
+    def _make_stock(self):
+        se = frappe.get_doc(
+            {
+                "doctype": "Stock Entry",
+                "stock_entry_type": "Material Receipt",
+                "purpose": "Material Receipt",
+                "company": self.profile.company,
+                "items": [
+                    {
+                        "item_code": self.item,
+                        "qty": 5,
+                        "t_warehouse": self.profile.warehouse,
+                        "allow_zero_valuation_rate": 1,
+                    }
+                ],
+            }
+        )
+        se.flags.ignore_permissions = True
+        se.insert()
+        se.submit()
+        self.stock_entry = se
+
+    def _submit(self):
+        result = submit_invoice(
+            invoice={
+                "pos_profile": self.profile.name,
+                "posa_pos_opening_shift": self.shift.name,
+                "customer": self.customer,
+                "loyalty_program": self.loyalty_program.name,
+                "items": [
+                    {"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.profile.warehouse}
+                ],
+                "payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+            }
+        )
+        self._invoices.append(result["name"])
+        return result
+
+    def test_conversion_failure_fails_the_submit(self):
+        """The mocked conversion failure must propagate out of the submit and
+        roll the request back: no submitted invoice, no partial wallet credit
+        (the old flow logged the error and left the invoice submitted)."""
+        # boundary: the raise must roll back exactly the request's own writes
+        frappe.db.commit()
+        # snapshot: the shared site has unrelated submitted invoices for this
+        # customer, so compare states instead of asserting an empty table
+        invoices_before = set(
+            frappe.get_all("Sales Invoice", filters={"customer": self.customer, "docstatus": 1}, pluck="name")
+        )
+        credits_before = set(
+            frappe.get_all(
+                "Wallet Transaction",
+                filters={"reference_doctype": "Sales Invoice", "source_type": "Loyalty Program"},
+                pluck="name",
+            )
+        )
+        with mock.patch(
+            "pos_next.pos_next.doctype.wallet_transaction.wallet_transaction.create_wallet_credit",
+            side_effect=Exception("forced conversion failure"),
+        ):
+            with self.assertRaises(Exception) as ctx:
+                self._submit()
+            self.assertIn("forced conversion failure", str(ctx.exception))
+        frappe.db.rollback()
+        self.assertEqual(
+            set(invoices_before),
+            set(frappe.get_all("Sales Invoice", filters={"customer": self.customer, "docstatus": 1}, pluck="name")),
+            "no submitted invoice may appear or survive from the failed request",
+        )
+        self.assertEqual(
+            credits_before,
+            set(
+                frappe.get_all(
+                    "Wallet Transaction",
+                    filters={"reference_doctype": "Sales Invoice", "source_type": "Loyalty Program"},
+                    pluck="name",
+                )
+            ),
+            "no partial wallet credit may survive a failed conversion",
+        )
+
+    def test_successful_conversion_still_credits_wallet(self):
+        """Guard: the honest lane still earns the wallet credit."""
+        result = self._submit()
+        rows = frappe.get_all(
+            "Wallet Transaction",
+            filters={
+                "reference_doctype": "Sales Invoice",
+                "reference_name": result["name"],
+                "source_type": "Loyalty Program",
+            },
+            pluck="name",
+        )
+        self._wallet_txns.extend(rows)
+        self.assertTrue(rows, "loyalty conversion must credit the wallet")

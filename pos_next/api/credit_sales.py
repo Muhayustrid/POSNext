@@ -16,6 +16,14 @@ from frappe.utils import cint, flt, get_datetime, nowdate, today
 from pos_next.api.settings_resolver import get_effective_pos_setting
 
 
+def _check_customer_read(customer):
+	"""Customer balances are financial data: require Customer read on the
+	probed customer (SEC-NEW-07). Same pattern as redeem_customer_credit's
+	has_permission gate below."""
+	if not frappe.has_permission("Customer", "read", doc=customer):
+		frappe.throw(_("Not permitted to read customer {0}").format(customer), frappe.PermissionError)
+
+
 @frappe.whitelist()
 def get_customer_balance(customer, company=None):
 	"""
@@ -45,6 +53,10 @@ def get_customer_balance(customer, company=None):
 	"""
 	if not customer:
 		frappe.throw(_("Customer is required"))
+
+	# SEC-NEW-07: before the try block so the gate cannot be swallowed into
+	# the zero-balance fallback below
+	_check_customer_read(customer)
 
 	try:
 		from frappe.query_builder import DocType
@@ -154,6 +166,9 @@ def get_available_credit(customer, company, pos_profile=None):
 
 	if not company:
 		frappe.throw(_("Company is required"))
+
+	# SEC-NEW-07: same customer read gate as get_customer_balance
+	_check_customer_read(customer)
 
 	total_credit = []
 

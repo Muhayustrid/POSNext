@@ -24,6 +24,25 @@ const FALLBACK_ORDER = {
 }
 
 /**
+ * Failure that happened AFTER the receipt physically came out of a driver
+ * (e.g. a cut or status error once the bitmap was already queued). Falling
+ * back to the next driver would print a duplicate, so the chain stops here.
+ * Drivers mark such errors by setting `err.postPrint = true` or by throwing
+ * this class (COR-FE-10).
+ */
+export class PostPrintError extends Error {
+	constructor(message) {
+		super(message)
+		this.name = "PostPrintError"
+		this.postPrint = true
+	}
+}
+
+function isPostPrintError(err) {
+	return Boolean(err?.postPrint) || err?.name === "PostPrintError"
+}
+
+/**
  * Build a transport. `drivers` and `config` are injectable so unit tests need
  * no network or sockets. The production singleton below wires the real ones.
  */
@@ -95,6 +114,23 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 					effectivePaper = result.paper
 				}
 			} catch (err) {
+				if (isPostPrintError(err)) {
+					// The receipt came out of this driver: any further attempt
+					// would hand the customer a duplicate (COR-FE-10). Stop the
+					// chain, log the sheet that did print, and surface the error.
+					await logAttempt({
+						...opts.logContext,
+						driver: id,
+						status: idx === 0 ? "Success" : "Fallback",
+						error_message: [
+							...errors,
+							`${id}: ${err?.message || err} (after the receipt printed)`,
+						].join(" | "),
+						paper_width: effectivePaper,
+						duration_ms: Date.now() - started,
+					})
+					throw err
+				}
 				ok = false
 				errors.push(`${id}: ${err?.message || err}`)
 			}

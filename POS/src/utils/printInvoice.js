@@ -7,6 +7,7 @@ import { offlineWorker } from "@/utils/offline/workerClient"
 import {
 	getTransport,
 	initTransportFromServer,
+	PostPrintError,
 	printHTML as transportPrint,
 } from "@/utils/print/transport"
 import { buildCrewSlipHTML } from "@/utils/print/crew_slip"
@@ -26,8 +27,13 @@ const DEFAULT_PRINT_FORMAT = "POS Next Receipt"
 // Shared helpers
 // ============================================================================
 
+// Receipt money follows the invoice currency, using the same per-currency
+// decimal rule as the UI (IDR stays integer, others get 2 decimals). An
+// unknown currency keeps the legacy integer display.
+let receiptCurrency = null
+
 function formatCurrency(amount) {
-	return formatCurrencyNumber(Number.parseFloat(amount || 0))
+	return formatCurrencyNumber(Number.parseFloat(amount || 0), undefined, receiptCurrency)
 }
 
 /**
@@ -49,6 +55,20 @@ export function isLocalOnlyInvoiceName(name) {
 		typeof name === "string" &&
 		(name.startsWith("OFFLINE-") || name.startsWith("pos_offline_"))
 	)
+}
+
+/**
+ * Parse a date WITHOUT the UTC shift of `new Date("YYYY-MM-DD")`, which reads
+ * date-only strings as UTC midnight and renders the previous day in
+ * UTC-negative timezones (COR-FE-14: 2026-01-01 -> Dec 31). Date-only values
+ * become local-midnight dates; anything else goes through new Date as before.
+ */
+export function parseDateOnly(value) {
+	if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+		const [year, month, day] = value.split("-").map(Number)
+		return new Date(year, month - 1, day)
+	}
+	return new Date(value)
 }
 
 /**
@@ -168,6 +188,7 @@ export function effectiveReceiptDots() {
  * print transport's silent paths.
  */
 export function buildReceiptHTML(invoiceData) {
+	receiptCurrency = invoiceData.currency || null
 	const items = invoiceData.items || []
 	const paidAmount = derivePaidAmount(invoiceData)
 	const buyerName = (invoiceData.buyer_name || "").trim()
@@ -237,7 +258,7 @@ export function buildReceiptHTML(invoiceData) {
 
 				<div class="invoice-info">
 					<div><span>${__("Invoice #:")}</span><span><strong>${escapeHtml(invoiceData.name)}</strong></span></div>
-					<div><span>${__("Date:")}</span><span>${new Date(
+					<div><span>${__("Date:")}</span><span>${parseDateOnly(
 						invoiceData.posting_date || Date.now(),
 					).toLocaleString()}</span></div>
 						${
@@ -700,6 +721,15 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
 }
 
 /**
+ * Detect a post-print failure flagged by the transport/driver: the receipt
+ * already came out of the printer, so no fallback may print another copy
+ * (COR-FE-10).
+ */
+function isPostPrintFailure(err) {
+	return err instanceof PostPrintError || Boolean(err?.postPrint)
+}
+
+/**
  * Try silent print, fall back to browser print on failure.
  * The transport already walks its own driver chain (imin → qz → browser,
  * each driver reconnecting internally), so this outer fallback only fires
@@ -715,6 +745,9 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 			await silentPrintInvoiceFromDoc(invoiceData)
 			return { method: "silent", success: true }
 		} catch (err) {
+			// COR-FE-10: the receipt physically printed (post-print failure).
+			// A browser fallback would hand the customer a second copy.
+			if (isPostPrintFailure(err)) throw err
 			log.warn(
 				"Silent local receipt failed, falling back to browser:",
 				err?.message || err,
@@ -738,6 +771,9 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 		)
 		return { method: "silent", success: true }
 	} catch (err) {
+		// COR-FE-10: same guard for the server-invoice path: stop instead of
+		// opening a duplicate browser receipt.
+		if (isPostPrintFailure(err)) throw err
 		log.warn(
 			"Silent print failed, falling back to browser:",
 			err?.message || err,

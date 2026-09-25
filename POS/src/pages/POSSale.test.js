@@ -540,3 +540,24 @@ describe("shift boundary cart isolation (COR-FE-03)", () => {
 		expect(cartStore.invoiceItems).toHaveLength(1)
 	})
 })
+
+describe("offer reapply timer cleanup on unmount (COR-FE-15)", () => {
+	it("clears the pending reapply timer so the callback never fires after unmount", async () => {
+		await mountPOS()
+
+		const reapplySpy = vi.spyOn(cartStore, "reapplyOffer").mockResolvedValue()
+		// A customer change is one of the triggers that schedules the
+		// offerReapplyTimer callback (300ms).
+		cartStore.customer = { name: "CUST-TIMER", customer_name: "Timer Test" }
+		await flushPromises()
+
+		const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+		await wrapper.unmount()
+
+		// Outlive the 300ms delay: a surviving timer would call reapplyOffer
+		// here, after the page is gone.
+		await new Promise((resolve) => setTimeout(resolve, 450))
+		expect(reapplySpy).not.toHaveBeenCalled()
+		expect(clearSpy).toHaveBeenCalled()
+	})
+})

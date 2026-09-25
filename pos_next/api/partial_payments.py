@@ -396,15 +396,20 @@ def create_payment_entry(
 	if invoice.docstatus != 1:
 		frappe.throw(_("Invoice must be submitted before adding payments"))
 
-	if invoice.docstatus == 2:
-		frappe.throw(_("Cannot add payment to cancelled invoice"))
+	# COR-BE-12: read the outstanding under a row lock. Two concurrent payment
+	# requests serialize here: the first creates its Payment Entry and commits,
+	# then the second sees the reduced outstanding instead of the stale value
+	# the get_doc above loaded.
+	outstanding_amount = flt(
+		frappe.db.get_value("Sales Invoice", invoice_name, "outstanding_amount", for_update=True)
+	)
 
 	# Validate amount doesn't exceed outstanding
-	if amount > flt(invoice.outstanding_amount) + AMOUNT_TOLERANCE:
+	if amount > outstanding_amount + AMOUNT_TOLERANCE:
 		frappe.throw(
 			_("Payment amount {0} exceeds outstanding amount {1}").format(
 				frappe.format_value(amount, {"fieldtype": "Currency"}),
-				frappe.format_value(invoice.outstanding_amount, {"fieldtype": "Currency"}),
+				frappe.format_value(outstanding_amount, {"fieldtype": "Currency"}),
 			)
 		)
 
@@ -783,18 +788,23 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 	if not frappe.has_permission("Sales Invoice", "write", invoice_name):
 		frappe.throw(_("You don't have permission to add payments to this invoice"))
 
-	# Validate total payment amount doesn't exceed outstanding
+	# Validate total payment amount doesn't exceed outstanding.
+	# COR-BE-12: same locked outstanding read as create_payment_entry — a
+	# concurrent batch must not slip past the invoice's outstanding.
 	try:
 		invoice = frappe.get_doc("Sales Invoice", invoice_name)
 	except frappe.DoesNotExistError:
 		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
+	outstanding_amount = flt(
+		frappe.db.get_value("Sales Invoice", invoice_name, "outstanding_amount", for_update=True)
+	)
 	total_payment_amount = sum(flt(p.get("amount", 0)) for p in payments)
-	if total_payment_amount > flt(invoice.outstanding_amount) + AMOUNT_TOLERANCE:
+	if total_payment_amount > outstanding_amount + AMOUNT_TOLERANCE:
 		frappe.throw(
 			_("Total payment amount {0} exceeds outstanding amount {1}").format(
 				frappe.format_value(total_payment_amount, {"fieldtype": "Currency"}),
-				frappe.format_value(invoice.outstanding_amount, {"fieldtype": "Currency"}),
+				frappe.format_value(outstanding_amount, {"fieldtype": "Currency"}),
 			)
 		)
 

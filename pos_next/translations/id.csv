@@ -1426,7 +1426,6 @@
 "The customer received a cash refund for this return.","Pelanggan menerima pengembalian tunai untuk pengembalian ini.",""
 "The return amount was added to the customer credit balance. No cash refund was given.","Jumlah pengembalian ditambahkan ke saldo kredit pelanggan. Tidak ada pengembalian tunai.",""
 "The return amount will be added to the customer credit balance. No cash refund will be given.","Jumlah pengembalian akan ditambahkan ke saldo kredit pelanggan. Tidak ada pengembalian tunai.",""
-"This coupon requires a minimum purchase of","Kupon ini memerlukan pembelian minimal sebesar",""
 "This invoice cannot be returned because the return period has expired.","Faktur ini tidak dapat dikembalikan karena periode pengembalian telah habis.",""
 "Total must equal invoice amount","Total harus sama dengan jumlah faktur",""
 "Total: {0}%","Total: {0}%",""

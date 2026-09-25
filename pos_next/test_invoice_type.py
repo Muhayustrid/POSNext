@@ -17,11 +17,26 @@ def _set_invoice_type(value):
 
 
 class TestInvoiceType(FrappeTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
+
+	@classmethod
+	def tearDownClass(cls):
+		# these tests flip the switch on purpose; the site must keep the mode
+		# it started from, not inherit whatever the last test set
+		_set_invoice_type(cls._invoice_type_baseline or SALES_INVOICE)
+		cls._clear_cache()
+		frappe.db.commit()
+		super().tearDownClass()
+
 	def setUp(self):
 		self._clear_cache()
 
 	def tearDown(self):
-		_set_invoice_type(SALES_INVOICE)
 		self._clear_cache()
 		frappe.db.commit()
 
@@ -53,6 +68,10 @@ class TestInvoiceType(FrappeTestCase):
 		self.assertEqual(get_sales_report_doctypes(), ["POS Invoice", "Sales Invoice"])
 
 	def test_switch_rejected_with_open_shift(self):
+		# deterministic start: the guard only fires on a real mode change, so a
+		# POS-mode leftover from an earlier test must not silence it
+		_set_invoice_type(SALES_INVOICE)
+		self._clear_cache()
 		# fabricate an open shift row without full insert flow
 		from frappe.utils import nowdate
 

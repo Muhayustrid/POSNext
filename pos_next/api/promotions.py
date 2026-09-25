@@ -1060,6 +1060,10 @@ def apply_referral_code(referral_code, customer):
 @frappe.whitelist()
 def get_referral_codes(company=None, include_disabled=False):
 	"""Get all referral codes with optional filters."""
+	# The referral_code column is the redeemer secret (SEC-NEW-05): same read
+	# gate as the sibling get_referral_details below.
+	check_promotion_permissions("read")
+
 	filters = {}
 
 	if company:

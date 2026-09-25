@@ -264,60 +264,74 @@ export function createIminDriver(deps = {}) {
 			const sheets = Array.from({ length: copies }, () => bitmap)
 			if (crewApplies) sheets.push(crewBitmap)
 
-			for (let i = 0; i < sheets.length; i++) {
-				const bmp = sheets[i]
-				const tQueued = Date.now()
-				await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
+				// COR-FE-10: once the first sheet is queued, any failure below
+				// happens with paper already (partially) out of the printer.
+				// Tag it postPrint so the transport stops the chain instead of
+				// letting the next driver or the browser fallback print the
+				// same receipt a second time.
+				let firstSheetQueued = false
+				for (let i = 0; i < sheets.length; i++) {
+					try {
+						const bmp = sheets[i]
+						const tQueued = Date.now()
+						await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
+						firstSheetQueued = true
 
-				// Resolve above means "queued" — the raster may not be in the print
-				// buffer yet. Reference flows wait before advancing the paper.
-				await new Promise((r) => setTimeout(r, SETTLE_MS))
+						// Resolve above means "queued" — the raster may not be in the print
+						// buffer yet. Reference flows wait before advancing the paper.
+						await new Promise((r) => setTimeout(r, SETTLE_MS))
 
-				// The feed is what makes the receipt physically leave the printer.
-				// Omitting it is what caused the "first run prints nothing, second
-				// run prints the first one" behaviour seen on device.
-				p.printAndFeedPaper(feedDots)
-				if (cut) p.partialCut()
+						// The feed is what makes the receipt physically leave the printer.
+						// Omitting it is what caused the "first run prints nothing, second
+						// run prints the first one" behaviour seen on device.
+						p.printAndFeedPaper(feedDots)
+						if (cut) p.partialCut()
 
-				await waitIdle(p)
+						await waitIdle(p)
 
-				// Tear-off pause before the next SHEET (receipt or slip alike);
-				// never after the final one.
-				//
-				// Measured from QUEUE time, not from here. On device (2026-09-03)
-				// getPrinterStatus() already reports 0 while the head is still
-				// printing, so waitIdle passes instantly and a bare copyDelayMs is
-				// consumed by the copy still coming out: the pause visibly existed
-				// with fontScale 60 (short bitmap) and vanished at fontScale 100
-				// (tall bitmap). Invariant: the gap between two sheets is always
-				// at least copyDelayMs, ON TOP of whatever the pipeline actually
-				// took — the reservation only extends the pause (when status went
-				// idle early) and shrinks to zero when the pipeline overran the
-				// estimate, so slow uploads plus waitIdle polling overshoot can
-				// no longer swallow the configured tear-off window.
-				const elapsed = Date.now() - tQueued
-				const reserveMs = Math.max(
-					0,
-					SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
-				)
-				const isLastSheet = i === sheets.length - 1
-				const pauseMs = isLastSheet ? 0 : reserveMs + copyDelayMs
-				// The reservation is invisible to POS Print Log (it only sees the
-				// whole print), so say per sheet how the wall clock was spent —
-				// this is what makes a swallowed pause on site diagnosable after
-				// the fact. kind tells a swallowed crew slip apart from a copy.
-				log.info("sheet printed", {
-					sheet: i + 1,
-					kind: crewApplies && i === sheets.length - 1 ? "crew" : "receipt",
-					heightDots: bmp.height,
-					elapsedMs: elapsed,
-					reserveMs,
-					pauseMs,
-				})
-				if (!isLastSheet) {
-					await new Promise((r) => setTimeout(r, pauseMs))
+					// Tear-off pause before the next SHEET (receipt or slip alike);
+					// never after the final one.
+					//
+					// Measured from QUEUE time, not from here. On device (2026-09-03)
+					// getPrinterStatus() already reports 0 while the head is still
+					// printing, so waitIdle passes instantly and a bare copyDelayMs is
+					// consumed by the copy still coming out: the pause visibly existed
+					// with fontScale 60 (short bitmap) and vanished at fontScale 100
+					// (tall bitmap). Invariant: the gap between two sheets is always
+					// at least copyDelayMs, ON TOP of whatever the pipeline actually
+					// took — the reservation only extends the pause (when status went
+					// idle early) and shrinks to zero when the pipeline overran the
+					// estimate, so slow uploads plus waitIdle polling overshoot can
+					// no longer swallow the configured tear-off window.
+					const elapsed = Date.now() - tQueued
+					const reserveMs = Math.max(
+						0,
+						SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
+					)
+					const isLastSheet = i === sheets.length - 1
+					const pauseMs = isLastSheet ? 0 : reserveMs + copyDelayMs
+					// The reservation is invisible to POS Print Log (it only sees the
+					// whole print), so say per sheet how the wall clock was spent —
+					// this is what makes a swallowed pause on site diagnosable after
+					// the fact. kind tells a swallowed crew slip apart from a copy.
+					log.info("sheet printed", {
+						sheet: i + 1,
+						kind: crewApplies && i === sheets.length - 1 ? "crew" : "receipt",
+						heightDots: bmp.height,
+						elapsedMs: elapsed,
+						reserveMs,
+						pauseMs,
+					})
+					if (!isLastSheet) {
+						await new Promise((r) => setTimeout(r, pauseMs))
+					}
+					} catch (err) {
+						if (firstSheetQueued && err && typeof err === "object") {
+							err.postPrint = true
+						}
+						throw err
+					}
 				}
-			}
 
 			return { paper, dots, copies: sheets.length, tailDots }
 		},

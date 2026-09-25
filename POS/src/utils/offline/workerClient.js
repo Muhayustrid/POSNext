@@ -389,7 +389,12 @@ class OfflineWorkerClient {
 				};
 			case "PING_SERVER":
 			case "CHECK_OFFLINE":
-				return true; // Assume offline when worker unavailable
+				// COR-FE-09: keep the semantics of each message. PING_SERVER
+				// answers "is the server reachable" (worker's pingServer
+				// returns response.ok), CHECK_OFFLINE answers "are we
+				// offline". With the worker gone we cannot have reached the
+				// server, so the safe answers are false and true.
+				return type === "CHECK_OFFLINE";
 			case "SAVE_INVOICE":
 			case "DELETE_INVOICE":
 			case "CACHE_ITEMS":

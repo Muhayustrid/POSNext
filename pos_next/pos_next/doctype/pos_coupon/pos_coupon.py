@@ -178,18 +178,22 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 	}
 
 
-def increment_coupon_usage(coupon_code):
+def increment_coupon_usage(coupon_code, customer=None):
 	"""Increment the usage counter for a coupon under a row lock (SEC-15, PATTERN C).
 
 	Runs inside the caller's invoice submit transaction: the FOR UPDATE lock
 	serializes concurrent claims, and the max-use re-check under the lock
-	refuses to push `used` past `maximum_use`. No manual commit — the
-	increment commits (or rolls back) together with the invoice.
+	refuses to push `used` past `maximum_use`. The one-use-per-customer rule
+	is re-checked here too (COR-BE-07): the draft-save validation
+	(check_coupon_code) only sees committed invoices, so two drafts saved
+	before either was submitted both pass it, and only this submit-time
+	re-check can refuse the second one. No manual commit — the increment
+	commits (or rolls back) together with the invoice.
 	"""
 	coupon = frappe.db.get_value(
 		"POS Coupon",
 		{"coupon_code": coupon_code.upper()},
-		["name", "used", "maximum_use"],
+		["name", "used", "maximum_use", "one_use", "coupon_code"],
 		as_dict=True,
 		for_update=True,
 	)
@@ -199,6 +203,13 @@ def increment_coupon_usage(coupon_code):
 	used = cint(coupon.used)
 	if cint(coupon.maximum_use) and used >= cint(coupon.maximum_use):
 		frappe.throw(_("Sorry, this coupon code has been fully redeemed"))
+
+	# COR-BE-07: re-check under the lock. The submitting invoice is still a
+	# draft here, so the count only covers earlier submits; a thrown violation
+	# aborts the whole submit and never consumes quota.
+	if cint(coupon.one_use) and customer:
+		if _get_customer_coupon_usage_count(customer, coupon.coupon_code) > 0:
+			frappe.throw(_("Sorry, you have already used this coupon code"))
 
 	frappe.db.set_value("POS Coupon", coupon.name, "used", used + 1, update_modified=False)
 
