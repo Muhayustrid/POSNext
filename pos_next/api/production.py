@@ -263,8 +263,8 @@ def create_production(recipe, qty, pos_profile, items=None, batches=None):
 			fg_row["batch_no"] = fg_batch.name
 		se.append("items", fg_row)
 
-		# Cashiers have no Stock Entry doctype permission; the POS Production Log
-		# insert below stays permission-enforced and is the real access gate.
+		# Cashiers have no Stock Entry doctype permission; the access gate is
+		# _assert_profile_access above, both writes run permission-exempt.
 		se.flags.ignore_permissions = True
 		se.insert()
 		se.submit()
@@ -281,6 +281,7 @@ def create_production(recipe, qty, pos_profile, items=None, batches=None):
 		log.stock_entry = se.name
 		log.pos_profile = pos_profile
 		log.company = company
+		log.flags.ignore_permissions = True
 		log.insert()
 		log.submit()
 

@@ -47,6 +47,32 @@ def _set_invoice_type(value):
 		pass  # not cached yet (`in frappe.local` is unreliable on v16)
 
 
+def _cancel_wallet_transactions_for(invoice_names):
+	"""Cancel + delete Wallet Transactions referencing these invoices.
+
+	The loyalty-to-wallet conversion mints a WT per submitted invoice (this
+	site enables the conversion and the shared customer carries a loyalty
+	program), and cancelling an invoice under a linked WT throws
+	LinkExistsError. Same sweep as api/test_wallet_return_hardening.py."""
+	names = list(dict.fromkeys(n for n in invoice_names if n))
+	if not names:
+		return
+	for wt_name in frappe.get_all(
+		"Wallet Transaction",
+		filters={
+			"reference_doctype": ("in", (SALES_INVOICE, POS_INVOICE)),
+			"reference_name": ("in", names),
+			"docstatus": ("!=", 2),
+		},
+		pluck="name",
+	):
+		wt = frappe.get_doc("Wallet Transaction", wt_name)
+		if wt.docstatus == 1:
+			wt.flags.ignore_permissions = True
+			wt.cancel()
+		frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+
+
 class TestSubmitInvoicePOSIMode(FrappeTestCase):
 	def setUp(self):
 		self._created = []
@@ -139,6 +165,7 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 				doctype, {"posa_pos_opening_shift": self.shift.name}, pluck="name"
 			):
 				self._created.append(name)
+		_cancel_wallet_transactions_for(self._created)
 		for name in dict.fromkeys(self._created):
 			for doctype in ("POS Invoice", "Sales Invoice"):
 				if frappe.db.exists(doctype, name):
@@ -298,6 +325,8 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			or 0
 		)
 		doc = frappe.get_doc("POS Invoice", name)
+		# the loyalty WT linked at submit blocks the cancel — sweep it first
+		_cancel_wallet_transactions_for([name])
 		doc.flags.ignore_permissions = True
 		doc.cancel()
 

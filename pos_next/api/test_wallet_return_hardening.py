@@ -658,3 +658,160 @@ class TestLoyaltyConversionFailure(FrappeTestCase):
         )
         self._wallet_txns.extend(rows)
         self.assertTrue(rows, "loyalty conversion must credit the wallet")
+
+
+class TestLoyaltyCreditPOSInvoiceMode(TestLoyaltyConversionFailure):
+    """Fix C (loyalty leg): process_loyalty_to_wallet stamped every wallet
+    credit with reference_doctype "Sales Invoice". In POS Invoice mode (the
+    app default) the WT's Dynamic Link then points at a name that exists in
+    no Sales Invoice table — insert fails link validation and kills the whole
+    submit. The reference must carry the invoice's actual doctype."""
+
+    def setUp(self):
+        frappe.set_user("Administrator")
+        _set_invoice_type(POS_INVOICE)
+        self._invoices = []
+        self._wallet_txns = []
+        self.shift = self._make_shift()
+        self._make_stock()
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        _cancel_wallet_transactions_for(self._invoices)
+        for name in self._invoices:
+            if frappe.db.exists("POS Invoice", name):
+                doc = frappe.get_doc("POS Invoice", name)
+                if doc.docstatus == 1:
+                    doc.flags.ignore_permissions = True
+                    doc.cancel()
+                frappe.delete_doc("POS Invoice", name, force=1, ignore_permissions=True)
+        # RED-only: the failed submit logs its error under the invoice name
+        for name in self._invoices:
+            frappe.db.delete("Error Log", {"method": ["like", f"%{name}%"]})
+        super().tearDown()
+
+    def test_successful_conversion_still_credits_wallet(self):
+        self.skipTest(
+            "inherited guard filters reference_doctype Sales Invoice, meaningless in POS mode; "
+            "the POS-mode guard is test_loyalty_credit_references_pos_invoice"
+        )
+
+    def test_loyalty_credit_references_pos_invoice(self):
+        result = self._submit()
+        rows = frappe.get_all(
+            "Wallet Transaction",
+            filters={
+                "reference_doctype": POS_INVOICE,
+                "reference_name": result["name"],
+                "source_type": "Loyalty Program",
+            },
+            pluck="name",
+        )
+        self._wallet_txns.extend(rows)
+        self.assertTrue(rows, "loyalty conversion must credit the wallet against the POS Invoice")
+
+
+class TestWalletReturnReversalPOSInvoiceMode(TestWalletReturnReversal):
+    """Fix C: the return/reversal family hardcoded "Sales Invoice". In POS
+    Invoice mode both invoices are POS Invoices, so the helper read the wrong
+    table (get_doc threw / the WT lookups found nothing) and the return could
+    never submit with a reversal. return_against is always the same doctype
+    as its return, so resolving the return name resolves the pair."""
+
+    def setUp(self):
+        frappe.set_user("Administrator")
+        _set_invoice_type(POS_INVOICE)
+        self._created = []
+        self._wallet_txns = []
+        self.shift = self._make_shift()
+        self._make_stock()
+        self.original = self._submit_original()
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        # POS-mode returns live in tabPOS Invoice; sweep them BEFORE the
+        # parent's Sales-Invoice sweep and original cancel (a return_against
+        # link blocks the original's cancel)
+        for name in frappe.get_all(
+            "POS Invoice",
+            filters={"return_against": getattr(self, "original", ""), "docstatus": ["!=", 2]},
+            pluck="name",
+        ):
+            _cancel_wallet_transactions_for([name])
+            doc = frappe.get_doc("POS Invoice", name)
+            if doc.docstatus == 1:
+                doc.flags.ignore_permissions = True
+                doc.cancel()
+            frappe.delete_doc("POS Invoice", name, force=1, ignore_permissions=True)
+        super().tearDown()
+
+    def _submit_return(self, add_to_balance=1):
+        # ERPNext demands at least one payment row on every POS Invoice,
+        # returns included; the wallet lane refunds via add_to_customer_balance
+        # so the cash row itself stays at zero
+        result = submit_invoice(
+            invoice={
+                "is_return": 1,
+                "return_against": self.original,
+                "pos_profile": self.profile.name,
+                "posa_pos_opening_shift": self.shift.name,
+                "customer": self.customer,
+                "items": [
+                    {"item_code": self.item, "qty": -1, "rate": 100, "warehouse": self.profile.warehouse}
+                ],
+                "payments": [{"mode_of_payment": self.mode[0], "amount": 0}],
+                "add_to_customer_balance": add_to_balance,
+            }
+        )
+        self._created.append(result["name"])
+        return result
+
+    def _credit_wallet_against_original(self, amount=50):
+        wallet_name = self.wallet.name if hasattr(self.wallet, "name") else self.wallet["name"]
+        wt = create_wallet_credit(
+            wallet=wallet_name,
+            amount=amount,
+            source_type="Manual Adjustment",
+            remarks="Fix C test credit",
+            reference_doctype=POS_INVOICE,
+            reference_name=self.original,
+            submit=True,
+        )
+        self._wallet_txns.append(wt.name)
+        return wt
+
+    # the two inherited guards below hardcode Sales Invoice doctypes/filters
+    # in their own bodies; they stay proven by the parent class in SI mode
+    def test_reversal_reports_per_row_results(self):
+        self.skipTest(
+            "parent builds a literal Sales Invoice return doc, impossible against a "
+            "POS Invoice original; covered end to end by the full-return test here"
+        )
+
+    def test_successful_return_still_credits_wallet(self):
+        self.skipTest(
+            "inherited guard filters reference_doctype Sales Invoice, meaningless in POS mode; "
+            "covered by test_full_return_cancels_credit_and_credits_refund_in_pos_invoice_mode"
+        )
+
+    def test_full_return_cancels_credit_and_credits_refund_in_pos_invoice_mode(self):
+        self._credit_wallet_against_original(50)
+        result = self._submit_return(add_to_balance=1)
+        # the original credit was reversed (full return → cancel)
+        self.assertEqual(
+            frappe.db.get_value("Wallet Transaction", self._wallet_txns[0], "docstatus"),
+            2,
+            "the original credit WT must be cancelled by the reversal",
+        )
+        rows = frappe.get_all(
+            "Wallet Transaction",
+            filters={
+                "reference_doctype": POS_INVOICE,
+                "reference_name": result["name"],
+                "transaction_type": "Credit",
+                "source_type": "Refund",
+            },
+            pluck="name",
+        )
+        self._wallet_txns.extend(rows)
+        self.assertTrue(rows, "refund credit must exist for the return")

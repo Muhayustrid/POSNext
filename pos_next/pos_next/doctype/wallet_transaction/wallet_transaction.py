@@ -8,6 +8,21 @@ from frappe import _
 from frappe.utils import flt, today
 
 from pos_next.api.wallet import get_or_create_wallet
+from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
+
+
+def _resolve_invoice_doctype(name):
+	"""The doctype an invoice name lives in.
+
+	The return/refund family used to hardcode "Sales Invoice"; in POS Invoice
+	mode (the app default) that reads the wrong table — reversals never found
+	their wallet transactions and refund credits failed link validation.
+	return_against is always the same doctype as its return, so resolving the
+	return name resolves the pair.
+	"""
+	if name and frappe.db.exists(POS_INVOICE, name):
+		return POS_INVOICE
+	return SALES_INVOICE
 
 
 class WalletTransaction(AccountsController):
@@ -320,7 +335,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 	return invoice's grand_total (absolute value) or can be explicitly passed.
 
 	Args:
-		return_invoice: Return Sales Invoice name (is_return=1)
+		return_invoice: Return invoice name (is_return=1, either doctype)
 		amount: Explicit credit amount (optional). If not provided,
 				uses abs(return_invoice.grand_total).
 
@@ -328,7 +343,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 		Wallet Transaction document or None
 	"""
 	return_data = frappe.db.get_value(
-		"Sales Invoice",
+		_resolve_invoice_doctype(return_invoice),
 		return_invoice,
 		["customer", "company", "grand_total", "is_return", "return_against"],
 		as_dict=True,
@@ -374,7 +389,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 	existing_transaction_name = frappe.db.get_value(
 		"Wallet Transaction",
 		{
-			"reference_doctype": "Sales Invoice",
+			"reference_doctype": _resolve_invoice_doctype(return_invoice),
 			"reference_name": return_invoice,
 			"transaction_type": "Credit",
 			"source_type": "Refund",
@@ -420,7 +435,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 			"amount": credit_amount,
 			"source_type": "Refund",
 			"source_account": source_account,
-			"reference_doctype": "Sales Invoice",
+			"reference_doctype": _resolve_invoice_doctype(return_invoice),
 			"reference_name": return_invoice,
 			"remarks": _("Return credit to wallet for {0} against {1}: {2}").format(
 				return_invoice,
@@ -452,8 +467,9 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	For partial returns: Create a proportional Debit transaction to reverse the credit
 
 	Args:
-		original_invoice: Original Sales Invoice name
-		return_invoice: Return Sales Invoice name (is_return=1)
+		original_invoice: Original invoice name (either doctype)
+		return_invoice: Return invoice name (is_return=1, same doctype as the
+			original)
 
 	Returns:
 		list: one {"wallet_transaction", "action", "success"} dict per reversal
@@ -463,9 +479,11 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 		(the old swallow produced a double credit: old credit kept + refund
 		credit granted).
 	"""
-	# Get the return invoice to calculate return ratio
-	return_doc = frappe.get_doc("Sales Invoice", return_invoice)
-	original_doc = frappe.get_doc("Sales Invoice", original_invoice)
+	# Get the return invoice to calculate return ratio. One doctype resolution
+	# per original/return pair — return_against is always the same doctype.
+	invoice_doctype = _resolve_invoice_doctype(return_invoice)
+	return_doc = frappe.get_doc(invoice_doctype, return_invoice)
+	original_doc = frappe.get_doc(invoice_doctype, original_invoice)
 
 	if not return_doc.is_return or return_doc.return_against != original_invoice:
 		return []
@@ -473,7 +491,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	existing = frappe.db.exists(
 		"Wallet Transaction",
 		{
-			"reference_doctype": "Sales Invoice",
+			"reference_doctype": invoice_doctype,
 			"reference_name": return_invoice,
 			"transaction_type": "Debit",
 			"source_type": "Refund",
@@ -486,7 +504,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	wallet_transactions = frappe.get_all(
 		"Wallet Transaction",
 		filters={
-			"reference_doctype": "Sales Invoice",
+			"reference_doctype": invoice_doctype,
 			"reference_name": original_invoice,
 			"docstatus": 1,
 			"transaction_type": ["in", ["Credit", "Loyalty Credit"]],
@@ -616,7 +634,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 						"amount": reverse_amount,
 						"source_type": "Refund",
 						"source_account": wt.source_account,
-						"reference_doctype": "Sales Invoice",
+						"reference_doctype": invoice_doctype,
 						"reference_name": return_invoice,
 						"remarks": _(
 							"Wallet reversal for return {0} against {1}: returned {2}, reversed {3}"

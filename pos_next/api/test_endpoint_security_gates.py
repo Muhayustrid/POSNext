@@ -30,6 +30,7 @@ from pos_next.api.wallet import (
     get_customer_wallet,
     get_customer_wallet_balance,
     get_or_create_wallet,
+    get_wallet_info,
 )
 
 ADMIN = "Administrator"
@@ -235,6 +236,29 @@ class TestEndpointSecurityGates(FrappeTestCase):
             if self.wallet:
                 wallet = get_or_create_wallet(self.customer, self.profile.company)
                 self.assertTrue(wallet, "existing wallet must still be returned to the cashier")
+        finally:
+            frappe.set_user(ADMIN)
+
+    def test_sec_new_08_get_wallet_info_is_customer_read_gated(self):
+        # get_wallet_info was the one wallet read endpoint left ungated: it
+        # leaks wallet existence/balance (and can auto-create a wallet) for
+        # any customer name the caller types
+        if frappe.has_permission("Customer", "read", user=self.intruder):
+            self.skipTest("site grants Customer read to roleless users")
+
+        frappe.set_user(self.intruder)
+        try:
+            with self.assertRaises(frappe.PermissionError):
+                get_wallet_info(self.customer, self.profile.company)
+        finally:
+            frappe.set_user(ADMIN)
+
+        # the cashier's own info panel (Customer read) keeps working
+        frappe.set_user(self.cashier)
+        try:
+            info = get_wallet_info(self.customer, self.profile.company)
+            self.assertIsInstance(info, dict)
+            self.assertIn("wallet_balance", info)
         finally:
             frappe.set_user(ADMIN)
 

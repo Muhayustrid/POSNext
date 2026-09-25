@@ -461,3 +461,42 @@ class TestCreateProduction(FrappeTestCase):
 			frappe.set_user("Administrator")
 		self.assertTrue(result["stock_entry"])
 		self.assertTrue(result["production_log"])
+
+	def test_posnext_cashier_can_produce_on_own_profile(self):
+		# the real cashier lane: POSNext Cashier carries read on Recipe/Item but
+		# no Stock Entry or POS Production Log perms — the API's profile gate
+		# (SEC-NEW-03) is the access control, so production itself must run
+		# under the function's own ignore_permissions flags
+		if not frappe.db.exists("Role", "POSNext Cashier"):
+			self.skipTest("POSNext Cashier role missing")
+		cashier = self._make_user("Prod Cashier Lane")
+		frappe.get_doc(
+			{
+				"doctype": "Has Role",
+				"parent": cashier,
+				"parenttype": "User",
+				"parentfield": "roles",
+				"role": "POSNext Cashier",
+			}
+		).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.pos_profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": cashier,
+				"default": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.clear_cache(user=cashier)
+		_seed_stock(self.mat, self.warehouse, 10)
+		frappe.set_user(cashier)
+		try:
+			result = create_production(recipe=self.recipe.name, qty=1, pos_profile=self.pos_profile)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertTrue(result["stock_entry"])
+		log = frappe.get_doc("POS Production Log", result["production_log"])
+		self.assertEqual(log.docstatus, 1)
+		self.assertEqual(log.recipe, self.recipe.name)

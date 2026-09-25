@@ -141,7 +141,7 @@ def process_loyalty_to_wallet(doc, method=None):
 			loyalty_entry.loyalty_points,
 			frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
 		),
-		reference_doctype="Sales Invoice",
+		reference_doctype=doc.doctype,
 		reference_name=doc.name,
 		submit=True,
 	)
@@ -443,6 +443,9 @@ def get_wallet_info(customer, company, pos_profile=None):
 	Get comprehensive wallet information for a customer.
 	Used by POS frontend.
 	"""
+	# SEC-NEW-08: same gate as the other wallet read endpoints
+	_check_customer_read(customer)
+
 	result = {
 		"wallet_enabled": False,
 		"wallet_exists": False,
