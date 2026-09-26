@@ -30,7 +30,15 @@ POS_ROLES = {"POSNext Cashier", "Nexus POS Manager"}
 #   POS Profile User outlet), lihat blok permissions JSON doctype app.
 # - Company, Purchase Order, Purchase Receipt (entri pn-mgr-*):
 #   paket Nexus POS Manager — persona manager berdiri sendiri tanpa role core.
+# - Account (select=1 tanpa read, kedua role):
+#   ERPNext v16 party.account_perm_check() menuntut select/read Account saat
+#   set_missing_values meresolusi debit_to — field server-managed yang tidak
+#   pernah dipilih kasir (pos_next/api/test_cashier_checkout_permissions.py).
+#   Select tanpa read = cukup untuk validasi link, chart of accounts tetap
+#   tertutup. Kedua role POS tidak punya DocPerm standar di Account, jadi
+#   baris ini murni menambah.
 ALLOWED_PARENTS = {
+    "Account",
     "Bin",
     "Company",
     "Customer",

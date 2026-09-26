@@ -448,6 +448,7 @@ def get_sales_persons(pos_profile=None):
 			fields=["name", "sales_person_name", "commission_rate", "employee"],
 			order_by="sales_person_name",
 			limit_page_length=0,
+			ignore_permissions=True,
 		)
 
 		return sales_persons

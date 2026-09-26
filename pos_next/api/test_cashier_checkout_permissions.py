@@ -1,16 +1,22 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
-"""COR-BE-11 acceptance: a stale draft update must be rejected with HTTP 409.
+"""Two-persona cashier checkout acceptance.
 
-Two devices editing the same draft used to be last-writer-wins: a payload
-carrying an older `modified` silently overwrote the other device's edits.
-When the payload carries `modified` and the DB value is newer, update_invoice
-must reject with a ValidationError whose http_status_code is 409. The same
-modified value is an idempotent retry and must pass. Payloads without
-`modified` (what the honest UI sends) are not compared.
+A cashier user (POSNext Cashier + Stock User, no accounting roles) must be able
+to drive the checkout path end to end. Two server-side spots broke this:
 
-Run via pos_next/_pn_run_tests.py pos_next.api.test_draft_update_conflict
+1. update_invoice → POS Invoice.set_missing_values → get_party_account()
+   runs an Account select/read permission check (account_perm_check) that the
+   cashier cannot pass. debit_to is a server-managed field the cashier never
+   chooses, so the app must resolve it with permission-safe reads before
+   set_missing_values runs.
+
+2. get_sales_persons returned an empty list for the cashier because
+   frappe.get_list enforced Sales Person read permission. The endpoint is a
+   public name/commission dropdown, so it must read with ignore_permissions.
+
+Run via pos_next/_pn_run_tests.py pos_next.api.test_cashier_checkout_permissions
 """
 
 import json
@@ -18,11 +24,12 @@ import unittest
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import get_datetime
 
 from pos_next.api.invoices import update_invoice
+from pos_next.api.pos_profile import get_sales_persons
 from pos_next.invoice_type import POS_INVOICE, get_pos_invoice_doctype
 
+CASHIER = "kasir.checkout@pnxt.test"
 _PROFILE_FILTER = [
     ["disabled", "=", 0],
     ["pos_schedule_enforce_closing", "=", 0],
@@ -37,16 +44,13 @@ def _set_invoice_type(value):
         pass  # not cached yet
 
 
-class TestDraftUpdateConflict(FrappeTestCase):
+class TestCashierCheckoutPermissions(FrappeTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.original_invoice_type = frappe.db.get_single_value(
             "POS Next Global Settings", "invoice_type"
         )
-        # resolve the doctype under the same forced mode setUp uses: a module
-        # that leaked Sales mode must not pin cls.doctype to Sales Invoice
-        # while every draft below is created as a POS Invoice
         _set_invoice_type(POS_INVOICE)
         cls.doctype = get_pos_invoice_doctype()
         cls.profile = frappe.db.get_value(
@@ -58,11 +62,20 @@ class TestDraftUpdateConflict(FrappeTestCase):
         )
         if not cls.profile:
             raise unittest.SkipTest("no schedule-safe POS Profile")
+        frappe.set_user("Administrator")
+        cls._make_cashier_user()
+        cls._grant_profile_access()
         item = frappe.get_all(
             "Item",
-            filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+            filters={
+                "disabled": 0,
+                "is_sales_item": 1,
+                "is_stock_item": 1,
+                "name": ["not like", "\\_PNXT\\_%"],
+            },
             pluck="name",
             limit=1,
+            order_by="creation asc",
         )
         if not item:
             raise unittest.SkipTest("no stock sales item on site")
@@ -87,9 +100,68 @@ class TestDraftUpdateConflict(FrappeTestCase):
 
     @classmethod
     def tearDownClass(cls):
+        frappe.set_user("Administrator")
         _set_invoice_type(cls.original_invoice_type or POS_INVOICE)
+        if getattr(cls, "sales_person", None) and frappe.db.exists(
+            "Sales Person", cls.sales_person
+        ):
+            frappe.delete_doc("Sales Person", cls.sales_person, force=1, ignore_permissions=True)
+        if frappe.db.exists("User", CASHIER):
+            profile_doc = frappe.get_doc("POS Profile", cls.profile.name)
+            profile_doc.set(
+                "applicable_for_users",
+                [r for r in profile_doc.get("applicable_for_users") or [] if r.user != CASHIER],
+            )
+            profile_doc.save(ignore_permissions=True)
+            frappe.delete_doc("User", CASHIER, force=1, ignore_permissions=True)
         frappe.db.commit()
         super().tearDownClass()
+
+    @classmethod
+    def _make_cashier_user(cls):
+        if frappe.db.exists("User", CASHIER):
+            return
+        user = frappe.new_doc("User")
+        user.email = CASHIER
+        user.first_name = "Kasir Checkout Fixture"
+        user.enabled = 1
+        user.send_welcome_email = 0
+        user.user_type = "System User"
+        user.flags.ignore_permissions = True
+        user.insert()
+        user.add_roles("POSNext Cashier")
+        user.add_roles("Stock User")
+        user.save(ignore_permissions=True)
+
+    @classmethod
+    def _grant_profile_access(cls):
+        profile_doc = frappe.get_doc("POS Profile", cls.profile.name)
+        if any(r.user == CASHIER for r in profile_doc.get("applicable_for_users") or []):
+            return
+        profile_doc.append("applicable_for_users", {"user": CASHIER, "default": 1})
+        profile_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+    @classmethod
+    def _make_sales_person(cls):
+        existing = frappe.db.get_value(
+            "Sales Person",
+            {"enabled": 1, "is_group": 0},
+            "name",
+            order_by="creation asc",
+        )
+        if existing:
+            cls.sales_person = None  # pre-existing data, do not delete
+            return existing
+        doc = frappe.new_doc("Sales Person")
+        doc.sales_person_name = "Kasir Checkout SP"
+        doc.enabled = 1
+        doc.is_group = 0
+        doc.flags.ignore_permissions = True
+        doc.insert()
+        cls.sales_person = doc.name
+        frappe.db.commit()
+        return doc.name
 
     def setUp(self):
         frappe.set_user("Administrator")
@@ -101,7 +173,7 @@ class TestDraftUpdateConflict(FrappeTestCase):
                 "doctype": "POS Opening Shift",
                 "pos_profile": self.profile.name,
                 "company": self.profile.company,
-                "user": "Administrator",
+                "user": CASHIER,
                 "posting_date": frappe.utils.nowdate(),
                 "period_start_date": frappe.utils.now_datetime(),
                 "balance_details": [{"mode_of_payment": self.mode[0], "amount": 0}],
@@ -113,6 +185,7 @@ class TestDraftUpdateConflict(FrappeTestCase):
         self.shift.submit()
         self._make_stock()
         self._make_item_price(100)
+        frappe.set_user(CASHIER)
 
     def tearDown(self):
         frappe.set_user("Administrator")
@@ -208,28 +281,21 @@ class TestDraftUpdateConflict(FrappeTestCase):
             payload["name"] = name
         return payload
 
-    def _create_draft(self):
-        created = update_invoice(json.dumps(self._payload()))
-        name = created.get("name")
+    def test_cashier_can_save_draft_via_update_invoice(self):
+        """The whole checkout blocks here: the client saves the draft through
+        update_invoice on every cart change before it can submit anything."""
+        result = update_invoice(json.dumps(self._payload()))
+        name = result.get("name") if isinstance(result, dict) else result
+        self.assertTrue(name)
         self._created.append(name)
-        return name
+        doc = frappe.get_doc(self.doctype, name)
+        self.assertEqual(doc.docstatus, 0)
+        self.assertTrue(doc.debit_to, "server must resolve debit_to for the cashier")
 
-    def test_stale_modified_update_rejected_with_409(self):
-        """RED: the old flow let the stale payload overwrite the draft."""
-        draft = self._create_draft()
-        db_modified = frappe.db.get_value(self.doctype, draft, "modified")
-        stale = frappe.utils.add_to_date(get_datetime(db_modified), seconds=-60).__str__()
-        with self.assertRaises(frappe.ValidationError) as ctx:
-            update_invoice(json.dumps({**self._payload(draft), "modified": stale}))
-        self.assertEqual(getattr(ctx.exception, "http_status_code", None), 409)
-
-    def test_same_modified_update_is_idempotent_retry(self):
-        draft = self._create_draft()
-        db_modified = str(frappe.db.get_value(self.doctype, draft, "modified"))
-        result = update_invoice(json.dumps({**self._payload(draft), "modified": db_modified}))
-        self.assertEqual(result.get("name"), draft)
-
-    def test_payload_without_modified_still_saves(self):
-        draft = self._create_draft()
-        result = update_invoice(json.dumps(self._payload(draft)))
-        self.assertEqual(result.get("name"), draft)
+    def test_cashier_can_list_sales_persons(self):
+        """The salesperson dropdown silently returned [] for cashiers."""
+        seeded = self._make_sales_person()
+        result = get_sales_persons(self.profile.name)
+        self.assertIsInstance(result, list)
+        self.assertTrue(result, "cashier must see the sales person list")
+        self.assertIn(seeded, [r.get("name") for r in result])

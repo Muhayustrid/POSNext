@@ -21,6 +21,32 @@ from frappe.utils import nowdate
 from pos_next.api.invoices import submit_invoice, update_invoice
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
 
+
+def _cancel_wallet_transactions_for(invoice_names):
+	"""Cancel + delete Wallet Transactions referencing these invoices.
+
+	The loyalty-to-wallet conversion mints a WT per submitted invoice (this
+	site enables the conversion and the shared customer carries a loyalty
+	program), and cancelling an invoice under a linked WT throws
+	LinkExistsError. Same sweep as api/test_pos_invoice_submit.py."""
+	names = list(dict.fromkeys(n for n in invoice_names if n))
+	if not names:
+		return
+	for wt_name in frappe.get_all(
+		"Wallet Transaction",
+		filters={
+			"reference_doctype": ("in", (SALES_INVOICE, POS_INVOICE)),
+			"reference_name": ("in", names),
+			"docstatus": ("!=", 2),
+		},
+		pluck="name",
+	):
+		wt = frappe.get_doc("Wallet Transaction", wt_name)
+		if wt.docstatus == 1:
+			wt.flags.ignore_permissions = True
+			wt.cancel()
+		frappe.delete_doc("Wallet Transaction", wt_name, force=1, ignore_permissions=True)
+
 # same schedule-safe profile filter as test_pos_invoice_submit
 _PROFILE_FILTER = [
     ["disabled", "=", 0],
@@ -144,6 +170,7 @@ class TestDraftSubmitRateGate(FrappeTestCase):
 
     def tearDown(self):
         frappe.set_user("Administrator")
+        _cancel_wallet_transactions_for(self._created)
         for name in dict.fromkeys(self._created):
             for doctype in ("POS Invoice", "Sales Invoice"):
                 if frappe.db.exists(doctype, name):
@@ -189,6 +216,19 @@ class TestDraftSubmitRateGate(FrappeTestCase):
         self.stock_entry = se
 
     def _make_item_price(self, rate):
+        existing = frappe.db.get_value(
+            "Item Price",
+            {
+                "item_code": self.item,
+                "price_list": self.price_list,
+                "selling": 1,
+                "valid_from": "2020-01-01",
+            },
+            "name",
+        )
+        if existing:
+            self._item_prices.append(existing)
+            return
         doc = frappe.get_doc(
             {
                 "doctype": "Item Price",

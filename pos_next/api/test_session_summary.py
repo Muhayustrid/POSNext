@@ -95,12 +95,20 @@ class TestSessionSummary(IntegrationTestCase):
 					"doctype": "User",
 					"email": cls.user,
 					"first_name": "Session",
-					"roles": [{"role": "Sales User"}],
+					"roles": [{"role": "Sales User"}, {"role": "POSNext Cashier"}],
 				}
 			).insert(ignore_permissions=True)
 		elif not frappe.db.get_value("User", cls.user, "enabled"):
 			# a previous run's cleanup disabled the shared fixture user
 			frappe.db.set_value("User", cls.user, "enabled", 1)
+		if "POSNext Cashier" not in frappe.get_all(
+			"Has Role", filters={"parent": cls.user}, pluck="role"
+		):
+			# the shared fixture user predates the two-persona design; without
+			# this role it lacks the Account select perm the checkout path needs
+			udoc = frappe.get_doc("User", cls.user)
+			udoc.append("roles", {"role": "POSNext Cashier"})
+			udoc.save(ignore_permissions=True)
 		# A fresh profile per run: the recap scope is "every shift of the
 		# profile", so a shared fixed-name profile accumulates leftover
 		# shifts/invoices from earlier runs and demos, breaking exact-value
@@ -154,11 +162,17 @@ class TestSessionSummary(IntegrationTestCase):
 					"doctype": "User",
 					"email": cls.second_cashier,
 					"first_name": "Cashier Two",
-					"roles": [{"role": "Sales User"}],
+					"roles": [{"role": "Sales User"}, {"role": "POSNext Cashier"}],
 				}
 			).insert(ignore_permissions=True)
 		elif not frappe.db.get_value("User", cls.second_cashier, "enabled"):
 			frappe.db.set_value("User", cls.second_cashier, "enabled", 1)
+		if "POSNext Cashier" not in frappe.get_all(
+			"Has Role", filters={"parent": cls.second_cashier}, pluck="role"
+		):
+			udoc = frappe.get_doc("User", cls.second_cashier)
+			udoc.append("roles", {"role": "POSNext Cashier"})
+			udoc.save(ignore_permissions=True)
 		# payment-method fixtures: extra profile methods (one unused, one used
 		# but unconfigured) and a second non-cash profile
 		cls.qr_mode = cls._make_mode_of_payment("_SESSUM QR", "Bank")
