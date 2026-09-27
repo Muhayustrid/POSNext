@@ -180,37 +180,28 @@ describe("ShiftDashboard", () => {
 		expect(wrapper.find('[data-test="kpi-grid"]').exists()).toBe(true)
 	})
 
-	it("renders the seven KPI cards with their values", async () => {
+	it("renders the sales hero with companion stats instead of equal KPI cards", async () => {
 		const { wrapper } = await mountWithData()
-		const kpis = wrapper.findAll('[data-test="kpi-grid"] > div')
-		expect(kpis.length).toBe(7)
-		expect(kpis[0].text()).toContain("Net Sales")
-		expect(kpis[0].text()).toContain("150000 IDR")
-		expect(kpis[1].text()).toContain("Transactions")
-		expect(kpis[1].text()).toContain("3")
-		expect(kpis[2].text()).toContain("Average Transaction")
-		expect(kpis[2].text()).toContain("50000 IDR")
-		expect(kpis[3].text()).toContain("Items Sold")
-		expect(kpis[3].text()).toContain("7")
-		expect(kpis[4].text()).toContain("Returns")
-		expect(kpis[4].text()).toContain("1 · -10000 IDR")
-		expect(kpis[5].text()).toContain("Discounts")
-		expect(kpis[5].text()).toContain("2000 IDR")
-		expect(wrapper.find('[data-test="kpi-cash"]').text()).toContain(
-			"Cash in Drawer",
+		const hero = wrapper.find('[data-test="kpi-net-sales"]')
+		expect(hero.text()).toContain("Net Sales")
+		expect(hero.text()).toContain("150000 IDR")
+		expect(hero.text()).toContain("Transactions 3")
+		expect(hero.text()).toContain("50000 IDR")
+		// companion stats live in the quiet strip
+		expect(wrapper.find('[data-test="kpi-items-sold"]').text()).toContain("7")
+		expect(wrapper.find('[data-test="kpi-discounts"]').text()).toContain(
+			"2000 IDR",
 		)
-		expect(wrapper.find('[data-test="kpi-cash"]').text()).toContain("140000 IDR")
-		// expense_supported is false in the fixture
-		expect(wrapper.find('[data-test="kpi-cash"]').text()).toContain(
-			"Before expenses",
+		expect(wrapper.find('[data-test="kpi-returns"]').text()).toContain(
+			"1 · -10000 IDR",
 		)
+		// no cash card in the hero band — cash reads once, in Payment Methods
+		expect(wrapper.find('[data-test="kpi-cash"]').exists()).toBe(false)
 	})
 
-	it("drops the Before expenses subtitle when expenses are supported", async () => {
-		const { wrapper } = await mountWithData({ expense_supported: true })
-		expect(wrapper.find('[data-test="kpi-cash"]').text()).not.toContain(
-			"Before expenses",
-		)
+	it("hides the returns stat when there are no returns", async () => {
+		const { wrapper } = await mountWithData({ returns_count: 0, returns_total: 0 })
+		expect(wrapper.find('[data-test="kpi-returns"]').exists()).toBe(false)
 	})
 
 	it("renders the hourly chart with positive, current, negative and zero buckets", async () => {
@@ -232,40 +223,31 @@ describe("ShiftDashboard", () => {
 		)
 	})
 
-	it("renders payment rows with share percentages and the drawer annotation", async () => {
+	it("renders calm payment rows with one drawer note for the whole section", async () => {
 		const { wrapper } = await mountWithData()
 		const rows = wrapper.findAll('[data-test="payment-row"]')
 		expect(rows.length).toBe(2)
-		const cash = rows[0]
-		expect(cash.text()).toContain("Cash")
-		expect(cash.text()).toContain("90000 IDR")
-		expect(cash.text()).toContain("60%")
-		expect(cash.find('[data-test="drawer-note"]').text()).toContain("in drawer")
-		expect(cash.find('[data-test="drawer-note"]').text()).toContain("140000 IDR")
-		expect(cash.find('[data-test="payment-bar"]').attributes("style")).toContain(
-			"width: 60%",
+		expect(rows[0].text()).toContain("Cash")
+		expect(rows[0].text()).toContain("90000 IDR")
+		// expense_supported is false in the fixture: the section note carries it
+		const note = wrapper.find('[data-test="drawer-note"]')
+		expect(note.text()).toContain("in drawer")
+		expect(note.text()).toContain("140000 IDR")
+		expect(note.text()).toContain("Before expenses")
+		// exactly one drawer note — it belongs to the section, not each row
+		expect(wrapper.findAll('[data-test="drawer-note"]').length).toBe(1)
+		// no percentage share and no bars — amounts only
+		expect(wrapper.find('[data-test="payment-bar"]').exists()).toBe(false)
+		expect(wrapper.find('[data-test="payments-section"]').text()).not.toContain(
+			"%",
 		)
-		expect(rows[1].text()).toContain("40%")
-		expect(rows[1].find('[data-test="drawer-note"]').exists()).toBe(false)
 	})
 
-	it("guards the payment percentage when the grand total is zero", async () => {
-		const { wrapper } = await mountWithData({ methods_grand_total: 0 })
-		expect(wrapper.find('[data-test="payment-row"]').text()).toContain("0%")
-	})
-
-	it("caps the payment bar when change given pushes a method past 100%", async () => {
-		const { wrapper } = await mountWithData({
-			payments: [
-				{ mode_of_payment: "Cash", amount: -120000, is_cash: true, configured: true },
-			],
-			methods_grand_total: 100000,
-		})
-		// the % text stays truthful, the bar never overflows the track
-		expect(wrapper.find('[data-test="payment-row"]').text()).toContain("120%")
-		const bar = wrapper.find('[data-test="payment-bar"]')
-		expect(bar.attributes("style")).toContain("width: 100%")
-		expect(bar.attributes("style")).not.toContain("width: 120%")
+	it("hides the drawer note in period mode and when expenses are supported", async () => {
+		const { wrapper } = await mountWithData({ expense_supported: true })
+		expect(wrapper.find('[data-test="drawer-note"]').text()).not.toContain(
+			"Before expenses",
+		)
 	})
 
 	it("caps top items at five", async () => {
@@ -434,7 +416,7 @@ describe("ShiftDashboard period mode", () => {
 
 	async function mountPeriodData(overrides = {}) {
 		const { wrapper } = mountDashboard({ posProfile: "P1" })
-		await wrapper.find('[data-test="mode-chip-today"]').trigger("click")
+		await wrapper.find('[data-test="period-select"]').setValue("today")
 		const entry = periodDashboardResource()
 		entry.resource.data = { ...PERIOD, ...overrides }
 		entry.resource.loading = false
@@ -465,10 +447,10 @@ describe("ShiftDashboard period mode", () => {
 		wrapper.unmount()
 	})
 
-	it("renders period chips and swaps the cash card to Cash Payments", async () => {
+	it("renders a period dropdown like the recap and swaps the cash card to Cash Payments", async () => {
 		const wrapper = await mountPeriodData()
-		const chips = wrapper.findAll('[data-test="mode-chips"] button')
-		expect(chips.map((c) => c.text())).toEqual([
+		const options = wrapper.findAll('[data-test="period-select"] option')
+		expect(options.map((o) => o.text().trim())).toEqual([
 			"This Shift",
 			"Today",
 			"Yesterday",
@@ -479,11 +461,10 @@ describe("ShiftDashboard period mode", () => {
 		])
 		expect(wrapper.find('[data-test="chip-period"]').text()).toBe("Today")
 
-		const cash = wrapper.find('[data-test="kpi-cash"]')
-		expect(cash.text()).toContain("Cash Payments")
-		expect(cash.text()).toContain("180000 IDR")
-		expect(cash.text()).not.toContain("Cash in Drawer")
-		expect(cash.text()).not.toContain("Before expenses")
+		// no cash card anywhere — cash payments read in Payment Methods
+		expect(wrapper.find('[data-test="kpi-cash"]').exists()).toBe(false)
+		const cashRow = wrapper.findAll('[data-test="payment-row"]')[0]
+		expect(cashRow.text()).toContain("180000 IDR")
 		// KPIs come from the period payload
 		expect(wrapper.find('[data-test="kpi-net-sales"]').text()).toContain(
 			"300000 IDR",
@@ -496,10 +477,11 @@ describe("ShiftDashboard period mode", () => {
 		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("13/09")
 		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("14/09")
 
-		const cashRow = wrapper.findAll('[data-test="payment-row"]')[0]
-		expect(cashRow.find('[data-test="drawer-note"]').exists()).toBe(false)
-		// payments themselves still render with their share
-		expect(cashRow.text()).toContain("60%")
+		expect(wrapper.find('[data-test="drawer-note"]').exists()).toBe(false)
+		// payments render as plain amounts, no share text
+		expect(wrapper.findAll('[data-test="payment-row"]')[0].text()).toContain(
+			"180000 IDR",
+		)
 		wrapper.unmount()
 	})
 
@@ -508,13 +490,13 @@ describe("ShiftDashboard period mode", () => {
 		expect(entry.resource.reload).toHaveBeenCalledTimes(1)
 		expect(periodDashboardResource().resource.reload).not.toHaveBeenCalled()
 
-		const chip = (value) => wrapper.find(`[data-test="mode-chip-${value}"]`)
-		await chip("today").trigger("click")
+		const periodSelect = () => wrapper.find('[data-test="period-select"]')
+		await periodSelect().setValue("today")
 		await flushPromises()
 		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
 		expect(entry.resource.reload).toHaveBeenCalledTimes(1)
 
-		await chip("shift").trigger("click")
+		await periodSelect().setValue("shift")
 		await flushPromises()
 		expect(entry.resource.reload).toHaveBeenCalledTimes(2)
 		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
@@ -524,7 +506,7 @@ describe("ShiftDashboard period mode", () => {
 	it("applies a custom range once both dates are set", async () => {
 		const { wrapper } = mountDashboard({ posProfile: "P1" })
 		const periodEntry = periodDashboardResource()
-		await wrapper.find('[data-test="mode-chip-custom"]').trigger("click")
+		await wrapper.find('[data-test="period-select"]').setValue("custom")
 		await flushPromises()
 		// incomplete custom range: nothing fetched, prompt shown, inputs out
 		expect(periodEntry.resource.reload).not.toHaveBeenCalled()

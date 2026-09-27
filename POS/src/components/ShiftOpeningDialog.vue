@@ -100,12 +100,19 @@
 									</label>
 								</div>
 								<div class="w-32">
-									<Input
-										v-model="openingBalances[method.mode_of_payment]"
-										type="number"
-										placeholder="0.00"
-										step="0.01"
-										min="0"
+									<!-- native input: Vue drives the value so the thousand
+										separators appear while typing (frappe-ui Input only
+										syncs the formatted value back on blur) -->
+									<input
+										class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
+										:value="openingBalances[method.mode_of_payment]"
+										inputmode="decimal"
+										autocomplete="off"
+										placeholder="0"
+										@input="
+											openingBalances[method.mode_of_payment] =
+												formatAmountInput($event.target.value)
+										"
 									/>
 								</div>
 							</div>
@@ -247,11 +254,11 @@
 </template>
 
 <script setup>
-import { Button, Dialog, Input } from "frappe-ui";
-import { createResource } from "frappe-ui";
+import { Button, Dialog, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useShift } from "../composables/useShift";
 import { useFormatters } from "../composables/useFormatters";
+import { formatAmountInput, parseAmountInput } from "../utils/amountInput";
 import { serverErrorMessage } from "../utils/apiWrapper";
 import ShiftClosingDialog from "./ShiftClosingDialog.vue";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
@@ -374,7 +381,7 @@ async function openShift() {
 	// Prepare balance details
 	const balance_details = paymentMethods.value.map((method) => ({
 		mode_of_payment: method.mode_of_payment,
-		opening_amount: Number.parseFloat(openingBalances.value[method.mode_of_payment] || 0),
+		opening_amount: parseAmountInput(openingBalances.value[method.mode_of_payment]),
 	}));
 
 	try {

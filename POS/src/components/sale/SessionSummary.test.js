@@ -281,16 +281,17 @@ describe("SessionSummary", () => {
 		)
 	})
 
-	it("shows the sales summary with clear captions", async () => {
+	it("shows the sales hero with inline companion stats and honest caption", async () => {
 		const { wrapper } = await mountWithSummary()
 		const sales = wrapper.find('[data-test="sales-summary"]').text()
 
 		expect(sales).toContain("50500 IDR") // total sales (after returns)
-		expect(sales).toContain("3") // total orders: sales-only count
+		expect(sales).toContain("Total Orders 3") // orders inline with the hero
 		expect(sales).toContain("16833.333 IDR") // average per order
 		expect(sales).toContain("After returns, tax included")
-		expect(sales).toContain("Submitted sales invoices (returns not counted)")
-		expect(sales).toContain("Gross Sales ÷ Total Orders")
+		// jargon captions are gone — the values carry the meaning
+		expect(sales).not.toContain("Submitted sales invoices (returns not counted)")
+		expect(sales).not.toContain("Gross Sales ÷ Total Orders")
 		expect(sales).toContain("52500 IDR") // gross sales secondary line
 	})
 
@@ -458,14 +459,14 @@ describe("SessionSummary", () => {
 	it("stacks the sales metrics on mobile and keeps tabular numbers", async () => {
 		const { wrapper } = await mountWithSummary()
 		const sales = wrapper.find('[data-test="sales-summary"]')
-		const grid = sales.find(".grid")
-		// base layout is a stacked single column (mobile 360px), 3-up on sm+
-		expect(grid.classes()).toContain("grid-cols-1")
-		expect(grid.classes()).toContain("sm:grid-cols-3")
-		// shift info follows the same pattern
+		// hero values wrap under each other on mobile (flex-wrap), no fixed grid
+		const hero = sales.find('[data-test="kpi-total-sales"]')
+		expect(hero.exists()).toBe(true)
+		expect(sales.html()).toContain("flex-wrap")
+		// shift info is one quiet meta line under the title
 		const info = wrapper.find('[data-test="shift-info"]')
-		expect(info.classes()).toContain("grid-cols-1")
-		expect(info.classes()).toContain("sm:grid-cols-3")
+		expect(info.exists()).toBe(true)
+		expect(info.classes()).toContain("truncate")
 		// numeric values use tabular numerals
 		expect(sales.html()).toContain("tabular-nums")
 	})

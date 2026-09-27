@@ -8,23 +8,19 @@
 		<template v-else>
 			<!-- Mode selector: shift lens or a posting-date window over the whole
 			     profile. Always rendered so a window that failed to load can be
-			     changed. -->
-			<div class="flex flex-wrap items-center gap-1.5" data-test="mode-chips">
-				<button
-					v-for="preset in presets"
-					:key="preset.value"
-					type="button"
-					class="rounded-full px-2.5 py-1 text-xs transition-colors"
-					:class="
-						mode === preset.value
-							? 'bg-gray-900 text-white'
-							: 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-					"
-					:data-test="`mode-chip-${preset.value}`"
-					@click="mode = preset.value"
+			     changed. Same dropdown pattern as the sales recap (SessionSummary). -->
+			<div class="flex flex-wrap items-center gap-2" data-test="mode-chips">
+				<label class="text-xs text-gray-500" for="dash-period">{{ __("Period") }}</label>
+				<select
+					id="dash-period"
+					v-model="mode"
+					class="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900"
+					data-test="period-select"
 				>
-					{{ preset.label }}
-				</button>
+					<option v-for="preset in presets" :key="preset.value" :value="preset.value">
+						{{ preset.label }}
+					</option>
+				</select>
 				<template v-if="mode === 'custom'">
 					<input
 						v-model="customFrom"
@@ -52,14 +48,7 @@
 				class="flex flex-col gap-4"
 				data-test="dashboard-skeleton"
 			>
-				<div class="h-6 w-2/3 rounded bg-gray-100 animate-pulse"></div>
-				<div class="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-					<div
-						v-for="i in 7"
-						:key="i"
-						class="h-20 rounded-lg bg-gray-100 animate-pulse"
-					></div>
-				</div>
+				<div class="h-24 rounded-lg bg-gray-100 animate-pulse"></div>
 				<div class="h-44 rounded-lg bg-gray-100 animate-pulse"></div>
 				<div class="h-36 rounded-lg bg-gray-100 animate-pulse"></div>
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -147,56 +136,41 @@
 					{{ emptyText }}
 				</p>
 
-				<!-- KPI cards -->
-				<div class="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3" data-test="kpi-grid">
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-net-sales">
+				<!-- Ringkasan: satu angka utama (penjualan bersih), sisanya statistik
+				     pendamping tenang. Info tunai hidup di Metode Pembayaran — bukan
+				     kartu terpisah — supaya "kas di laci" terbaca di satu tempat. -->
+				<div
+					class="flex flex-wrap items-end justify-between gap-x-8 gap-y-3 rounded-lg border border-gray-200 p-4"
+					data-test="kpi-grid"
+				>
+					<div data-test="kpi-net-sales">
 						<div class="text-xs text-gray-500">{{ __("Net Sales") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
+						<div class="mt-1 text-2xl font-bold text-gray-900 tabular-nums sm:text-3xl">
 							{{ formatMoney(dashboard.net_sales) }}
 						</div>
-					</div>
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-transactions">
-						<div class="text-xs text-gray-500">{{ __("Transactions") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums">
-							{{ dashboard.sales_count || 0 }}
+						<div class="mt-1 text-xs text-gray-500 tabular-nums">
+							{{ __("Transactions") }} {{ dashboard.sales_count || 0 }}
+							· {{ __("Average Transaction") }} {{ formatMoney(dashboard.average_sale) }}
 						</div>
 					</div>
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-average-sale">
-						<div class="text-xs text-gray-500">{{ __("Average Transaction") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
-							{{ formatMoney(dashboard.average_sale) }}
+					<div class="flex flex-wrap gap-x-8 gap-y-2" data-test="kpi-strip">
+						<div data-test="kpi-items-sold">
+							<div class="text-xs text-gray-500">{{ __("Items Sold") }}</div>
+							<div class="font-semibold text-gray-900 tabular-nums">
+								{{ dashboard.total_qty || 0 }}
+							</div>
 						</div>
-					</div>
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-items-sold">
-						<div class="text-xs text-gray-500">{{ __("Items Sold") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums">
-							{{ dashboard.total_qty || 0 }}
+						<div data-test="kpi-discounts">
+							<div class="text-xs text-gray-500">{{ __("Discounts") }}</div>
+							<div class="font-semibold text-gray-900 tabular-nums">
+								{{ formatMoney(dashboard.total_discount) }}
+							</div>
 						</div>
-					</div>
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-returns">
-						<div class="text-xs text-gray-500">{{ __("Returns") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
-							{{ returnsLabel }}
-						</div>
-					</div>
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-discounts">
-						<div class="text-xs text-gray-500">{{ __("Discounts") }}</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
-							{{ formatMoney(dashboard.total_discount) }}
-						</div>
-					</div>
-					<div class="min-w-0 rounded-lg border border-gray-200 p-3" data-test="kpi-cash">
-						<div class="text-xs text-gray-500">
-							{{ isShiftMode ? __("Cash in Drawer") : __("Cash Payments") }}
-						</div>
-						<div class="mt-0.5 text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
-							{{ formatMoney(isShiftMode ? dashboard.cash_expected : dashboard.total_cash) }}
-						</div>
-						<div
-							v-if="isShiftMode && !dashboard.expense_supported"
-							class="text-xs text-gray-500 mt-0.5"
-						>
-							{{ __("Before expenses") }}
+						<div v-if="(dashboard.returns_count || 0) > 0" data-test="kpi-returns">
+							<div class="text-xs text-gray-500">{{ __("Returns") }}</div>
+							<div class="font-semibold text-red-600 tabular-nums">
+								{{ returnsLabel }}
+							</div>
 						</div>
 					</div>
 				</div>
@@ -258,34 +232,37 @@
 					<h3 id="sd-pay-h" class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
 						{{ __("Payment Methods") }}
 					</h3>
-					<div v-if="paymentRows.length" class="mt-2 flex flex-col gap-2.5" data-test="payments-list">
-						<div v-for="row in paymentRows" :key="row.mode_of_payment" data-test="payment-row">
-							<div class="flex items-baseline justify-between gap-3 text-sm">
-								<span class="min-w-0 truncate text-gray-700">
-									{{ row.mode_of_payment }}
-									<span
-										v-if="row.is_cash && isShiftMode"
-										class="text-xs text-gray-500"
-										data-test="drawer-note"
-									>
-										{{ __("in drawer") }} {{ formatMoney(dashboard.cash_expected) }}
-									</span>
-								</span>
-								<span class="shrink-0 text-end font-semibold text-gray-900 tabular-nums whitespace-nowrap">
-									{{ formatMoney(row.amount) }}
-									<span class="text-xs font-normal text-gray-400">{{ row.percent }}%</span>
-								</span>
-							</div>
-							<div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-								<div
-									data-test="payment-bar"
-									class="h-1.5 rounded-full"
-									:class="row.is_cash ? 'bg-green-500' : 'bg-blue-500'"
-									:style="{ width: row.barPercent + '%' }"
-								></div>
-							</div>
+					<!-- Baris tenang: nama mode — jumlah. Tanpa persen & bar: persen
+					     terhadap total bruto menyesatkan saat ada retur/pengeluaran. -->
+					<div v-if="paymentRows.length" data-test="payments-list">
+						<div
+							v-for="row in paymentRows"
+							:key="row.mode_of_payment"
+							class="flex items-baseline justify-between gap-3 border-b border-gray-100 py-1.5 last:border-b-0"
+							data-test="payment-row"
+						>
+							<span class="min-w-0 text-sm text-gray-700">
+								{{ row.mode_of_payment }}
+							</span>
+							<span
+								class="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums"
+								:class="(Number.parseFloat(row.amount) || 0) < 0 ? 'text-red-600' : 'text-gray-900'"
+							>
+								{{ formatMoney(row.amount) }}
+							</span>
 						</div>
 					</div>
+					<!-- Kas di laci dibaca sekali di sini — milik seksi, bukan baris -->
+					<p
+						v-if="isShiftMode && dashboard.cash_expected != null"
+						class="mt-2 text-xs text-gray-500"
+						data-test="drawer-note"
+					>
+						{{ __("in drawer") }} {{ formatMoney(dashboard.cash_expected) }}
+						<span v-if="!dashboard.expense_supported">
+							· {{ __("Before expenses") }}</span
+						>
+					</p>
 					<p v-else class="mt-1 text-xs text-gray-500">
 						{{ __("No payment methods are configured on this POS Profile.") }}
 					</p>
@@ -575,25 +552,9 @@ function barTitle(bucket) {
 	return `${bucket.label} · ${formatMoney(bucket.net_sales)} · ${Number.parseFloat(bucket.sales_count) || 0}`
 }
 
-const paymentRows = computed(() => {
-	const rows = dashboard.value?.payments || []
-	const total = Number.parseFloat(dashboard.value?.methods_grand_total || 0)
-	return rows.map((row) => {
-		const percent =
-			total > 0
-				? Math.round(
-						(Math.abs(Number.parseFloat(row.amount) || 0) / total) * 100,
-					)
-				: 0
-		return {
-			...row,
-			percent,
-			// change given can push a method past 100% of the takings; cap the
-			// bar at the track while the % text stays as computed
-			barPercent: Math.min(100, percent),
-		}
-	})
-})
+// Payment rows render plainly (mode — amount); no share percentages: with
+// returns/payouts in the mix, a share of the gross total reads as nonsense.
+const paymentRows = computed(() => dashboard.value?.payments || [])
 
 // Backend already orders by base_net_amount desc; cap the display at five.
 const topItems = computed(() => (dashboard.value?.items || []).slice(0, 5))

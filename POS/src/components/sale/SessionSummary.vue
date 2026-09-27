@@ -67,17 +67,29 @@
 		</div>
 
 		<template v-else>
-			<!-- Header + shift/period info -->
+			<!-- Header: judul + SATU baris meta tenang. Nama profil tidak diulang,
+			     info kasir/dibuka/ditutup tidak lagi jadi kotak terpisah. -->
 			<div class="flex items-start justify-between gap-3">
 				<div class="min-w-0">
 					<h3 class="text-base font-semibold text-gray-900 truncate">
 						{{ isShiftMode ? summary.shift_name || summary.pos_profile : summary.pos_profile }}
 					</h3>
-					<p v-if="isShiftMode" class="text-xs text-gray-500 truncate">
-						{{ summary.pos_profile }} · ID {{ summary.opening_shift }}
+					<p
+						v-if="isShiftMode"
+						class="truncate text-xs text-gray-500 tabular-nums"
+						data-test="shift-info"
+					>
+						{{ summary.opening_shift }} · {{ __("Cashier") }}: {{ summary.cashier }}
+						· {{ __("Opened") }} {{ formatDateTime(summary.period_start_date) }}
+						· <template v-if="closing.time">{{ __("Closed") }} {{ closing.time }}<template v-if="closing.badge"> ({{ closing.badge }})</template></template><template v-else>{{ closing.note }}</template>
 					</p>
-					<p v-else class="text-xs text-gray-500 truncate" data-test="period-label">
-						{{ periodLabel }}
+					<p
+						v-else
+						class="truncate text-xs text-gray-500 tabular-nums"
+						data-test="period-info"
+					>
+						{{ periodLabel }} · {{ __("Shifts") }} {{ summary.shift_count ?? 0 }} ·
+						{{ __("All cashiers") }}
 					</p>
 				</div>
 				<div class="flex-shrink-0 flex flex-col items-end gap-1">
@@ -120,92 +132,31 @@
 				{{ __("Showing data from the last successful refresh.") }}
 			</div>
 
-			<!-- 1. Shift info -->
-			<dl
-				v-if="isShiftMode"
-				class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-lg bg-gray-50 border border-gray-200 p-3"
-				data-test="shift-info"
-				:aria-label="__('Session Information')"
-			>
-				<div class="min-w-0">
-					<dt class="text-xs text-gray-500">{{ __("Cashier") }}</dt>
-					<dd class="text-sm font-semibold text-gray-900 truncate">{{ summary.cashier }}</dd>
-				</div>
-				<div class="min-w-0">
-					<dt class="text-xs text-gray-500">{{ __("Opened") }}</dt>
-					<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatDateTime(summary.period_start_date) }}</dd>
-				</div>
-				<div class="min-w-0">
-					<dt class="text-xs text-gray-500">{{ __("Closed") }}</dt>
-					<dd class="text-sm font-semibold text-gray-900 tabular-nums flex flex-wrap items-center gap-1.5">
-						<span v-if="closing.time">{{ closing.time }}</span>
-						<span
-							v-if="closing.badge"
-							class="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
-							:class="closing.badgeClass"
-						>{{ closing.badge }}</span>
-						<span v-if="!closing.time" class="text-gray-400">—</span>
-					</dd>
-					<dd v-if="closing.note" class="text-xs text-gray-500">{{ closing.note }}</dd>
-				</div>
-			</dl>
-
-			<!-- 1b. Period info: the window covers every cashier of the profile -->
-			<dl
-				v-else
-				class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-lg bg-gray-50 border border-gray-200 p-3"
-				data-test="period-info"
-				:aria-label="__('Period Information')"
-			>
-				<div class="min-w-0">
-					<dt class="text-xs text-gray-500">{{ __("Period") }}</dt>
-					<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ periodLabel }}</dd>
-				</div>
-				<div class="min-w-0">
-					<dt class="text-xs text-gray-500">{{ __("Shifts") }}</dt>
-					<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ summary.shift_count ?? 0 }}</dd>
-				</div>
-				<div class="min-w-0">
-					<dt class="text-xs text-gray-500">{{ __("Cashiers") }}</dt>
-					<dd class="text-sm font-semibold text-gray-900">{{ __("All cashiers") }}</dd>
-				</div>
-			</dl>
-
 			<p v-if="!summary.counted_invoices" class="text-xs text-gray-500 text-center" role="status">
 				{{ emptyText }}
 			</p>
 
-			<!-- 2. Sales Summary -->
-			<section
-				class="rounded-lg border border-blue-200 bg-blue-50/60 p-3"
-				aria-labelledby="ss-sales-h"
-				data-test="sales-summary"
-			>
-				<h3 id="ss-sales-h" class="text-xs font-semibold text-blue-700 uppercase tracking-wide">{{ __("Sales Summary") }}</h3>
-				<div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
-					<div class="min-w-0" data-test="kpi-total-sales">
-						<div class="text-xs text-blue-700">{{ __("Total Sales") }}</div>
-						<div class="text-xl sm:text-2xl font-bold text-blue-900 tabular-nums break-words">
-							{{ formatMoney(summary.net_sales) }}
-						</div>
-						<div class="text-xs text-gray-500 mt-0.5">{{ __("After returns, tax included") }}</div>
+			<!-- Lembar rekap: satu wadah tenang, pemisah tipis antar bagian -->
+			<div class="rounded-lg border border-gray-200 divide-y divide-gray-100" data-test="recap-sheet">
+
+			<!-- 2. Sales Summary — hero band yang sama dengan Dasbor: satu angka
+			     utama, statistik pendamping inline, tanpa kotak berwarna & jargon -->
+				<section class="p-4" aria-labelledby="ss-sales-h" data-test="sales-summary">
+				<h3 id="ss-sales-h" class="sr-only">{{ __("Sales Summary") }}</h3>
+				<div data-test="kpi-total-sales">
+					<div class="text-xs text-gray-500">{{ __("Total Sales") }}</div>
+					<div class="mt-1 text-2xl font-bold text-gray-900 tabular-nums sm:text-3xl">
+						{{ formatMoney(summary.net_sales) }}
 					</div>
-					<div class="min-w-0" data-test="kpi-total-orders">
-						<div class="text-xs text-gray-500">{{ __("Total Orders") }}</div>
-						<div class="text-lg sm:text-xl font-bold text-gray-900 tabular-nums">{{ summary.sales_count }}</div>
-						<div class="text-xs text-gray-500 mt-0.5">{{ __("Submitted sales invoices (returns not counted)") }}</div>
+					<div class="mt-1 text-xs text-gray-500 tabular-nums">
+						{{ __("Total Orders") }} {{ summary.sales_count }}
+						· {{ __("Avg / Order") }} {{ formatMoney(summary.average_sale) }}
 					</div>
-					<div class="min-w-0" data-test="kpi-avg-order">
-						<div class="text-xs text-gray-500">{{ __("Avg / Order") }}</div>
-						<div class="text-lg sm:text-xl font-bold text-gray-900 tabular-nums break-words">
-							{{ formatMoney(summary.average_sale) }}
-						</div>
-						<div class="text-xs text-gray-500 mt-0.5">{{ __("Gross Sales ÷ Total Orders") }}</div>
-					</div>
+					<div class="text-xs text-gray-400">{{ __("After returns, tax included") }}</div>
 				</div>
 				<div
 					v-if="summary.gross_sales || summary.credit_outstanding"
-					class="mt-2 flex flex-wrap gap-x-5 gap-y-1 border-t border-blue-100 pt-2"
+					class="mt-2 flex flex-wrap gap-x-5 gap-y-1 border-t border-gray-100 pt-2"
 				>
 					<p class="text-xs text-gray-500">
 						{{ __("Gross Sales (before returns)") }}:
@@ -224,7 +175,7 @@
 			</section>
 
 			<!-- 3. Cash Summary -->
-			<section class="rounded-lg border border-gray-200 p-3" aria-labelledby="ss-cash-h" data-test="cash-summary">
+				<section class="p-3" aria-labelledby="ss-cash-h" data-test="cash-summary">
 				<h3 id="ss-cash-h" class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ __("Cash Summary") }}</h3>
 				<dl class="mt-1 flex flex-col">
 					<div class="flex items-baseline justify-between gap-3 py-1.5 border-b border-gray-100">
@@ -253,7 +204,7 @@
 			</section>
 
 			<!-- 4. Payment Methods -->
-			<section class="rounded-lg border border-gray-200 p-3" aria-labelledby="ss-pay-h" data-test="payments-section">
+				<section class="p-3" aria-labelledby="ss-pay-h" data-test="payments-section">
 				<h3 id="ss-pay-h" class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ __("Payment Methods") }}</h3>
 				<table v-if="summary.payments.length" class="mt-1 w-full text-sm" data-test="payments-table">
 					<tbody>
@@ -300,7 +251,7 @@
 			</section>
 
 			<!-- 5. Charges & Discounts -->
-			<section class="rounded-lg border border-gray-200 p-3" aria-labelledby="ss-charges-h" data-test="charges-section">
+				<section class="p-3" aria-labelledby="ss-charges-h" data-test="charges-section">
 				<h3 id="ss-charges-h" class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ __("Charges & Discounts") }}</h3>
 				<dl class="mt-1 flex flex-col">
 					<div
@@ -334,7 +285,7 @@
 			</section>
 
 			<!-- 6. Refund -->
-			<section class="rounded-lg border border-gray-200 p-3" aria-labelledby="ss-refund-h" data-test="refund-section">
+				<section class="p-3" aria-labelledby="ss-refund-h" data-test="refund-section">
 				<h3 id="ss-refund-h" class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ __("Refund") }}</h3>
 				<div class="mt-1 flex items-baseline justify-between gap-3">
 					<p class="text-sm text-gray-600">
@@ -349,6 +300,8 @@
 					</p>
 				</div>
 			</section>
+
+			</div>
 
 			<!-- 7. Sales per Category -->
 			<section class="flex flex-col gap-1.5" :aria-labelledby="__('Sales per Category')" data-test="categories-section">
