@@ -10,6 +10,7 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import cint, flt, get_datetime, getdate, nowdate, nowtime
 
 from pos_next.api.utilities import get_wallet_payment_modes
+from pos_next.services.cash_mode import get_cash_mode_of_payment
 from pos_next.services.sales_recap import (
 	build_recap,
 	period_hourly,
@@ -429,10 +430,10 @@ def get_session_summary(opening_shift):
 	profile_row = frappe.db.get_value(
 		"POS Profile",
 		shift.pos_profile,
-		("posa_cash_mode_of_payment", "pos_profile_group"),
+		("pos_profile_group",),
 		as_dict=True,
 	)
-	cash_mode = profile_row.posa_cash_mode_of_payment or "Cash"
+	cash_mode = get_cash_mode_of_payment(shift.pos_profile)
 
 	summary = {
 		"opening_shift": opening_shift,
@@ -490,10 +491,10 @@ def get_shift_dashboard(opening_shift):
 	profile_row = frappe.db.get_value(
 		"POS Profile",
 		shift.pos_profile,
-		("posa_cash_mode_of_payment", "pos_profile_group"),
+		("pos_profile_group",),
 		as_dict=True,
 	)
-	cash_mode = profile_row.posa_cash_mode_of_payment or "Cash"
+	cash_mode = get_cash_mode_of_payment(shift.pos_profile)
 
 	scope = shift_scope(opening_shift)
 	dashboard = {
@@ -540,7 +541,7 @@ def get_period_summary(pos_profile, from_date, to_date):
 	profile = frappe.db.get_value(
 		"POS Profile",
 		pos_profile,
-		("name", "company", "posa_cash_mode_of_payment"),
+		("name", "company"),
 		as_dict=True,
 	)
 	if not profile:
@@ -548,7 +549,7 @@ def get_period_summary(pos_profile, from_date, to_date):
 	_check_profile_access(pos_profile)
 	from_date, to_date = _validate_period(from_date, to_date)
 
-	cash_mode = profile.posa_cash_mode_of_payment or "Cash"
+	cash_mode = get_cash_mode_of_payment(pos_profile)
 	scope = period_scope(pos_profile, from_date, to_date)
 	summary = {
 		"pos_profile": pos_profile,
@@ -585,7 +586,7 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	profile = frappe.db.get_value(
 		"POS Profile",
 		pos_profile,
-		("name", "company", "posa_cash_mode_of_payment"),
+		("name", "company"),
 		as_dict=True,
 	)
 	if not profile:
@@ -593,7 +594,7 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	_check_profile_access(pos_profile)
 	from_date, to_date = _validate_period(from_date, to_date)
 
-	cash_mode = profile.posa_cash_mode_of_payment or "Cash"
+	cash_mode = get_cash_mode_of_payment(pos_profile)
 	scope = period_scope(pos_profile, from_date, to_date)
 	dashboard = {
 		"pos_profile": pos_profile,

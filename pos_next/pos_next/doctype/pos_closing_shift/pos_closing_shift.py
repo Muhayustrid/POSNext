@@ -10,6 +10,7 @@ from frappe.model.document import Document
 from frappe.utils import flt
 
 from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
+from pos_next.services.cash_mode import get_cash_mode_of_payment as _resolve_cash_mode
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -232,9 +233,7 @@ class POSClosingShift(Document):
 			if currency:
 				row["currencies"][currency] += flt(amount)
 
-		cash_mode_of_payment = (
-			frappe.db.get_value("POS Profile", self.pos_profile, "posa_cash_mode_of_payment") or "Cash"
-		)
+		cash_mode_of_payment = _get_cash_mode_of_payment(self.pos_profile)
 
 		for row in self.get("pos_transactions", []):
 			invoice = row.get("sales_invoice") or row.get("pos_invoice")
@@ -566,9 +565,14 @@ def get_payments_entries(pos_opening_shift):
 
 
 def _get_cash_mode_of_payment(pos_profile):
-	"""Get the cash mode of payment for a POS profile."""
-	cash_mode = frappe.get_value("POS Profile", pos_profile, "posa_cash_mode_of_payment")
-	return cash_mode or "Cash"
+	"""Get the cash mode of payment for a POS profile (per-profile resolver)."""
+	return _resolve_cash_mode(pos_profile)
+
+
+@frappe.whitelist()
+def get_effective_cash_mode_of_payment(pos_profile):
+	"""Effective cash Mode of Payment of a profile (Desk closing preview)."""
+	return _resolve_cash_mode(pos_profile)
 
 
 def _aggregate_payment(payments, mode_of_payment, amount, opening_amount=0):

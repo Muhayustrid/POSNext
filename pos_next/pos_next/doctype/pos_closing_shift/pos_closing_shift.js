@@ -49,6 +49,7 @@ frappe.ui.form.on("POS Closing Shift", {
 		if (frm.doc.pos_opening_shift && frm.doc.user) {
 			reset_values(frm);
 			frappe.run_serially([
+				() => resolve_cash_mode(frm),
 				() => frm.trigger("set_opening_amounts"),
 				() => frm.trigger("get_pos_invoices"),
 				() => frm.trigger("get_pos_payments"),
@@ -178,12 +179,30 @@ function add_to_pos_payments(d, frm) {
 	});
 }
 
+// Resolve the effective cash mode the same way the server does (profile
+// field, else the profile's own Cash-type row — never a blind "Cash": outlet
+// profiles use per-outlet cash modes like "Cash PKU DELANGGU").
+function resolve_cash_mode(frm) {
+	return frappe
+		.call({
+			method:
+				"pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift.get_effective_cash_mode_of_payment",
+			args: { pos_profile: frm.doc.pos_profile },
+		})
+		.then((r) => {
+			frm._cash_mode_of_payment = r.message || "Cash";
+		});
+}
+
 function add_to_payments(d, frm, conversion_rate) {
-	let cash_mode_of_payment = get_value(
-		"POS Profile",
-		frm.doc.pos_profile,
-		"posa_cash_mode_of_payment"
-	);
+	let cash_mode_of_payment = frm._cash_mode_of_payment;
+	if (!cash_mode_of_payment) {
+		cash_mode_of_payment = get_value(
+			"POS Profile",
+			frm.doc.pos_profile,
+			"posa_cash_mode_of_payment"
+		);
+	}
 	if (!cash_mode_of_payment) {
 		cash_mode_of_payment = "Cash";
 	}
