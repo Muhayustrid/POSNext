@@ -10,7 +10,7 @@ di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
 | Hal | Nilai |
 | --- | --- |
 | Versi app | 2.13.0 (`pos_next/__init__.py` + `POS/package.json` + root `package.json`) |
-| `main` | ronde-2 27 Sep di-commit (**belum di-push** — origin/main masih `cfd89fc`; hash lihat `git log`) |
+| `main` | `847f87e` (= `origin/main`, di-push 27 Sep) |
 | `security-audit-fixes` | `2d16754` (di belakang main; isinya sudah terserap via merge 26 Sep + fix/open-items) |
 | Produksi (Frappe Cloud) | **MASIH `b6f7ae9`** — seluruh remediasi belum melindungi produksi |
 | Site uji dev | `roti-posnext-test.localhost:8001` (bundle build) |
