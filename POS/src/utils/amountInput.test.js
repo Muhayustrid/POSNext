@@ -28,6 +28,13 @@ describe("formatAmountInput", () => {
 		expect(formatAmountInput("0")).toBe("0");
 		expect(formatAmountInput("007")).toBe("7");
 	});
+
+	it("keeps a leading minus (closing rows can pre-fill negative expected)", () => {
+		expect(formatAmountInput("-19750")).toBe("-19.750");
+		expect(formatAmountInput(-19750)).toBe("-19.750");
+		expect(formatAmountInput("-1.000,5")).toBe("-1.000,5");
+		expect(formatAmountInput("-")).toBe("");
+	});
 });
 
 describe("parseAmountInput", () => {
@@ -45,7 +52,14 @@ describe("parseAmountInput", () => {
 		expect(parseAmountInput(null)).toBe(0);
 	});
 
+	it("honors the leading minus", () => {
+		expect(parseAmountInput("-19.750")).toBe(-19750);
+		expect(parseAmountInput("-0,5")).toBe(-0.5);
+		expect(parseAmountInput("-")).toBe(0);
+	});
+
 	it("round-trips through format", () => {
 		expect(parseAmountInput(formatAmountInput("1234567"))).toBe(1234567);
+		expect(parseAmountInput(formatAmountInput(-19750))).toBe(-19750);
 	});
 });

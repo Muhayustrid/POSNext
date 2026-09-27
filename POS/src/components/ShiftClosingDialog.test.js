@@ -237,3 +237,51 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 		expect(wrapper.emitted("update:modelValue")).toBeUndefined()
 	})
 })
+
+describe("ShiftClosingDialog counted-amount prefill", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		reloadSettings.mockResolvedValue(undefined)
+		printEODReport.mockResolvedValue({ method: "silent", success: true })
+	})
+
+	it("prefills each row from the expected total, still editable with live grouping", async () => {
+		getClosingShiftData.submit.mockResolvedValue({
+			pos_profile: POS_PROFILE,
+			payment_reconciliation: [
+				{ mode_of_payment: "Cash", expected_amount: 71000 },
+				{ mode_of_payment: "QRIS", expected_amount: 25000 },
+			],
+			pos_transactions: [],
+		})
+		const wrapper = await mountOpenDialog()
+		const rows = wrapper.vm.closingData.payment_reconciliation
+		expect(rows.map((r) => r.closing_text)).toEqual(["71.000", "25.000"])
+		expect(rows.map((r) => r.closing_amount)).toEqual([71000, 25000])
+		expect(rows.map((r) => r.difference)).toEqual([0, 0])
+		// the cashier can submit right away — prefill counts as filled
+		expect(wrapper.vm.canSubmit).toBe(true)
+
+		// an edit recalculates live through the same mask as the opening dialog
+		wrapper.vm.onClosingInput(rows[0], "20000")
+		expect(rows[0].closing_text).toBe("20.000")
+		expect(rows[0].closing_amount).toBe(20000)
+		expect(rows[0].difference).toBe(-51000)
+		expect(wrapper.vm.canSubmit).toBe(true)
+	})
+
+	it("prefills a negative expected with its sign", async () => {
+		getClosingShiftData.submit.mockResolvedValue({
+			pos_profile: POS_PROFILE,
+			payment_reconciliation: [
+				{ mode_of_payment: "Cash", expected_amount: -19750 },
+			],
+			pos_transactions: [],
+		})
+		const wrapper = await mountOpenDialog()
+		const row = wrapper.vm.closingData.payment_reconciliation[0]
+		expect(row.closing_text).toBe("-19.750")
+		expect(row.closing_amount).toBe(-19750)
+		expect(row.difference).toBe(0)
+	})
+})

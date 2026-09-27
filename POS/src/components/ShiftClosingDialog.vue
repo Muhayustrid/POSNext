@@ -498,25 +498,22 @@
 											</label>
 										</div>
 
-										<!-- Simple Input with Native Arrows -->
+										<!-- Counted Amount, live thousand grouping -->
 										<div class="w-40 md:w-48">
-											<Input
+											<input
 												:id="`payment-${idx}`"
-												:modelValue="payment.closing_amount"
-												@update:modelValue="
-													(value) => updateClosingAmount(payment, value)
-												"
-												type="number"
-												step="10"
-												min="0"
-												placeholder="0.00"
+												class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-center text-base md:text-lg font-semibold text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
+												:value="payment.closing_text"
+												inputmode="decimal"
+												autocomplete="off"
+												placeholder="0"
 												:disabled="submitResource.loading"
 												:aria-label="
 													__('Enter actual amount for {0}', [
 														payment.mode_of_payment,
 													])
 												"
-												class="text-base md:text-lg text-center font-semibold"
+												@input="onClosingInput(payment, $event.target.value)"
 											/>
 										</div>
 									</div>
@@ -670,15 +667,12 @@
 											>
 												{{ __("Actual Amount *") }}
 											</label>
-											<Input
-												:modelValue="payment.closing_amount"
-												@update:modelValue="
-													(value) => updateClosingAmount(payment, value)
-												"
-												type="number"
-												step="0.01"
-												min="0"
-												placeholder="0.00"
+											<input
+												class="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-base md:text-lg text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
+												:value="payment.closing_text"
+												inputmode="decimal"
+												autocomplete="off"
+												placeholder="0"
 												:disabled="
 													showSuccessReport || submitResource.loading
 												"
@@ -688,7 +682,7 @@
 														[payment.mode_of_payment],
 													)
 												"
-												class="text-base md:text-lg"
+												@input="onClosingInput(payment, $event.target.value)"
 											/>
 											<div
 												class="text-xs text-gray-500 mt-0.5 md:mt-1 hidden sm:block"
@@ -996,7 +990,8 @@
 </template>
 
 <script setup>
-import { Button, Dialog, FeatherIcon, Input } from "frappe-ui"
+import { Button, Dialog, FeatherIcon } from "frappe-ui"
+import { formatAmountInput, parseAmountInput } from "../utils/amountInput"
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { storeToRefs } from "pinia"
 import { useShift, shiftState } from "../composables/useShift"
@@ -1119,14 +1114,20 @@ async function loadClosingData() {
 
 		// Make payment_reconciliation reactive
 		if (data.payment_reconciliation) {
-			data.payment_reconciliation = data.payment_reconciliation.map((payment) =>
-				reactive({
+			// Auto-fill each row's counted amount from the expected total so
+			// the cashier only edits the rows that really differ — but blind
+			// entry mode must NOT leak the expected value, so it stays empty.
+			const autoFill = !hideExpectedAmount.value
+			data.payment_reconciliation = data.payment_reconciliation.map((payment) => {
+				const expected = Number.parseFloat(payment.expected_amount) || 0
+				return reactive({
 					...payment,
-					closing_amount: payment.closing_amount ?? 0,
+					closing_amount: autoFill ? expected : (payment.closing_amount ?? 0),
+					closing_text: autoFill ? formatAmountInput(expected) : "",
 					difference: 0,
 					_touched: true,
-				}),
-			)
+				})
+			})
 
 			// Calculate initial differences
 			data.payment_reconciliation.forEach((payment) => {
@@ -1154,9 +1155,12 @@ function calculateDifference(payment) {
 	payment.difference = closing - expected
 }
 
-// New function to handle closing amount updates with proper reactivity
-function updateClosingAmount(payment, value) {
-	payment.closing_amount = value
+// Live-masked counted amount: closing_text holds the grouped display
+// ("71.000"), closing_amount the parsed number that drives difference,
+// canSubmit and the submit payload.
+function onClosingInput(payment, rawValue) {
+	payment.closing_text = formatAmountInput(rawValue)
+	payment.closing_amount = parseAmountInput(payment.closing_text)
 	payment._touched = true
 	calculateDifference(payment)
 }
