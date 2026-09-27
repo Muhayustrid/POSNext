@@ -4,8 +4,8 @@
 """SEC-13 acceptance tests: declarative permission tightening for POSNext Cashier.
 
 A user holding ONLY the POSNext Cashier role must:
-- lose the abusable rights: Sales Invoice cancel/amend, POS Closing Entry
-  cancel/amend, Payment Entry submit, POS Settings write, and
+- lose the abusable rights: Sales Invoice / POS Invoice cancel/amend, POS
+  Closing Entry cancel/amend, Payment Entry submit, POS Settings write, and
   cancel/amend/export on Bank Deposits / POS Opening Shift / POS Closing Shift;
 - keep the daily flow: Sales Invoice create/write/submit, Payment Entry create,
   shift create/submit, POS Settings read, POS Coupon read (dependency of the
@@ -26,6 +26,7 @@ ADMIN = "Administrator"
 
 DOCTYPES = (
     "Sales Invoice",
+    "POS Invoice",
     "POS Closing Entry",
     "Payment Entry",
     "Bank Deposits",
@@ -108,31 +109,140 @@ class TestCashierPermissions(FrappeTestCase):
             denied=("cancel", "amend", "delete"),
         )
 
+    def test_pos_invoice_abusable_rights_removed_flow_kept(self):
+        # POS Invoice = doctype mode aktif situs (reversal 25 Sep); baris
+        # fixture-nya kloning Sales Invoice persis. read membuka SPA
+        # "Lihat Detail" + print kasir (E2E-01 27 Sep), cancel/amend tertutup.
+        self._assert_matrix(
+            "POS Invoice",
+            granted=("read", "write", "create", "submit", "print"),
+            denied=("cancel", "amend", "delete"),
+        )
+
     def test_sales_invoice_delete_own_draft_only(self):
         """A4: kasir may delete their OWN draft (if_owner grant), never
         another user's draft."""
-        company = get_default_company()
-        customer = get_default_customer()
+        self._assert_delete_own_draft_only("Sales Invoice")
+
+    def test_pos_invoice_delete_own_draft_only(self):
+        """E2E-01 parity: the if_owner delete lane must fall through to POS
+        Invoice — the doctype the site actually runs in."""
+        self._assert_delete_own_draft_only("POS Invoice")
+
+    def _assert_delete_own_draft_only(self, doctype):
         item = frappe.get_all(
             "Item", filters={"disabled": 0, "is_sales_item": 1}, pluck="name", limit=1
         )
-        if not (company and customer and item):
-            self.skipTest("missing company/customer/item on this site")
-
-        def _draft(owner):
+        if not item:
+            self.skipTest("missing sales item on this site")
+        customer = get_default_customer()
+        if not customer:
+            self.skipTest("missing customer on this site")
+        grp = frappe.db.get_value(
+            "Customer", customer, ["customer_group", "territory"], as_dict=True
+        )
+        profile = None
+        shift = None
+        pos_customer = None
+        if doctype == "POS Invoice":
+            # company/warehouse mengikuti profil agar validation lolos
+            profile = frappe.db.get_value(
+                "POS Profile", {"disabled": 0}, ["name", "company", "warehouse"], as_dict=True
+            )
+            if not profile:
+                self.skipTest("no POS Profile on this site")
+            # pelanggan polos tanpa price group: resolusi harga memakai daftar
+            # umum. Pelanggan bawaan helper bisa ber-price-group franchise,
+            # membuat price_list_rate melompat dan rate daftar umum terbaca
+            # diskon manual → gate kode head-office melempar.
+            plain_customer = frappe.get_doc(
+                {
+                    "doctype": "Customer",
+                    "customer_name": f"POS Perm Cust {uuid.uuid4().hex[:8]}",
+                    "customer_group": grp.customer_group,
+                    "territory": grp.territory,
+                }
+            )
+            plain_customer.flags.ignore_permissions = True
+            plain_customer.insert()
+            pos_customer = plain_customer.name
+            self.addCleanup(
+                lambda: frappe.delete_doc(
+                    "Customer", pos_customer, force=1, ignore_permissions=True
+                )
+            )
+            mode = frappe.get_all(
+                "POS Payment Method",
+                {"parent": profile.name, "parenttype": "POS Profile"},
+                pluck="mode_of_payment",
+                limit=1,
+            )
+            if not mode:
+                self.skipTest("profile has no payment methods")
+            # rate di bawah price_list_rate terbaca diskon manual → gate kode
+            # head-office melempar; pakai harga daftar apa adanya
             price_list = (
                 frappe.db.get_value("Selling Settings", "Selling Settings", "selling_price_list")
                 or frappe.db.get_value("Price List", {"selling": 1, "enabled": 1}, "name")
             )
-            doc = frappe.get_doc(
+            price = frappe.get_all(
+                "Item Price",
+                filters={"item_code": item[0], "price_list": price_list, "selling": 1},
+                fields=["price_list_rate"],
+                limit=1,
+            )
+            pos_rate = price[0].price_list_rate if price else 10
+            # validate_pos_opening_entry menolak POS Invoice tanpa shift
+            # terbuka yang cocok dengan profilnya — buat satu utk draft uji
+            shift = frappe.get_doc(
                 {
-                    "doctype": "Sales Invoice",
-                    "company": company,
-                    "customer": customer,
-                    "selling_price_list": price_list,
-                    "items": [{"item_code": item[0], "qty": 1, "rate": 10}],
+                    "doctype": "POS Opening Shift",
+                    "pos_profile": profile.name,
+                    "company": profile.company,
+                    "user": ADMIN,
+                    "posting_date": frappe.utils.nowdate(),
+                    "period_start_date": frappe.utils.now_datetime(),
+                    "balance_details": [{"mode_of_payment": mode[0], "amount": 0}],
                 }
             )
+            shift.flags.ignore_permissions = True
+            shift.insert()
+            shift.submit()
+
+            def _drop_shift():
+                frappe.db.set_value(
+                    "POS Opening Shift", shift.name, "docstatus", 2, update_modified=False
+                )
+                frappe.delete_doc(
+                    "POS Opening Shift", shift.name, force=1, ignore_permissions=True
+                )
+
+            self.addCleanup(_drop_shift)
+
+        def _draft(owner):
+            rate = pos_rate if profile else 10
+            doc_data = {
+                "doctype": doctype,
+                "customer": pos_customer or customer,
+                "selling_price_list": (
+                    frappe.db.get_value("Selling Settings", "Selling Settings", "selling_price_list")
+                    or frappe.db.get_value("Price List", {"selling": 1, "enabled": 1}, "name")
+                ),
+                "items": [{"item_code": item[0], "qty": 1, "rate": rate}],
+            }
+            if profile:
+                doc_data["pos_profile"] = profile.name
+                doc_data["company"] = profile.company
+                doc_data["posa_pos_opening_shift"] = shift.name
+                doc_data["items"][0]["warehouse"] = profile.warehouse
+                # POS Invoice menuntut >= 1 mode pembayaran (validate_mode_of_payment)
+                doc_data["payments"] = [{"mode_of_payment": mode[0], "amount": rate}]
+            else:
+                company = get_default_company()
+                if not company:
+                    self.skipTest("missing company on this site")
+                doc_data["company"] = company
+            doc = frappe.get_doc(doc_data)
             # insert under Administrator (validation reads accounts the cashier
             # cannot), then place ownership explicitly — the permission engine
             # keys on doc.owner
@@ -143,24 +253,25 @@ class TestCashierPermissions(FrappeTestCase):
             finally:
                 frappe.set_user(self.cashier)
             if owner != ADMIN:
-                frappe.db.set_value("Sales Invoice", doc.name, "owner", owner)
-                doc = frappe.get_doc("Sales Invoice", doc.name)
+                frappe.db.set_value(doctype, doc.name, "owner", owner)
+                doc = frappe.get_doc(doctype, doc.name)
             return doc
+
         own_draft = _draft(self.cashier)
         other_draft = _draft(ADMIN)
         self.addCleanup(
-            lambda: frappe.delete_doc("Sales Invoice", own_draft.name, force=1, ignore_permissions=True)
+            lambda: frappe.delete_doc(doctype, own_draft.name, force=1, ignore_permissions=True)
         )
         self.addCleanup(
-            lambda: frappe.delete_doc("Sales Invoice", other_draft.name, force=1, ignore_permissions=True)
+            lambda: frappe.delete_doc(doctype, other_draft.name, force=1, ignore_permissions=True)
         )
 
         self.assertTrue(
-            frappe.has_permission("Sales Invoice", "delete", doc=own_draft, user=self.cashier),
+            frappe.has_permission(doctype, "delete", doc=own_draft, user=self.cashier),
             "kasir must be able to delete their own draft",
         )
         self.assertFalse(
-            frappe.has_permission("Sales Invoice", "delete", doc=other_draft, user=self.cashier),
+            frappe.has_permission(doctype, "delete", doc=other_draft, user=self.cashier),
             "kasir must NOT delete another user's draft",
         )
 
@@ -237,6 +348,8 @@ class TestCashierPermissions(FrappeTestCase):
         # A4 grant: delete exists but is owner-scoped. Frappe aggregates an
         # if_owner-only ptype to 0 doc-less; it surfaces only with is_owner.
         self.assertEqual(evidence["Sales Invoice"]["delete"], 0)
+        self.assertEqual(evidence["POS Invoice"]["cancel"], 0)
+        self.assertEqual(evidence["POS Invoice"]["submit"], 1)
         owner_scoped = frappe.permissions.get_role_permissions(
             "Sales Invoice", user=self.cashier, is_owner=True
         )

@@ -37,6 +37,10 @@ POS_ROLES = {"POSNext Cashier", "Nexus POS Manager"}
 #   Select tanpa read = cukup untuk validasi link, chart of accounts tetap
 #   tertutup. Kedua role POS tidak punya DocPerm standar di Account, jadi
 #   baris ini murni menambah.
+# - POS Invoice (entri pn-cshr-pos-invoice* / pn-mgr-pos-invoice):
+#   reversal doctype 25 Sep memindahkan mode faktur situs dari Sales Invoice
+#   ke POS Invoice, jadi baris kloning persis baris Sales Invoice per persona;
+#   tanpa read POS Invoice, "Lihat Detail" kasir di SPA 417 (E2E-01 27 Sep).
 ALLOWED_PARENTS = {
     "Account",
     "Bin",
@@ -45,6 +49,7 @@ ALLOWED_PARENTS = {
     "Item",
     "Payment Entry",
     "POS Closing Entry",
+    "POS Invoice",
     "POS Opening Entry",
     "POS Production Recipe",
     "POS Profile",

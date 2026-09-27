@@ -464,6 +464,37 @@ class TestMediumGatesSecurity(FrappeTestCase):
 			frappe.set_user(ADMIN)
 		self.assertEqual(frappe.db.get_value(self.doctype, name, "docstatus"), 0)
 
+		# Sweep hygiene: the series can hand this draft a name a previously
+		# deleted invoice once carried. That invoice's audit/ledger rows
+		# survive its deletion — a confirmation code's last_used_in_invoice,
+		# cancelled GL / Payment Ledger / Stock Ledger rows — and delete_doc
+		# refuses to delete the new draft while they point at the name. The
+		# draft itself has no ledgers yet, so every row referencing the name
+		# here is an orphan of the earlier invoice; purge them first.
+		for stale_code in frappe.get_all(
+			"POS Discount Confirmation Code",
+			filters={"last_used_in_invoice": name},
+			pluck="name",
+		):
+			frappe.db.set_value(
+				"POS Discount Confirmation Code",
+				stale_code,
+				"last_used_in_invoice",
+				None,
+				update_modified=False,
+			)
+		for ledger_doctype, field in (
+			("GL Entry", "voucher_no"),
+			("GL Entry", "against_voucher"),
+			("Payment Ledger Entry", "voucher_no"),
+			("Payment Ledger Entry", "against_voucher_no"),
+			("Stock Ledger Entry", "voucher_no"),
+		):
+			for stale_row in frappe.get_all(ledger_doctype, filters={field: name}, pluck="name"):
+				frappe.delete_doc(
+					ledger_doctype, stale_row, force=1, ignore_permissions=True
+				)
+
 		# the owner still deletes their own draft
 		frappe.set_user(self.cashier)
 		try:

@@ -1,5 +1,5 @@
 import { call } from "@/utils/apiWrapper";
-import { CUSTOMER_SYNC_PAGE_SIZE } from "@/utils/offline/cache";
+import { CUSTOMER_SYNC_MAX_PAGES, CUSTOMER_SYNC_PAGE_SIZE } from "@/utils/offline/cache";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
@@ -235,9 +235,11 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				} else {
 					// Full pull (PERF-03): page through instead of one
 					// unbounded limit:0 request that hangs at production scale.
+					// Capped (CUSTOMER_SYNC_MAX_PAGES) so a pagination anomaly
+					// cannot loop forever.
 					delta = [];
 					let start = 0;
-					for (;;) {
+					for (let pages = 0; pages < CUSTOMER_SYNC_MAX_PAGES; pages++) {
 						const response = await call("pos_next.api.customers.get_customers", {
 							pos_profile: posProfile,
 							search_term: "",

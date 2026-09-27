@@ -65,6 +65,29 @@ def _disable_client_cache_persistence():
 	cc.set_value = _local_only_set_value
 
 
+# Modules observed to fail only inside long full sweeps (86 modules, one
+# process, ~2h) while passing individually and in pairs. Investigated
+# 2026-09-27 within a 2-cycle budget, no residual-state root cause found:
+# - test_cashier_permissions (sweep position 3): passed 2x after running its
+#   exact sweep predecessors serially (test_backdate_invoices,
+#   test_block_sale_toggle, test_cashier_checkout_permissions).
+# - test_uninstall_coverage (last sweep position): tests are hermetic (file +
+#   mocked-deletion checks, no DB reads); passed after its 11 nearest
+#   predecessors ran before it.
+# State audited: invoice_type flip/restore (all _set_invoice_type variants
+# invalidate frappe.local._pos_next_invoice_doctype), Custom DocPerm writers
+# (test_docperm_mirror cleans up + clears cache), permission caches
+# (set_user resets frappe.local.role_permissions; FrappeTestCase class
+# cleanups rollback + restore thread locals). Treat their sweep failures as
+# environment noise of the long shared-site sweep, not regressions.
+KNOWN_FLAKY = frozenset(
+    {
+        "pos_next.api.test_cashier_permissions",
+        "pos_next.tests.test_uninstall_coverage",
+    }
+)
+
+
 def main(module_names, sync=False):
 	if not module_names:
 		print(__doc__, file=sys.stderr)
@@ -101,6 +124,12 @@ def main(module_names, sync=False):
 			suite.addTests(loader.loadTestsFromName(name))
 
 		result = unittest.TextTestRunner(verbosity=2).run(suite)
+		flaky = sorted(KNOWN_FLAKY & set(module_names))
+		if flaky:
+			print(
+				"known-flaky modules in this run (fail only in long sweeps, pass individually): "
+				+ ", ".join(flaky)
+			)
 		return 0 if result.wasSuccessful() else 1
 	finally:
 		frappe.destroy()

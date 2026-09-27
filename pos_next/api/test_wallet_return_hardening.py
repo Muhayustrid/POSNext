@@ -16,7 +16,7 @@ from unittest import mock
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import nowdate, today
+from frappe.utils import flt, nowdate, today
 
 from pos_next.api.invoices import submit_invoice, update_invoice
 from pos_next.api.wallet import get_or_create_wallet
@@ -815,3 +815,340 @@ class TestWalletReturnReversalPOSInvoiceMode(TestWalletReturnReversal):
         )
         self._wallet_txns.extend(rows)
         self.assertTrue(rows, "refund credit must exist for the return")
+
+
+class TestInvoiceCancelCancelsLinkedWalletTransactions(FrappeTestCase):
+    """A1: cancelling an invoice must cancel its linked Wallet Transactions.
+
+    A live WT holds a Dynamic Link to the invoice, so invoice.cancel() used
+    to die with frappe.LinkExistsError — both the loyalty credit minted by
+    process_loyalty_to_wallet on submit AND the refund credit minted by
+    credit_return_to_wallet on returns (returns mint WTs too) bricked the
+    cancel. sales_invoice_hooks.before_cancel now cancels them first; a
+    failure there propagates (the whole cancel rolls back). WT.on_cancel
+    reverses the GL and refreshes the wallet balance (computed realtime from
+    GL entries), so the balance returns to its pre-submit value.
+    """
+
+    _FIELDS = ("enable_loyalty_program", "loyalty_to_wallet", "require_refund_code")
+    # loyalty-to-wallet ON mints the sales WT; require_refund_code OFF lets a
+    # return past the fail-closed refund gate
+    _ON = {"enable_loyalty_program": 1, "loyalty_to_wallet": 1, "require_refund_code": 0}
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.original_invoice_type = frappe.db.get_single_value(
+            "POS Next Global Settings", "invoice_type"
+        )
+        cls.profile = frappe.db.get_value(
+            "POS Profile",
+            _PROFILE_FILTER,
+            ["name", "company", "warehouse"],
+            as_dict=True,
+            order_by="creation asc",
+        )
+        if not cls.profile:
+            raise unittest.SkipTest("no schedule-safe POS Profile")
+        cls.item = _pick_item()
+        if not cls.item:
+            raise unittest.SkipTest("no stock sales item on site")
+        cls.mode = frappe.get_all(
+            "POS Payment Method",
+            {"parent": cls.profile.name, "parenttype": "POS Profile"},
+            pluck="mode_of_payment",
+            limit=1,
+        )
+        if not cls.mode:
+            raise unittest.SkipTest("profile has no payment methods")
+
+        suffix = uuid.uuid4().hex[:8]
+        cls.loyalty_program = frappe.get_doc(
+            {
+                "doctype": "Loyalty Program",
+                "loyalty_program_name": f"Invoice-Cancel LP {suffix}",
+                "company": cls.profile.company,
+                "from_date": nowdate(),
+                "conversion_factor": 1,
+                "expiry_duration": 100,
+                "collection_rules": [{"tier_name": "Silver", "min_spent": 0, "collection_factor": 1}],
+            }
+        ).insert(ignore_permissions=True)
+
+        # same shared-customer reasoning as TestLoyaltyConversionFailure: a
+        # fresh customer would get its after-insert wallet against the GLOBAL
+        # default company and collide on the per-customer Wallet name
+        cls.customer = frappe.db.get_value(
+            "Customer", {"is_internal_customer": 0}, "name", order_by="creation asc"
+        )
+        if not cls.customer:
+            raise unittest.SkipTest("no non-internal customer")
+        cls._original_loyalty_program = frappe.db.get_value("Customer", cls.customer, "loyalty_program")
+        frappe.db.set_value(
+            "Customer", cls.customer, "loyalty_program", cls.loyalty_program.name, update_modified=False
+        )
+        cls.wallet = get_or_create_wallet(cls.customer, cls.profile.company, force_create=True)
+        if not cls.wallet:
+            raise unittest.SkipTest("no wallet account configured on company")
+
+        # one settings slot (enabled profile row wins whole, else the global
+        # single) carries all three toggles; the resolver is deliberately
+        # uncached so in-test toggles are read back on the next submit
+        cls._settings_row = frappe.db.get_value(
+            "POS Settings", {"pos_profile": cls.profile.name, "enabled": 1}, "name"
+        )
+        cls._settings_backup = {}
+        for field in cls._FIELDS:
+            if cls._settings_row:
+                cls._settings_backup[field] = frappe.db.get_value("POS Settings", cls._settings_row, field)
+                frappe.db.set_value(
+                    "POS Settings", cls._settings_row, field, cls._ON[field], update_modified=False
+                )
+            else:
+                cls._settings_backup[field] = frappe.db.get_single_value(
+                    "POS Next Global Settings", field
+                )
+                frappe.db.set_single_value("POS Next Global Settings", field, cls._ON[field])
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._settings_row:
+            for field, value in cls._settings_backup.items():
+                frappe.db.set_value("POS Settings", cls._settings_row, field, value, update_modified=False)
+        else:
+            for field, value in cls._settings_backup.items():
+                frappe.db.set_single_value("POS Next Global Settings", field, value)
+        frappe.db.delete("Loyalty Point Entry", {"loyalty_program": cls.loyalty_program.name})
+        frappe.db.set_value(
+            "Customer",
+            cls.customer,
+            "loyalty_program",
+            cls._original_loyalty_program,
+            update_modified=False,
+        )
+        frappe.delete_doc("Loyalty Program", cls.loyalty_program.name, force=1, ignore_permissions=True)
+        _set_invoice_type(cls.original_invoice_type or POS_INVOICE)
+        frappe.db.commit()
+        super().tearDownClass()
+
+    def setUp(self):
+        frappe.set_user("Administrator")
+        _set_invoice_type(SALES_INVOICE)
+        self._created = []
+        self.shift = self._make_shift()
+        self._make_stock()
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        # sweep wallet rows first: the teardown must stay independent of the
+        # fix under test (whose hook now also cancels WTs on invoice cancel)
+        _cancel_wallet_transactions_for(self._created)
+        for name in reversed(self._created):
+            for doctype in ("Sales Invoice", "POS Invoice"):
+                if frappe.db.exists(doctype, name):
+                    doc = frappe.get_doc(doctype, name)
+                    if doc.docstatus == 1:
+                        doc.flags.ignore_permissions = True
+                        doc.cancel()
+                    frappe.delete_doc(doctype, name, force=1, ignore_permissions=True)
+                    break
+        if getattr(self, "stock_entry", None):
+            se = frappe.get_doc("Stock Entry", self.stock_entry.name)
+            if se.docstatus == 1:
+                se.cancel()
+            frappe.delete_doc("Stock Entry", se.name, force=1, ignore_permissions=True)
+        if getattr(self, "shift", None):
+            frappe.db.set_value(
+                "POS Opening Shift", self.shift.name, "docstatus", 2, update_modified=False
+            )
+            frappe.delete_doc("POS Opening Shift", self.shift.name, force=1, ignore_permissions=True)
+        frappe.db.commit()
+
+    def _set_loyalty_to_wallet(self, value):
+        if self._settings_row:
+            frappe.db.set_value(
+                "POS Settings", self._settings_row, "loyalty_to_wallet", value, update_modified=False
+            )
+        else:
+            frappe.db.set_single_value("POS Next Global Settings", "loyalty_to_wallet", value)
+
+    def _make_shift(self):
+        shift = frappe.get_doc(
+            {
+                "doctype": "POS Opening Shift",
+                "pos_profile": self.profile.name,
+                "company": self.profile.company,
+                "user": "Administrator",
+                "posting_date": nowdate(),
+                "period_start_date": frappe.utils.now_datetime(),
+                "balance_details": [{"mode_of_payment": self.mode[0], "amount": 0}],
+            }
+        )
+        shift.flags.ignore_permissions = True
+        shift.insert()
+        shift.reload()
+        shift.submit()
+        return shift
+
+    def _make_stock(self):
+        se = frappe.get_doc(
+            {
+                "doctype": "Stock Entry",
+                "stock_entry_type": "Material Receipt",
+                "purpose": "Material Receipt",
+                "company": self.profile.company,
+                "items": [
+                    {
+                        "item_code": self.item,
+                        "qty": 5,
+                        "t_warehouse": self.profile.warehouse,
+                        "allow_zero_valuation_rate": 1,
+                    }
+                ],
+            }
+        )
+        se.flags.ignore_permissions = True
+        se.insert()
+        se.submit()
+        self.stock_entry = se
+
+    def _submit(self, **overrides):
+        payload = {
+            "pos_profile": self.profile.name,
+            "posa_pos_opening_shift": self.shift.name,
+            "customer": self.customer,
+            "loyalty_program": self.loyalty_program.name,
+            "items": [
+                {"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.profile.warehouse}
+            ],
+            "payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+        }
+        payload.update(overrides)
+        result = submit_invoice(invoice=payload)
+        self._created.append(result["name"])
+        return result
+
+    def _linked_wt_names(self, invoice_name):
+        return frappe.get_all(
+            "Wallet Transaction",
+            filters={"reference_doctype": "Sales Invoice", "reference_name": invoice_name},
+            pluck="name",
+        )
+
+    def _wt_snapshot(self):
+        return set(frappe.get_all("Wallet Transaction", pluck="name"))
+
+    def _new_wt_rows(self, snapshot, invoice_name):
+        """WT rows referencing invoice_name that did not exist at the snapshot.
+
+        Name-filtered asserts must be delta-based: tearDown deletes this
+        suite's invoices and the count-based naming series recycles their
+        names, so a plain query also matches rows left over from dead previous
+        occupants of the same name."""
+        rows = frappe.get_all(
+            "Wallet Transaction",
+            filters={"reference_doctype": "Sales Invoice", "reference_name": invoice_name},
+            fields=["name", "transaction_type", "source_type", "amount", "docstatus"],
+        )
+        return [row for row in rows if row.name not in snapshot]
+
+    def _wallet_balance(self):
+        """Realtime GL-derived wallet balance (the same math Wallet.get_balance
+        uses). NOT Wallet.current_balance: that stored field is a snapshot the
+        WTs refresh, and during an invoice cancel it is computed BEFORE the
+        invoice's own GL reversal lands (this site's wallet account doubles as
+        the default receivable), so it reads stale at assert time."""
+        from erpnext.accounts.utils import get_balance_on
+
+        return -flt(
+            get_balance_on(account=self.wallet.account, party_type="Customer", party=self.customer)
+        )
+
+    def test_cancel_invoice_with_loyalty_wt_cancels_wt_and_restores_balance(self):
+        """(a) submit mints a loyalty WT; the invoice cancel succeeds (no
+        LinkExistsError), the WT ends cancelled and the wallet balance
+        returns to its pre-submit value."""
+        snapshot = self._wt_snapshot()
+        balance_before = self._wallet_balance()
+        result = self._submit()
+        minted = self._new_wt_rows(snapshot, result["name"])
+        self.assertTrue(minted, "loyalty-to-wallet submit must mint a WT")
+        for row in minted:
+            self.assertEqual(row.docstatus, 1)
+
+        doc = frappe.get_doc("Sales Invoice", result["name"])
+        doc.flags.ignore_permissions = True
+        doc.cancel()  # used to raise frappe.LinkExistsError
+
+        self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 2)
+        for row in minted:
+            self.assertEqual(
+                frappe.db.get_value("Wallet Transaction", row.name, "docstatus"),
+                2,
+                "the linked WT must be cancelled with the invoice",
+            )
+        self.assertAlmostEqual(
+            self._wallet_balance(),
+            balance_before,
+            places=4,
+            msg="cancelling the WTs must reverse their GL and restore the balance",
+        )
+
+    def test_cancel_return_invoice_cancels_refund_wt(self):
+        """(b) a return with add_to_customer_balance mints a refund-credit WT
+        (credit_return_to_wallet); cancelling the RETURN cancels it too."""
+        self._set_loyalty_to_wallet(0)
+        try:
+            snapshot = self._wt_snapshot()
+            original = self._submit()["name"]
+            snapshot_after_original = self._wt_snapshot()
+            result = self._submit(
+                is_return=1,
+                return_against=original,
+                items=[
+                    {"item_code": self.item, "qty": -1, "rate": 100, "warehouse": self.profile.warehouse}
+                ],
+                payments=[],
+                add_to_customer_balance=1,
+            )
+            refund_wts = [
+                row
+                for row in self._new_wt_rows(snapshot_after_original, result["name"])
+                if row.source_type == "Refund"
+            ]
+            self.assertTrue(refund_wts, "the return must mint a refund credit WT")
+
+            doc = frappe.get_doc("Sales Invoice", result["name"])
+            doc.flags.ignore_permissions = True
+            doc.cancel()  # used to raise frappe.LinkExistsError
+
+            self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 2)
+            for row in refund_wts:
+                self.assertEqual(
+                    frappe.db.get_value("Wallet Transaction", row.name, "docstatus"),
+                    2,
+                    "the refund credit WT must be cancelled with the return",
+                )
+            # the original is untouched
+            self.assertEqual(frappe.db.get_value("Sales Invoice", original, "docstatus"), 1)
+        finally:
+            self._set_loyalty_to_wallet(1)
+
+    def test_cancel_invoice_without_wt_cancels_cleanly(self):
+        """(c) an invoice with no WT cancels cleanly — the hook is a no-op."""
+        self._set_loyalty_to_wallet(0)
+        try:
+            snapshot = self._wt_snapshot()
+            result = self._submit()
+            self.assertEqual(
+                self._new_wt_rows(snapshot, result["name"]),
+                [],
+                "no WT may be minted for this invoice",
+            )
+
+            doc = frappe.get_doc("Sales Invoice", result["name"])
+            doc.flags.ignore_permissions = True
+            doc.cancel()
+            self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 2)
+        finally:
+            self._set_loyalty_to_wallet(1)

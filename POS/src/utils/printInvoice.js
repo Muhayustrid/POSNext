@@ -215,7 +215,7 @@ export function buildReceiptHTML(invoiceData) {
 							${
 								hasDiscount
 									? `<div class="item-discount"><span>${__(
-											"Discount ",
+											"Discount",
 										)}${
 											item.discount_percentage
 												? `(${Number(item.discount_percentage).toFixed(2)}%)`
@@ -360,7 +360,7 @@ export function buildReceiptHTML(invoiceData) {
 					${
 						invoiceData.footer
 							? ""
-							: `<div style="font-size: 10px;">${__("Powered by ")}<a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>`
+							: `<div style="font-size: 10px;">${__("Powered by")} <a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>`
 					}
 				</div>
 			</div>`

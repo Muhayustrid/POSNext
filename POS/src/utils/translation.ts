@@ -133,11 +133,14 @@ const getLocale = (): string => {
 
 /**
  * Initializes translations on app startup.
- * Uses stale-while-revalidate: shows cached immediately, refreshes in background.
+ * Shows cached immediately, then always refreshes from the network: the
+ * client cache carries no server version marker, so a TTL-fresh entry may
+ * predate a deploy's new translations and skipping the fetch would pin
+ * stale strings for up to a day. Offline clients fall back to the cache.
  */
 async function init() {
   const locale = getLocale()
-  const loaded = await loadLocale(locale, { preferCache: true })
+  const loaded = await loadLocale(locale, { preferCache: true, forceNetwork: true })
   if (!loaded) fallbackFetch(locale)
 }
 

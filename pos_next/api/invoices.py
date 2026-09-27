@@ -37,6 +37,11 @@ FIELD_DISCOUNT_PERCENTAGE = "discount_percentage"
 FIELD_ALLOW_USER_TO_EDIT_RATE = "allow_user_to_edit_rate"
 FIELD_MAX_DISCOUNT_ALLOWED = "max_discount_allowed"
 FIELD_DISABLE_ROUNDED_TOTAL = "disable_rounded_total"
+FIELD_PRICE_REPLAY_AUDIT_ONLY = "price_replay_audit_only"
+# Percentage-point slack for the transaction-discount stamp comparison — the
+# same slack the discount code gate uses for reconciled rule percentages
+# (overrides/discount_code.py _PCT_TOLERANCE).
+_TXN_PCT_TOLERANCE = 0.5
 
 # Doctypes
 DOCTYPE_SALES_INVOICE = "Sales Invoice"
@@ -204,12 +209,13 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
 	return {"valid": True}
 
 
-def log_manual_rate_edit(item, invoice_name, user=None):
+def log_manual_rate_edit(item, invoice_name, user=None, doctype=DOCTYPE_SALES_INVOICE):
 	"""
 	Create an audit log entry for manual rate edits.
 
-	This function creates a Comment on the Sales Invoice documenting the rate change.
-	It should only be called ONCE per item, after the invoice is successfully submitted.
+	This function creates a Comment on the invoice (Sales Invoice or POS Invoice)
+	documenting the rate change. It should only be called ONCE per item, after the
+	invoice is successfully submitted.
 
 	Args:
 	    item: The item dict/object with rate information. Must contain:
@@ -217,8 +223,10 @@ def log_manual_rate_edit(item, invoice_name, user=None):
 	        - item_code: The item code
 	        - rate: The new/edited rate
 	        - original_rate: The original price before edit (or price_list_rate as fallback)
-	    invoice_name: The Sales Invoice document name
+	    invoice_name: The invoice document name
 	    user: Optional user who made the edit (defaults to session user)
+	    doctype: The invoice doctype ("Sales Invoice" or "POS Invoice"); used as
+	        the Comment's reference_doctype
 
 	Returns:
 	    None
@@ -249,7 +257,7 @@ def log_manual_rate_edit(item, invoice_name, user=None):
 		{
 			"doctype": DOCTYPE_COMMENT,
 			"comment_type": "Comment",
-			"reference_doctype": DOCTYPE_SALES_INVOICE,
+			"reference_doctype": doctype,
 			"reference_name": invoice_name,
 			"content": _(
 				"Manual rate edit by {user}: Item {item_code} rate changed from {original} to {new} ({change_pct}% {change_type})"
@@ -265,7 +273,493 @@ def log_manual_rate_edit(item, invoice_name, user=None):
 	).insert(ignore_permissions=True)
 
 
-def _validate_item_rates(invoice_doc, pos_profile, pos_settings_cache, pos_profile_doc=None):
+def _row_offer_claims(row):
+	"""The offer rules attributed to one payload row for the SEC-23 replay:
+	the client-carried ``pricing_rules`` marker, else the server-written
+	per-row attribution (``pos_offer_item_rules`` — ``pricing_rules`` is
+	cleared pre-save, so the existing-draft submit payload only carries the
+	server attribution, restored by _reapply_item_offer_attribution)."""
+	claims = _derive_item_offer_rules(row.get("pricing_rules"))
+	if claims:
+		return claims
+	return _derive_item_offer_rules(row.get("pos_offer_item_rules"))
+
+
+def _rate_mismatch_band(rate_precision):
+	"""Tolerance band for the SEC-23 magnitude comparison.
+
+	The honest client's rate is the server list price passed through
+	apply_offers and two roundings (line total, then per unit — see
+	useInvoice.js recalculateItem/computeBackendRate), which stays within
+	~0.02 of the engine's per-unit figure at the default precision. Anything
+	past that is a manipulated magnitude, not rounding noise.
+	"""
+	return max(0.05, 1.5 / (10 ** cint(rate_precision)))
+
+
+def _replay_offer_rates(
+	invoice_doc,
+	pos_profile_doc,
+	server_prices,
+	price_list,
+	claimed_rule_names,
+	rate_precision,
+	need_txn=False,
+):
+	"""SEC-23: replay the SAME pricing pipeline apply_offers runs, on the
+	server's own list prices, and return what each scoped row would rate.
+
+	Reuse, not a second engine: the ERPNext per-item pricing engine
+	(``apply_pricing_rule`` — the exact call at apply_offers), the Min/Max
+	bulk pass (``apply_min_max_price_discounts``) and the transaction-level
+	evaluator (``_evaluate_transaction_offers``) are the same functions the
+	preview API drives, so an honest client's submitted rate equals the
+	replayed rate by construction.
+
+	Returns ``(expected_rates, free_granted, txn_pct, txn_amt)`` where
+	``expected_rates`` maps doc row index -> expected per-unit rate,
+	``free_granted`` maps (item_code, rule_name) -> engine-granted free qty,
+	or ``None`` when the pipeline is unavailable.
+	"""
+	if not erpnext_apply_pricing_rule or not pos_profile_doc:
+		return None
+
+	company = pos_profile_doc.company
+	rows = invoice_doc.get("items") or []
+
+	# Same batched item-details fetch apply_offers runs (item_details_map).
+	item_codes = sorted({row.get(FIELD_ITEM_CODE) for row in rows if row.get(FIELD_ITEM_CODE)})
+	item_details_map = {}
+	if item_codes:
+		for record in frappe.get_all(
+			"Item",
+			filters={"name": ["in", item_codes]},
+			fields=["name", "item_name", "item_group", "brand", "stock_uom"],
+		):
+			item_details_map[record.name] = record
+
+	customer = invoice_doc.get("customer")
+	customer_group = invoice_doc.get("customer_group")
+	territory = invoice_doc.get("territory")
+	if customer and not customer_group:
+		try:
+			customer_data = frappe.get_cached_value(
+				"Customer", customer, ["customer_group", "territory"], as_dict=1
+			)
+			if customer_data:
+				customer_group = customer_data.get("customer_group")
+				if not territory:
+					territory = customer_data.get("territory")
+		except Exception:
+			pass
+	if not customer_group:
+		customer_group = "All Customer Groups"
+
+	# Engine input — mirrors apply_offers' prepared_items construction with the
+	# SERVER's list price as the basis (an honest client's price_list_rate is
+	# the same Item Price figure; a forged one cannot shift the engine).
+	pricing_items = []
+	index_map = []
+	claims_list = []
+	for idx, row in enumerate(rows):
+		item_code = row.get(FIELD_ITEM_CODE)
+		qty = flt(row.get("qty") or row.get("quantity") or 0)
+		claims = _row_offer_claims(row)
+		if not item_code or qty <= 0:
+			continue
+		claims_list.append(claims)
+		cached = item_details_map.get(item_code)
+		if cint(row.get("is_free_item") or 0):
+			# Honest clients send free rows with a zero list price (the free
+			# row IS the discount); feed the engine the same zeros.
+			price_list_rate = 0.0
+		else:
+			server_plr = _resolve_server_price_list_rate(server_prices, row)
+			# No server basis: mirror the payload for engine parity; such rows
+			# are excluded from enforcement anyway.
+			price_list_rate = server_plr if server_plr > 0 else flt(
+				row.get(FIELD_PRICE_LIST_RATE) or row.get(FIELD_RATE) or 0
+			)
+		conversion_factor = flt(row.get("conversion_factor") or 1) or 1
+		pricing_items.append(
+			frappe._dict(
+				{
+					"doctype": "Sales Invoice Item",
+					"name": row.get("name") or f"POS-{idx}",
+					"item_code": item_code,
+					"item_name": (cached.item_name if cached else row.get("item_name")),
+					"item_group": (cached.item_group if cached else None),
+					"brand": (cached.brand if cached else None),
+					"qty": qty,
+					"stock_qty": qty * conversion_factor,
+					"conversion_factor": conversion_factor,
+					"uom": row.get("uom")
+					or row.get("stock_uom")
+					or (cached.stock_uom if cached else None),
+					"stock_uom": row.get("stock_uom") or (cached.stock_uom if cached else None),
+					"price_list_rate": price_list_rate,
+					"base_price_list_rate": price_list_rate,
+					"rate": price_list_rate,
+					"base_rate": price_list_rate,
+					"discount_percentage": 0,
+					"discount_amount": 0,
+					"warehouse": row.get("warehouse") or pos_profile_doc.warehouse,
+					"parenttype": invoice_doc.doctype,
+				}
+			)
+		)
+		index_map.append(idx)
+
+	if not pricing_items:
+		return [], {}, 0.0, 0.0
+
+	pricing_args = frappe._dict(
+		{
+			"doctype": invoice_doc.doctype,
+			"name": invoice_doc.get("name") or "POS-INVOICE",
+			"is_pos": 1,
+			"company": company,
+			"transaction_date": invoice_doc.get("posting_date") or nowdate(),
+			"posting_date": invoice_doc.get("posting_date") or nowdate(),
+			"currency": invoice_doc.get("currency")
+			or pos_profile_doc.get("currency")
+			or frappe.get_cached_value("Company", company, "default_currency"),
+			"conversion_rate": flt(invoice_doc.get("conversion_rate") or 1) or 1,
+			"plc_conversion_rate": flt(invoice_doc.get("plc_conversion_rate") or 1) or 1,
+			"price_list": price_list,
+			"customer": customer,
+			"customer_group": customer_group,
+			"territory": territory,
+			"items": pricing_items,
+		}
+	)
+
+	pricing_results = erpnext_apply_pricing_rule(pricing_args, doc=pricing_args) or []
+
+	# rule_map — same construction as apply_offers (coupon-based and one-time
+	# rules dropped under the same conditions), without the client's selection
+	# filter: the row claims below reconstruct it.
+	raw_rule_names = set()
+	for result in pricing_results:
+		if not result:
+			continue
+		raw_rule_names.update(_derive_item_offer_rules(result.get("pricing_rules")))
+
+	default_customer = pos_profile_doc.get("customer")
+	rule_map = {}
+	if raw_rule_names:
+		for record in frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", sorted(raw_rule_names)]},
+			fields=[
+				"name",
+				"promotional_scheme",
+				"coupon_code_based",
+				"one_time_per_customer",
+				"promotional_scheme_id",
+				"price_or_product_discount",
+			],
+		):
+			if record.coupon_code_based:
+				continue
+			if record.one_time_per_customer:
+				if not customer or customer == default_customer:
+					continue
+				if frappe.db.exists("One Time Customer Offer Usage", f"{customer}::{record.name}"):
+					continue
+			rule_map[record.name] = record
+
+	if erpnext_apply_pricing_rule_on_transaction:
+		for record in frappe.get_all(
+			"Pricing Rule",
+			filters={
+				"disable": 0,
+				"apply_on": "Transaction",
+				"company": company,
+				"selling": 1,
+				"coupon_code_based": 0,
+			},
+			fields=[
+				"name",
+				"promotional_scheme",
+				"coupon_code_based",
+				"promotional_scheme_id",
+				"price_or_product_discount",
+			],
+		):
+			rule_map.setdefault(record.name, record)
+
+	claimed = set(claimed_rule_names or [])
+
+	# Per-item expected rate — mirrors apply_offers' result processing
+	# (price_list_rate / discount_percentage / per-unit discount_amount), with
+	# the fallback fetch for validate_applied_rule rules.
+	expected_rates = {}
+	free_granted = defaultdict(float)
+	for result, pricing_item, idx, row_claims in zip(
+		pricing_results, pricing_items, index_map, claims_list, strict=False
+	):
+		if not result:
+			continue
+		applicable = [
+			name
+			for name in _derive_item_offer_rules(result.get("pricing_rules"))
+			if name in rule_map and name in set(row_claims)
+		]
+		qty = flt(pricing_item.qty)
+		price_list_rate = flt(result.get("price_list_rate") or pricing_item.price_list_rate or 0)
+		discount_percentage = flt(result.get("discount_percentage") or 0)
+		per_unit_discount = flt(result.get("discount_amount") or 0)
+
+		if not discount_percentage and not per_unit_discount and applicable:
+			for rule_name in applicable:
+				full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+				# Min/Max rules are deferred to the bulk pass below (same skip
+				# apply_offers makes when fetching full rules).
+				if full_rule.get("apply_discount_on_price") in ("Min", "Max"):
+					continue
+				if full_rule.rate_or_discount == "Discount Percentage" and full_rule.discount_percentage:
+					discount_percentage += flt(full_rule.discount_percentage)
+				elif full_rule.rate_or_discount == "Discount Amount" and full_rule.discount_amount:
+					per_unit_discount += flt(full_rule.discount_amount)
+				elif full_rule.rate_or_discount == "Rate" and full_rule.rate:
+					price_list_rate = flt(full_rule.rate)
+
+		# Same composition apply_offers relays (percentage branch wins over the
+		# flat amount), expressed per unit: rate = plr - line_discount / qty.
+		if discount_percentage and qty and price_list_rate:
+			line_discount = price_list_rate * qty * discount_percentage / 100
+		elif per_unit_discount and qty:
+			line_discount = per_unit_discount * qty
+		else:
+			line_discount = per_unit_discount
+		expected_rates[idx] = flt(price_list_rate - (line_discount / qty if qty else line_discount), rate_precision)
+
+		for free_item in result.get("free_item_data") or []:
+			rule_name = free_item.get("pricing_rules")
+			if not rule_name or rule_name not in rule_map:
+				continue
+			free_granted[(free_item.get("item_code"), rule_name)] += flt(free_item.get("qty") or 0)
+
+	# Min/Max ranking — the same bulk pass apply_offers runs, restricted to the
+	# claimed rules (the claims reconstruct the client's offer selection).
+	if apply_min_max_price_discounts and claimed:
+		for pricing_item, claims in zip(pricing_items, claims_list, strict=False):
+			# Only server-resolvable names: the bulk pass fetches each rule doc,
+			# so a fabricated claim must not reach frappe.get_cached_doc.
+			pricing_item.pricing_rules = ",".join(sorted(c for c in claims if c in rule_map))
+		mock_doc = frappe._dict(
+			{
+				"doctype": invoice_doc.doctype,
+				"items": pricing_items,
+				"selling_price_list": price_list,
+				"company": company,
+				"customer": customer,
+			}
+		)
+		apply_min_max_price_discounts(mock_doc, allowed_rules=claimed)
+		# Winners get their rate materialised by the pass itself
+		# (overrides/pricing_rule._materialize_rate) — read it back.
+		for pricing_item, idx in zip(pricing_items, index_map, strict=False):
+			if flt(pricing_item.get("discount_percentage") or 0) > 0:
+				expected_rates[idx] = flt(pricing_item.get("rate") or 0, rate_precision)
+
+	# Transaction-level stamp — same evaluator apply_offers harvests the
+	# header discount from.
+	txn_pct = 0.0
+	txn_amt = 0.0
+	if need_txn and erpnext_apply_pricing_rule_on_transaction and rule_map:
+		txn_result = _evaluate_transaction_offers(
+			frappe._dict({"pos_profile": invoice_doc.get("pos_profile")}),
+			pos_profile_doc,
+			pricing_items,
+			customer,
+			customer_group,
+			territory,
+			invoice_doc.get("posting_date") or nowdate(),
+			pricing_args.currency,
+			pricing_args.price_list,
+			rule_map,
+			None,
+		)
+		txn_pct = flt(txn_result.get("additional_discount_percentage") or 0)
+		txn_amt = flt(txn_result.get("discount_amount") or 0)
+		for (item_code, rule_name), free_item_doc in txn_result.get("free_items", {}).items():
+			free_granted[(item_code, rule_name)] += flt(free_item_doc.get("qty") or 0)
+
+	return expected_rates, dict(free_granted), txn_pct, txn_amt
+
+
+def _price_mismatch_message(item_code, client_rate, expected_rate, rate_precision):
+	"""User-facing SEC-23 mismatch message: item, client rate, server rate."""
+	return _(
+		"Price validation failed for item {0}: submitted rate {1} does not match the "
+		"server-calculated offer rate {2}. Reload the cart and re-apply offers."
+	).format(
+		item_code,
+		flt(client_rate, rate_precision),
+		flt(expected_rate, rate_precision),
+	)
+
+
+def _verify_offer_rate_magnitudes(
+	invoice_doc,
+	pos_profile,
+	pos_profile_doc,
+	pos_settings_cache,
+	server_prices,
+	price_list,
+	rate_precision,
+	relayed_offer_rules=None,
+):
+	"""SEC-23: magnitude verification for money-path rows the SEC-04 loop does
+	not reach — offer-attributed rows (the SEC-04 detector skips them), free /
+	zero-rate rows (rate 0 escapes the below-list detection) and the relayed
+	transaction-level header discount. Runs inside _validate_item_rates so it
+	gates EVERY submit path (online draft save, offline replay, existing-draft
+	submit).
+
+	The expected magnitudes come from _replay_offer_rates (the same engine
+	pipeline apply_offers uses); nothing here derives prices itself.
+	"""
+	rows = invoice_doc.get("items") or []
+	if not pos_profile or not pos_profile_doc:
+		return
+	if invoice_doc.get("is_return") or cint(invoice_doc.get("is_consolidated") or 0):
+		return
+	# The preview honours this flag by returning rows untouched — a claimed
+	# rule under an ignore_pricing_rule profile cannot be honest.
+	if pos_profile_doc.get("ignore_pricing_rule"):
+		return
+
+	rule_rows = []
+	free_rows = []
+	zero_rows = []
+	claimed_all = set()
+	# The existing-draft submit branch drops the relay by design; the draft's
+	# server-written stash is the remaining record of claimed transaction rules.
+	claimed_all.update(_parse_relayed_offer_rules(relayed_offer_rules))
+	claimed_all.update(_parse_relayed_offer_rules(invoice_doc.get("pos_applied_offer_rules")))
+	for idx, row in enumerate(rows):
+		if row.get("pos_package"):
+			# Package rows are re-quoted from the snapshot server-side
+			# (packages.validate_invoice_packages) — outside this gate.
+			continue
+		claims = _row_offer_claims(row)
+		claimed_all.update(claims)
+		if cint(row.get("is_free_item") or 0):
+			free_rows.append((idx, row, claims))
+		elif claims:
+			rule_rows.append((idx, row, claims))
+		elif flt(row.get(FIELD_RATE) or 0) <= 0:
+			zero_rows.append((idx, row, claims))
+	if not (rule_rows or free_rows or zero_rows):
+		# Header-only relay carts (transaction-level offers ride no rows) still
+		# need the stamp check below; everything else is out of scope.
+		doc_amt = flt(invoice_doc.get("discount_amount") or 0)
+		doc_pct = flt(invoice_doc.get("additional_discount_percentage") or 0)
+		if not claimed_all or (doc_amt <= 0 and doc_pct <= 0):
+			return
+
+	replay = _replay_offer_rates(
+		invoice_doc,
+		pos_profile_doc,
+		server_prices,
+		price_list,
+		claimed_all,
+		rate_precision,
+		need_txn=bool(claimed_all) or bool(free_rows),
+	)
+	if replay is None:
+		return
+	expected_rates, free_granted, txn_pct, txn_amt = replay
+
+	band = _rate_mismatch_band(rate_precision)
+	violations = []
+
+	# (a) offer-attributed rows and rate-0 rows: |client rate - replayed rate|
+	#     must sit inside the tolerance band. Rate-0 rows without any engine
+	#     grant replay to the full list price and reject.
+	for idx, row, _claims in rule_rows + zero_rows:
+		expected = expected_rates.get(idx)
+		if expected is None:
+			continue
+		if _resolve_server_price_list_rate(server_prices, row) <= 0:
+			# No server truth for this row — the SEC-04 legacy fallback governs.
+			continue
+		client_rate = flt(row.get(FIELD_RATE) or 0)
+		if abs(client_rate - expected) > band:
+			violations.append(
+				_price_mismatch_message(row.get(FIELD_ITEM_CODE), client_rate, expected, rate_precision)
+			)
+
+	# (b) free rows: the engine must actually grant the item via a claimed
+	#     rule, and the claimed free quantity must not exceed the grant.
+	assigned = defaultdict(float)
+	assignment_rows = {}
+	for _idx, row, claims in free_rows:
+		item_code = row.get(FIELD_ITEM_CODE)
+		grants = sorted(
+			(c for c in claims if free_granted.get((item_code, c), 0.0) > 0),
+			key=lambda c: -(free_granted[(item_code, c)] - assigned[(item_code, c)]),
+		)
+		if not grants:
+			violations.append(
+				_("Free item {0} is not granted by any applied pricing rule.").format(item_code)
+			)
+			continue
+		assigned[(item_code, grants[0])] += flt(row.get("qty") or row.get("quantity") or 0)
+		assignment_rows.setdefault((item_code, grants[0]), row)
+	for (item_code, rule_name), claimed_qty in assigned.items():
+		granted = free_granted.get((item_code, rule_name), 0.0)
+		if claimed_qty > granted + 0.01:
+			violations.append(
+				_("Free quantity for item {0} ({1}) exceeds the granted quantity ({2}).").format(
+					item_code, flt(claimed_qty, 2), flt(granted, 2)
+				)
+			)
+
+	# (c) transaction-level header discount relay: when a Transaction Price
+	#     rule is claimed, the header must not exceed the engine's own stamp
+	#     (apply_offers relays that stamp verbatim). An explicit confirmation
+	#     code keeps the head-office manual-discount lane authoritative.
+	doc_amt = flt(invoice_doc.get("discount_amount") or 0)
+	doc_pct = flt(invoice_doc.get("additional_discount_percentage") or 0)
+	if (doc_amt > 0 or doc_pct > 0) and claimed_all and not (
+		invoice_doc.get("discount_confirmation_code")
+	):
+		# Only rules the engine actually fired back the header claim; a stamp
+		# of zero means the claimed relay produced nothing (manual lane).
+		if txn_amt > 0 or txn_pct > 0:
+			if doc_amt > txn_amt + band or doc_pct > txn_pct + _TXN_PCT_TOLERANCE:
+				violations.append(
+					_(
+						"Header discount {0} does not match the server-calculated "
+						"transaction offer {1}."
+					).format(flt(max(doc_amt, 0), rate_precision), flt(txn_amt, rate_precision))
+				)
+
+	if not violations:
+		return
+
+	if pos_settings_cache is not None and FIELD_PRICE_REPLAY_AUDIT_ONLY in pos_settings_cache:
+		audit_only = cint(pos_settings_cache.get(FIELD_PRICE_REPLAY_AUDIT_ONLY) or 0)
+	else:
+		audit_only = cint(get_effective_pos_setting(pos_profile, FIELD_PRICE_REPLAY_AUDIT_ONLY) or 0)
+
+	if audit_only:
+		frappe.log_error(
+			title="POS Price Replay Mismatch (audit-only)",
+			message="\n".join(violations)[:2000],
+		)
+		return
+
+	frappe.throw(violations[0])
+
+
+def _validate_item_rates(
+	invoice_doc, pos_profile, pos_settings_cache, pos_profile_doc=None, relayed_offer_rules=None
+):
 	"""SEC-04 price verification loop, shared by update_invoice and the
 	existing-draft branch of submit_invoice.
 
@@ -282,6 +776,12 @@ def _validate_item_rates(invoice_doc, pos_profile, pos_settings_cache, pos_profi
 
 	Returns the set of applied pricing rule names seen on the rows (the
 	caller feeds them into the offer stash).
+
+	SEC-23: rows outside the SEC-04 detector (offer-attributed, free,
+	rate-0) plus the relayed header discount are magnitude-verified against
+	a replay of the same pricing pipeline apply_offers runs — see
+	_verify_offer_rate_magnitudes. The client's claimed magnitudes alone are
+	never trusted on the money path.
 	"""
 	price_list = (
 		(pos_profile_doc.selling_price_list if pos_profile_doc else None)
@@ -294,6 +794,16 @@ def _validate_item_rates(invoice_doc, pos_profile, pos_settings_cache, pos_profi
 	# currency_precision, exactly what bootstrap.py feeds roundCurrency),
 	# so an honest row's rate equals the server list price exactly.
 	rate_precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
+	_verify_offer_rate_magnitudes(
+		invoice_doc,
+		pos_profile,
+		pos_profile_doc,
+		pos_settings_cache,
+		server_prices,
+		price_list,
+		rate_precision,
+		relayed_offer_rules=relayed_offer_rules,
+	)
 	# Collect applied pricing rule names before we clear item.pricing_rules
 	applied_rule_names_seen = set()
 	for item in invoice_doc.get("items", []):
@@ -322,8 +832,16 @@ def _validate_item_rates(invoice_doc, pos_profile, pos_settings_cache, pos_profi
 		# Clearing item.pricing_rules here avoids that branch entirely. The
 		# discount itself is preserved via the discount_percentage /
 		# discount_amount fields we already set above.
-		if item.get("pricing_rules"):
-			item_rule_names = _derive_item_offer_rules(item.pricing_rules)
+		if item.get("pricing_rules") or item.get("pos_offer_item_rules"):
+			# Claims come from the payload's pricing_rules marker, else from the
+			# server-restored per-row attribution: at the existing-draft submit
+			# the rows arrive with pricing_rules cleared (pre-save) and only
+			# pos_offer_item_rules — server truth, restored by
+			# _reapply_item_offer_attribution — distinguishes an offer row from
+			# a manual edit. Without this fallback every honest offer row lands
+			# in the manual-edit lane below and is rejected on profiles with
+			# rate editing disabled.
+			item_rule_names = _row_offer_claims(item)
 			applied_rule_names_seen.update(item_rule_names)
 			# Per-item offer attribution for the discount code gate: an item
 			# whose discount comes from an applied pricing rule is offer-driven,
@@ -1253,7 +1771,12 @@ def update_invoice(data):
 		pos_settings_cache = None
 		if pos_profile:
 			pos_settings_cache = get_effective_pos_settings(
-				pos_profile, [FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED]
+				pos_profile,
+				[
+					FIELD_ALLOW_USER_TO_EDIT_RATE,
+					FIELD_MAX_DISCOUNT_ALLOWED,
+					FIELD_PRICE_REPLAY_AUDIT_ONLY,
+				],
 			)
 			# disable_rounded_total is on POS Profile, not POS Settings
 			pos_settings_cache[FIELD_DISABLE_ROUNDED_TOTAL] = frappe.db.get_value(
@@ -1274,7 +1797,11 @@ def update_invoice(data):
 		# _validate_item_rates (shared with submit_invoice's existing-draft
 		# branch); it returns every applied rule name for the offer stash.
 		applied_rule_names_seen = _validate_item_rates(
-			invoice_doc, pos_profile, pos_settings_cache, pos_profile_doc=pos_profile_doc
+			invoice_doc,
+			pos_profile,
+			pos_settings_cache,
+			pos_profile_doc=pos_profile_doc,
+			relayed_offer_rules=relayed_offer_rules,
 		)
 
 		# offer stashes are POS Invoice/Sales Invoice custom fields (Tasks 2/3);
@@ -1309,6 +1836,22 @@ def update_invoice(data):
 			# Transaction rule whose configured discount equals this doc's
 			# header discount. Item-level and free-item rules ride
 			# item.pricing_rules and were stashed above.
+			# ERPNext computes the doc totals only later
+			# (calculate_taxes_and_totals below), but the relay verification's
+			# qty/amount windows read doc.total_qty / doc.total — a windowed
+			# Transaction rule would otherwise never survive verification at
+			# draft save and its honest header discount would fall into the
+			# confirmation-code lane. Bootstrap the cart totals from the rows
+			# (rate is already the per-unit post-item-discount figure, the same
+			# basis doc.total uses); the real calculation overwrites them. The
+			# rows are the only source — a payload-supplied total must not
+			# unlock a qty/amount window.
+			invoice_doc.total_qty = flt(
+				sum(flt(it.qty or 0) for it in invoice_doc.get("items") or [])
+			)
+			invoice_doc.total = flt(
+				sum(flt(it.qty or 0) * flt(it.rate or 0) for it in invoice_doc.get("items") or [])
+			)
 			applied_rule_names_seen.update(
 				verify_transaction_rule_names(
 					_parse_relayed_offer_rules(relayed_offer_rules), invoice_doc
@@ -2120,7 +2663,7 @@ def submit_invoice(invoice=None, data=None):
 			redeem_customer_credit(invoice_doc.name, customer_credit_dict)
 
 		# Log manual rate edits for audit trail (only after successful submission)
-		if doctype == DOCTYPE_SALES_INVOICE:
+		if doctype in (DOCTYPE_SALES_INVOICE, POS_INVOICE):
 			incoming_items = invoice.get("items") or []
 			for item in incoming_items:
 				if cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED)):
@@ -2135,6 +2678,7 @@ def submit_invoice(invoice=None, data=None):
 							FIELD_IS_RATE_MANUALLY_EDITED: 1,
 						},
 						invoice_doc.name,
+						doctype=doctype,
 					)
 
 		# Return complete invoice details

@@ -26,6 +26,8 @@ import { logger } from "./utils/logger";
 import { offlineWorker } from "./utils/offline/workerClient";
 import translationPlugin from "./utils/translation";
 import { initSocket } from "./socket";
+import { usePOSCartStore } from "./stores/posCart";
+import { usePOSSyncStore } from "./stores/posSync";
 
 import {
 	Alert,
@@ -65,10 +67,86 @@ if ("serviceWorker" in navigator) {
 				wb.addEventListener("installed", (event) => {
 					if (!event.isUpdate) log.info("App ready to work offline");
 				});
+
+				// Anti-reload-storm: sw.js berubah tiap build (precache manifest
+				// berbeda) sehingga tiap update check terbaca isUpdate. Generasi SW
+				// diidentifikasi dari hash byte sw.js — selalu berubah ketika SW
+				// berubah, tanpa bergantung pada env build. Penanda generasi yang
+				// sudah pernah di-reload disimpan di localStorage sehingga maksimal
+				// satu auto-reload per generasi (event activation yang sama di tab
+				// lain, atau iterasi berikutnya, tidak me-reload ulang).
+				const SW_RELOADED_GENERATION_KEY = "pos_next_sw_reloaded_generation";
+
+				async function getSwGeneration() {
+					const response = await fetch("/sw.js", { cache: "no-cache" });
+					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					const digest = await crypto.subtle.digest(
+						"SHA-256",
+						await response.arrayBuffer(),
+					);
+					return Array.from(new Uint8Array(digest))
+						.map((byte) => byte.toString(16).padStart(2, "0"))
+						.join("");
+				}
+
+				// Guard transaksi: jangan reload di tengah kerja kasir. State dibaca
+				// dari store existing (posCart/posSync). Bila store belum bisa
+				// dibaca (pinia belum aktif), anggap aktif — reload hanya boleh
+				// terjadi pada state yang terbaca idle.
+				function hasActiveTransaction() {
+					try {
+						if (!usePOSCartStore().isEmpty) return true;
+						return usePOSSyncStore().isSyncing;
+					} catch {
+						return true;
+					}
+				}
+
 				wb.addEventListener("activated", (event) => {
-					// autoUpdate behavior: an updated SW activating means new content.
-					if (event.isUpdate || event.isExternal) window.location.reload();
+					// autoUpdate: SW baru aktif berarti konten baru, tetapi reload
+					// hanya bila state idle DAN generasinya memang baru; yang
+					// ditunda cukup dicatat di log.
+					if (!(event.isUpdate || event.isExternal)) return;
+					getSwGeneration()
+						.then((generation) => {
+							if (
+								localStorage.getItem(SW_RELOADED_GENERATION_KEY) === generation
+							) {
+								log.info("SW generation already reloaded, skipping", {
+									generation,
+								});
+								return;
+							}
+							if (hasActiveTransaction()) {
+								log.info("SW update reload deferred: transaction active", {
+									generation,
+								});
+								return;
+							}
+							localStorage.setItem(SW_RELOADED_GENERATION_KEY, generation);
+							window.location.reload();
+						})
+						.catch((err) =>
+							log.warn("SW update reload skipped (generation unknown)", err),
+						);
 				});
+
+				// Update check periodik: per jam dan saat tab kembali visible, agar
+				// deployment baru terdeteksi tanpa menunggu navigasi.
+				let lastUpdateCheck = 0;
+				const checkForUpdate = () => {
+					lastUpdateCheck = Date.now();
+					wb.update().catch((err) => log.debug("SW update check failed", err));
+				};
+				setInterval(checkForUpdate, 60 * 60 * 1000);
+				document.addEventListener("visibilitychange", () => {
+					if (document.visibilityState !== "visible") return;
+					// Throttle: sw.py mengirim Cache-Control no-cache sehingga tiap
+					// check adalah revalidasi jaringan; cukup sekali per menit.
+					if (Date.now() - lastUpdateCheck < 60 * 1000) return;
+					checkForUpdate();
+				});
+
 				wb.register({ immediate: true }).then(
 					(reg) => {
 						log.info("Service Worker registered", reg);

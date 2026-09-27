@@ -54,7 +54,15 @@ vi.mock("@/utils/offline/db", () => ({
 	},
 }));
 
-vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn() }));
+// serverErrorMessage mirrors the real helper's contract (apiWrapper.js): the
+// server's translated messages joined, else the fallback.
+vi.mock("@/utils/apiWrapper", () => ({
+	call: vi.fn(),
+	serverErrorMessage: (error, fallback = "Something went wrong") => {
+		const messages = Array.isArray(error?.messages) ? error.messages.filter(Boolean) : [];
+		return messages.length ? messages.join(" ") : fallback;
+	},
+}));
 
 vi.mock("@/utils/logger", () => ({
 	logger: {
@@ -218,6 +226,114 @@ describe("COR-FE-04 sync_failed handling", () => {
 		// worker's own unfiltered copy, which keeps failed entries visible).
 		expect(await getOfflineInvoices()).toHaveLength(1);
 		expect(await getOfflineInvoiceCount()).toBe(1);
+	});
+});
+
+// B2: a server ValidationError is a permanent rejection — the same payload
+// can never sync — so the invoice is flagged sync_failed on the FIRST failure
+// with a human-readable reason instead of burning MAX_RETRY_COUNT + backoff.
+// Network / timeout / 5xx failures stay transient on the existing schedule.
+describe("fail-fast on server ValidationError (B2)", () => {
+	const validationError = (message, status = 417) => {
+		const error = new Error(`${SUBMIT} ValidationError`);
+		error.exc_type = "ValidationError";
+		error.response = { status };
+		error.messages = [message];
+		return error;
+	};
+
+	it("flags sync_failed on the first server rejection with the human-readable reason", async () => {
+		store.rows.push(seedRow());
+		const reason = 'Stok tidak cukup untuk "ITEM-1" di gudang Gudang Utama';
+		call.mockImplementation(async (method) =>
+			method === CHECK ? { synced: false } : Promise.reject(validationError(reason))
+		);
+
+		const result = await syncOfflineInvoices();
+
+		expect(result.failed).toBe(1);
+		// Exactly one attempt: no retry inside the same cycle.
+		expect(submittedInvoices()).toHaveLength(1);
+		expect(store.rows[0].sync_failed).toBe(true);
+		expect(store.rows[0].retry_count).toBe(1);
+		// The stored reason is the server's message, not frappe-ui's
+		// "POST /api/method/... ValidationError" wrapper.
+		expect(store.rows[0].error).toBe(reason);
+	});
+
+	it("does not resubmit a permanently rejected invoice on later sync cycles", async () => {
+		store.rows.push(seedRow());
+		call.mockImplementation(async (method) =>
+			method === CHECK ? { synced: false } : Promise.reject(validationError("rejected"))
+		);
+
+		await syncOfflineInvoices();
+		expect(submittedInvoices()).toHaveLength(1);
+
+		// The next cycle must not spend an attempt on the rejected payload.
+		store.rows[0].last_attempt = 0;
+		await syncOfflineInvoices();
+		expect(submittedInvoices()).toHaveLength(1);
+	});
+
+	it("keeps network errors transient on the retry schedule", async () => {
+		store.rows.push(seedRow());
+		call.mockImplementation(async (method) =>
+			method === CHECK ? { synced: false } : Promise.reject(new TypeError("Failed to fetch"))
+		);
+
+		await syncOfflineInvoices();
+		expect(store.rows[0].retry_count).toBe(1);
+		expect(store.rows[0].sync_failed).toBeFalsy();
+
+		// Backoff still gates the next attempt: 1s later it is skipped.
+		store.rows[0].last_attempt = Date.now() - 1000;
+		await syncOfflineInvoices();
+		expect(submittedInvoices()).toHaveLength(1);
+		expect(store.rows[0].retry_count).toBe(1);
+
+		// After the backoff elapses the entry is retried.
+		store.rows[0].last_attempt = Date.now() - 11000;
+		await syncOfflineInvoices();
+		expect(store.rows[0].retry_count).toBe(2);
+		expect(submittedInvoices()).toHaveLength(2);
+	});
+
+	it("keeps 5xx rejections transient even when an exc_type is present", async () => {
+		store.rows.push(seedRow());
+		call.mockImplementation(async (method) =>
+			method === CHECK
+				? { synced: false }
+				: Promise.reject(validationError("Internal Server Error", 500))
+		);
+
+		await syncOfflineInvoices();
+		expect(store.rows[0].retry_count).toBe(1);
+		expect(store.rows[0].sync_failed).toBeFalsy();
+	});
+
+	it("retryOfflineInvoice re-queues a permanently rejected invoice", async () => {
+		store.rows.push(seedRow());
+		call.mockImplementation(async (method) =>
+			method === CHECK ? { synced: false } : Promise.reject(validationError("rejected"))
+		);
+		await syncOfflineInvoices();
+		expect(store.rows[0].sync_failed).toBe(true);
+
+		const ok = await retryOfflineInvoice(store.rows[0].id);
+		expect(ok).toBe(true);
+		expect(store.rows[0].sync_failed).toBe(false);
+		expect(store.rows[0].retry_count).toBe(0);
+		expect(store.rows[0].error).toBeNull();
+
+		// The cashier fixed the cause (or the server rule changed): the
+		// re-queued invoice syncs normally.
+		call.mockImplementation(async (method) =>
+			method === CHECK ? { synced: false } : { name: "INV-001" }
+		);
+		const result = await syncOfflineInvoices();
+		expect(result.success).toBe(1);
+		expect(store.rows[0].synced).toBe(true);
 	});
 });
 

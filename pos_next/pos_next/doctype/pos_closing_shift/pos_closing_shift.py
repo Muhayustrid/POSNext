@@ -9,7 +9,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
-from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -809,14 +809,7 @@ def make_closing_shift_from_opening(opening_shift):
 			# COR-BE-15: the preview no longer submits printed drafts (reads
 			# are pure), so surface how many are still pending so the close
 			# dialog can warn that the final numbers will include them.
-			"pending_printed_drafts": frappe.db.count(
-				"Sales Invoice",
-				{
-					"posa_pos_opening_shift": opening_shift_name,
-					"docstatus": 0,
-					"posa_is_printed": 1,
-				},
-			),
+			"pending_printed_drafts": _count_pending_printed_drafts(opening_shift_name),
 		}
 	)
 
@@ -880,6 +873,27 @@ def submit_closing_shift(closing_shift):
 	closing_shift_doc.save()
 	closing_shift_doc.submit()
 	return closing_shift_doc.name
+
+
+def _count_pending_printed_drafts(pos_opening_shift):
+	"""Printed drafts still waiting for the close's auto-submit (COR-BE-15).
+
+	Counted on the site's invoice doctype (get_pos_invoice_doctype).
+	posa_is_printed exists only on Sales Invoice (see submit_printed_invoices
+	— POS Invoices carry no printed-draft state and are never auto-submitted),
+	so in POS Invoice mode nothing is pending and the count is 0.
+	"""
+	doctype = get_pos_invoice_doctype()
+	if doctype != SALES_INVOICE:
+		return 0
+	return frappe.db.count(
+		doctype,
+		{
+			"posa_pos_opening_shift": pos_opening_shift,
+			"docstatus": 0,
+			"posa_is_printed": 1,
+		},
+	)
 
 
 def submit_printed_invoices(pos_opening_shift, doctype):

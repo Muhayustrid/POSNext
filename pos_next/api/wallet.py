@@ -155,6 +155,50 @@ def process_loyalty_to_wallet(doc, method=None):
 	)
 
 
+def cancel_wallet_transactions_for_invoice(doc, method=None):
+	"""
+	Cancel every submitted Wallet Transaction linked to an invoice.
+
+	A live WT holds a Dynamic Link to the invoice and blocks its cancel with
+	frappe.LinkExistsError. Matches every transaction_type — sales credits
+	(Loyalty Program / Credit) and refund credits on returns
+	(credit_return_to_wallet) all reference the invoice.
+
+	WalletTransaction.on_cancel reverses the GL entries and refreshes the
+	wallet balance (computed realtime from GL entries), so cancelling restores
+	what the invoice credited/charged.
+
+	Any failure re-raises: the whole cancel request rolls back and the invoice
+	stays submitted. Swallowing here would leave a dangling link that blocks
+	every later cancel with LinkExistsError.
+
+	Called from sales_invoice_hooks.before_cancel — the sink for both Sales
+	Invoice and POS Invoice.
+	"""
+	wt_names = frappe.get_all(
+		"Wallet Transaction",
+		filters={
+			"reference_doctype": doc.doctype,
+			"reference_name": doc.name,
+			"docstatus": 1,
+		},
+		pluck="name",
+	)
+
+	for wt_name in wt_names:
+		try:
+			wt = frappe.get_doc("Wallet Transaction", wt_name)
+			wt.flags.ignore_permissions = True
+			wt.cancel()
+		except Exception as e:
+			frappe.throw(
+				_("Could not cancel Wallet Transaction {0} linked to {1} {2}: {3}").format(
+					wt_name, doc.doctype, doc.name, e
+				),
+				title=_("Wallet Transaction Cancellation Error"),
+			)
+
+
 def get_wallet_amount_from_payments(payments):
 	"""
 	Calculate total wallet payment amount from invoice payments.

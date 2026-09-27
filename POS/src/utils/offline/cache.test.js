@@ -31,7 +31,7 @@ vi.mock("@/utils/offline/offlineState", () => ({
 }));
 
 import { call } from "@/utils/apiWrapper";
-import { cacheCustomersFromServer, memory } from "@/utils/offline/cache";
+import { CUSTOMER_SYNC_MAX_PAGES, cacheCustomersFromServer, memory } from "@/utils/offline/cache";
 
 const BATCH = 500;
 
@@ -82,6 +82,17 @@ describe("cacheCustomersFromServer pagination (PERF-03)", () => {
 			expect(params.limit).not.toBe(0);
 			expect(params.limit).toBeLessThanOrEqual(BATCH);
 		}
+	});
+
+	it("stops at the page cap when the server keeps returning full pages", async () => {
+		// Pagination anomaly: every page comes back full, so the short-page
+		// stop never fires; the hard cap must end the loop.
+		call.mockResolvedValue({ message: page(0, BATCH) });
+
+		const result = await cacheCustomersFromServer("POS-1");
+
+		expect(call).toHaveBeenCalledTimes(CUSTOMER_SYNC_MAX_PAGES);
+		expect(result.customers).toHaveLength(CUSTOMER_SYNC_MAX_PAGES * BATCH);
 	});
 
 	it("does not send modified_since when the cache has no last-sync marker", async () => {

@@ -33,6 +33,23 @@
 						</p>
 					</div>
 
+					<!-- Printed drafts pending auto-submit (COR-BE-15): informational,
+					     one calm accent, no badges -->
+					<div
+						v-if="closingData.pending_printed_drafts > 0"
+						class="rounded-lg bg-blue-50 border border-blue-200 p-3 flex items-center gap-2"
+					>
+						<FeatherIcon name="printer" class="w-4 h-4 text-blue-600 flex-shrink-0" />
+						<p class="text-xs md:text-sm text-blue-800">
+							{{
+								__(
+									"{0} struk tercetak akan otomatis di-submit saat shift ditutup",
+									[closingData.pending_printed_drafts]
+								)
+							}}
+						</p>
+					</div>
+
 					<!-- Shift Summary Header (hidden in entry mode when hideExpectedAmount is enabled) -->
 					<div
 						v-if="shouldShowSummary"

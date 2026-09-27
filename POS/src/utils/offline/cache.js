@@ -182,6 +182,10 @@ export const cacheItemsFromServer = async (posProfile) => {
 // Shared with stores/customerSearch.js so both full-pull loops page identically.
 export const CUSTOMER_SYNC_PAGE_SIZE = 500;
 
+// Hard stop for both paging loops: a server anomaly that keeps returning
+// full pages must not loop forever. 100 pages x 500 = 50k customers.
+export const CUSTOMER_SYNC_MAX_PAGES = 100;
+
 // Load customers from server (returns data for worker to cache)
 export const cacheCustomersFromServer = async (posProfile) => {
 	try {
@@ -196,9 +200,9 @@ export const cacheCustomersFromServer = async (posProfile) => {
 		const customers = [];
 		const disabledNames = [];
 		let start = 0;
-		let fetching = true;
+		let pages = 0;
 
-		while (fetching) {
+		while (pages < CUSTOMER_SYNC_MAX_PAGES) {
 			const response = await call("pos_next.api.customers.get_customers", {
 				pos_profile: posProfile,
 				search_term: "",
@@ -218,8 +222,15 @@ export const cacheCustomersFromServer = async (posProfile) => {
 				}
 			}
 
+			pages++;
+			if (page.length < CUSTOMER_SYNC_PAGE_SIZE) break;
 			start += CUSTOMER_SYNC_PAGE_SIZE;
-			fetching = page.length >= CUSTOMER_SYNC_PAGE_SIZE;
+		}
+
+		if (pages >= CUSTOMER_SYNC_MAX_PAGES) {
+			console.warn(
+				`Customer sync stopped at the ${CUSTOMER_SYNC_MAX_PAGES}-page cap; more pages may remain`
+			);
 		}
 
 		if (disabledNames.length > 0) {

@@ -1,4 +1,4 @@
-import { call } from "@/utils/apiWrapper";
+import { call, serverErrorMessage } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { CoalescingMutex } from "@/utils/mutex";
 import { db } from "./db";
@@ -26,6 +26,9 @@ const SYNC_CONFIG = {
 	// Exponential backoff between transient retries: base * 2^retry_count ms
 	// since the last attempt (10s after the 1st failure, 20s after the 2nd).
 	RETRY_BACKOFF_BASE_MS: 5000,
+	// Replay at most this many queued invoices per sync cycle; the rest wait
+	// for the next cycle so a large backlog cannot monopolize the tab.
+	MAX_SYNC_BATCH: 50,
 };
 
 // Duplicate error patterns to detect already-synced invoices
@@ -227,6 +230,21 @@ const isSyncInProgressError = (error) => {
 };
 
 /**
+ * Check if a server rejection is permanent: the same payload can never sync,
+ * so the invoice is flagged sync_failed on the first rejection instead of
+ * burning the retry budget. Frappe answers business-rule rejections with a
+ * ValidationError (frappe-ui exposes it as error.exc_type). Network failures,
+ * timeouts and 5xx responses are transient and stay on the retry schedule.
+ * @param {Error} error - Error thrown by apiWrapper call
+ * @returns {boolean}
+ */
+const isPermanentSyncError = (error) => {
+	if (error?.exc_type !== "ValidationError") return false;
+	const status = error?.response?.status;
+	return !(typeof status === "number" && status >= 500);
+};
+
+/**
  * Wait for a specified duration
  * @param {number} ms - Milliseconds to wait
  * @returns {Promise<void>}
@@ -269,13 +287,16 @@ const isRetryDue = (invoice) => {
 /**
  * Increment retry count and optionally mark as failed
  * @param {Object} invoice - Invoice record
- * @param {string} errorMessage - Error message
+ * @param {string} errorMessage - Human-readable error reason
+ * @param {Object} [options]
+ * @param {boolean} [options.permanent] - Flag sync_failed immediately (server
+ *   rejected the payload; retrying cannot fix it)
  */
-const handleSyncFailure = async (invoice, errorMessage) => {
+const handleSyncFailure = async (invoice, errorMessage, { permanent = false } = {}) => {
 	const newRetryCount = (invoice.retry_count || 0) + 1;
 	const updates = { retry_count: newRetryCount, last_attempt: Date.now() };
 
-	if (newRetryCount >= SYNC_CONFIG.MAX_RETRY_COUNT) {
+	if (permanent || newRetryCount >= SYNC_CONFIG.MAX_RETRY_COUNT) {
 		updates.sync_failed = true;
 		updates.error = errorMessage;
 	}
@@ -440,10 +461,17 @@ export const syncOfflineInvoices = async () => {
 		// getOfflineInvoices already excludes sync_failed entries; the backoff
 		// gate here skips entries whose next transient retry is not due yet.
 		// Both are skips, never blocks: the loop below continues past them.
-		const pendingInvoices = (await getOfflineInvoices()).filter((inv) => isRetryDue(inv));
+		const eligible = (await getOfflineInvoices()).filter((inv) => isRetryDue(inv));
+		const pendingInvoices = eligible.slice(0, SYNC_CONFIG.MAX_SYNC_BATCH);
 
 		if (!pendingInvoices.length) {
 			return { success: 0, failed: 0, skipped: 0, errors: [] };
+		}
+
+		if (eligible.length > pendingInvoices.length) {
+			log.info(
+				`Deferring ${eligible.length - pendingInvoices.length} invoice(s) to the next sync cycle`
+			);
 		}
 
 		log.info(`Starting sync of ${pendingInvoices.length} invoice(s)`);
@@ -475,7 +503,13 @@ export const syncOfflineInvoices = async () => {
 					continue;
 				}
 
-				// Handle genuine failure
+				// Handle genuine failure. A server ValidationError is permanent:
+				// flag sync_failed now with a human-readable reason (the server's
+				// translated message) instead of waiting out MAX_RETRY_COUNT.
+				// Network/5xx/timeout errors stay transient on the backoff schedule.
+				const permanent = isPermanentSyncError(error);
+				const errorMessage = permanent ? serverErrorMessage(error) : error.message;
+
 				result.errors.push({
 					invoiceId: invoice.id,
 					offlineId: invoice.offline_id,
@@ -483,7 +517,7 @@ export const syncOfflineInvoices = async () => {
 					error,
 				});
 
-				await handleSyncFailure(invoice, error.message);
+				await handleSyncFailure(invoice, errorMessage, { permanent });
 				result.failed++;
 			}
 		}

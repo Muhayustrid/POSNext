@@ -52,11 +52,11 @@ const pendingInvoice = {
 	data: { customer: "Budi", items: [], grand_total: 1000 },
 };
 
-const mountDialog = async () => {
+const mountDialog = async (invoiceList = [failedInvoice, pendingInvoice]) => {
 	// The dialog populates its list when the model transitions to open,
 	// mirroring how POSSale.vue opens it after loading the pending list.
 	const wrapper = mount(OfflineInvoicesDialog, {
-		props: { modelValue: false, pendingInvoices: [failedInvoice, pendingInvoice] },
+		props: { modelValue: false, pendingInvoices: invoiceList },
 		global: { config: { globalProperties: { __: globalThis.__ } } },
 	});
 	await wrapper.setProps({ modelValue: true });
@@ -86,6 +86,23 @@ describe("OfflineInvoicesDialog COR-FE-04", () => {
 
 		expect(mocks.retryOfflineInvoice).toHaveBeenCalledTimes(1);
 		expect(mocks.retryOfflineInvoice).toHaveBeenCalledWith(1);
+	});
+
+	it("renders the server rejection reason stored in invoice.error for a permanently failed entry (B3)", async () => {
+		// sync.js fail-fast stores the server's translated message (frappe's
+		// _()) in the error field; the dialog displays it verbatim next to the
+		// localized "Sync failed" badge (the badge strings themselves go
+		// through __() in the template).
+		const rejected = {
+			...failedInvoice,
+			id: 3,
+			error: 'Stok tidak cukup untuk "ITEM-1" di gudang Gudang Utama',
+		};
+
+		const wrapper = await mountDialog([rejected, pendingInvoice]);
+
+		expect(wrapper.text()).toContain("Sync failed");
+		expect(wrapper.text()).toContain('Stok tidak cukup untuk "ITEM-1" di gudang Gudang Utama');
 	});
 
 	it("keeps the destructive delete flow behind confirmation for failed entries", async () => {

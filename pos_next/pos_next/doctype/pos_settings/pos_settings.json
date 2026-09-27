@@ -17,6 +17,7 @@
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
   "allow_user_to_edit_rate",
+  "price_replay_audit_only",
   "use_percentage_discount",
   "max_discount_allowed",
   "column_break_general",
@@ -199,6 +200,13 @@
    "fieldname": "allow_user_to_edit_rate",
    "fieldtype": "Check",
    "label": "Allow User To Edit Rate"
+  },
+  {
+   "default": "0",
+   "description": "Audit-only mode for the server-side offer price replay (SEC-23): magnitude mismatches between the submitted rate and the server-replayed offer rate are logged instead of rejected. Leave unchecked (default) to enforce and reject manipulated submissions.",
+   "fieldname": "price_replay_audit_only",
+   "fieldtype": "Check",
+   "label": "Price Replay Audit Only"
   },
   {
    "default": "0",

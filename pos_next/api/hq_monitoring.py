@@ -768,15 +768,18 @@ def _item_from(where):
 	# PERF-01: the window predicates ride into BOTH union branches (see
 	# _invoice_from), so each branch is pruned on the invoice's posting_date /
 	# company index before the derived tables are joined — the outer WHERE
-	# keeps the identical predicates, so results are unchanged.
-	base = f"si.docstatus = 1 AND si.is_pos = 1 AND ({where})"
+	# keeps the identical predicates, so results are unchanged. ``where``
+	# always comes from _si_window_where, which already carries
+	# docstatus/is_pos, so it is forwarded as-is: re-wrapping them here (and
+	# feeding the wrapped form back into _invoice_from, which adds its own)
+	# only nested the same predicates redundantly.
 	return f"""
 	FROM {sales_invoice_item_union(
 		"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
 		" sii.base_net_amount, sii.pos_package_role",
-		where=base,
+		where=where,
 	)}
-	INNER JOIN {_invoice_from(base)} ON si.name = sii.parent
+	INNER JOIN {_invoice_from(where)} ON si.name = sii.parent
 	WHERE {where}
 	  AND (sii.pos_package_role IS NULL OR sii.pos_package_role <> '{COMPONENT_ROLE}')
 """

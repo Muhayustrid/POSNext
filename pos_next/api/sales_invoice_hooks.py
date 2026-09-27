@@ -223,6 +223,9 @@ def before_cancel(doc, method=None):
 	"""
 	Before Cancel hook for Sales Invoice.
 	Cancel any credit redemption journal entries.
+	Cancel Wallet Transactions linked to this invoice — sales credits AND
+	return refund credits (credit_return_to_wallet mints a WT for returns
+	too) — so the cancel does not die on the live Dynamic Link.
 
 	Args:
 		doc: Sales Invoice document
@@ -230,6 +233,15 @@ def before_cancel(doc, method=None):
 	"""
 	if doc.get("is_consolidated"):
 		return
+
+	# Hard gate: a live linked Wallet Transaction blocks the invoice's own
+	# cancel with LinkExistsError, so — unlike the best-effort JE cleanup
+	# below — a failure here must propagate: the whole cancel rolls back and
+	# the invoice stays submitted.
+	from pos_next.api.wallet import cancel_wallet_transactions_for_invoice
+
+	cancel_wallet_transactions_for_invoice(doc)
+
 	try:
 		from pos_next.api.credit_sales import cancel_credit_journal_entries
 
