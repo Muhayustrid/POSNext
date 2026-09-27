@@ -38,7 +38,7 @@ class TestDraftInvoiceScoping(FrappeTestCase):
         cls.profile = frappe.db.get_value(
             "POS Profile",
             _PROFILE_FILTER,
-            ["name", "company", "warehouse"],
+            ["name", "company", "warehouse", "selling_price_list"],
             as_dict=True,
             order_by="creation asc",
         )
@@ -50,9 +50,41 @@ class TestDraftInvoiceScoping(FrappeTestCase):
         if not item:
             raise unittest.SkipTest("no sales item on site")
         cls.item = item[0]
-        cls.customer = get_default_customer()
-        if not cls.customer:
+        # rate mengikuti Item Price daftar harga profil — rate hardcode di
+        # bawah harga server terbaca diskon manual dan gate kode head-office
+        # melempar saat insert
+        cls.rate = (
+            frappe.db.get_value(
+                "Item Price",
+                {
+                    "item_code": cls.item,
+                    "price_list": cls.profile.selling_price_list,
+                    "selling": 1,
+                },
+                "price_list_rate",
+            )
+            or 10
+        )
+        donor = get_default_customer()
+        if not donor:
             raise unittest.SkipTest("no non-internal customer")
+        grp = frappe.db.get_value(
+            "Customer", donor, ["customer_group", "territory"], as_dict=True
+        )
+        # pelanggan polos segar tanpa price group: get_default_customer bisa
+        # balik pelanggan franchise, membuat price_list_rate melompat dan
+        # rate daftar umum terbaca diskon manual → gate melempar
+        plain_customer = frappe.get_doc(
+            {
+                "doctype": "Customer",
+                "customer_name": f"Draft Sec Cust {uuid.uuid4().hex[:8]}",
+                "customer_group": grp.customer_group,
+                "territory": grp.territory,
+            }
+        )
+        plain_customer.flags.ignore_permissions = True
+        plain_customer.insert()
+        cls.customer = plain_customer.name
         cls.mode = frappe.get_all(
             "POS Payment Method",
             {"parent": cls.profile.name, "parenttype": "POS Profile"},
@@ -85,6 +117,10 @@ class TestDraftInvoiceScoping(FrappeTestCase):
                 frappe.delete_doc("User", user, force=1, ignore_permissions=True)
             except Exception:
                 pass
+        try:
+            frappe.delete_doc("Customer", cls.customer, force=1, ignore_permissions=True)
+        except Exception:
+            pass
         frappe.db.commit()
         super().tearDownClass()
 
@@ -168,8 +204,8 @@ class TestDraftInvoiceScoping(FrappeTestCase):
                 "pos_profile": cls.profile.name,
                 "is_pos": 1,
                 "posa_pos_opening_shift": shift,
-                "items": [{"item_code": cls.item, "qty": 1, "rate": 10}],
-                "payments": [{"mode_of_payment": cls.mode[0], "amount": 10}],
+                "items": [{"item_code": cls.item, "qty": 1, "rate": cls.rate}],
+                "payments": [{"mode_of_payment": cls.mode[0], "amount": cls.rate}],
             }
         )
         doc.flags.ignore_permissions = True
@@ -217,7 +253,7 @@ class TestDraftInvoiceScoping(FrappeTestCase):
                 "pos_profile": self.profile.name,
                 "is_pos": 1,
                 "posa_pos_opening_shift": self.shift.name,
-                "items": [{"item_code": self.item, "qty": 1, "rate": 10}],
+                "items": [{"item_code": self.item, "qty": 1, "rate": self.rate}],
             }
         )
         si.flags.ignore_permissions = True

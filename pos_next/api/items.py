@@ -483,36 +483,6 @@ def search_by_barcode(barcode, pos_profile):
 
 
 @frappe.whitelist()
-def get_item_stock(item_code, warehouse):
-	"""Get real-time stock for item"""
-	try:
-		# Get both quantities in a single query (performance optimization)
-		bin_data = (
-			frappe.db.get_value(
-				"Bin",
-				{"item_code": item_code, "warehouse": warehouse},
-				["actual_qty", "reserved_qty"],
-				as_dict=True,
-			)
-			or {}
-		)
-
-		stock_qty = flt(bin_data.get("actual_qty", 0))
-		reserved_qty = flt(bin_data.get("reserved_qty", 0))
-
-		return {
-			"item_code": item_code,
-			"warehouse": warehouse,
-			"stock_qty": stock_qty,
-			"reserved_qty": reserved_qty,
-			"available_qty": stock_qty - reserved_qty,
-		}
-	except Exception as e:
-		frappe.log_error(frappe.get_traceback(), "Get Item Stock Error")
-		frappe.throw(_("Error fetching item stock: {0}").format(str(e)))
-
-
-@frappe.whitelist()
 def get_batch_serial_details(item_code, warehouse):
 	"""Get batch/serial number details"""
 	try:
@@ -2285,101 +2255,6 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Warehouse Availability Error")
 		frappe.throw(_("Error fetching warehouse availability: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def get_product_bundle_availability(item_code, warehouse):
-	"""
-	Get Product Bundle availability with detailed component information.
-	Uses available_qty (actual - reserved) to prevent overselling.
-
-	Returns:
-		{
-			"available_qty": int,
-			"components": [
-				{
-					"item_code": str,
-					"item_name": str,
-					"required_qty": float,
-					"available_qty": float,
-					"possible_bundles": int,
-					"uom": str,
-					"is_limiting": bool  # True if this component limits bundle qty
-				}
-			]
-		}
-	"""
-	try:
-		# Use bulk calculation for single bundle
-		bundle_availability = _calculate_bundle_availability_bulk([item_code], warehouse)
-		available_qty = bundle_availability.get(item_code, 0)
-
-		# Get detailed component information with item names (single query with JOIN)
-		components = frappe.db.sql(
-			"""
-			SELECT
-				pbi.item_code,
-				i.item_name,
-				pbi.qty as required_qty,
-				pbi.uom
-			FROM `tabProduct Bundle Item` pbi
-			INNER JOIN `tabItem` i ON i.name = pbi.item_code
-			WHERE pbi.parent = %(bundle)s
-			ORDER BY pbi.idx
-		""",
-			{"bundle": item_code},
-			as_dict=1,
-		)
-
-		if not components:
-			return {"available_qty": 0, "components": []}
-
-		# Get warehouses (support group warehouses)
-		warehouses = [warehouse]
-		if frappe.db.get_value("Warehouse", warehouse, "is_group"):
-			warehouses = frappe.db.get_descendants("Warehouse", warehouse) or [warehouse]
-
-		# Get component stock (use available = actual - reserved)
-		component_codes = [c["item_code"] for c in components]
-		stock_data = frappe.db.sql(
-			"""
-			SELECT
-				item_code,
-				COALESCE(SUM(actual_qty - reserved_qty), 0) as available_qty
-			FROM `tabBin`
-			WHERE item_code IN %(items)s AND warehouse IN %(warehouses)s
-			GROUP BY item_code
-		""",
-			{"items": component_codes, "warehouses": warehouses},
-			as_dict=1,
-		)
-
-		component_stock_map = {row["item_code"]: flt(row["available_qty"]) for row in stock_data}
-
-		# Build component details with limiting indicator
-		component_details = []
-		for comp in components:
-			available = component_stock_map.get(comp["item_code"], 0)
-			required = flt(comp["required_qty"])
-			possible = int(available / required) if required > 0 else 0
-
-			component_details.append(
-				{
-					"item_code": comp["item_code"],
-					"item_name": comp["item_name"],
-					"required_qty": required,
-					"available_qty": available,
-					"possible_bundles": possible,
-					"uom": comp["uom"],
-					"is_limiting": (possible == available_qty),  # Mark limiting component
-				}
-			)
-
-		return {"available_qty": available_qty, "components": component_details}
-
-	except Exception as e:
-		frappe.log_error(frappe.get_traceback(), f"Bundle Availability Error: {item_code} in {warehouse}")
-		frappe.throw(_("Error fetching bundle availability for {0}: {1}").format(item_code, str(e)))
 
 
 def _pos_reserved_batches_bulk(item_codes, company=None):

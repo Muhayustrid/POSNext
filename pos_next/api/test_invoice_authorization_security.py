@@ -31,7 +31,8 @@ from pos_next.api.invoices import (
 	submit_invoice,
 	update_invoice,
 )
-from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
+from pos_next.tests._posi_test_utils import _set_invoice_type
 from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
@@ -48,6 +49,14 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# fixtures below insert through the Sales Invoice lane without an
+		# opening-shift fixture, so an ambient site left in POS Invoice mode
+		# breaks every submit with "No open POS Opening Entry" — pin the mode
+		# for the run and restore the site's baseline in tearDownClass
+		cls._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
+		_set_invoice_type(SALES_INVOICE)
 		cls.profile = frappe.db.get_value(
 			"POS Profile",
 			_PROFILE_FILTER,
@@ -142,6 +151,7 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 	@classmethod
 	def tearDownClass(cls):
 		frappe.set_user(ADMIN)
+		_set_invoice_type(cls._invoice_type_baseline or SALES_INVOICE)
 
 		def _safe(step):
 			# tolerant teardown (see test_closing_shift_security): one leftover

@@ -750,50 +750,6 @@ def get_brands():
 	return frappe.get_all("Brand", fields=["name"], order_by="name")
 
 
-@frappe.whitelist()
-def search_items(search_term, pos_profile=None, limit=20):
-	"""Search for items."""
-	# Rate limiting: Track API calls per user
-	cache_key = f"search_items_rate_limit:{frappe.session.user}"
-	call_count_raw = frappe.cache().get(cache_key)
-	call_count = int(call_count_raw) if call_count_raw else 0
-
-	if call_count > 50:  # Max 50 searches per minute
-		frappe.throw(_("Too many search requests. Please wait a moment."))
-
-	frappe.cache().setex(cache_key, 60, call_count + 1)
-
-	# Sanitize search term to prevent SQL injection
-	if not search_term or not isinstance(search_term, str):
-		return []
-
-	# Remove any special SQL characters and limit length
-	search_term = re.sub(r"[^\w\s-]", "", search_term)[:100]
-
-	if len(search_term) < 2:
-		return []
-
-	filters = {"disabled": 0}
-
-	if pos_profile:
-		profile = frappe.get_doc("POS Profile", pos_profile)
-		if profile.item_groups:
-			item_groups = [d.item_group for d in profile.item_groups]
-			filters["item_group"] = ["in", item_groups]
-
-	# Limit results
-	limit = min(int(limit) if limit else 20, 50)  # Max 50 results
-
-	return frappe.get_all(
-		"Item",
-		filters=filters,
-		or_filters={"item_code": ["like", f"%{search_term}%"], "item_name": ["like", f"%{search_term}%"]},
-		fields=["item_code", "item_name", "item_group", "brand", "stock_uom"],
-		limit=limit,
-		order_by="item_name",
-	)
-
-
 # ==================== COUPON MANAGEMENT ====================
 
 

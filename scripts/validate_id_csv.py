@@ -13,7 +13,7 @@ Checks:
    no control characters.
 
 Usage: python3 scripts/validate_id_csv.py [csv_path ...]
-       (default: pos_next/translations/id.csv — task C scope)
+       (default: every pos_next/translations/*.csv)
 """
 import csv
 import re
@@ -71,7 +71,7 @@ def validate(path: Path) -> list[str]:
 def main() -> int:
     args = sys.argv[1:]
     base = Path(__file__).resolve().parent.parent / "pos_next" / "translations"
-    paths = [Path(a) for a in args] if args else [base / "id.csv"]
+    paths = [Path(a) for a in args] if args else sorted(base.glob("*.csv"))
     if not paths:
         print(f"no csv files found under {base}")
         return 2

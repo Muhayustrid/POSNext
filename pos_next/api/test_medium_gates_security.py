@@ -39,9 +39,10 @@ from pos_next.api.invoices import (
 from pos_next.api.partial_payments import create_payment_entry
 from pos_next.api.qz import get_certificate, get_certificate_download, sign_message
 from pos_next.api.shifts import submit_closing_shift
-from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
 from pos_next.overrides.queue_counter import bump_queue_counter
 from pos_next.pos_next.utils.pos_closing_print import get_sales_recap
+from pos_next.tests._posi_test_utils import _set_invoice_type
 
 ADMIN = "Administrator"
 OPENING_CASH = 100
@@ -59,6 +60,14 @@ class TestMediumGatesSecurity(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# fixtures below insert through the Sales Invoice lane without an
+		# opening-shift fixture, so an ambient site left in POS Invoice mode
+		# breaks every submit with "No open POS Opening Entry" — pin the mode
+		# for the run and restore the site's baseline in tearDownClass
+		cls._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
+		_set_invoice_type(SALES_INVOICE)
 		cls.profile = frappe.db.get_value(
 			"POS Profile",
 			_PROFILE_FILTER,
@@ -154,6 +163,7 @@ class TestMediumGatesSecurity(FrappeTestCase):
 	@classmethod
 	def tearDownClass(cls):
 		frappe.set_user(ADMIN)
+		_set_invoice_type(cls._invoice_type_baseline or SALES_INVOICE)
 
 		def _safe(step):
 			# tolerant teardown: one leftover must never abort the remaining

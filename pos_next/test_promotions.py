@@ -36,6 +36,8 @@ from frappe.utils import add_days, flt, nowdate
 
 import pos_next  # noqa: F401 — ensure app hooks load.
 from pos_next.api.invoices import apply_offers, submit_invoice, update_invoice
+from pos_next.invoice_type import SALES_INVOICE
+from pos_next.tests._posi_test_utils import _set_invoice_type
 
 ITEM_A = "_PNXT_TEST_ITEM_A"  # Standard Selling: 50
 ITEM_B = "_PNXT_TEST_ITEM_B"  # Standard Selling: 80
@@ -572,9 +574,24 @@ class TestPromotions(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# The module drives the Sales Invoice lane (payloads and read-backs
+		# below hardcode it) and never creates an opening shift, so a site
+		# left in POS Invoice mode errors every submit with "No open POS
+		# Opening Entry". Pin the mode for the run and restore the site's
+		# baseline afterwards — a leaked flip poisons every module after us.
+		cls._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
+		_set_invoice_type(SALES_INVOICE)
 		# Resolve context once; per-test calls re-resolve so missing fixtures are
 		# surfaced where they're actually consumed.
 		cls.ctx = _ctx()
+
+	@classmethod
+	def tearDownClass(cls):
+		_set_invoice_type(cls._invoice_type_baseline or SALES_INVOICE)
+		frappe.db.commit()
+		super().tearDownClass()
 
 	def tearDown(self):
 		"""Disable any test pricing rule created during this test method.
