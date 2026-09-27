@@ -193,8 +193,13 @@ describe("ShiftDashboard", () => {
 			"2000 IDR",
 		)
 		expect(wrapper.find('[data-test="kpi-returns"]').text()).toContain(
-			"1 · -10000 IDR",
+			"-10000 IDR",
 		)
+		expect(wrapper.find('[data-test="kpi-returns"]').text()).toContain(
+			"1 return invoices",
+		)
+		// count and nominal are no longer piled into one "1 · -10.000" line
+		expect(wrapper.find('[data-test="kpi-returns"]').text()).not.toContain("·")
 		// no cash card in the hero band — cash reads once, in Payment Methods
 		expect(wrapper.find('[data-test="kpi-cash"]').exists()).toBe(false)
 	})

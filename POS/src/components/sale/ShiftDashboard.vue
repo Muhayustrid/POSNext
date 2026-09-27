@@ -169,7 +169,10 @@
 						<div v-if="(dashboard.returns_count || 0) > 0" data-test="kpi-returns">
 							<div class="text-xs text-gray-500">{{ __("Returns") }}</div>
 							<div class="font-semibold text-red-600 tabular-nums">
-								{{ returnsLabel }}
+								{{ returnsTotalLabel }}
+							</div>
+							<div class="mt-1 text-xs text-gray-500 tabular-nums">
+								{{ returnsCountLabel }}
 							</div>
 						</div>
 					</div>
@@ -489,13 +492,18 @@ const isEmpty = computed(
 )
 
 // Display only: never render "-0" — the sign appears only for real values.
-const returnsLabel = computed(() => {
+// Nominal is the value line; the count drops to the caption so the strip
+// keeps one figure per stat (no "1 · -Rp 50.000" pile-up).
+const returnsTotalLabel = computed(() => {
 	const value = Number.parseFloat(dashboard.value?.returns_total || 0)
-	let total = formatMoney(0)
-	if (value > 0) total = `-${formatMoney(value)}`
-	else if (value < 0) total = formatMoney(value)
-	return `${dashboard.value?.returns_count || 0} · ${total}`
+	if (value > 0) return `-${formatMoney(value)}`
+	if (value < 0) return formatMoney(value)
+	return formatMoney(0)
 })
+
+const returnsCountLabel = computed(() =>
+	__("{0} return invoices", [dashboard.value?.returns_count || 0]),
+)
 
 // Bucket type follows the window, same rule as the backend: hours on a
 // single day, days up to 62, calendar months beyond.
