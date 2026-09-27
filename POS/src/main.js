@@ -25,6 +25,7 @@ import {
 import { logger } from "./utils/logger";
 import { offlineWorker } from "./utils/offline/workerClient";
 import translationPlugin from "./utils/translation";
+import { initTextScale } from "./composables/useTextScale";
 import { initSocket } from "./socket";
 import { usePOSCartStore } from "./stores/posCart";
 import { usePOSSyncStore } from "./stores/posSync";
@@ -208,6 +209,9 @@ async function syncCSRFTokenToWorker() {
 // =============================================================================
 
 async function initializeApp() {
+	// Saved text size must land before mount so the first paint uses it
+	initTextScale();
+
 	const app = createApp(App);
 	const pinia = createPinia();
 

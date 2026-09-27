@@ -586,3 +586,29 @@ Verifikasi: shellScrollW = viewport (390 & 360, tadinya 402), hamburger x=4
 payment bersih. Jebakan audit: klik sintetis `dispatchEvent(MouseEvent)` kadang
 diabaikan SPA — pakai `el.click()` via evaluate; viewport IAB bisa di-set via
 `tab.setViewportSize` dan WAJIB reload agar SPA membaca ulang lebar.
+
+## Sesi 27 Sep ronde-5 — fitur Ukuran Teks (85–125%, belum commit)
+
+Fitur pengaturan ukuran font per-perangkat di UserMenu ("Ukuran Teks": − % +
+; klik persen = reset ke 100%). Mekanisme: root `font-size` % (semua utility
+Tailwind rem-based ikut skala; arbitrary `text-[10px]` tidak — sengaja).
+
+**Batas aman hasil sweep empiris** (probe elemen-luber di luar carousel +
+screenshot, 390px & 1050px): layout TIDAK rusak dari 80% sampai 135%;
+yang menentukan bukan layout melainkan keterbacaan/estetika — di 130% judul
+header menyusut jadi "P", di bawah 85% teks isi tidak nyaman. Putusan:
+**MIN 85% – MAX 125%, langkah 5%, default 100%** (100% = base browser, jadi
+preferensi font browser user tetap dihormati secara proporsional).
+
+- `composables/useTextScale.js`: `initTextScale()` dipanggil di main.js SEBELUM
+  mount (first paint sudah pakai ukuran tersimpan), `useTextScale()` =
+  state + increase/decrease/reset; localStorage `pos_text_scale`; clamp ketat.
+- `UserMenu.vue`: baris Ukuran Teks setelah header user (tampil di semua
+  ukuran layar), `@click.stop` WAJIB — tanpa itu satu ketuk +/− menutup menu
+  (handler klik container dropdown).
+- Terjemahan: 4 baris baru di `pos_next/translations/id.csv` + `bench
+  clear-cache` agar API terjemahan menyajikan string baru.
+- Verifikasi: vitest 580/580 (+6 test composable: persist, clamp 300→125,
+  korup→default, reset), build OK, live: boot 85% terpakai, menu tetap terbuka
+  saat menyetel, label live, reset 100%; probe offenders = 0 di 85/100/125
+  pada 390px; sweep desktop 80–135% tanpa pelanggaran.

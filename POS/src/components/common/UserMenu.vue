@@ -45,6 +45,46 @@
 				</div>
 			</div>
 
+			<!-- Text Size -->
+			<div
+				class="px-4 py-2 border-b border-gray-100 flex items-center justify-between gap-3"
+				@click.stop
+			>
+				<span class="text-sm text-gray-700">{{ __("Text Size") }}</span>
+				<div class="flex items-center gap-0.5">
+					<button
+						type="button"
+						@click="decrease"
+						:disabled="scale <= TEXT_SCALE_MIN"
+						class="h-8 w-8 flex items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+						:aria-label="__('Decrease text size')"
+						:title="__('Decrease text size')"
+					>
+						<FeatherIcon name="minus" class="w-4 h-4" />
+					</button>
+					<button
+						type="button"
+						@click="reset"
+						class="w-12 h-8 rounded-md text-xs font-semibold text-gray-700 tabular-nums hover:bg-gray-100 active:bg-gray-200 transition-colors"
+						:class="isDefault ? 'text-gray-400' : ''"
+						:aria-label="__('Reset text size')"
+						:title="__('Reset text size')"
+					>
+						{{ scale }}%
+					</button>
+					<button
+						type="button"
+						@click="increase"
+						:disabled="scale >= TEXT_SCALE_MAX"
+						class="h-8 w-8 flex items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+						:aria-label="__('Increase text size')"
+						:title="__('Increase text size')"
+					>
+						<FeatherIcon name="plus" class="w-4 h-4" />
+					</button>
+				</div>
+			</div>
+
 			<!-- Menu Items -->
 			<div class="py-1">
 				<slot name="menu-items"></slot>
@@ -160,7 +200,15 @@
 
 <script setup>
 import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
+import { FeatherIcon } from "frappe-ui";
 import { useLocale } from "@/composables/useLocale";
+import {
+	TEXT_SCALE_MAX,
+	TEXT_SCALE_MIN,
+	useTextScale,
+} from "@/composables/useTextScale";
+
+const { scale, isDefault, increase, decrease, reset } = useTextScale();
 
 // Avatar Sub-component
 const Avatar = (props) => {
