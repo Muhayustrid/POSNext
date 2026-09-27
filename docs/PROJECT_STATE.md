@@ -10,7 +10,8 @@ di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
 | Hal | Nilai |
 | --- | --- |
 | Versi app | 2.13.0 (`pos_next/__init__.py` + `POS/package.json` + root `package.json`) |
-| `main` | `847f87e` (= `origin/main`, di-push 27 Sep) |
+| `main` | `914e8a0` (= `origin/main`, di-push 27 Sep ronde-5) |
+| `develop` | `914e8a0` (fast-forward dari main + di-push, 27 Sep ronde-5; default branch repo) |
 | `security-audit-fixes` | `2d16754` (di belakang main; isinya sudah terserap via merge 26 Sep + fix/open-items) |
 | Produksi (Frappe Cloud) | **MASIH `b6f7ae9`** — seluruh remediasi belum melindungi produksi |
 | Site uji dev | `roti-posnext-test.localhost:8001` (bundle build) |
@@ -341,7 +342,7 @@ Tiga ronde E2E di situs uji dengan kriteria yang tidak dilonggarkan; bukti
   build OK. PELAJARAN: test yang baru ditambahkan wajib dijalankan sebelum
   commit.
 
-## Sesi 27 Sep ronde-2 — verifikasi "aman lokal" + penutupan item terbuka (belum commit)
+## Sesi 27 Sep ronde-2 — verifikasi "aman lokal" + penutupan item terbuka (di-commit `847f87e`)
 
 Gate penuh dijalankan pada pohon `main` = `cfd89fc`: sweep backend penuh
 **88 modul / 907 test** (serial via `_pn_run_tests.py`), vitest 564/564, build
@@ -403,7 +404,8 @@ otorisasi user — belum di-push**):
 ## Terbuka / menunggu keputusan
 
 1. **Deploy produksi** — masih `b6f7ae9`; sumber deploy kini `main` =
-   `cfd89fc` (satu commit memuat seluruh remediasi + open items). Wajib:
+   `914e8a0` (main = origin/main = develop; memuat seluruh remediasi + open
+   items + UI kasir + fix mobile + ukuran teks). Wajib:
    build frontend manual di host (`npm --prefix POS run build`), **migrate**
    (2 patch index baru + FULLTEXT + field `price_replay_audit_only` di 2
    doctype settings + fixture DocPerm baru: Account select=1 dan 3 baris
@@ -501,7 +503,7 @@ hermetik — bukan uninstall nyata.
 - RQ penuh memalsukan kegagalan massal — flush `rq:*` di
   `erpnext16_dev-redis-queue-1` sebelum sweep.
 
-## Sesi 27 Sep ronde-3 — fix "baris hantu Cash" di rekonsiliasi tutup shift (belum commit)
+## Sesi 27 Sep ronde-3 — fix "baris hantu Cash" + auto-isi tutup shift (di-commit `16eeb9e` + `dfbb7ba`)
 
 Temuan user saat tutup shift PKU DELANGGU: muncul DUA baris cash — "Cash PKU
 DELANGGU" (ekspektasi 71.000) + "Cash" generik (ekspektasi −19.750, "Tidak ada
@@ -555,7 +557,7 @@ live yang sama dengan dialog opening (`amountInput.js`). Detail:
 - Test: amountInput (+minus, round-trip negatif) + dua test prefill di
   `ShiftClosingDialog.test.js`. vitest 574/574 hijau; build OK.
 
-## Sesi 27 Sep ronde-4 — audit & fix layout mobile 390px (belum commit)
+## Sesi 27 Sep ronde-4 — audit & fix layout mobile 390px (di-commit `79b3f56`)
 
 Audit visual penuh di viewport ponsel (390x844 + 360x740) via in-app browser di
 situs uji `roti-posnext-test.localhost:8001/pos/`: items, cart kosong & berisi,
@@ -587,7 +589,7 @@ payment bersih. Jebakan audit: klik sintetis `dispatchEvent(MouseEvent)` kadang
 diabaikan SPA — pakai `el.click()` via evaluate; viewport IAB bisa di-set via
 `tab.setViewportSize` dan WAJIB reload agar SPA membaca ulang lebar.
 
-## Sesi 27 Sep ronde-5 — fitur Ukuran Teks (85–125%, belum commit)
+## Sesi 27 Sep ronde-5 — fitur Ukuran Teks 85–125% (di-commit `914e8a0`)
 
 Fitur pengaturan ukuran font per-perangkat di UserMenu ("Ukuran Teks": − % +
 ; klik persen = reset ke 100%). Mekanisme: root `font-size` % (semua utility
@@ -612,3 +614,25 @@ preferensi font browser user tetap dihormati secara proporsional).
   korup→default, reset), build OK, live: boot 85% terpakai, menu tetap terbuka
   saat menyetel, label live, reset 100%; probe offenders = 0 di 85/100/125
   pada 390px; sweep desktop 80–135% tanpa pelanggaran.
+
+## Sesi 27 Sep ronde-5b — commit, push, dan sinkron `develop`
+
+Semua batch 27 Sep di-commend dan di-push ke `origin/main` (fast-forward):
+
+- `ce484ed` perapian UI kasir (format ribuan live, bahasa visual dasbor/rekap)
+- `16eeb9e` fix baris hantu Cash (resolver cash mode per-profil)
+- `dfbb7ba` auto-isi jumlah aktual dialog tutup shift + input titik live
+- `79b3f56` layout mobile 390px (overflow header 12px + tap target)
+- `914e8a0` fitur Ukuran Teks 85–125% di menu user
+- docs commit kecil untuk pembaruan dokumen ini.
+
+`develop` (default branch repo, tanpa commit sendiri) di-fast-forward ke
+`main` (`914e8a0`) dan di-push — tidak ada merge commit karena `develop`
+murni ancestor dari `main` (terverifikasi `merge-base --is-ancestor`).
+Yang TIDAK disentuh: `security-audit-fixes` (sengaja tertinggal, isinya
+sudah terserap), branch fitur lain, dan `feat/pos-offer-2` (milik user,
+belum merge).
+
+Pohon bersih setelah push; gate terakhir sebelum push: vitest 580/580,
+build host OK, verifikasi visual live (390px & 1050px) untuk batch mobile +
+ukuran teks.
