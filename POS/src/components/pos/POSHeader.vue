@@ -12,7 +12,7 @@
 			</button>
 
 			<!-- POS Icon - Aligned with Management Sidebar (64px) -->
-			<div class="w-16 flex-shrink-0 flex items-center justify-center">
+			<div class="w-12 sm:w-16 flex-shrink-0 flex items-center justify-center">
 				<button
 					class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-md flex-shrink-0 hover:from-blue-600 hover:to-blue-700 active:scale-95 transition-all"
 					:aria-label="__('POS Next')"
@@ -28,7 +28,7 @@
 
 			<!-- Main Header Content -->
 			<div
-				class="flex-1 flex justify-between items-center gap-1 sm:gap-2 px-2 sm:px-4 md:px-6"
+				class="flex-1 min-w-0 flex justify-between items-center gap-1 sm:gap-2 px-2 sm:px-4 md:px-6"
 			>
 				<!-- Left Side: Brand Info -->
 				<div class="flex items-center gap-1 sm:gap-4 min-w-0 flex-1 overflow-hidden">
@@ -91,7 +91,7 @@
 				<button
 					@click="$emit('sync-click')"
 					:class="[
-						'pos-icon-btn p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative group touch-manipulation',
+						'pos-icon-btn p-1.5 sm:p-2 inline-flex items-center justify-center hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative group touch-manipulation',
 						isSyncing ? 'animate-pulse' : '',
 					]"
 						:title="
@@ -140,7 +140,7 @@
 						<button
 							@click="showCacheTooltip = !showCacheTooltip"
 							@blur="handleBlur"
-							class="pos-icon-btn p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative touch-manipulation"
+							class="pos-icon-btn p-1.5 sm:p-2 inline-flex items-center justify-center hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative touch-manipulation"
 							:aria-label="getCacheAriaLabel()"
 						>
 							<svg
@@ -357,7 +357,7 @@
 						:title="isRefreshing ? __('Refreshing...') : __('Refresh')"
 						@click="$emit('refresh-click')"
 						:class="[
-							'pos-icon-btn touch-manipulation p-1 sm:p-2',
+							'pos-icon-btn touch-manipulation p-1 sm:p-2 inline-flex items-center justify-center',
 							isRefreshing ? 'animate-spin' : '',
 						]"
 						:aria-label="

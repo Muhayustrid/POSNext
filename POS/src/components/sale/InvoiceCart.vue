@@ -113,7 +113,7 @@
 								<button
 									type="button"
 									@click.stop="$emit('edit-customer', customer)"
-									class="w-7 h-7 flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
+									class="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Edit customer details')"
 								>
 									<svg
@@ -133,7 +133,7 @@
 								<button
 									type="button"
 									@click.stop="$emit('create-customer', '')"
-									class="w-7 h-7 flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
+									class="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Create new customer')"
 								>
 									<svg
@@ -153,7 +153,7 @@
 								<button
 									type="button"
 									@click.stop="removeCustomer"
-									class="w-7 h-7 flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
+									class="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Remove customer')"
 								>
 									<svg
@@ -496,7 +496,7 @@
 						v-model="cartStore.buyerName"
 						type="text"
 						:placeholder="__('e.g. Budi (not saved as a customer)')"
-						class="w-full h-9 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
+						class="w-full h-11 sm:h-9 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
 						autocomplete="off"
 						:aria-label="__('Buyer name')"
 					/>
@@ -512,7 +512,7 @@
 					<!-- Clear Cart Button -->
 					<button
 						@click="$emit('clear-cart')"
-						class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
+						class="inline-flex items-center gap-1.5 rounded-lg px-3 min-h-[36px] py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
 						type="button"
 						:title="__('Clear all items')"
 					>
@@ -536,7 +536,7 @@
 						<button
 							@click="toggleCartSortDropdown"
 							:class="[
-								'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation',
+								'inline-flex items-center gap-1.5 rounded-lg px-3 min-h-[36px] py-1.5 text-xs font-semibold transition-colors touch-manipulation',
 								cartSortBy
 									? 'text-blue-600 hover:bg-blue-50'
 									: 'text-gray-600 hover:bg-gray-50',
@@ -677,7 +677,7 @@
 				<button
 					type="button"
 					@click="$emit('show-offers')"
-					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 min-h-[40px] py-2 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 					:aria-label="__('View all available offers')"
 				>
 					<svg
@@ -708,7 +708,7 @@
 				<button
 					type="button"
 					@click="$emit('apply-coupon')"
-					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 min-h-[40px] py-2 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 					:aria-label="__('Apply coupon code')"
 				>
 					<svg
@@ -1190,7 +1190,7 @@
 										<button
 											type="button"
 											@click="openEditDialog(item)"
-											class="flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded transition-colors shadow-sm"
+											class="flex items-center justify-center w-9 h-9 sm:w-7 sm:h-7 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded transition-colors shadow-sm"
 											:title="__('Edit serials')"
 										>
 											<FeatherIcon name="edit-2" class="w-3 h-3" />
@@ -1211,7 +1211,7 @@
 											@click.stop="decrementQuantity(item)"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
+												'w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
 													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
@@ -1247,7 +1247,7 @@
 											inputmode="decimal"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-12 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
+												'w-12 sm:w-20 h-9 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
 												item.is_resolved_barcode
 													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
 													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500',
@@ -1264,7 +1264,7 @@
 											@click.stop="incrementQuantity(item)"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
+												'w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
 													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
@@ -1303,7 +1303,7 @@
 												item.item_uoms.length === 0
 											"
 											:class="[
-												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
+												'h-9 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
 												item.is_resolved_barcode
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
 													: item.item_uoms && item.item_uoms.length > 0
@@ -1529,7 +1529,7 @@
 					@click="handleProceedToPayment"
 					:disabled="items.length === 0"
 					:class="[
-						'flex-1 py-2.5 px-3 rounded-lg font-bold text-xs text-white transition-all flex items-center justify-center touch-manipulation',
+						'flex-1 min-h-[44px] py-2.5 px-3 rounded-lg font-bold text-xs text-white transition-all flex items-center justify-center touch-manipulation',
 						items.length === 0
 							? 'bg-gray-300 cursor-not-allowed'
 							: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 shadow-lg hover:shadow-xl active:scale-[0.98]',
@@ -1557,7 +1557,7 @@
 					type="button"
 					v-if="items.length > 0"
 					@click="$emit('save-draft')"
-					class="flex-1 py-2.5 px-2 rounded-lg font-semibold text-xs text-orange-700 bg-orange-50 hover:bg-orange-100 active:bg-orange-200 transition-all touch-manipulation active:scale-[0.98] flex items-center justify-center"
+					class="flex-1 min-h-[44px] py-2.5 px-2 rounded-lg font-semibold text-xs text-orange-700 bg-orange-50 hover:bg-orange-100 active:bg-orange-200 transition-all touch-manipulation active:scale-[0.98] flex items-center justify-center"
 					:aria-label="__('Hold order as draft')"
 				>
 					<svg

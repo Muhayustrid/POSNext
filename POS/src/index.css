@@ -217,3 +217,11 @@ button.active\:scale-95:active,
 		min-height: 36px;
 	}
 }
+
+/* Phones get the full 44px tap target; tablets keep the compact 36px. */
+@media (max-width: 639.98px) {
+	.pos-icon-btn {
+		min-width: 44px;
+		min-height: 44px;
+	}
+}

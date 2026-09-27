@@ -500,3 +500,89 @@ hermetik — bukan uninstall nyata.
   aktif) — test yang cancel invoice perlu sweep WT.
 - RQ penuh memalsukan kegagalan massal — flush `rq:*` di
   `erpnext16_dev-redis-queue-1` sebelum sweep.
+
+## Sesi 27 Sep ronde-3 — fix "baris hantu Cash" di rekonsiliasi tutup shift (belum commit)
+
+Temuan user saat tutup shift PKU DELANGGU: muncul DUA baris cash — "Cash PKU
+DELANGGU" (ekspektasi 71.000) + "Cash" generik (ekspektasi −19.750, "Tidak ada
+penjualan") → total selisih +19.750 palsu. Akar: `change_amount` (kembalian)
+selalu dipotong ke "cash mode" yang diambil dari field
+`POS Profile.posa_cash_mode_of_payment`; field itu KOSONG di semua profile
+outlet → fallback hard-code `"Cash"` generik → baris baru dibuat dengan
+ekspektasi negatif. Angkanya sebenarnya konsisten: laci fisik = 71.000 −
+19.750 = 51.250 (kembalian ACC-PSINV-2026-00060: tagihan 250, dibayar tunai
+20.000).
+
+Fix permanen (kode saja, per-POS-Profile — siap untuk model outlet
+per-company dengan beberapa profile per company):
+
+- Helper baru `pos_next/services/cash_mode.py:get_cash_mode_of_payment` —
+  rantai: field `posa_cash_mode_of_payment` → baris payment profil bertipe
+  Cash (baris default dulu, lalu urutan idx) → `"Cash"` generik terakhir.
+- Dipakai di `_get_cash_mode_of_payment` + blok inline merge
+  (`pos_closing_shift.py`; preview/submit), 4 titik `shifts.py`
+  (session/period summary & dashboard — klasifikasi tunai ikut benar), dan
+  endpoint whitelist `get_effective_cash_mode_of_payment` untuk JS Desk.
+- Twin JS Desk `pos_closing_shift.js`: prefetch cash mode via endpoint baru
+  (`resolve_cash_mode` di `run_serially` `pos_opening_shift`); lookup lama
+  tetap ada sebagai jaring pengaman.
+- Test: unit `pos_next/services/test_cash_mode.py` (6 kasus, profil hermetik
+  via `flags.ignore_validate`) + integrasi `TestClosingCashModeRegression`
+  di `test_pos_invoice_closing.py` (kembalian masuk baris kas outlet, baris
+  generik tak tersentuh). 9/9 OK + 63 test closing/summary/recap/race OK.
+- **Jebakan baru**: ERPNext menghitung ulang `change_amount = paid − grand`
+  hanya bila ada baris payment bertipe Cash — payload tanpa `type` membuat
+  kembalian jadi 0; SPA selalu mengirim `type` (`useInvoice.addPayment`).
+  Test integrasi wajib menyertakan `type: "Cash"`.
+- Terverifikasi live di situs uji (POSA-OS-26-0000049): preview tutup shift
+  kini SATU baris "Cash PKU DELANGGU" ekspektasi 51.250. `bench serve
+  --noreload` direstart — **cwd wajib `sites/`** (apps.txt dibaca relatif
+  `./apps.txt`), bukan root bench.
+
+Lanjutan ronde-3 (UX dialog tutup shift): input "Jumlah Aktual" kini
+**auto-isi dari ekspektasi** (tetap bisa diedit) dan memakai format titik
+live yang sama dengan dialog opening (`amountInput.js`). Detail:
+
+- `loadClosingData` mengisi `closing_amount` + display `closing_text` dari
+  `expected_amount`; `canSubmit` langsung true (prefill dianggap terisi).
+  **Mode entry buta (`hideExpectedAmount`) TETAP kosong** — auto-isi tidak
+  boleh membocorkan ekspektasi.
+- Dua input frappe-ui `Input` (type=number) diganti native input `:value` +
+  `@input` → `formatAmountInput`/`parseAmountInput` (jebakan frappe-ui Input
+  tidak menulis balik DOM saat fokus).
+- `amountInput.js` kini mempertahankan tanda minus di depan (baris return
+  bisa prefill ekspektasi negatif); `parseAmountInput` menghormatinya.
+- Test: amountInput (+minus, round-trip negatif) + dua test prefill di
+  `ShiftClosingDialog.test.js`. vitest 574/574 hijau; build OK.
+
+## Sesi 27 Sep ronde-4 — audit & fix layout mobile 390px (belum commit)
+
+Audit visual penuh di viewport ponsel (390x844 + 360x740) via in-app browser di
+situs uji `roti-posnext-test.localhost:8001/pos/`: items, cart kosong & berisi,
+dialog Pembayaran, Tutup Shift (rekonsiliasi + auto-isi 70.250 terlihat hidup),
+menu Manajemen, Dasbor shift, Buat Pelanggan, Penawaran (empty state), toast
+error stok. Sebagian besar sudah rapi; temuan & fix:
+
+1. **Overflow horizontal 12px di header (akar masalah "berantakan")** — seksi
+   tengah `flex-1` di POSHeader tidak punya `min-w-0`, jadi min-content 290px
+   (klaster ikon `flex-shrink-0` 205px) → baris header 402px > 390px, dan
+   `.pos-app-shell` (`overflow-x-hidden`) jadi BISA tergulir horizontal; begitu
+   tergulir, seluruh app bergeser dan hamburger terpotong. Fix: `min-w-0` di
+   seksi tengah + shell diganti `overflow-x-clip` (clip benar-benar melarang
+   gulir; lazy-load aman karena pakai IntersectionObserver).
+2. **Target sentuh < 44px (R-03)** — `pos-icon-btn` 36px → 44px khusus ponsel
+   (media query ≤639.98px di index.css; tablet tetap 36px) + tombol diberi
+   `inline-flex items-center justify-center` agar ikon tetap center saat box
+   membesar. Kompensasi lebar supaya muat sampai 360px: logo `w-12 sm:w-16`,
+   chevron UserMenu `hidden sm:block`. Customer actions cart (edit/plus/x)
+   28px → `w-11 h-11 sm:w-7 sm:h-7`; stepper qty & tombol serial 24px → 36px
+   (input qty ikut h-9); chip grup item 29px → 39px (`py-2.5 sm:py-2`);
+   Checkout/Tunda `min-h-[44px]`; Hapus/Sortir `min-h-[36px]`;
+   Penawaran/Kupon `min-h-[40px]`; input "Nama pembeli" `h-11 sm:h-9`;
+   tombol footer Buat Pelanggan `min-h-[44px] flex-1 sm:flex-none`.
+
+Verifikasi: shellScrollW = viewport (390 & 360, tadinya 402), hamburger x=4
+(tadinya -8), vitest 574/574, build host OK, screenshot ulang header/cart/
+payment bersih. Jebakan audit: klik sintetis `dispatchEvent(MouseEvent)` kadang
+diabaikan SPA — pakai `el.click()` via evaluate; viewport IAB bisa di-set via
+`tab.setViewportSize` dan WAJIB reload agar SPA membaca ulang lebar.

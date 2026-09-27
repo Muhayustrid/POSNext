@@ -1,6 +1,6 @@
 <template>
 	<div
-		class="pos-app-shell flex flex-col bg-gray-50 overflow-x-hidden"
+		class="pos-app-shell flex flex-col bg-gray-50 overflow-x-clip"
 	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />

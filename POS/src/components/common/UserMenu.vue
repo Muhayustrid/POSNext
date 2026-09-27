@@ -9,7 +9,7 @@
 			</div>
 			<Avatar :image="profileImage" :name="userName" :initials="userInitials" size="sm" />
 			<svg
-				class="w-4 h-4 text-gray-500"
+				class="w-4 h-4 text-gray-500 hidden sm:block"
 				fill="none"
 				stroke="currentColor"
 				viewBox="0 0 24 24"

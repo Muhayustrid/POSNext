@@ -249,6 +249,7 @@
 				<div class="flex gap-2">
 					<Button
 						variant="solid"
+						class="min-h-[44px] flex-1 sm:flex-none"
 						@click="handleCreate"
 						:loading="
 							createCustomerResource.loading ||
@@ -259,7 +260,7 @@
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
-					<Button variant="subtle" @click="show = false">
+					<Button variant="subtle" class="min-h-[44px]" @click="show = false">
 						{{ __("Cancel") }}
 					</Button>
 				</div>
