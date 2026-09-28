@@ -70,6 +70,14 @@
 										size="xs"
 										:text="receipt.status"
 									/>
+									<span
+										v-if="receipt.attachment_count"
+										class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
+										:title="__('Attachments')"
+									>
+										<FeatherIcon name="paperclip" class="w-3 h-3" />
+										{{ receipt.attachment_count }}
+									</span>
 								</div>
 								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receipt.supplier_name }}</p>
 								<p class="text-xs text-gray-400 mt-0.5">
@@ -105,9 +113,9 @@
 							>
 								{{ __("Loading...") }}
 							</div>
-							<div v-else-if="receiptDetails[receipt.name]?.length" class="flex flex-col">
+							<div v-else-if="receiptDetails[receipt.name]?.items?.length" class="flex flex-col">
 								<div
-									v-for="row in receiptDetails[receipt.name]"
+									v-for="row in receiptDetails[receipt.name].items"
 									:key="row.name"
 									class="flex items-center justify-between gap-3 py-1.5 text-xs"
 								>
@@ -122,6 +130,11 @@
 							<p v-else class="py-2 text-center text-xs text-gray-400">
 								{{ __("No items") }}
 							</p>
+							<PurchaseAttachments
+								v-if="receiptDetails[receipt.name]?.attachments?.length"
+								:attached="receiptDetails[receipt.name].attachments"
+								:label="__('Attachments')"
+							/>
 						</div>
 
 						<div
@@ -148,6 +161,7 @@ import { FeatherIcon } from "frappe-ui"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import StatusBadge from "@/components/common/StatusBadge.vue"
+import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useToast } from "@/composables/useToast"
 import { useFormatters } from "@/composables/useFormatters"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
@@ -232,8 +246,11 @@ async function toggleReceipt(receipt) {
 	if (receiptDetails.value[receipt.name]) return
 	loadingDetail.value = true
 	try {
-		const res = await call(`${PR_API}.get_purchase_receipt`, { name: receipt.name })
-		receiptDetails.value[receipt.name] = res?.items || []
+		const res = await call(`${PR_API}.get_purchase_receipt`, {
+			name: receipt.name,
+		})
+		// full summary — items feed the peek, attachments ride along
+		receiptDetails.value[receipt.name] = res || {}
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 		expandedReceipt.value = null

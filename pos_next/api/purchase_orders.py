@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import json
+from collections import Counter
 
 import frappe
 from erpnext.accounts.party import get_party_details
@@ -209,8 +210,26 @@ def get_purchase_item_details(
 	}
 
 
+ATTACHMENT_DOCTYPES = ("Purchase Order", "Purchase Receipt")
+ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _attachments_summary(doctype, name):
+	"""Attachment rows that ride along every PO/PR summary (expand views read
+	them straight off the get/save/submit responses — no extra round-trip)."""
+	if not name or not frappe.db.exists(doctype, name):
+		return []
+	return frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": doctype, "attached_to_name": name},
+		fields=["name", "file_name", "file_url", "file_size"],
+		order_by="creation asc",
+	)
+
+
 def _po_summary(doc):
 	"""Shape shared by every mutating/reading method."""
+	attachments = _attachments_summary("Purchase Order", doc.name)
 	return {
 		"name": doc.name,
 		"docstatus": doc.docstatus,
@@ -236,6 +255,8 @@ def _po_summary(doc):
 		"inter_company_order_reference": frappe.db.get_value(
 			"Sales Order", {"inter_company_order_reference": doc.name, "docstatus": 1}, "name"
 		),
+		"attachments": attachments,
+		"attachment_count": len(attachments),
 		"items": [
 			{
 				"name": row.name,
@@ -424,7 +445,26 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 	for order in orders:
 		order["inter_company_order_reference"] = so_map.get(order["name"])
 		order["delivery_ready"] = so_map.get(order["name"]) in delivery_ready
+	counts = _attachment_counts("Purchase Order", [o["name"] for o in orders])
+	for order in orders:
+		order["attachment_count"] = counts.get(order["name"], 0)
 	return {"orders": orders}
+
+
+def _attachment_counts(doctype, names):
+	"""attached-file counts for a batch of docs (list rows show a paperclip chip).
+	Plain names + a Counter — v16's get_all rejects raw SQL functions in fields."""
+	if not names:
+		return {}
+	return dict(
+		Counter(
+			frappe.get_all(
+				"File",
+				filters={"attached_to_doctype": doctype, "attached_to_name": ("in", names)},
+				pluck="attached_to_name",
+			)
+		)
+	)
 
 
 @frappe.whitelist()
@@ -459,3 +499,43 @@ def cancel_purchase_order(name):
 		)
 	doc.cancel()
 	return _po_summary(doc)
+
+
+@frappe.whitelist()
+def attach_purchase_files(doctype, name, files):
+	"""Attach evidence files (surat jalan / delivery note photos, PDFs) to a
+	PO or PR created from the POS.
+
+	`files` is a JSON list of {file_name, filedata} with base64 payloads; each
+	becomes a private File on the document. Write permission on the target doc
+	gates the whole call — File.validate re-checks it on insert, so attaching
+	works for a submitted receipt exactly as long as the user may edit it."""
+	_check_guest()
+	if doctype not in ATTACHMENT_DOCTYPES:
+		frappe.throw(_("Attachments are only supported on Purchase Order and Purchase Receipt"))
+	doc = frappe.get_doc(doctype, name)
+	_check_permission("write", doc=doc)
+	parsed = _parse(files) or []
+	if not parsed:
+		frappe.throw(_("At least one file is required"))
+	for f in parsed:
+		if not (f.get("file_name") or "").strip() or not (f.get("filedata") or "").strip():
+			frappe.throw(_("File name and data are required"))
+		# base64 inflates by ~4/3 — the pre-check just fails fast with a clear
+		# message; File.validate still enforces the site's own cap exactly
+		if (len(f["filedata"]) * 3) // 4 > ATTACHMENT_MAX_BYTES:
+			frappe.throw(_("File {0} exceeds the {1} MB limit").format(f["file_name"], 10))
+	for f in parsed:
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				"attached_to_doctype": doctype,
+				"attached_to_name": name,
+				"file_name": f["file_name"],
+				"is_private": 1,
+				"content": f["filedata"],
+				"decode": 1,
+			}
+		).insert()
+	frappe.db.commit()
+	return _attachments_summary(doctype, name)

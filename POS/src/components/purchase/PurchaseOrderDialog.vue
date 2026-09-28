@@ -70,6 +70,14 @@
 										size="xs"
 										:text="__('Factory SO')"
 									/>
+									<span
+										v-if="order.attachment_count"
+										class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
+										:title="__('Attachments')"
+									>
+										<FeatherIcon name="paperclip" class="w-3 h-3" />
+										{{ order.attachment_count }}
+									</span>
 								</div>
 								<p class="text-xs text-gray-500 mt-0.5 truncate">{{ order.supplier_name }}</p>
 								<p class="text-xs text-gray-400 mt-0.5">
@@ -95,9 +103,9 @@
 							>
 								{{ __("Loading...") }}
 							</div>
-							<div v-else-if="orderDetails[order.name]?.length" class="flex flex-col">
+							<div v-else-if="orderDetails[order.name]?.items?.length" class="flex flex-col">
 								<div
-									v-for="row in orderDetails[order.name]"
+									v-for="row in orderDetails[order.name].items"
 									:key="row.name"
 									class="flex items-center justify-between gap-3 py-1.5 text-xs"
 								>
@@ -112,6 +120,11 @@
 							<p v-else class="py-2 text-center text-xs text-gray-400">
 								{{ __("No items") }}
 							</p>
+							<PurchaseAttachments
+								v-if="orderDetails[order.name]?.attachments?.length"
+								:attached="orderDetails[order.name].attachments"
+								:label="__('Attachments')"
+							/>
 						</div>
 
 						<div
@@ -233,12 +246,20 @@
 									/>
 								</td>
 							</tr>
-						</tbody>
-					</table>
-				</div>
-			</div>
+							</tbody>
+						</table>
+					</div>
 
-			<!-- FORM VIEW -->
+					<PurchaseAttachments
+						editable
+						:pending="receivePending"
+						:label="__('Delivery evidence (surat jalan / delivery note)')"
+						@add="onAttachAdd($event, receivePending)"
+						@remove="(row) => removeAttachment(receivePending, row)"
+					/>
+				</div>
+
+				<!-- FORM VIEW -->
 			<div v-else class="flex flex-col gap-3">
 				<div>
 					<label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Supplier") }}</label>
@@ -371,6 +392,13 @@
 						class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
 					></textarea>
 				</div>
+
+				<PurchaseAttachments
+					editable
+					:pending="formPending"
+					@add="onAttachAdd($event, formPending)"
+					@remove="(row) => removeAttachment(formPending, row)"
+				/>
 			</div>
 		</template>
 
@@ -407,9 +435,14 @@
 <script setup>
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import StatusBadge from "@/components/common/StatusBadge.vue"
+import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useToast } from "@/composables/useToast"
 import { useFormatters } from "@/composables/useFormatters"
 import { usePermissions } from "@/composables/usePermissions"
+import {
+	sanitizePickedFiles,
+	uploadPurchaseFiles,
+} from "@/utils/attachments"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
 import { parseError } from "@/utils/errorHandler"
 import { Button, FeatherIcon } from "frappe-ui"
@@ -591,7 +624,8 @@ async function toggleOrder(order) {
 	loadingDetail.value = true
 	try {
 		const res = await call(`${API}.get_purchase_order`, { name: order.name })
-		orderDetails.value[order.name] = res?.items || []
+		// full summary — items feed the peek, attachments ride along
+		orderDetails.value[order.name] = res || {}
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 		expandedOrder.value = null
@@ -622,6 +656,33 @@ async function cancelOrder(order) {
 
 function openInErpnext(order) {
 	window.open(`/app/purchase-order/${order.name}`, "_blank")
+}
+
+// ---------- attachments (evidence files held client-side until save) ----------
+const formPending = ref([])
+const receivePending = ref([])
+
+function onAttachAdd(files, target) {
+	const { ok, tooBig } = sanitizePickedFiles(files)
+	if (tooBig.length) showError(__("File {0} exceeds the {1} MB limit", [tooBig[0].name, 10]))
+	target.push(...ok)
+}
+
+function removeAttachment(target, row) {
+	const i = target.indexOf(row)
+	if (i !== -1) target.splice(i, 1)
+}
+
+// the doc is created first, then the held files upload to its real name — a
+// failed upload keeps the document and reports the miss instead of blocking it
+async function uploadAfterSave(doctype, name, files) {
+	if (!name || !files.length) return
+	try {
+		const uploaded = await uploadPurchaseFiles(doctype, name, files)
+		showSuccess(__("{0} attachment(s) uploaded", [uploaded.length]))
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
 }
 
 // ---------- receive view ----------
@@ -709,6 +770,9 @@ async function saveReceipt(submitAfter) {
 				? __("Purchase Receipt {0} submitted", [res?.name])
 				: __("Purchase Receipt {0} saved", [res?.name]),
 		)
+		await uploadAfterSave("Purchase Receipt", res?.name, receivePending.value)
+		receivePending.value = []
+		delete orderDetails.value[res?.name]
 		view.value = "list"
 		await loadOrders()
 	} catch (error) {
@@ -760,6 +824,7 @@ function seedSupplierOption(name, label) {
 
 async function openNew() {
 	form.value = blankForm()
+	formPending.value = []
 	view.value = "form"
 	const d = await loadPoDefaults()
 	if (form.value.name) return // user switched away mid-await
@@ -770,6 +835,7 @@ async function openNew() {
 }
 
 async function openEdit(order) {
+	formPending.value = []
 	try {
 		const d = await call(`${API}.get_purchase_order`, { name: order.name })
 		form.value = {
@@ -977,6 +1043,9 @@ async function save(submitAfter) {
 				? __("Purchase Order {0} submitted", [res?.name])
 				: __("Purchase Order {0} saved", [res?.name]),
 		)
+		await uploadAfterSave("Purchase Order", res?.name, formPending.value)
+		formPending.value = []
+		delete orderDetails.value[res?.name]
 		view.value = "list"
 		await loadOrders()
 	} catch (error) {

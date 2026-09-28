@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, flt, nowdate
 
 from pos_next.api.purchase_orders import (
+	_attachment_counts,
 	_check_guest,
 	_parse,
 	_profile_value,
@@ -146,6 +147,9 @@ def get_intercompany_receipt_draft(po_name):
 
 def _pr_summary(doc):
 	"""Shape shared by every mutating/reading method."""
+	from pos_next.api.purchase_orders import _attachments_summary
+
+	attachments = _attachments_summary("Purchase Receipt", doc.name)
 	return {
 		"name": doc.name,
 		"docstatus": doc.docstatus,
@@ -159,6 +163,8 @@ def _pr_summary(doc):
 		"net_total": doc.net_total,
 		"grand_total": doc.grand_total,
 		"per_billed": doc.per_billed,
+		"attachments": attachments,
+		"attachment_count": len(attachments),
 		"items": [
 			{
 				"name": row.name,
@@ -275,28 +281,30 @@ def get_purchase_receipts(pos_profile=None, status=None, search_term=None, limit
 	if search_term:
 		term = f"%{search_term.strip()}%"
 		or_filters = [["name", "like", term], ["supplier", "like", term], ["supplier_name", "like", term]]
-	return {
-		"receipts": frappe.get_list(
-			"Purchase Receipt",
-			filters=filters,
-			or_filters=or_filters,
-			fields=[
-				"name",
-				"supplier",
-				"supplier_name",
-				"posting_date",
-				"status",
-				"docstatus",
-				"grand_total",
-				"currency",
-				"per_billed",
-				"company",
-				"modified",
-			],
-			order_by="modified desc",
-			limit_page_length=cint(limit) or 50,
-		)
-	}
+	receipts = frappe.get_list(
+		"Purchase Receipt",
+		filters=filters,
+		or_filters=or_filters,
+		fields=[
+			"name",
+			"supplier",
+			"supplier_name",
+			"posting_date",
+			"status",
+			"docstatus",
+			"grand_total",
+			"currency",
+			"per_billed",
+			"company",
+			"modified",
+		],
+		order_by="modified desc",
+		limit_page_length=cint(limit) or 50,
+	)
+	counts = _attachment_counts("Purchase Receipt", [r["name"] for r in receipts])
+	for receipt in receipts:
+		receipt["attachment_count"] = counts.get(receipt["name"], 0)
+	return {"receipts": receipts}
 
 
 @frappe.whitelist()
