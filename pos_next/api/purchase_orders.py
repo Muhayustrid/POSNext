@@ -131,15 +131,20 @@ def get_supplier_details(supplier, pos_profile=None):
 
 
 def _default_purchase_uom(item_code, stock_uom):
-	"""The site's per-item custom default UOM when it exists and the item can
-	actually use it; otherwise None (caller falls back to the stock UOM)."""
-	if not frappe.get_meta("Item").has_field("custom_default_uom_warehouse"):
-		return None
-	custom_uom = frappe.db.get_value("Item", item_code, "custom_default_uom_warehouse")
-	if not custom_uom or custom_uom == stock_uom:
-		return None
-	valid = frappe.get_all("UOM Conversion Detail", filters={"parent": item_code, "uom": custom_uom}, limit=1)
-	return custom_uom if valid else None
+	"""The item's default purchase UOM: native Item.purchase_uom first, then the
+	per-item custom inventory UOM when the site defines that field — each only
+	when the item can actually convert to it; otherwise None (caller falls back
+	to the stock UOM)."""
+	converting = set(frappe.get_all("UOM Conversion Detail", filters={"parent": item_code}, pluck="uom"))
+	candidates = [frappe.db.get_value("Item", item_code, "purchase_uom")]
+	if frappe.get_meta("Item").has_field("custom_default_inventory_unit_of_measure"):
+		candidates.append(
+			frappe.db.get_value("Item", item_code, "custom_default_inventory_unit_of_measure")
+		)
+	for uom in candidates:
+		if uom and uom != stock_uom and uom in converting:
+			return uom
+	return None
 
 
 @frappe.whitelist()
@@ -169,10 +174,11 @@ def get_purchase_item_details(
 	}
 	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
 	# resolve the row's UOM up front — the cashier's remembered pick, else the
-	# per-item custom default — so get_item_details prices in that UOM
+	# item's default purchase/inventory UOM — so get_item_details prices in
+	# that UOM. Always pin ctx.uom: left empty, native get_item_details
+	# resolves to purchase_uom itself, past the conversion check above
 	chosen_uom = uom or _default_purchase_uom(item_code, stock_uom)
-	if chosen_uom:
-		ctx["uom"] = chosen_uom
+	ctx["uom"] = chosen_uom or stock_uom
 	# get_item_details never resolves the party price list itself — that is the
 	# caller's job (the PO does it via set_missing_values) — so seed it here:
 	# the POS Settings default wins over the supplier's
@@ -247,6 +253,18 @@ def _po_summary(doc):
 	}
 
 
+def _validate_row_uom(item_code, uom):
+	"""Reject a row UOM the item cannot convert. ERPNext coerces a missing
+	conversion factor to 1, so a hand-crafted payload could book 1 Box as
+	1 Unit — the POS UI only offers convertible UOMs, this closes the API hole."""
+	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
+	if not uom or uom == stock_uom:
+		return
+	if frappe.get_all("UOM Conversion Detail", filters={"parent": item_code, "uom": uom}, limit=1):
+		return
+	frappe.throw(_("Item {0} has no UOM conversion for {1}").format(item_code, uom))
+
+
 @frappe.whitelist()
 def save_purchase_order(data, pos_profile=None, submit=0):
 	"""Create or update a Purchase Order and optionally submit it.
@@ -311,6 +329,7 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 
 	doc.set("items", [])
 	for row in items:
+		_validate_row_uom(row.get("item_code"), row.get("uom"))
 		doc.append(
 			"items",
 			{

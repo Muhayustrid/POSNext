@@ -864,7 +864,8 @@ function onItemSearch(term) {
 }
 
 // the cashier's last-chosen UOM per item, remembered in this browser — wins
-// over the backend's default (custom field, else stock UOM)
+// over the backend's default (native Default Purchase UOM, else the item's
+// custom inventory UOM, else stock UOM)
 const PO_UOM_STORAGE_KEY = "posNext.poUom"
 
 function readLastUoms() {

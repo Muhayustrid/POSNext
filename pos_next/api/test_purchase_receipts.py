@@ -520,6 +520,18 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		with self.assertRaises(ValidationError):
 			get_purchase_receipt_draft(draft_po["name"])
 
+		# a row UOM the item cannot convert would silently book factor 1
+		stock_uom = frappe.db.get_value("Item", self.item, "stock_uom")
+		bad_uom = frappe.db.get_value("UOM", {"uom_name": ("!=", stock_uom)}, "uom_name")
+		with self.assertRaises(ValidationError):
+			save_purchase_receipt(
+				{
+					"supplier": self.supplier,
+					"company": self.company,
+					"items": [{"item_code": self.item, "qty": 1, "uom": bad_uom}],
+				}
+			)
+
 	def test_internal_supplier_po_refused(self):
 		# intercompany receipts are born from the selling company's Delivery
 		# Note — the POS receive flow must refuse them (double-receipt window)

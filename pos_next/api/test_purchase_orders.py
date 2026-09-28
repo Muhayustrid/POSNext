@@ -105,27 +105,28 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		cls.item_name = item.item_name
 		cls.stock_uom = item.stock_uom
 
-		# the production site carries a per-item custom default UOM
-		# (custom_default_uom_warehouse) — recreate it locally so the fallback
-		# chain is testable, plus a convertible Box UOM on the fixture item.
-		# create_custom_fields (not a plain insert): something in this bench
-		# recreates the same field on Item inserts, and the helper is idempotent.
+		# the default-UOM chain reads native Item.purchase_uom, then the per-item
+		# custom inventory UOM — that field is NOT pos_next's (the warehouse app
+		# owns it on production), so a dev site may lack it: create it locally and
+		# delete on teardown only when the test created it.
 		from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-		create_custom_fields(
-			{
-				"Item": [
-					{
-						"fieldname": "custom_default_uom_warehouse",
-						"label": "Default Purchase UOM",
-						"fieldtype": "Link",
-						"options": "UOM",
-						"insert_after": "stock_uom",
-					}
-				]
-			}
-		)
-		cls.custom_uom_field = "Item-custom_default_uom_warehouse"
+		cls.uom_field = "Item-custom_default_inventory_unit_of_measure"
+		cls.owns_uom_field = not frappe.db.exists("Custom Field", cls.uom_field)
+		if cls.owns_uom_field:
+			create_custom_fields(
+				{
+					"Item": [
+						{
+							"fieldname": "custom_default_inventory_unit_of_measure",
+							"label": "Default Inventory UOM",
+							"fieldtype": "Link",
+							"options": "UOM",
+							"insert_after": "stock_uom",
+						}
+					]
+				}
+			)
 		cls.uom_box = f"PR Box {cls._uniq()}"
 		frappe.get_doc({"doctype": "UOM", "uom_name": cls.uom_box}).insert()
 		item = frappe.get_doc("Item", cls.item)
@@ -232,13 +233,8 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 			("Purchase Taxes and Charges Template", getattr(cls, "tax_template", None)),
 			("Item", getattr(cls, "item", None)),
 			("Item", getattr(cls, "priced_item", None)),
-			# tolerant teardown — the bench's mystery recreator may own it too
-			(
-				"Custom Field",
-				frappe.db.get_value(
-					"Custom Field", {"dt": "Item", "fieldname": "custom_default_uom_warehouse"}, "name"
-				),
-			),
+			# only when the test created it — an app-owned copy survives teardown
+			("Custom Field", getattr(cls, "uom_field", None) if getattr(cls, "owns_uom_field", False) else None),
 			("UOM", getattr(cls, "uom_box", None)),
 			("Supplier", getattr(cls, "supplier", None)),
 			("User", getattr(cls, "user", None)),
@@ -246,6 +242,10 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		]:
 			if name and frappe.db.exists(doctype, name):
 				frappe.delete_doc(doctype, name, force=1)
+		# IntegrationTestCase's class cleanup rolls the DB back AFTER this method
+		# — without this commit every deletion here is undone and the fixtures
+		# (items, suppliers, users, the custom field...) strand on the site
+		frappe.db.commit()
 		super().tearDownClass()
 
 	def setUp(self):
@@ -507,31 +507,68 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				)
 
 	def test_purchase_item_details_default_uom(self):
-		# no custom default set -> the stock UOM, and the item's UOMs ride along
+		# no purchase UOM and no custom pick -> the stock UOM, and the item's
+		# UOMs ride along
 		details = get_purchase_item_details(self.item)
 		self.assertEqual(details["default_uom"], self.stock_uom)
 		self.assertEqual(details["uom"], self.stock_uom)
 		self.assertIn(self.uom_box, {d["uom"] for d in details["uoms"]})
 
-		# the per-item custom default wins and prices in that UOM already
-		frappe.db.set_value("Item", self.item, "custom_default_uom_warehouse", self.uom_box)
+		# the native Default Purchase UOM wins and prices in that UOM already
+		frappe.db.set_value("Item", self.item, "purchase_uom", self.uom_box)
 		try:
 			details = get_purchase_item_details(self.item)
 			self.assertEqual(details["default_uom"], self.uom_box)
 			self.assertEqual(details["uom"], self.uom_box)
 			self.assertEqual(flt(details["conversion_factor"]), 10)
 
-			# an explicit cashier pick overrides the custom default
+			# an explicit cashier pick overrides the item's purchase UOM
 			details = get_purchase_item_details(self.item, uom=self.stock_uom)
 			self.assertEqual(details["uom"], self.stock_uom)
 
-			# a custom default the item can't convert falls back to the stock UOM
+			# a purchase UOM the item can't convert drops to the custom
+			# inventory UOM, and one it can't convert either way drops to stock
 			if self.uom_invalid:
-				frappe.db.set_value("Item", self.item, "custom_default_uom_warehouse", self.uom_invalid)
-				details = get_purchase_item_details(self.item)
-				self.assertEqual(details["default_uom"], self.stock_uom)
+				frappe.db.set_value("Item", self.item, "purchase_uom", self.uom_invalid)
+				frappe.db.set_value(
+					"Item", self.item, "custom_default_inventory_unit_of_measure", self.uom_box
+				)
+				self.assertEqual(get_purchase_item_details(self.item)["default_uom"], self.uom_box)
+				frappe.db.set_value(
+					"Item", self.item, "custom_default_inventory_unit_of_measure", self.uom_invalid
+				)
+				self.assertEqual(get_purchase_item_details(self.item)["default_uom"], self.stock_uom)
 		finally:
-			frappe.db.set_value("Item", self.item, "custom_default_uom_warehouse", None)
+			frappe.db.set_value("Item", self.item, "purchase_uom", None)
+			frappe.db.set_value("Item", self.item, "custom_default_inventory_unit_of_measure", None)
+
+	def test_custom_inventory_uom_only(self):
+		# the custom inventory UOM alone (no native purchase UOM) still drives the row
+		frappe.db.set_value("Item", self.item, "custom_default_inventory_unit_of_measure", self.uom_box)
+		try:
+			details = get_purchase_item_details(self.item)
+			self.assertEqual(details["default_uom"], self.uom_box)
+			self.assertEqual(details["uom"], self.uom_box)
+			self.assertEqual(flt(details["conversion_factor"]), 10)
+		finally:
+			frappe.db.set_value("Item", self.item, "custom_default_inventory_unit_of_measure", None)
+
+	def test_save_rejects_unconvertible_uom(self):
+		# a hand-crafted payload with an unconvertible UOM would silently book
+		# conversion factor 1 — save must refuse it (the UI can't produce it)
+		if not self.uom_invalid:
+			self.skipTest("no UOM outside the fixture item's conversions")
+		with self.assertRaises(ValidationError):
+			save_purchase_order(
+				json.dumps(
+					{
+						"supplier": self.supplier,
+						"company": self.company,
+						"set_warehouse": self.warehouse,
+						"items": [{"item_code": self.item, "qty": 1, "uom": self.uom_invalid}],
+					}
+				)
+			)
 
 	def test_pos_settings_price_list_drives_the_po(self):
 		if not self.pos_profile:

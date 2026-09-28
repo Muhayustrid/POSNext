@@ -165,6 +165,18 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		for email in (cls.cashier, cls.cashier2, cls.intruder):
 			_safe(lambda email=email: frappe.db.delete("Error Log", {"owner": email}))
 			_safe(lambda email=email: frappe.delete_doc("User", email, force=1, ignore_permissions=True))
+		# the foreign-outlet fixture survives the per-test rollback (something in
+		# the seed path commits), and a stranded profile poisons any module that
+		# picks "the first enabled POS Profile" — the PO proxy tests once priced
+		# against this company in its currency instead of the site's. Sweep by name.
+		company = "_Test PG Co RetScope"
+		profile = "_Test POS Profile RetScope"
+		_safe(lambda: frappe.db.delete("POS Invoice", {"company": company}))
+		_safe(lambda: frappe.db.delete("Sales Invoice", {"company": company}))
+		_safe(lambda: frappe.db.delete("POS Settings", {"pos_profile": profile}))
+		_safe(lambda: frappe.delete_doc("POS Profile", profile, force=1, ignore_permissions=True))
+		_safe(lambda: frappe.db.delete("Warehouse", {"company": company}))
+		_safe(lambda: frappe.delete_doc("Company", company, force=1, ignore_permissions=True))
 		frappe.db.commit()
 		super().tearDownClass()
 

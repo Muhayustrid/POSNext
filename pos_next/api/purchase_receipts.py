@@ -12,6 +12,7 @@ from pos_next.api.purchase_orders import (
 	_parse,
 	_profile_value,
 	_resolve_company,
+	_validate_row_uom,
 )
 from pos_next.api.purchase_orders import (
 	_check_permission as _check_po_permission,
@@ -234,6 +235,7 @@ def save_purchase_receipt(data, submit=0):
 
 	doc.set("items", [])
 	for row in items:
+		_validate_row_uom(row.get("item_code"), row.get("uom"))
 		doc.append(
 			"items",
 			{
