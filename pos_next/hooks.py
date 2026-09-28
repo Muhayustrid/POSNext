@@ -214,6 +214,11 @@ doc_events = {
 		# consolidating them would double-post. Built-in-POS rows unaffected.
 		"before_validate": "pos_next.invoice_type.guard_against_retroactive_consolidation",
 	},
+	# D1: the recipe is the source of truth; every save re-syncs its derived
+	# BOMs (one active BOM per enabled company row, name stored on the row).
+	"POS Production Recipe": {
+		"on_update": "pos_next.services.production.sync_recipe_boms",
+	},
 }
 
 # Scheduled Tasks

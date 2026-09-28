@@ -3181,8 +3181,9 @@ const { hasPermission: canProduction } = usePermissionCheck("POS Production Log"
 // Purchase Order
 const { hasPermission: canPurchaseOrder } = usePermissionCheck("Purchase Order", "create");
 
-function handleProductionCreated(result) {
-	showSuccess(__("Production complete: {0} × {1}", [result.production_item, result.qty]));
+// Stock moved on finish/close/cancel — refresh the catalog quietly; the
+// Production dialog already shows its own per-action toast.
+function handleProductionCreated() {
 	handleRefresh();
 }
 

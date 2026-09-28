@@ -276,6 +276,33 @@
 												)
 											"
 										/>
+
+										<!-- Production warehouses (D2b): per-profile override for
+										     Work Order production; empty falls back to the active
+										     warehouse server-side. -->
+										<SelectField
+											v-model="settings.production_source_warehouse"
+											:label="__('Source Warehouse (Produksi)')"
+											:options="warehouseOptions"
+											:description="
+												__(
+													'Warehouse for production materials (Work Order). Empty = use the active warehouse.'
+												)
+											"
+										/>
+										<!-- Production warehouses (D2b): per-profile override for
+										     Work Order production; empty falls back to the active
+										     warehouse server-side. -->
+										<SelectField
+											v-model="settings.production_fg_warehouse"
+											:label="__('FG Warehouse (Produksi)')"
+											:options="warehouseOptions"
+											:description="
+												__(
+													'Warehouse for production output (Work Order). Empty = use the active warehouse.'
+												)
+											"
+										/>
 									</div>
 
 									<!-- Stock Policy Settings -->
@@ -1711,6 +1738,9 @@ const settings = ref({
 	print_mode: "Manual",
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
+	// Production warehouses (D2b) — empty = profile's own warehouse server-side
+	production_source_warehouse: "",
+	production_fg_warehouse: "",
 	// Printing
 	enable_pos_queue: 0,
 	print_driver: "browser",
@@ -1977,7 +2007,9 @@ async function saveSettings() {
 		// allow_negative_stock is global (POS Next Global Settings in Desk) and is
 		// stripped so this payload never overwrites the server-side global value.
 		const settingsPayload = { ...settings.value };
-		delete settingsPayload.allow_negative_stock;
+		// JSON.stringify drops undefined keys, so the key is absent server-side
+		// exactly as with delete — the global value is never overwritten.
+		settingsPayload.allow_negative_stock = undefined;
 		const result = await call(
 			"pos_next.pos_next.doctype.pos_settings.pos_settings.update_pos_settings",
 			{
@@ -2007,7 +2039,7 @@ async function saveSettings() {
 				warehouse: selectedWarehouse.value,
 			});
 
-			if (warehouseResult && warehouseResult.success) {
+			if (warehouseResult?.success) {
 				// Add warehouse to new settings for change detection
 				// (detectSettingsChanges below will emit settings:warehouse-changed via event bus)
 				settings.value.warehouse = selectedWarehouse.value;

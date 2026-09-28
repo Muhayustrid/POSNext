@@ -404,6 +404,39 @@ CUSTOM_FIELDS = {
 				"description": "Per-unit nominal cap for POS Offer percentage discounts (0 = no cap).",
 			}
 		],
+		# Home data for the POS production flow (design D5/D7): the Work Order is
+		# the single source of truth, these fields route it back to the outlet,
+		# operator and recipe without any mirror doctype.
+		"Work Order": [
+			{
+				"fieldname": "posa_pos_profile",
+				"label": "POS Profile",
+				"fieldtype": "Link",
+				"options": "POS Profile",
+				"insert_after": "project",
+				"read_only": 1,
+				"in_standard_filter": 1,
+				"description": "Outlet whose production run created this Work Order.",
+			},
+			{
+				"fieldname": "posa_operator",
+				"label": "POS Operator",
+				"fieldtype": "Link",
+				"options": "User",
+				"insert_after": "posa_pos_profile",
+				"read_only": 1,
+				"description": "POS user who started the production run.",
+			},
+			{
+				"fieldname": "posa_recipe",
+				"label": "POS Production Recipe",
+				"fieldtype": "Link",
+				"options": "POS Production Recipe",
+				"insert_after": "posa_operator",
+				"read_only": 1,
+				"description": "Recipe this Work Order was produced from (BOM is its derived artifact).",
+			},
+		],
 	}
 
 

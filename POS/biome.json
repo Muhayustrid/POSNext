@@ -7,7 +7,17 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"ignore": ["dist/**", "coverage/**", "node_modules/**", "../<app-name>/**"]
+		"ignore": [
+			"dist/**",
+			"coverage/**",
+			"node_modules/**",
+			"../<app-name>/**",
+			"dev-dist/**",
+			"auto-imports.d.ts",
+			"components.d.ts",
+			"src/auto-imports.d.ts",
+			"src/components.d.ts"
+		]
 	},
 	"formatter": {
 		"enabled": true,

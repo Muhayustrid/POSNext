@@ -104,7 +104,11 @@
   "po_receive_requires_delivery_note",
   "barcode_tab",
   "barcode_rules",
-  "invoice_type"
+  "invoice_type",
+  "section_break_production",
+  "production_source_warehouse",
+  "column_break_production",
+  "production_fg_warehouse"
  ],
  "fields": [
   {
@@ -821,6 +825,29 @@
    "label": "Invoice Type Created via POS Screen",
    "options": "Sales Invoice\nPOS Invoice",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_break_production",
+   "fieldtype": "Section Break",
+   "label": "Production"
+  },
+  {
+   "description": "Warehouse materials are drawn from for Work Order production. Empty = this profile's own warehouse.",
+   "fieldname": "production_source_warehouse",
+   "fieldtype": "Link",
+   "label": "Production Source Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "column_break_production",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Warehouse finished goods land in after production. Empty = this profile's own warehouse.",
+   "fieldname": "production_fg_warehouse",
+   "fieldtype": "Link",
+   "label": "Production FG Warehouse",
+   "options": "Warehouse"
   }
  ],
  "index_web_pages_for_search": 1,

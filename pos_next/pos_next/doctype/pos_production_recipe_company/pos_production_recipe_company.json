@@ -4,10 +4,11 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
- "field_order": ["company", "enabled"],
+ "field_order": ["company", "enabled", "bom_no"],
  "fields": [
   {"fieldname": "company", "fieldtype": "Link", "in_list_view": 1, "label": "Company", "options": "Company", "reqd": 1},
-  {"default": "1", "fieldname": "enabled", "fieldtype": "Check", "in_list_view": 1, "label": "Enabled"}
+  {"default": "1", "fieldname": "enabled", "fieldtype": "Check", "in_list_view": 1, "label": "Enabled"},
+  {"fieldname": "bom_no", "fieldtype": "Link", "in_list_view": 1, "label": "BOM", "options": "BOM", "read_only": 1}
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
