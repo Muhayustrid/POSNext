@@ -10,10 +10,10 @@ di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
 | Hal | Nilai |
 | --- | --- |
 | Versi app | 2.13.0 (`pos_next/__init__.py` + `POS/package.json` + root `package.json`) |
-| `main` | `914e8a0` (= `origin/main`, di-push 27 Sep ronde-5) |
-| `develop` | `914e8a0` (fast-forward dari main + di-push, 27 Sep ronde-5; default branch repo) |
+| `main` | `6161681` (= `origin/main` setelah push 28 Sep: fitur produksi Work Order + pilih batch; di atas `7ec649d` fix KPI) |
+| `develop` | `6161681` (fast-forward dari main + di-push, 28 Sep; default branch repo) |
 | `security-audit-fixes` | `2d16754` (di belakang main; isinya sudah terserap via merge 26 Sep + fix/open-items) |
-| Produksi (Frappe Cloud) | **MASIH `b6f7ae9`** — seluruh remediasi belum melindungi produksi |
+| Produksi (Frappe Cloud) | user deploy `dbcf9c7` 27 Sep (verifikasi hidup dari luar ambigu; sebelumnya `b6f7ae9`) — detail & temuan `/sw.js` di ronde-6 |
 | Site uji dev | `roti-posnext-test.localhost:8001` (bundle build) |
 | Site test-runner | `posnext.localhost` |
 
@@ -403,33 +403,38 @@ otorisasi user — belum di-push**):
 
 ## Terbuka / menunggu keputusan
 
-1. **Deploy produksi** — masih `b6f7ae9`; sumber deploy kini `main` =
-   `914e8a0` (main = origin/main = develop; memuat seluruh remediasi + open
-   items + UI kasir + fix mobile + ukuran teks). Wajib:
-   build frontend manual di host (`npm --prefix POS run build`), **migrate**
-   (2 patch index baru + FULLTEXT + field `price_replay_audit_only` di 2
-   doctype settings + fixture DocPerm baru: Account select=1 dan 3 baris
-   POS Invoice per persona dari fix E2E-01 — fixture tersinkron otomatis
-   saat migrate, atau manual via `bench --site X execute
-   frappe.utils.fixtures.sync_fixtures --args "['pos_next']"`), smoke test
-   per `docs/DEPLOY_CHECKLIST_SECURITY_AUDIT_FIXES.md` (SELECT pra-cek PE
-   legacy; kini termasuk item 3 §1: jalankan `pos_next.audit.run` — angka
-   pembanding situs test ada di item A7 di atas).
-2. **Rollout SEC-23 bertahap** — di produksi mulai audit-only → cek log →
+1. **Deploy produksi** — user deploy `dbcf9c7` ke FC 27 Sep (repo-side benar: saat
+   itu `dbcf9c7` = tip main; verifikasi hidup dari luar ambigu — lihat ronde-6).
+   Perlu dipastikan deploy itu sudah melewati **migrate + build frontend**
+   (About → pos_next 2.13.0; baris "Ukuran Teks" di UserMenu). Sumber deploy
+   berikutnya `main` = `6161681` (fitur produksi Work Order + pilih batch) —
+   kali ini **wajib migrate DAN build frontend**: doctype/patch produksi baru
+   + custom field Work Order `posa_*` + field baru 2 doctype + id.csv; detail
+   di sesi 27–28 Sep di bawah. Smoke test per
+   `docs/DEPLOY_CHECKLIST_SECURITY_AUDIT_FIXES.md` tetap berlaku (SELECT pra-cek
+   PE legacy; item 3 §1: jalankan `pos_next.audit.run` — angka pembanding situs
+   test ada di item A7 di atas).
+2. **`/sw.js` produksi direbut app lain (temuan ronde-6)** — balik "Production
+   Workspace service worker (FU42)", diduga `warehouse_app`; tanpa header
+   `Service-Worker-Allowed` sehingga `register("/sw.js")` mendaftarkan SW asing
+   scope `/` yang mengendalikan `/pos` → offline/PWA pos_next di produksi
+   terancam. Cek pemilik rute di FC shell (grep "FU42"), lalu putuskan: prioritas
+   app di apps.txt, rename rute pos_next, atau koordinasi dengan app pemilik.
+3. **Rollout SEC-23 bertahap** — di produksi mulai audit-only → cek log →
    baru enforce. Kode + test sudah mendukung kedua mode (default 0 =
    enforce); tidak ada lagi kerja lokal untuk item ini.
-3. **Ruff ignore** — menunggu CLN penuh (keputusan user: tetap terbuka).
-4. **CLN §7 sisa (non-quick-win)** — refactor besar tetap backlog:
+4. **Ruff ignore** — menunggu CLN penuh (keputusan user: tetap terbuka).
+5. **CLN §7 sisa (non-quick-win)** — refactor besar tetap backlog:
    centralize `_check_profile_access`, event-map dispatcher, CUSTOM_FIELDS →
    JSON, dedupe countries/useCountryCodes, logger/lowEndOptimizations,
    `_pn_run_tests.py` pindah scripts/, hapus admin wallet endpoints (ada
    test + keputusan produk), BrainWise Branding (HIDUP — jangan hapus),
    credit endpoints (dipakai test SEC-09), workbox-window dynamic import.
-5. ~~Laporan dampak A7~~ — **TUTUP**: `docs/A7_IMPACT_REPORT.md`.
-6. ~~Flake `test_promotions` posisi-dependent~~ — **TUTUP**: akar =
+6. ~~Laporan dampak A7~~ — **TUTUP**: `docs/A7_IMPACT_REPORT.md`.
+7. ~~Flake `test_promotions` posisi-dependent~~ — **TUTUP**: akar =
    mode `invoice_type` ambient (tanpa fixture shift); fix permanen pin-mode
    + restore (ronde-2 item 3).
-7. ~~Duplikat key `ar.csv` & `pt-br.csv`~~ — **TUTUP**: dedupe keep-last +
+8. ~~Duplikat key `ar.csv` & `pt-br.csv`~~ — **TUTUP**: dedupe keep-last +
    validator semua CSV (ronde-2 item 6).
 
 ## Catatan sapuan akhir
@@ -636,3 +641,80 @@ belum merge).
 Pohon bersih setelah push; gate terakhir sebelum push: vitest 580/580,
 build host OK, verifikasi visual live (390px & 1050px) untuk batch mobile +
 ukuran teks.
+
+## Sesi 27 Sep ronde-6 — cek deploy produksi + fix KPI Pengembalian dasbor (di-commit `7ec649d`)
+
+**Verifikasi deploy produksi (user: "udh aku deploy pake main dbcf9c7").**
+Repo-side BENAR: saat itu `main` = `develop` = `origin/main` = `origin/develop` =
+`dbcf9c7` (commit docs-only di atas `914e8a0` — kode yang dideploy = kode terbaru).
+Probe publik ke erpnext-mfp-lex.j.frappe.cloud:
+
+- `/assets/pos_next/pos/index.html` (cache-bust) refer `index-CARUhlEK.js` +
+  `index-CTzrYItX.css`; **CSS hash identik byte-per-byte dengan build lokal
+  `dbcf9c7`**; `version.json` menunjukkan build `2026-09-27T12:56:54Z` (9 menit
+  pasca-commit) — build di FC memang jalan hari itu.
+- TAPI fetch langsung JS entry + vendor chunk yang di-refer = **404 nginx dari
+  luar** — pola cache edge FC (max-age 300, `x-from-cache`) atau bench switch
+  setengah jadi. Uji marker fitur (`pos_text_scale` dkk.) via fetch gugur karena
+  yang ter-download halaman 404. Kesimpulan: "apakah bundle terbaru hidup" belum
+  bisa dipastikan dari luar.
+- **Temuan sampingan penting: `/sw.js` produksi BUKAN PWA SW pos_next** — balik
+  "Production Workspace service worker (FU42)" (diduga milik `warehouse_app`),
+  tanpa header `Service-Worker-Allowed`, ter-cache `max-age=300` — padahal
+  `www/sw.py` dirancang `no_cache` + header `/` (membaca `public/pos/sw.js`,
+  template `www/sw.js` berisi `{{ service_worker_source }}`). Akibatnya
+  `register("/sw.js")` di produksi mendaftarkan SW asing dengan scope `/` yang
+  mengendalikan `/pos` → offline/PWA pos_next di produksi terancam. Belum
+  ditindaklanjuti (lihat Terbuka).
+- Cara cek pasti: FC shell `cd apps/pos_next && git rev-parse HEAD` (harus
+  `dbcf9c7…`) + cek fungsional: baris **"Ukuran Teks − % +"** di UserMenu
+  (fitur `914e8a0`) dan hero "Penjualan Bersih" di Dasbor (`ce484ed`).
+
+**Fix KPI Pengembalian dasbor (permintaan user: tumpukan `1 · -Rp 50.000` jelek).**
+`ShiftDashboard.vue`: nilai sel = **nominal saja** (`returnsTotalLabel`, merah,
+logika tanda minus dipertahankan) + **caption abu-abu** `returnsCountLabel` =
+`__("{0} return invoices")` → id **"{0} faktur retur"** — key ternyata SUDAH ada
+di `id.csv` (±baris 1136); duplikat yang sempat ditambahkan ditangkap
+`scripts/validate_id_csv.py` lalu dibatalkan (net-zero CSV). Test diubah
+(assert `-10000 IDR` + `1 return invoices` + `not.toContain("·")` sebagai guard
+anti format numpuk). Gate: vitest 580/580, build OK, validator CSV OK, biome
+bersih untuk file yang disentuh (drift format pra-eksisting di baris mock 88–118
+file test dibiarkan). Live IAB terverifikasi (Dasbor → sel terbaca
+`Pengembalian / -Rp 50.000 / 1 faktur retur`). Commit `7ec649d` di-push: main +
+develop fast-forward (`main` = `develop` = `origin`, 27 Sep malam). Deploy
+produksi berikutnya: wajib build frontend ulang; tanpa migrate (murni frontend).
+
+## Sesi 27–28 Sep — fitur produksi Work Order native + pilih batch bahan (di-commit `6161681`)
+
+**Implementasi + rework UX + fitur batch, semua terverifikasi penuh sebelum
+commit** (backend 53/53, vitest 594/594, E2E browser situs uji lulus semua
+skenario dengan lereng DB). Ringkasan desain & hasil; detail jebakan di memori
+sesi dan `docs/superpowers/plans/2026-09-27-pos-production-work-order.md`.
+
+- **Dua-fase di atas Work Order ERPNext** (`pos_next/services/production.py`):
+  Mulai = WO insert+submit (stok diam), Selesaikan = satu Stock Entry
+  Manufacture (bahan keluar untuk hasil+rusak — process loss tetap memakan
+  bahan; FG masuk hanya yang baik), Tutup = WO close (hasil parsial tersimpan,
+  sisa bahan tidak di-issue tanpa writeoff), Batal = pembalikan LIFO + WO
+  docstatus 2. One-shot "Proses Produksi" dihapus dari UI;
+  `create_production` tetap ada untuk klien ter-cache.
+- **Pilih batch bahan saat Selesaikan**: `get_finish_context` memberi bahan
+  ber-batch + daftar batch live per gudang (urut FEFO); klien kirim
+  `batch_picks` (dict item_code→batch) yang divalidasi pra-submit
+  (`_checked_batch_pick`); default Otomatis = server pilih FEFO; pick invalid
+  ditolak bersih tanpa dokumen. Form resep tanpa batch tetap polos.
+- **Tab Riwayat** + `get_production_history` (docstatus 1 status selesai +
+  docstatus 2; jebakan: WO batal tidak pernah cocok filter status=Cancelled
+  docstatus 1).
+- **Fix timer timezone**: `started_at` epoch detik (naive site-tz →
+  `ZoneInfo(get_system_timezone())`), klien terima number + fallback string.
+- **Verifikasi E2E browser (28 Sep)**: parsial 2/3 + Tutup → WO Closed, bahan
+  keluar hanya 2×resep; batch Otomatis qty 5 → FEFO terbukti di SLE
+  (`B-E2E-OLD`); pick eksplisit → batch pilihan user yang terpakai; Batal →
+  docstatus 2 stok utuh; stok kurang → server tolak "kurang 20.0" tanpa WO
+  yatim. Riwayat label Indonesia + operator.
+- **Deploy produksi berikutnya WAJIB migrate + build frontend**: doctype
+  Production baru masuk skema, custom field Work Order `posa_*` via
+  `install.py` (after_migrate), field baru di 2 doctype + id.csv. Flag
+  `enable_serial_and_batch_no_for_item` (Stock Settings) harus ON di outlet
+  yang memakai batch — keputusan master data per outlet.
