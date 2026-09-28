@@ -3,12 +3,13 @@ import { computed, ref } from "vue";
 /**
  * Per-device text size preference for the POS screen.
  *
- * Scales every rem-based size (Tailwind text/spacing utilities) by setting the
- * root font-size percentage. Bounds come from an empirical sweep at 360-1050px
- * viewports: the layout holds from 80% to 135%, but above 125% the header
- * title collapses and below 85% body text gets uncomfortable to read.
- * 100% = the browser's own base size, so a user who raised their browser
- * font size keeps a proportional boost.
+ * Scales the root font-size percentage; text utilities are rem-based (the
+ * tailwind.config.js fontSize override rewrites the frappe-ui preset's static
+ * px scale), so text follows the same scale as spacing and icons. Bounds come
+ * from an empirical sweep at 360-1050px viewports: 125% keeps the layout intact
+ * (a phone header only truncates its title, by design), below 85% body text
+ * gets uncomfortable to read. 100% = the browser's own base size, so a user who
+ * raised their browser font size keeps a proportional boost.
  */
 export const TEXT_SCALE_MIN = 85;
 export const TEXT_SCALE_MAX = 125;
