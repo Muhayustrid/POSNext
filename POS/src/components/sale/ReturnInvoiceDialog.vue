@@ -1940,6 +1940,13 @@ function handleValidityResponse(validity) {
 		});
 	} else if (validity.error_type === "not_found") {
 		showError(validity.message || __("Invoice not found"));
+	} else if (validity.error_type === "wrong_outlet") {
+		// outlet = POS Profile = 1 company; the server message already names
+		// the issuing outlet so the cashier can redirect the customer
+		showError(
+			validity.message ||
+				__("Invoice was issued at another outlet. Returns can only be processed at the issuing outlet."),
+		);
 	} else {
 		showError(validity.message || __("Cannot process return for this invoice"));
 	}
@@ -1981,7 +1988,7 @@ async function checkValidityAndOpenModal(invoiceName, fallbackOnError = false) {
 			// Fallback to direct open if validity check fails
 			openReturnModal({ name: invoiceName });
 		} else {
-			showError(__("Failed to check invoice"));
+			showError(extractErrorMessage(error, __("Failed to check invoice")));
 		}
 	}
 }

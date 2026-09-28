@@ -23,6 +23,7 @@ from frappe.utils import now_datetime, nowdate
 
 from pos_next.api.invoices import (
 	cleanup_old_drafts,
+	check_invoice_return_validity,
 	get_invoice_for_return,
 	get_returnable_invoices,
 	prepare_return_invoice,
@@ -31,7 +32,7 @@ from pos_next.api.invoices import (
 	submit_invoice,
 	update_invoice,
 )
-from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
+from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE, get_pos_invoice_doctype
 from pos_next.tests._posi_test_utils import _set_invoice_type
 from pos_next.tests.price_group_helpers import get_default_customer
 
@@ -229,10 +230,8 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		frappe.set_user(user)
 		return update_invoice(self._payload(**overrides))
 
-	def _submit(self, user, draft_name):
-		"""Full legit submit as `user`: opening shift first (same recipe as
-		api/test_pos_invoice_submit.py)."""
-		self._make_stock_receipt()
+	def _open_shift(self, user):
+		"""Open a POS Opening Shift for `user` on the class profile."""
 		frappe.set_user(ADMIN)
 		shift = frappe.get_doc(
 			{
@@ -247,13 +246,20 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		).insert(ignore_permissions=True)
 		shift.reload()
 		shift.submit()
+		return shift
 
+	def _submit(self, user, draft_name, doctype=None):
+		"""Full legit submit as `user`: opening shift first (same recipe as
+		api/test_pos_invoice_submit.py)."""
+		doctype = doctype or self.doctype
+		self._make_stock_receipt()
+		shift = self._open_shift(user)
 		frappe.set_user(user)
 		return submit_invoice(
 			invoice=json.dumps(
 				self._payload(
 					name=draft_name,
-					doctype=self.doctype,
+					doctype=doctype,
 					posa_pos_opening_shift=shift.name,
 				)
 			),
@@ -377,6 +383,170 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 			self.assertIn(name, [row.name for row in searched["invoices"]])
 		finally:
 			frappe.set_user(ADMIN)
+
+	# ------------------------------------------- outlet isolation (E2 scope)
+
+	def _make_foreign_profile(self):
+		"""A second outlet: dedicated company + warehouse + POS Profile with
+		no users — the intercompany "1 outlet = 1 company" neighbor."""
+		from pos_next.tests.price_group_helpers import (
+			make_test_company,
+			make_test_pos_profile,
+			make_test_warehouse,
+		)
+
+		company = make_test_company("RetScope")
+		warehouse = make_test_warehouse("RetScope", company)
+		profile = make_test_pos_profile("RetScope", company, warehouse)
+		return frappe.db.get_value("POS Profile", profile, ["name", "company"], as_dict=True)
+
+	def _seed_invoice_row(self, profile_name, company, doctype=None):
+		"""Minimal submitted POS-style invoice under `profile_name`.
+
+		The return READ gates are pure queries (the mapper only runs after the
+		gate), so a raw row + one item row is enough — no shift, stock or GL.
+		Child row is inserted explicitly: ignore_validate skips the machinery
+		that stamps parent/parentfield onto appended children.
+		Raw-value surgery mirrors test_cleanup's modified-date touch."""
+		doctype = doctype or self.doctype
+		doc = frappe.get_doc(
+			{
+				"doctype": doctype,
+				"company": company,
+				"customer": self.customer,
+				"pos_profile": profile_name,
+				"is_pos": 1,
+				"is_return": 0,
+				"posting_date": nowdate(),
+			}
+		)
+		doc.flags.ignore_validate = True
+		doc.flags.ignore_mandatory = True
+		doc.insert(ignore_permissions=True)
+		item_row = frappe.get_doc(
+			{
+				"doctype": f"{doctype} Item",
+				"parent": doc.name,
+				"parenttype": doctype,
+				"parentfield": "items",
+				"idx": 1,
+				"docstatus": 1,
+				"item_code": self.item[0],
+				"qty": 1,
+				"rate": 100,
+			}
+		)
+		item_row.flags.ignore_validate = True
+		item_row.flags.ignore_mandatory = True
+		item_row.insert(ignore_permissions=True)
+		frappe.db.set_value(doctype, doc.name, "docstatus", 1, update_modified=False)
+		return doc.name
+
+	def test_return_validity_reports_wrong_outlet_for_foreign_profile(self):
+		foreign = self._make_foreign_profile()
+		name = self._seed_invoice_row(foreign.name, foreign.company)
+
+		frappe.set_user(self.cashier)
+		try:
+			result = check_invoice_return_validity(name)
+			# truthful: the code is real but belongs to another outlet
+			self.assertFalse(result["valid"])
+			self.assertEqual(result["error_type"], "wrong_outlet")
+			self.assertEqual(result["outlet"], foreign.name)
+
+			# the listings never leak the foreign row for the cashier
+			self.assertEqual(search_invoice_by_number(name[-6:]), [])
+			returnable = get_returnable_invoices()
+			self.assertNotIn(name, [row.name for row in returnable])
+
+			# preparation stays a hard no (defense in depth behind the gate)
+			with self.assertRaises(frappe.PermissionError):
+				prepare_return_invoice(name)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_admin_return_scope_follows_requested_profile(self):
+		# own invoice first: the submit pipeline runs inner savepoint rollbacks
+		# that would wipe an uncommitted seed created before it
+		draft = self._make_draft(self.cashier)
+		own_name = self._submit(self.cashier, draft["name"])["name"]
+
+		foreign = self._make_foreign_profile()
+		foreign_name = self._seed_invoice_row(foreign.name, foreign.company)
+
+		# without a profile the HQ lane stays unrestricted (admin explicitly:
+		# _submit leaves the session as the cashier, whose membership scope
+		# rightly hides the foreign outlet)
+		frappe.set_user(ADMIN)
+		names = [row.name for row in get_returnable_invoices(limit=100)]
+		self.assertIn(own_name, names)
+		self.assertIn(foreign_name, names)
+		self.assertIn(foreign_name, names)
+
+		# with a profile: outlet-pure — the requested outlet only
+		names = [
+			row.name
+			for row in get_returnable_invoices(limit=100, pos_profile=self.profile.name)
+		]
+		self.assertIn(own_name, names)
+		self.assertNotIn(foreign_name, names)
+
+		self.assertEqual(
+			[row.name for row in search_invoice_by_number(foreign_name[-6:], pos_profile=self.profile.name)],
+			[],
+		)
+		self.assertIn(
+			own_name,
+			[row.name for row in search_invoice_by_number(own_name[-6:], pos_profile=self.profile.name)],
+		)
+		self.assertEqual(
+			search_invoices_for_return(invoice_name=foreign_name, pos_profile=self.profile.name)["invoices"],
+			[],
+		)
+		self.assertIn(
+			own_name,
+			[
+				row.name
+				for row in search_invoices_for_return(invoice_name=own_name, pos_profile=self.profile.name)[
+					"invoices"
+				]
+			],
+		)
+
+	def test_return_fallback_finds_own_invoice_in_other_doctype(self):
+		# sell in POS Invoice mode while the site sits on Sales Invoice; the
+		# draft must already carry the shift — a shiftless POS Invoice draft
+		# falls into ERPNext's native opening-entry validation
+		_set_invoice_type(POS_INVOICE)
+		try:
+			shift = self._open_shift(self.cashier)
+			draft = self._make_draft(self.cashier, posa_pos_opening_shift=shift.name)
+			name = self._submit(self.cashier, draft["name"], doctype=POS_INVOICE)["name"]
+		finally:
+			_set_invoice_type(SALES_INVOICE)
+		self.assertEqual(frappe.db.get_value(POS_INVOICE, name, "docstatus"), 1)
+
+		# ambient is Sales Invoice again: the code must still be returnable
+		# for the outlet (fallback), prepared with the matching mapper
+		frappe.set_user(self.cashier)
+		try:
+			self.assertTrue(check_invoice_return_validity(name)["valid"])
+			return_doc = prepare_return_invoice(name)
+			self.assertEqual(return_doc["pos_profile"], self.profile.name)
+			self.assertEqual(len(return_doc["items"]), 1)
+		finally:
+			frappe.set_user(ADMIN)
+
+		# a foreign-profile invoice in the other doctype answers wrong_outlet
+		# too — the fallback never widens visibility
+		foreign = self._make_foreign_profile()
+		foreign_name = self._seed_invoice_row(foreign.name, foreign.company, doctype=POS_INVOICE)
+		frappe.set_user(self.cashier)
+		try:
+			result = check_invoice_return_validity(foreign_name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(result["error_type"], "wrong_outlet")
 
 	# ---------------------------------------------------------------- SEC-06
 

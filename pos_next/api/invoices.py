@@ -3077,33 +3077,70 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 # ==========================================
 
 
-def _check_return_read_access(pos_profile):
-	"""SEC-05 gate for single-invoice return reads: the caller must be a POS
-	Profile User of the invoice's profile (Administrator excepted). Strict on
-	purpose — a site-wide read grant (role "All" read=1) must not open the POS
-	return flow to every user. Cross-profile returns need membership in the
-	invoice's profile."""
+def _return_access_denied(pos_profile):
+	"""SEC-05 membership test for single-invoice return reads (Administrator
+	exempt). Strict on purpose — a site-wide read grant (role "All" read=1)
+	must not open the POS return flow to every user. Cross-profile returns
+	need membership in the invoice's profile (outlet = POS Profile = 1 company
+	in the intercompany deployment)."""
 	if frappe.session.user == "Administrator":
-		return
+		return False
 	if pos_profile and frappe.db.exists(
 		"POS Profile User",
 		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
 	):
-		return
-	frappe.throw(_("You don't have permission to view this invoice"), frappe.PermissionError)
+		return False
+	return True
 
 
-def _return_search_scope():
-	"""SEC-05 scoping for return searches (cheap: one indexed child-table
-	query, no JOINs). Administrator gets None (unrestricted); profile members
-	get their profile list to filter by; no membership at all →
+def _check_return_read_access(pos_profile):
+	"""SEC-05 gate: hard-fail when the caller may not read this invoice's
+	return flow. check_invoice_return_validity reports a structured
+	wrong_outlet answer instead so the cashier can route the customer to the
+	issuing outlet; the detail/preparation endpoints keep throwing as defense
+	in depth."""
+	if _return_access_denied(pos_profile):
+		frappe.throw(_("You don't have permission to view this invoice"), frappe.PermissionError)
+
+
+def _return_scope_for(pos_profile=None):
+	"""SEC-05 scoping for return listings/searches (cheap: one indexed
+	child-table query, no JOINs). Profile members get their profile list;
+	Administrator is scoped to the explicitly requested profile so the return
+	dialog stays outlet-pure for every role. No profile requested (admin
+	callers without context) → None (unrestricted); no membership at all →
 	PermissionError."""
 	if frappe.session.user == "Administrator":
-		return None
+		return [pos_profile] if pos_profile else None
 	profiles = frappe.get_all("POS Profile User", filters={"user": frappe.session.user}, pluck="parent")
 	if not profiles:
 		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
 	return profiles
+
+
+def _return_search_scope():
+	return _return_scope_for()
+
+
+def _resolve_returnable_invoice(invoice_name, fields):
+	"""Locate an invoice for a return read across BOTH POS doctypes.
+
+	The site-wide invoice type is switchable, so an outlet's history spans
+	POS Invoices and Sales Invoices; resolving only the active mode made half
+	of the outlet's own sales unreturnable by code (get_invoice already falls
+	back the same way). Returns (doctype, row-as-dict) or (None, None)."""
+	doctype = get_pos_invoice_doctype()
+	other = POS_INVOICE if doctype == DOCTYPE_SALES_INVOICE else DOCTYPE_SALES_INVOICE
+	for candidate in (doctype, other):
+		si = frappe.qb.DocType(candidate)
+		rows = (
+			frappe.qb.from_(si)
+			.select(*[getattr(si, field) for field in fields])
+			.where(si.name == invoice_name)
+		).run(as_dict=True)
+		if rows:
+			return candidate, rows[0]
+	return None, None
 
 
 def _filter_fully_returned(invoices, doctype="Sales Invoice"):
@@ -3167,8 +3204,9 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	# transactions are created in
 	doctype = get_pos_invoice_doctype()
 
-	# SEC-05: restrict the listing to the caller's own POS profiles
-	scope = _return_search_scope()
+	# SEC-05: restrict the listing to the caller's own POS profiles; an
+	# explicit profile scopes the administrator to that outlet too
+	scope = _return_scope_for(pos_profile)
 
 	# Check return validity days from POS Settings
 	return_validity_days = 0
@@ -3224,7 +3262,8 @@ def search_invoice_by_number(search_term, pos_profile=None):
 
 	Args:
 	    search_term: Invoice number or partial number to search for (min 3 chars)
-	    pos_profile: Optional POS profile for context (reserved for future use)
+	    pos_profile: Caller's POS profile — scopes the Administrator to that
+	        outlet (non-admins are always scoped by their memberships)
 
 	Returns:
 	    List of matching invoices with return availability info (max 10 results)
@@ -3238,8 +3277,9 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	search_term = cstr(search_term).strip().replace("%", r"\%").replace("_", r"\_")
 	doctype = get_pos_invoice_doctype()
 
-	# SEC-05: restrict the search to the caller's own POS profiles
-	scope = _return_search_scope()
+	# SEC-05: restrict the search to the caller's own POS profiles; an
+	# explicit profile scopes the administrator to that outlet too
+	scope = _return_scope_for(pos_profile)
 
 	si = frappe.qb.DocType(doctype)
 
@@ -3281,26 +3321,32 @@ def check_invoice_return_validity(invoice_name):
 	"""
 	from frappe.utils import date_diff, formatdate, getdate
 
-	doctype = get_pos_invoice_doctype()
+	# Fetch only the fields needed for validation — in either POS doctype, so
+	# a code created under the other invoice type still answers truthfully
+	invoice_info = _resolve_returnable_invoice(
+		invoice_name, ["pos_profile", "posting_date"]
+	)[1]
 
-	# Fetch only the fields needed for validation
-	si = frappe.qb.DocType(doctype)
-	invoice_data = (
-		frappe.qb.from_(si).select(si.pos_profile, si.posting_date).where(si.name == invoice_name)
-	).run(as_dict=True)
-
-	if not invoice_data:
+	if not invoice_info:
 		return {
 			"valid": False,
 			"error_type": "not_found",
 			"message": _("Invoice {0} does not exist").format(invoice_name),
 		}
 
-	invoice_info = invoice_data[0]
-
 	# E2: bare existence must not confirm other outlets' invoice numbers —
-	# same profile gate as the rest of the return flow (SEC-05).
-	_check_return_read_access(invoice_info.pos_profile)
+	# same profile gate as the rest of the return flow (SEC-05), but as a
+	# structured wrong_outlet answer so the cashier can route the customer to
+	# the issuing outlet instead of chasing a "not found" ghost.
+	if _return_access_denied(invoice_info.pos_profile):
+		return {
+			"valid": False,
+			"error_type": "wrong_outlet",
+			"message": _(
+				"Invoice {0} was issued at another outlet ({1}). Returns can only be processed at the issuing outlet."
+			).format(invoice_name, invoice_info.pos_profile),
+			"outlet": invoice_info.pos_profile,
+		}
 
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
@@ -3336,18 +3382,14 @@ def get_invoice_for_return(invoice_name):
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
 
-	doctype = get_pos_invoice_doctype()
+	# Validate invoice exists (either POS doctype) and get the fields needed
+	# for the return period check
+	doctype, invoice_info = _resolve_returnable_invoice(
+		invoice_name, ["pos_profile", "posting_date"]
+	)
 
-	# Validate invoice exists and get fields needed for return period check
-	si = frappe.qb.DocType(doctype)
-	invoice_check = (
-		frappe.qb.from_(si).select(si.pos_profile, si.posting_date).where(si.name == invoice_name)
-	).run(as_dict=True)
-
-	if not invoice_check:
+	if not invoice_info:
 		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
-
-	invoice_info = invoice_check[0]
 
 	# SEC-05: no return-flow read outside the caller's profile, before any
 	# further detail is computed.
@@ -3628,37 +3670,35 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
 
-	doctype = get_pos_invoice_doctype()
+	# Validate invoice (either POS doctype — the mode is switchable, so the
+	# original may live in the other table) and get the fields needed for the
+	# docstatus / return-period checks
+	doctype, invoice_info = _resolve_returnable_invoice(
+		invoice_name,
+		(
+			"docstatus",
+			"is_return",
+			"pos_profile",
+			"posting_date",
+			"is_pos",
+			"grand_total",
+			"paid_amount",
+			"outstanding_amount",
+			"customer",
+			"customer_name",
+			"net_total",
+			"total_taxes_and_charges",
+		),
+	)
+
+	if not invoice_info:
+		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+
+	# the mapper must match the doctype the original actually lives in
 	if doctype == POS_INVOICE:
 		from erpnext.accounts.doctype.pos_invoice.pos_invoice import make_sales_return
 	else:
 		from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
-
-	# Validate invoice and get fields needed for return period check
-	si = frappe.qb.DocType(doctype)
-	invoice_check = (
-		frappe.qb.from_(si)
-		.select(
-			si.docstatus,
-			si.is_return,
-			si.pos_profile,
-			si.posting_date,
-			si.is_pos,
-			si.grand_total,
-			si.paid_amount,
-			si.outstanding_amount,
-			si.customer,
-			si.customer_name,
-			si.net_total,
-			si.total_taxes_and_charges,
-		)
-		.where(si.name == invoice_name)
-	).run(as_dict=True)
-
-	if not invoice_check:
-		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
-
-	invoice_info = invoice_check[0]
 
 	# SEC-05: no return against an invoice outside the caller's profile,
 	# before any further detail is computed.
@@ -3848,6 +3888,7 @@ def search_invoices_for_return(
 	min_amount=None,
 	max_amount=None,
 	page=1,
+	pos_profile=None,
 	doctype="Sales Invoice",
 ):
 	"""Search for invoices that can be returned with pagination.
@@ -3871,8 +3912,9 @@ def search_invoices_for_return(
 	# searchable through this endpoint.
 	doctype = doctype if doctype in (DOCTYPE_SALES_INVOICE, POS_INVOICE) else get_pos_invoice_doctype()
 
-	# SEC-05: restrict results to the caller's own POS profiles
-	scope = _return_search_scope()
+	# SEC-05: restrict results to the caller's own POS profiles; an explicit
+	# profile scopes the administrator to that outlet too
+	scope = _return_scope_for(pos_profile)
 
 	# Build main invoice query
 	si = frappe.qb.DocType(doctype)
