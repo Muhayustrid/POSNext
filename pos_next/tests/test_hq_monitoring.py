@@ -295,8 +295,21 @@ class TestHQMonitoring(IntegrationTestCase):
 			{"is_group": 0, "name": ("!=", frappe.db.get_value("Item", code, "item_group"))},
 			"name",
 		)
-		if group:
-			frappe.db.set_value("Item", code, "item_group", group)
+		if not group:
+			# A fresh site has a single leaf item group — create the second
+			# group the category-card tests need instead of silently leaving
+			# this item in the same group as every other fixture item.
+			group = "_Test HQ Other Group"
+			if not frappe.db.exists("Item Group", group):
+				frappe.get_doc(
+					{
+						"doctype": "Item Group",
+						"item_group_name": group,
+						"parent_item_group": "All Item Groups",
+						"is_group": 0,
+					}
+				).insert(ignore_permissions=True)
+		frappe.db.set_value("Item", code, "item_group", group)
 		return code
 
 	@classmethod
@@ -903,6 +916,102 @@ class TestHQMonitoring(IntegrationTestCase):
 		columns, rows = execute({"from_date": "2026-01-01", "to_date": frappe.utils.nowdate()})[:2]
 		self.assertIsInstance(rows, list)
 
+	# ------------------------------------------------------------------
+	# Aggregate & window regressions (2026-09-29 fixes)
+	# ------------------------------------------------------------------
+
+	def test_apc_is_total_over_orders_per_currency(self):
+		# Two outlets sharing a currency: APC must be summed totals over
+		# summed orders (400/4 = 100), never a sum of per-outlet averages
+		# (100 + 100 = 200) which inflates the ticket as outlets are added.
+		from pos_next.api.hq_monitoring import _metrics_from_totals
+
+		rows = [
+			frappe._dict(
+				company="C1", gross=300, refunds=0, net_tax_incl=300, net_pretax=300,
+				taxes=0, orders=3, refund_orders=0,
+			),
+			frappe._dict(
+				company="C2", gross=100, refunds=0, net_tax_incl=100, net_pretax=100,
+				taxes=0, orders=1, refund_orders=0,
+			),
+		]
+		metrics = _metrics_from_totals(rows, {"C1": "IDR", "C2": "IDR"}, "IDR")
+		self.assertEqual(metrics["apc"]["by_currency"]["IDR"], 100)
+
+	def test_overall_target_undated_outlet_stays_all_time(self):
+		frappe.set_user(ADMIN)
+		frappe.db.set_value(
+			"Company", self.company_a,
+			{"pos_overall_sales_target": 100000, "pos_overall_target_from": frappe.utils.nowdate()},
+		)
+		frappe.db.set_value(
+			"Company", self.company_b,
+			{"pos_overall_sales_target": 500, "pos_overall_target_from": None},
+		)
+		frappe.local._pos_next_target_bases = {}
+		frappe.db.set_single_value("POS Next Global Settings", "overall_target_basis", "Net Sales")
+		frappe.local._pos_next_target_bases = {}
+		data = get_sales_monitoring()
+		by_company = data["targets"]["overall"]["by_company"]
+		# B has no counted-from date: its all-time sales (inv5 = 100) must
+		# survive A's date bound — the dated-only OR filter used to zero out
+		# every undated outlet.
+		self.assertEqual(by_company[self.company_b]["cumulative_value"], 100)
+		self.assertEqual(by_company[self.company_a]["cumulative_value"], 4500)
+
+	def test_product_ranking_stale_page_clamped(self):
+		frappe.set_user(ADMIN)
+		data = get_sales_monitoring(company=self.company_a, product_page=99, page_size=10)
+		ranking = data["product_ranking"]
+		self.assertEqual(ranking["page"], 1)
+		self.assertTrue(ranking["rows"])
+
+	def test_turnover_prev_comparable_cut_at_same_time_of_day(self):
+		frappe.set_user(ADMIN)
+		today = frappe.utils.getdate(frappe.utils.nowdate())
+		month_start = frappe.utils.get_first_day(today)
+		days_elapsed = (today - month_start).days + 1
+		prev_month_start = frappe.utils.get_first_day(month_start - timedelta(days=1))
+		prev_end = prev_month_start + timedelta(days=days_elapsed - 1)
+
+		early = self._make_invoice(
+			self.company_a, self.profile_a, self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 100}], paid=100, posting_date=prev_end,
+		)
+		late = self._make_invoice(
+			self.company_a, self.profile_a, self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 200}], paid=200, posting_date=prev_end,
+		)
+		frappe.db.set_value("Sales Invoice", early, "posting_time", "00:00:01")
+		frappe.db.set_value("Sales Invoice", late, "posting_time", "23:59:59")
+
+		data = get_sales_monitoring(company=self.company_a)
+		prev = data["turnover"]["prev_comparable_net"]["by_currency"][self.currency_a]
+		# the comparable window is cut at the same time of day as "now":
+		# the 00:00:01 invoice counts, the 23:59:59 one does not (yet)
+		self.assertEqual(prev, 100)
+
+	def test_outlet_ranking_apc_uses_net(self):
+		frappe.set_user(ADMIN)
+		data = get_sales_monitoring(company=self.company_a)
+		row = next(r for r in data["outlet_ranking"] if r["company"] == self.company_a)
+		# net 4500 / 3 orders — matching the hero's "Net incl. tax ÷ orders",
+		# not gross 5500 / 3 (returns are already netted out of APC)
+		self.assertEqual(row["apc"], 1500)
+
+	def test_set_outlet_target_date_only_keeps_stored_value(self):
+		frappe.set_user(ADMIN)
+		set_outlet_target(company=self.company_a, overall_target=12345)
+		# dialog shape: blank target + a counted-from date must keep the
+		# stored target and still save the date
+		set_outlet_target(company=self.company_a, overall_target="", overall_from="2026-01-01")
+		value, start = frappe.db.get_value(
+			"Company", self.company_a, ["pos_overall_sales_target", "pos_overall_target_from"]
+		)
+		self.assertEqual(frappe.utils.flt(value), 12345)
+		self.assertEqual(str(start), "2026-01-01")
+
 
 class TestPOSMonthlyTarget(IntegrationTestCase):
 	@classmethod
@@ -1370,6 +1479,24 @@ class TestTargetBasis(IntegrationTestCase):
 	# ------------------------------------------------------------------
 	# gross profit basis
 	# ------------------------------------------------------------------
+
+	def test_gross_profit_orders_exclude_returns_and_non_pos(self):
+		from pos_next.api.hq_monitoring import _gross_profit_actuals
+
+		out = _gross_profit_actuals([self.company_gp], None, None, None, None)
+		self.assertEqual(out[self.company_gp]["orders"], 1)
+
+		# a return voucher is not an order
+		frappe.db.set_value("POS Invoice", self.gp_invoice, "is_return", 1)
+		out = _gross_profit_actuals([self.company_gp], None, None, None, None)
+		self.assertEqual(out[self.company_gp]["orders"], 0)
+		frappe.db.set_value("POS Invoice", self.gp_invoice, "is_return", 0)
+
+		# a non-POS voucher never reaches the outlet's figures
+		frappe.db.set_value("POS Invoice", self.gp_invoice, "is_pos", 0)
+		out = _gross_profit_actuals([self.company_gp], None, None, None, None)
+		self.assertNotIn(self.company_gp, out)
+		frappe.db.set_value("POS Invoice", self.gp_invoice, "is_pos", 1)
 
 	def test_gross_profit_basis_value_is_omzet_minus_hpp(self):
 		frappe.set_user(ADMIN)

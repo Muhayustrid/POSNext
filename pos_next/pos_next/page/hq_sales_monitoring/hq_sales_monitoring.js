@@ -148,6 +148,20 @@ class HQSalesMonitor {
 	}
 
 	_setup_filters() {
+		// Custom-range edits must re-read BOTH date inputs into this.range
+		// before refreshing — the API only ever sees this.range, so a bare
+		// refresh() would resend the range captured when "Custom" was last
+		// selected and the typed dates would never apply. Debounced so
+		// setting both ends fires one request; waits for both dates.
+		this._custom_range_changed = frappe.utils.debounce(this._later(() => {
+			if (this._preset() !== "custom") return;
+			const from_date = this._dom_date(this.from_field);
+			const to_date = this._dom_date(this.to_field);
+			if (!from_date || !to_date) return;
+			this.range = { from_date, to_date };
+			this.product_page = 1;
+			this.refresh();
+		}), 500);
 		this.preset_field = this.page.add_field({
 			fieldname: "range_preset",
 			label: __("Time Range"),
@@ -167,19 +181,14 @@ class HQSalesMonitor {
 			label: __("From Date"),
 			fieldtype: "Date",
 			default: frappe.datetime.get_today(),
-			change: frappe.utils.debounce(this._later(() => {
-				if (this._preset() === "custom") this.refresh();
-			}), 500),
+			change: () => this._custom_range_changed(),
 		});
 		this.to_field = this.page.add_field({
 			fieldname: "to_date",
 			label: __("To Date"),
 			fieldtype: "Date",
 			default: frappe.datetime.get_today(),
-			change: this._later(() => {
-				this.product_page = 1;
-				if (this._preset() === "custom") this.refresh();
-			}),
+			change: () => this._custom_range_changed(),
 		});
 		// Outlet = Company. A Link control gives the searchable dropdown the
 		// Select never had; get_query keeps the choices inside the user's
@@ -220,19 +229,7 @@ class HQSalesMonitor {
 	// this.range is the source of truth sent to the API: the page Date
 	// controls commit asynchronously, so get_value() right after set_value()
 	// still returns the previous range.
-	_apply_preset(initial) {
-		const preset = this._preset();
-		const custom = preset === "custom";
-		this.from_field.$wrapper.toggle(custom);
-		this.to_field.$wrapper.toggle(custom);
-		if (custom) {
-			this.range = {
-				from_date: this._dom_date(this.from_field) || "",
-				to_date: this._dom_date(this.to_field) || "",
-			};
-			if (initial !== true) this.refresh();
-			return;
-		}
+	_preset_range(preset) {
 		const today = frappe.datetime.get_today();
 		let from = today;
 		let to = today;
@@ -243,9 +240,26 @@ class HQSalesMonitor {
 		} else if (preset === "month") {
 			from = frappe.datetime.month_start();
 		}
-		this.range = { from_date: from, to_date: to };
-		this.from_field.set_value(from);
-		this.to_field.set_value(to);
+		return { from_date: from, to_date: to };
+	}
+
+	_apply_preset(initial) {
+		const preset = this._preset();
+		const custom = preset === "custom";
+		this.from_field.$wrapper.toggle(custom);
+		this.to_field.$wrapper.toggle(custom);
+		if (initial !== true) this.product_page = 1;
+		if (custom) {
+			this.range = {
+				from_date: this._dom_date(this.from_field) || "",
+				to_date: this._dom_date(this.to_field) || "",
+			};
+			if (initial !== true) this.refresh();
+			return;
+		}
+		this.range = this._preset_range(preset);
+		this.from_field.set_value(this.range.from_date);
+		this.to_field.set_value(this.range.to_date);
 		if (initial !== true) this.refresh();
 	}
 
@@ -293,6 +307,11 @@ class HQSalesMonitor {
 
 	refresh() {
 		if (!this.$root) return Promise.resolve();
+		// Preset ranges are relative to today: recompute on every refresh so a
+		// page left open overnight never keeps fetching yesterday's "Today".
+		if (this.preset_field && this._preset() !== "custom") {
+			this.range = this._preset_range(this._preset());
+		}
 		this.outlet_page = 1;
 		return new Promise((resolve) => {
 			frappe.call({
@@ -314,6 +333,10 @@ class HQSalesMonitor {
 				this._render();
 				resolve();
 			},
+			// A server-side throw (e.g. From > To on a custom range) must not
+			// leave this promise pending forever — frappe has already shown
+			// the msgprint; keep the last rendered state on screen.
+			error: () => resolve(),
 			});
 		});
 	}

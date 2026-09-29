@@ -116,7 +116,7 @@ class TestReportUnionCountsOnce(POSInvoiceModeMixin, FrappeTestCase):
 				"is_pos": 1,
 				"pos_profile": self.profile.name,
 				"posting_date": today(),
-				"items": [{"item_code": self.item, "qty": 1, "rate": rate}],
+				"items": [{"item_code": self.item, "qty": 1, "rate": rate, "price_list_rate": rate}],
 				"payments": [{"mode_of_payment": self.mode[0], "amount": rate}],
 			}
 		)
@@ -213,7 +213,7 @@ class TestSIModeCountsConsolidated(FrappeTestCase):
 				"is_pos": 1,
 				"pos_profile": profile.name,
 				"posting_date": today(),
-				"items": [{"item_code": item[0], "qty": 1, "rate": 100}],
+				"items": [{"item_code": item[0], "qty": 1, "rate": 100, "price_list_rate": 100}],
 				"payments": [{"mode_of_payment": mode, "amount": 100}],
 			}
 		)

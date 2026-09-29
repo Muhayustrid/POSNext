@@ -55,7 +55,7 @@ Formulas (achievement, linear projection, daily pro-rata) never change with
 the basis — only the numerator does.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import frappe
 from frappe import _
@@ -340,12 +340,16 @@ def set_outlet_target(
 		doc.save()
 		result["monthly"] = doc.name
 
-	if overall is not None:
+	if overall is not None or start:
 		if not frappe.has_permission("Company", "write", doc=company):
 			frappe.throw(
 				_("You need write permission on Company {0}").format(company),
 				frappe.PermissionError,
 			)
+		if overall is None:
+			# Blank target = keep the stored one, so the counted-from date can
+			# be (re)set on its own — same "blank keeps stored" rule as monthly.
+			overall = flt(frappe.db.get_value("Company", company, "pos_overall_sales_target"))
 		frappe.db.set_value(
 			"Company",
 			company,
@@ -630,12 +634,18 @@ def _metrics_from_totals(rows, currency_map, default_ccy):
 	out["orders"] = int(sum(r.orders for r in rows))
 	out["refund_orders"] = int(sum(r.refund_orders for r in rows))
 
-	# APC = tax-incl net / non-refund orders, per currency.
-	by_ccy = {}
+	# APC = tax-incl net / non-refund orders, per currency — the division
+	# happens once per currency on summed totals; summing per-outlet averages
+	# would inflate the ticket as outlets are added.
+	net_by_ccy, orders_by_ccy = {}, {}
 	for r in rows:
 		ccy = currency_map.get(r.company)
-		if ccy and r.orders:
-			by_ccy[ccy] = round(by_ccy.get(ccy, 0) + flt(r.net_tax_incl) / r.orders, 2)
+		if ccy:
+			net_by_ccy[ccy] = net_by_ccy.get(ccy, 0.0) + flt(r.net_tax_incl)
+			orders_by_ccy[ccy] = orders_by_ccy.get(ccy, 0) + int(r.orders)
+	by_ccy = {
+		ccy: round(net_by_ccy[ccy] / n, 2) for ccy, n in orders_by_ccy.items() if n
+	}
 	out["apc"] = make_metric(by_ccy, default_ccy)
 	return out
 
@@ -651,12 +661,21 @@ def _metrics_for_window(scope_companies, profiles, start, end, cutoff, currency_
 
 
 def _turnover_section(scope, currency_map, default_ccy, window, mtd_rows):
+	# The comparable window must be cut at the same time of day as the MTD
+	# cutoff — without it, "same elapsed days last month" compares this
+	# month's partial today against last month's full day and growth sags.
+	mtd_cutoff = window.get("mtd_cutoff")
+	prev_cutoff = None
+	if mtd_cutoff:
+		prev_cutoff = datetime.combine(
+			getdate(window["prev_comparable_end"]), mtd_cutoff.time()
+		)
 	prev = _metrics_for_window(
 		scope["companies"],
 		scope["profiles"],
 		window["prev_comparable_start"],
 		window["prev_comparable_end"],
-		None,
+		prev_cutoff,
 		currency_map,
 		default_ccy,
 	)
@@ -829,6 +848,11 @@ def _product_ranking(where, params, category, page, page_size):
 	total_sales = (
 		frappe.db.sql(f"SELECT SUM(sii.base_net_amount) AS total {item_from}{cat_where}", bind)[0][0] or 0
 	)
+
+	# Clamp to the last page that still has rows: a stale page number (e.g.
+	# kept from a wider range) would otherwise fetch OFFSET past the end and
+	# render an empty ranking under a pager like "4 / 1".
+	page = min(page, max(1, -(-int(total) // page_size)))
 
 	offset = (page - 1) * page_size
 	rows = frappe.db.sql(
@@ -1054,7 +1078,7 @@ def _outlet_ranking(where, params, currency_map):
 				"gross": flt(r.gross),
 				"net_tax_incl": flt(r.net_tax_incl),
 				"orders": int(r.orders),
-				"apc": flt(flt(r.gross) / r.orders) if r.orders else None,
+				"apc": flt(flt(r.net_tax_incl) / r.orders) if r.orders else None,
 				"share_pct": ratio(r.net_tax_incl, currency_totals.get(ccy)),
 				"profiles": profiles_by_company.get(r.company, []),
 			}
@@ -1151,7 +1175,9 @@ def _gross_profit_actuals(companies, profiles, start, end, cutoff):
 	exactly those rows.
 	"""
 	dt = get_pos_invoice_doctype()
-	where = ["si.docstatus = 1", "si.company IN %(companies)s"]
+	# is_pos matches every other sales window: in Sales Invoice mode plain
+	# credit invoices must not land in the outlet's POS payback figures.
+	where = ["si.docstatus = 1", "si.is_pos = 1", "si.company IN %(companies)s"]
 	params = {"voucher_type": dt, "companies": companies}
 	# Same window semantics as _si_window_where: the SLE's posting_datetime is
 	# copied from the voucher, so filtering si's date/time columns selects the
@@ -1192,7 +1218,7 @@ def _gross_profit_actuals(companies, profiles, start, end, cutoff):
 			FROM (
 				SELECT si.name, si.company, si.base_grand_total AS net,
 					IFNULL(SUM(sle.stock_value_difference), 0) AS hpp,
-					1 AS orders,
+					IF(si.is_return = 0, 1, 0) AS orders,
 					IFNULL(SUM(CASE WHEN sle.actual_qty < 0
 						AND sle.stock_value_difference = 0 THEN 1 ELSE 0 END), 0) AS zero_cost_rows
 				FROM `tab{dt}` si
@@ -1357,12 +1383,13 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		)
 
 	sales_target = {}
-	tx_target = 0
+	tx_by_ccy = {}
 	for r in rows:
 		ccy = currency_map.get(r.company)
 		if ccy:
 			sales_target[ccy] = sales_target.get(ccy, 0) + flt(r.target_sales)
-		tx_target += int(r.target_transactions or 0)
+			tx_by_ccy[ccy] = tx_by_ccy.get(ccy, 0) + int(r.target_transactions or 0)
+	tx_target = sum(tx_by_ccy.values())
 
 	# Basis MTD per currency — same aggregation path as monthly["net_tax_incl"]
 	# so the two reconcile bit-for-bit on the default basis.
@@ -1410,7 +1437,11 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		"achievement_transactions_pct": ratio(monthly["orders"], tx_target),
 		"surplus_sales": surplus,
 		"apc_target": {
-			ccy: (round(v / tx_target, 2) if tx_target else None) for ccy, v in sales_target.items()
+			# per-currency transaction targets: one shared denominator would
+			# divide e.g. an SGD sales target by the global (IDR-heavy) count
+			ccy: (round(sales_target[ccy] / n, 2) if n else None)
+			for ccy, n in tx_by_ccy.items()
+			if ccy in sales_target
 		},
 		"daily_target_sales": {
 			ccy: (round(v / days_in_month, 2) if days_in_month else None) for ccy, v in sales_target.items()
@@ -1469,12 +1500,17 @@ def _overall_target_section(scope, currency_map):
 		if scope["profiles"] is not None:
 			params["profiles"] = list(scope["profiles"])
 			where.append("si.pos_profile IN %(profiles)s")
+		# Per-company start bound: a company WITHOUT a counted-from date stays
+		# all-time. Every configured company needs an arm — filtering to only
+		# the dated ones would silently zero out the undated outlets.
 		bounds = []
 		for i, (name, row) in enumerate(configured.items()):
+			params[f"c{i}"] = name
 			if row.pos_overall_target_from:
-				params[f"c{i}"] = name
 				params[f"d{i}"] = row.pos_overall_target_from
 				bounds.append(f"(si.company = %(c{i})s AND si.posting_date >= %(d{i})s)")
+			else:
+				bounds.append(f"si.company = %(c{i})s")
 		if bounds:
 			where.append("(" + " OR ".join(bounds) + ")")
 
