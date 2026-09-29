@@ -11,10 +11,12 @@ from frappe.utils import cint, flt, getdate
 GROUP_KEY_PATTERN = re.compile(r"^[a-z0-9_]+$")
 
 
-def slugify_group_key(label, fallback_idx):
-	"""Derive a stable, readable group key from a label."""
-	slug = re.sub(r"[^a-z0-9]+", "_", (label or "").strip().lower()).strip("_")
-	return slug or f"group_{fallback_idx}"
+def generate_group_key(existing):
+	"""Random id for a choice group — the key is plumbing, never user input."""
+	while True:
+		key = frappe.generate_hash()[:8]
+		if key not in existing:
+			return key
 
 
 class POSPackage(Document):
@@ -30,11 +32,12 @@ class POSPackage(Document):
 		self.validate_outlets()
 
 	def assign_group_keys(self):
-		"""Fill blank group keys from the label and reject malformed/duplicate ones."""
+		"""Fill blank group keys with a random unique id and reject
+		malformed/duplicate typed ones."""
 		seen = set()
-		for idx, group in enumerate(self.groups or [], start=1):
+		for group in self.groups or []:
 			if not group.group_key:
-				group.group_key = slugify_group_key(group.label, idx)
+				group.group_key = generate_group_key(seen)
 
 			group.group_key = group.group_key.strip().lower()
 
@@ -219,4 +222,4 @@ class POSPackage(Document):
 				outlet.pos_profile = None
 			else:
 				outlet.status = "Available on all profiles for this warehouse"
-				outlet.pos_profile = matching[0]
+				outlet.pos_profile = ", ".join(sorted(matching))

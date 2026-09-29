@@ -7,12 +7,6 @@ frappe.ui.form.on("POS Package", {
 		pn_toggle_lifetime_fields(frm);
 		pn_filter_warehouse(frm);
 	},
-	groups_add(frm) {
-		pn_update_group_options(frm);
-	},
-	groups_remove(frm) {
-		pn_update_group_options(frm);
-	},
 	is_lifetime(frm) {
 		pn_toggle_lifetime_fields(frm);
 	},
@@ -45,7 +39,6 @@ function pn_filter_warehouse(frm) {
 frappe.ui.form.on("POS Package Outlet", {
 	company(frm, cdt, cdn) {
 		frappe.model.set_value(cdt, cdn, "warehouse", "");
-		frappe.model.set_value(cdt, cdn, "pos_profile", "");
 		frappe.model.set_value(cdt, cdn, "status", "");
 	},
 });
@@ -54,7 +47,26 @@ frappe.ui.form.on("POS Package Group", {
 	group_key(frm) {
 		pn_update_group_options(frm);
 	},
+	// row events fire with the CHILD doctype — registering <fieldname>_add on
+	// the parent never runs (get_handlers matches the trigger's doctype)
+	groups_add(frm, cdt, cdn) {
+		pn_assign_group_key(frm, cdt, cdn);
+		pn_update_group_options(frm);
+	},
+	groups_remove(frm) {
+		pn_update_group_options(frm);
+	},
 });
+
+// the key is generated plumbing, never typed: a random unique id per row
+function pn_assign_group_key(frm, cdt, cdn) {
+	const existing = new Set((frm.doc.groups || []).map((g) => g.group_key).filter(Boolean));
+	let key = "";
+	do {
+		key = (Math.random().toString(36).slice(2) + "00000000").slice(0, 8);
+	} while (existing.has(key));
+	frappe.model.set_value(cdt, cdn, "group_key", key);
+}
 
 function pn_update_group_options(frm) {
 	if (!frm.fields_dict.options) return;

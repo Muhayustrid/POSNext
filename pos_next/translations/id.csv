@@ -2722,7 +2722,7 @@
 "Source Account","Akun Sumber",""
 "Source Type","Jenis Sumber",""
 "Source account is required for wallet transaction","Akun sumber wajib untuk transaksi dompet",""
-"Stable identifier referenced by options. Auto-filled if left blank.","Pengenal stabil yang dirujuk oleh opsi. Diisi otomatis jika dibiarkan kosong.",""
+"Auto-generated unique id. Referenced by the choice options.","Id unik yang dibuat otomatis. Dirujuk oleh opsi pilihan.",""
 "Stock Status","Status Stok",""
 "Submit invoices in background","Submit faktur di latar belakang",""
 "Sync Delay (Hours)","Keterlambatan Sinkron (Jam)",""

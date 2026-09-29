@@ -16,6 +16,7 @@ import frappe
 from pos_next.api.packages import (
 	COMPONENT_ROLE,
 	PARENT_ROLE,
+	_eligible_package_names,
 	get_packages,
 	quote,
 	validate_invoice_packages,
@@ -23,8 +24,11 @@ from pos_next.api.packages import (
 from pos_next.tests.price_group_helpers import get_default_customer
 
 PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
+PROFILE_2 = "_PNXT_TEST_POS_PROFILE_2__Test Company"
 COMPANY = "_Test Company"
 PACKAGE = "_PNXT Year End Laptop Package"
+LEGACY_PACKAGE = "_PNXT Legacy Scope Package"
+LEGACY_PARENT_ITEM = "_PNXT_PKG_PARENT_LEGACY"
 
 LAPTOP = "_PNXT_PKG_LAPTOP"
 BACKPACK = "_PNXT_PKG_BACKPACK"
@@ -103,6 +107,72 @@ def _ensure_profile():
 			),
 			"selling_price_list": _ensure_inr_price_list(),
 			"payments": [{"mode_of_payment": mode_of_payment, "default": 1}] if mode_of_payment else [],
+			# explicit opt-out: the field's default (enabled) is rejected by
+			# validate_profile_schedule without start/end times
+			"pos_schedule_enabled": 0,
+		}
+	).insert(ignore_permissions=True)
+
+
+def _ensure_second_profile():
+	"""A second register on the SAME Company + Warehouse as PROFILE."""
+	if frappe.db.exists("POS Profile", PROFILE_2):
+		return
+
+	source = frappe.db.get_value(
+		"POS Profile",
+		PROFILE,
+		[
+			"company",
+			"warehouse",
+			"currency",
+			"selling_price_list",
+			"write_off_account",
+			"write_off_cost_center",
+		],
+		as_dict=True,
+	)
+	payments = [
+		{"mode_of_payment": row.mode_of_payment, "default": row.default}
+		for row in frappe.get_all(
+			"POS Payment Method",
+			filters={"parent": PROFILE, "parenttype": "POS Profile"},
+			fields=["mode_of_payment", "default"],
+		)
+	]
+	frappe.get_doc(
+		{
+			"doctype": "POS Profile",
+			"name": PROFILE_2,
+			"company": source.company,
+			"warehouse": source.warehouse,
+			"currency": source.currency,
+			"write_off_account": source.write_off_account,
+			"write_off_cost_center": source.write_off_cost_center,
+			"selling_price_list": source.selling_price_list,
+			"payments": payments,
+			"pos_schedule_enabled": 0,
+		}
+	).insert(ignore_permissions=True)
+
+
+def _ensure_legacy_package():
+	"""A dedicated package whose outlet row tests rewind to the retired
+	per-profile shape at runtime (see TestOutletScoping)."""
+	_ensure_item(LEGACY_PARENT_ITEM, "PNXT Legacy Scope Package", is_stock_item=False)
+	if frappe.db.exists("POS Package", LEGACY_PACKAGE):
+		return
+	vals = frappe.db.get_value("POS Profile", PROFILE, ["company", "warehouse"], as_dict=True)
+	frappe.get_doc(
+		{
+			"doctype": "POS Package",
+			"package_name": LEGACY_PACKAGE,
+			"company": vals.company,
+			"currency": frappe.db.get_value("Company", vals.company, "default_currency"),
+			"parent_item": LEGACY_PARENT_ITEM,
+			"base_price": 1_000_000.0,
+			"items": [{"item_code": LAPTOP, "qty": 1}],
+			"outlets": [{"company": vals.company, "warehouse": vals.warehouse, "enabled": 1}],
 		}
 	).insert(ignore_permissions=True)
 
@@ -659,6 +729,100 @@ class TestPackageAccessControl(unittest.TestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			get_packages(PROFILE)
+
+
+class TestOutletScoping(unittest.TestCase):
+	"""Outlet rows scope a package by Company + Warehouse, nothing else.
+
+	The retired model let a row's ``pos_profile`` column grant availability to
+	one named profile; these tests pin the new rule: only the pair counts, and
+	the profile column is a read-only listing filled by the controller.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		_ensure_package()
+		_ensure_second_profile()
+		_ensure_legacy_package()
+		frappe.db.commit()
+
+	def test_every_profile_sharing_the_pair_gets_the_package(self):
+		names = {pkg["name"] for pkg in get_packages(PROFILE_2)}
+		self.assertIn(PACKAGE, names)
+
+	def test_a_row_naming_only_a_profile_grants_nothing(self):
+		row = frappe.get_all(
+			"POS Package Outlet",
+			filters={"parent": LEGACY_PACKAGE, "parenttype": "POS Package"},
+			pluck="name",
+			order_by="creation asc",
+		)[0]
+		original = frappe.db.get_value(
+			"POS Package Outlet", row, ["company", "warehouse", "pos_profile"], as_dict=True
+		)
+		# rewind to the retired shape: scope columns empty, only a profile name
+		frappe.db.set_value(
+			"POS Package Outlet",
+			row,
+			{"company": None, "warehouse": None, "pos_profile": PROFILE},
+			update_modified=False,
+		)
+		try:
+			self.assertNotIn(LEGACY_PACKAGE, _eligible_package_names(PROFILE))
+			with self.assertRaises(frappe.ValidationError):
+				quote(LEGACY_PACKAGE, [], PROFILE)
+		finally:
+			frappe.db.set_value(
+				"POS Package Outlet",
+				row,
+				{
+					"company": original.company,
+					"warehouse": original.warehouse,
+					"pos_profile": original.pos_profile,
+				},
+				update_modified=False,
+			)
+			frappe.db.commit()
+
+	def test_saving_the_package_lists_every_profile_of_the_outlet(self):
+		pkg = frappe.get_doc("POS Package", PACKAGE)
+		pkg.save(ignore_permissions=True)
+
+		outlet = pkg.outlets[0]
+		self.assertEqual(outlet.status, "Available on all profiles for this warehouse")
+		self.assertEqual(outlet.pos_profile, ", ".join(sorted([PROFILE, PROFILE_2])))
+
+
+class TestRandomGroupKeys(unittest.TestCase):
+	"""Blank group keys must become unique random ids — identical labels must
+	never collide. (validate_groups requires options per group at save, so an
+	API writer pairs options with typed keys; random fill is the Desk form's
+	path, exercised here at the unit level.)"""
+
+	def test_blank_keys_get_unique_random_ids(self):
+		from pos_next.pos_next.doctype.pos_package.pos_package import GROUP_KEY_PATTERN
+
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Package",
+				"package_name": "_PNXT Random Keys Package",
+				"company": COMPANY,
+				"parent_item": PARENT_ITEM,
+				"base_price": 1000.0,
+				# identical labels on purpose: keys must still be unique
+				"groups": [
+					{"label": "Sama", "min_qty": 0, "max_qty": 1},
+					{"label": "Sama", "min_qty": 0, "max_qty": 1},
+				],
+			}
+		)
+		doc.assign_group_keys()
+		keys = [g.group_key for g in doc.groups]
+		self.assertEqual(len(set(keys)), 2)
+		for key in keys:
+			self.assertRegex(key, r"^[a-z0-9_]+$")
+			self.assertTrue(GROUP_KEY_PATTERN.match(key))
+			self.assertNotIn("sama", key)
 
 
 if __name__ == "__main__":
