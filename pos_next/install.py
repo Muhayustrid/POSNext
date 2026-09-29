@@ -284,15 +284,6 @@ CUSTOM_FIELDS = {
 			"description": "Internal: JSON list of Pricing Rules applied to this item row. Lets the discount code gate exempt offer-driven discounts from the HQ code requirement.",
 		},
 	],
-	"Sales Invoice Reference": [
-		{
-			"fieldname": "pos_invoice",
-			"label": "POS Invoice",
-			"fieldtype": "Link",
-			"options": "POS Invoice",
-			"insert_after": "sales_invoice",
-		},
-	],
 	# One-time per-outlet payback ("balik modal") target. Monthly targets live
 	# in the POS Monthly Target doctype (they need per-month history); this pair
 	# is a single attribute of the outlet itself, so it belongs on the master.
@@ -311,16 +302,6 @@ CUSTOM_FIELDS = {
 			"fieldtype": "Date",
 			"insert_after": "pos_overall_sales_target",
 			"description": "Count cumulative sales from this date. Empty = all time.",
-		},
-	],
-	"Offline Invoice Sync": [
-		{
-			"fieldname": "pos_invoice",
-			"label": "POS Invoice",
-			"fieldtype": "Link",
-			"options": "POS Invoice",
-			"insert_after": "sales_invoice",
-			"read_only": 1,
 		},
 	],
 	"POS Profile": [
