@@ -5,6 +5,10 @@ from frappe.model.document import Document
 
 
 class POSPackageOutlet(Document):
-	"""Restricts a POS Package to a specific POS Profile."""
+	"""Outlet scope of a POS Package: Company + Warehouse.
+
+	An outlet applies to every POS Profile sharing that pair; ``pos_profile``
+	is a read-only listing of those profiles, never the scoping key.
+	"""
 
 	pass

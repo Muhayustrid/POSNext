@@ -149,8 +149,8 @@ def _eligible_package_names(pos_profile, on_date=None):
 	"""Names of enabled, in-date packages available on this POS Profile.
 
 	A package with no outlet rows is available to every profile of its package
-	company (legacy behaviour); otherwise it is scoped by outlet Company +
-	Warehouse — an outlet applies to every POS Profile sharing that pair.
+	company; otherwise it is scoped by outlet Company + Warehouse — an outlet
+	applies to every POS Profile sharing that pair.
 	"""
 	profile = frappe.db.get_value(
 		"POS Profile", pos_profile, ["name", "company", "warehouse"], as_dict=True
@@ -174,17 +174,15 @@ def _eligible_package_names(pos_profile, on_date=None):
 	outlet_rows = frappe.get_all(
 		"POS Package Outlet",
 		filters={"parent": ["in", names], "parenttype": "POS Package"},
-		fields=["parent", "company", "warehouse", "pos_profile", "enabled"],
+		fields=["parent", "company", "warehouse", "enabled"],
 	)
 	restricted = {row.parent for row in outlet_rows}
 	allowed = {
 		row.parent
 		for row in outlet_rows
 		if row.enabled
-		and (
-			(row.company == profile.company and (row.warehouse or "") == (profile.warehouse or ""))
-			or row.pos_profile == profile.name
-		)
+		and row.company == profile.company
+		and (row.warehouse or "") == (profile.warehouse or "")
 	}
 
 	def _is_available(p):
