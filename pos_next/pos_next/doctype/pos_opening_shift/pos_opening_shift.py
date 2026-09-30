@@ -16,6 +16,14 @@ class POSOpeningShift(Document):
 
 		apply_schedule_snapshot(self)
 
+	def autoname(self):
+		# set_new_name runs this before meta autoname and only while the name
+		# is unset: a configured series (per-profile row, then global) takes
+		# over; empty keeps the POSA-OS meta pattern.
+		from pos_next.naming_series import apply_naming_series_setting
+
+		apply_naming_series_setting(self)
+
 	def validate(self):
 		# Any save of an existing shift (incl. the closing link) discards
 		# client edits to the snapshot — the deadline can only be changed by

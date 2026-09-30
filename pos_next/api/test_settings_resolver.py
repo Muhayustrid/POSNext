@@ -73,6 +73,14 @@ class TestSettingsResolver(FrappeTestCase):
 			expected = None if df.fieldtype == "Link" and not df.default else _coerce(df, df.default)
 			self.assertEqual(settings[fieldname], expected, fieldname)
 
+	def test_naming_series_fields_are_global_only(self):
+		for fieldname in (
+			"pos_invoice_naming_series",
+			"pos_opening_shift_naming_series",
+			"pos_closing_shift_naming_series",
+		):
+			self.assertNotIn(fieldname, _mirror_fields(), fieldname)
+
 	def test_get_pos_settings_does_not_auto_create(self):
 		result = get_pos_settings_doclevel(NO_PROFILE)
 		self.assertTrue(result)

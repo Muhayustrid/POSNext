@@ -15,6 +15,7 @@ from frappe import _
 from frappe.utils import cint, flt
 
 from pos_next.invoice_type import is_pos_next_owned
+from pos_next.naming_series import apply_naming_series_setting
 
 
 def _find_paid_bundle_row_for_free(si_doc, free_row):
@@ -390,3 +391,9 @@ class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
 				)
 			return
 		super().validate_pos_opening_entry()
+
+	def autoname(self):
+		# Runs at insert only, before the meta naming_series rule, for every
+		# creation path (checkout, offline sync, returns): a configured series
+		# (per-profile row, then global) overrides the meta naming_series.
+		apply_naming_series_setting(self)

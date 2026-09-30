@@ -39,6 +39,14 @@ def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
 
 
 class POSClosingShift(Document):
+	def autoname(self):
+		# set_new_name runs this before meta autoname and only while the name
+		# is unset: a configured series (per-profile row, then global) takes
+		# over; empty keeps the POSA-CS meta pattern.
+		from pos_next.naming_series import apply_naming_series_setting
+
+		apply_naming_series_setting(self)
+
 	def validate(self):
 		# COR-BE-06: the duplicate check must be a locking read (SELECT ... FOR
 		# UPDATE). submit_closing_shift holds the opening row's lock while this

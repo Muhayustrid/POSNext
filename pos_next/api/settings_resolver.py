@@ -16,6 +16,9 @@ GLOBAL_FIELDS = (
 	"overall_target_basis",
 	"allow_negative_stock",
 	"allowed_locales",
+	"pos_invoice_naming_series",
+	"pos_opening_shift_naming_series",
+	"pos_closing_shift_naming_series",
 )
 
 _NON_DATA_TYPES = frozenset(

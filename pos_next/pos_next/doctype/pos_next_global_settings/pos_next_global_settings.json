@@ -9,6 +9,10 @@
   "invoice_type",
   "monthly_target_basis",
   "overall_target_basis",
+  "section_break_naming",
+  "pos_invoice_naming_series",
+  "pos_opening_shift_naming_series",
+  "pos_closing_shift_naming_series",
   "section_break_negative_stock",
   "allow_negative_stock",
   "section_break_localization",
@@ -147,6 +151,29 @@
    "fieldtype": "Select",
    "label": "Overall (Payback) Target Basis",
    "options": "Net Sales\nGross Profit\nNet Profit"
+  },
+  {
+   "fieldname": "section_break_naming",
+   "fieldtype": "Section Break",
+   "label": "Naming Series"
+  },
+  {
+   "description": "Frappe naming series for new POS Invoices, e.g. INV-.YYYY.-. Empty keeps the default ACC-PSINV-.YYYY.-.",
+   "fieldname": "pos_invoice_naming_series",
+   "fieldtype": "Data",
+   "label": "POS Invoice Naming Series"
+  },
+  {
+   "description": "Frappe naming series for POS Opening Shift documents, e.g. OS-.YY.-.#######. Empty keeps the default POSA-OS-.YY.-.#######.",
+   "fieldname": "pos_opening_shift_naming_series",
+   "fieldtype": "Data",
+   "label": "Opening Shift Naming Series"
+  },
+  {
+   "description": "Frappe naming series for POS Closing Shift documents, e.g. CS-.YY.-.#######. Empty keeps the default POSA-CS-.YY.-.#######.",
+   "fieldname": "pos_closing_shift_naming_series",
+   "fieldtype": "Data",
+   "label": "Closing Shift Naming Series"
   },
   {
    "fieldname": "section_break_negative_stock",
@@ -870,7 +897,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-22 20:45:00.000000",
+ "modified": "2026-09-30 01:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",
