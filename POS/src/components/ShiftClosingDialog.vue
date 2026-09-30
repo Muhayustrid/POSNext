@@ -284,7 +284,7 @@
 									>
 										<span>{{ invoice.customer }}</span>
 										<span class="text-gray-500">{{
-											formatTime(invoice.posting_date)
+											formatTime(invoice.posting_time)
 										}}</span>
 									</div>
 								</div>
@@ -380,7 +380,7 @@
 											<td
 												class="text-start px-6 py-4 whitespace-nowrap text-sm text-gray-500"
 											>
-												{{ formatTime(invoice.posting_date) }}
+												{{ formatTime(invoice.posting_time) }}
 											</td>
 											<td class="text-start px-6 py-4 whitespace-nowrap">
 												<span

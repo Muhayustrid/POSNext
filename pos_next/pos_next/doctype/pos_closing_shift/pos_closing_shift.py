@@ -145,7 +145,7 @@ class POSClosingShift(Document):
 			)
 			self.append(
 				"pos_transactions",
-				{k: v for k, v in txn.items() if k not in ("is_return", "return_against")},
+				{k: v for k, v in txn.items() if k not in ("is_return", "return_against", "posting_time")},
 			)
 		self.grand_total = summary["grand_total"]
 		self.net_total = summary["net_total"]
@@ -429,6 +429,7 @@ INVOICE_HEADER_FIELDS = (
 	"name",
 	"customer",
 	"posting_date",
+	"posting_time",
 	"currency",
 	"conversion_rate",
 	"plc_conversion_rate",
@@ -822,7 +823,7 @@ def make_closing_shift_from_opening(opening_shift):
 	closing_shift.set(
 		"pos_transactions",
 		[
-			{k: v for k, v in txn.items() if k not in ("is_return", "return_against")}
+			{k: v for k, v in txn.items() if k not in ("is_return", "return_against", "posting_time")}
 			for txn in pos_transactions
 		],
 	)
