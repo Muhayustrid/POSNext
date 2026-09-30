@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+// Print-driver hooks (USB/serial status polling) can legitimately take a few
+// seconds each; the 10s default only trips when the suite runs while the dev
+// box is busy with parallel docker tests.
+vi.setConfig({ hookTimeout: 30_000 })
+
 vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn().mockResolvedValue({}) }))
 vi.mock("@/utils/logger", () => ({
 	logger: {
