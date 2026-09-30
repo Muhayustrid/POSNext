@@ -1,6 +1,6 @@
 import { useShift, shiftState } from "@/composables/useShift";
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency";
-import { computeScheduleStatus } from "@/utils/shiftSchedule";
+import { computeScheduleStatus, isSameScheduleStatus } from "@/utils/shiftSchedule";
 import { formatShiftDuration } from "@/utils/shiftDuration";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
@@ -49,7 +49,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	 */
 	function updateScheduleStatus() {
 		const state = shiftState.value;
-		scheduleStatus.value =
+		const next =
 			state.isOpen && state.pos_opening_shift
 				? computeScheduleStatus(state.pos_opening_shift, {
 						serverNowMs: state._serverNowMs,
@@ -57,6 +57,12 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 						localNowMs: Date.now(),
 					})
 				: null;
+		// Assign only on real transitions: identical payloads must not re-fire
+		// the schedule watchers (the forced-close dialog used to re-pin itself
+		// every second and could not be dismissed).
+		if (!isSameScheduleStatus(scheduleStatus.value, next)) {
+			scheduleStatus.value = next;
+		}
 	}
 
 	function updateCurrentTime() {

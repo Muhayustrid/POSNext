@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { computeScheduleStatus, isScheduleBlocking, parseServerDatetime } from "./shiftSchedule"
+import {
+	computeScheduleStatus,
+	isSameScheduleStatus,
+	isScheduleBlocking,
+	parseServerDatetime,
+} from "./shiftSchedule"
 
 // Shift opened "2026-09-07 21:00:00" server time; tests anchor the local
 // clock 5 seconds after the server payload was received.
@@ -91,5 +96,28 @@ describe("isScheduleBlocking", () => {
 		expect(isScheduleBlocking({ enforce: true, expired: false })).toBe(false)
 		expect(isScheduleBlocking({ enforce: false, expired: true })).toBe(false)
 		expect(isScheduleBlocking(null)).toBe(false)
+	})
+})
+
+describe("isSameScheduleStatus", () => {
+	const status = { enabled: true, enforce: true, deadlineMs: 99, expired: false, warning: true, minutesLeft: 5 }
+
+	it("treats equal payloads as same regardless of object identity", () => {
+		expect(isSameScheduleStatus(status, { ...status })).toBe(true)
+	})
+
+	it("is same when both are null", () => {
+		expect(isSameScheduleStatus(null, null)).toBe(true)
+	})
+
+	it("is different when one side is null", () => {
+		expect(isSameScheduleStatus(status, null)).toBe(false)
+		expect(isSameScheduleStatus(null, status)).toBe(false)
+	})
+
+	it("is different when any field changes", () => {
+		expect(isSameScheduleStatus(status, { ...status, expired: true })).toBe(false)
+		expect(isSameScheduleStatus(status, { ...status, minutesLeft: 4 })).toBe(false)
+		expect(isSameScheduleStatus(status, { ...status, warning: false })).toBe(false)
 	})
 })

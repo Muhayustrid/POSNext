@@ -62,3 +62,20 @@ export function computeScheduleStatus(shift, clock) {
 export function isScheduleBlocking(status) {
 	return !!(status && status.enforce && status.expired)
 }
+
+const SCHEDULE_STATUS_FIELDS = ["enabled", "enforce", "deadlineMs", "expired", "warning", "minutesLeft"]
+
+/**
+ * True when two schedule-status payloads carry the same meaning.
+ *
+ * The store recomputes the status every second; without this check every
+ * tick produced a fresh object and re-fired every `watch(scheduleStatus, ...)`
+ * — the forced-close dialog re-pinned itself each second and could not be
+ * dismissed. All fields are coarse (booleans, minutes), so identical
+ * consecutive payloads are the norm and only real transitions propagate.
+ */
+export function isSameScheduleStatus(a, b) {
+	if (a === b) return true
+	if (!a || !b) return false
+	return SCHEDULE_STATUS_FIELDS.every((field) => a[field] === b[field])
+}
