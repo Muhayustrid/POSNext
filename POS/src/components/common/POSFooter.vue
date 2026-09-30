@@ -23,22 +23,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import { call } from "@/utils/apiWrapper";
-import { __ } from "@/utils/translation";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue"
+import { call } from "@/utils/apiWrapper"
+import { __ } from "@/utils/translation"
 
 // Component state
-const footerText = ref(__("Powered by"));
-const linkText = ref("BrainWise");
-const footerLink = ref("https://nexus.brainwise.me");
-const footerRoot = ref(null);
-const config = ref({});
-const serverValidationEnabled = ref(true);
+const footerText = ref(__("Powered by"))
+const linkText = ref("BrainWise")
+const footerLink = ref("https://nexus.brainwise.me")
+const footerRoot = ref(null)
+const config = ref({})
+const serverValidationEnabled = ref(true)
 
 // Dynamic class and style to prevent easy CSS targeting
-const componentId = Math.random().toString(36).substring(7);
-const footerClass = ref(`pos-footer-component pos-footer-component-${componentId}`);
-const brandSignature = computed(() => `BrainWise-${componentId}`);
+const componentId = Math.random().toString(36).substring(7)
+const footerClass = ref(
+	`pos-footer-component pos-footer-component-${componentId}`,
+)
+const brandSignature = computed(() => `BrainWise-${componentId}`)
 
 const footerStyle = computed(() => ({
 	padding: config.value._s?.p || "12px 20px",
@@ -51,71 +53,71 @@ const footerStyle = computed(() => ({
 	WebkitUserSelect: "none",
 	MozUserSelect: "none",
 	msUserSelect: "none",
-}));
+}))
 
 // Protection mechanisms
-let integrityTimer = null;
-let visibilityObserver = null;
-let styleElement = null;
-let originalParent = null;
-let originalNextSibling = null;
-let validationTimer = null;
+let integrityTimer = null
+let visibilityObserver = null
+let styleElement = null
+let originalParent = null
+let originalNextSibling = null
+let validationTimer = null
 
 // Load branding configuration from backend
 const loadBrandingConfig = async () => {
 	try {
-		const response = await call("pos_next.api.branding.get_branding_config");
+		const response = await call("pos_next.api.branding.get_branding_config")
 
 		if (response) {
-			config.value = response;
+			config.value = response
 
 			// Decode base64 encoded values
-			footerText.value = atob(response._t || "");
-			linkText.value = atob(response._l || "");
-			footerLink.value = atob(response._u || "");
-			serverValidationEnabled.value = response._v || false;
+			footerText.value = atob(response._t || "")
+			linkText.value = atob(response._l || "")
+			footerLink.value = atob(response._u || "")
+			serverValidationEnabled.value = response._v || false
 
 			// Update check interval if provided
 			if (response._i && integrityTimer) {
-				clearInterval(integrityTimer);
-				integrityTimer = setInterval(checkIntegrity, response._i);
+				clearInterval(integrityTimer)
+				integrityTimer = setInterval(checkIntegrity, response._i)
 			}
 
 			// Start server validation if enabled
 			if (serverValidationEnabled.value) {
-				startServerValidation();
+				startServerValidation()
 			}
 		}
 	} catch (error) {
-		console.error("[BrainWise] Failed to load branding config:", error);
+		console.error("[BrainWise] Failed to load branding config:", error)
 		// Use fallback values
-		footerText.value = "Powered by";
-		linkText.value = "BrainWise";
-		footerLink.value = "https://nexus.brainwise.me";
+		footerText.value = "Powered by"
+		linkText.value = "BrainWise"
+		footerLink.value = "https://nexus.brainwise.me"
 	}
-};
+}
 
 // Server-side validation
 const validateWithServer = async () => {
-	if (!serverValidationEnabled.value) return;
+	if (!serverValidationEnabled.value) return
 
 	try {
 		await call("pos_next.api.branding.validate_branding", {
 			client_signature: config.value._sig,
 			brand_name: linkText.value,
 			brand_url: footerLink.value,
-		});
+		})
 	} catch (error) {
-		console.error("[BrainWise] Server validation failed:", error);
+		console.error("[BrainWise] Server validation failed:", error)
 	}
-};
+}
 
 const startServerValidation = () => {
 	// Validate with server every 5 minutes
-	validationTimer = setInterval(validateWithServer, 300000);
+	validationTimer = setInterval(validateWithServer, 300000)
 	// Initial validation
-	validateWithServer();
-};
+	validateWithServer()
+}
 
 // Log client-side events to server
 const logClientEvent = async (eventType, details = {}) => {
@@ -127,54 +129,65 @@ const logClientEvent = async (eventType, details = {}) => {
 				timestamp: Date.now(),
 				component_id: componentId,
 			}),
-		});
+		})
 	} catch (error) {
-		console.error("[BrainWise] Failed to log event:", error);
+		console.error("[BrainWise] Failed to log event:", error)
 	}
-};
+}
 
 const ensureBranding = () => {
-	if (!footerRoot.value) return;
+	if (!footerRoot.value) return
 
-	const expectedBrand = atob(config.value._l || btoa("BrainWise"));
-	const expectedUrl = atob(config.value._u || btoa("https://nexus.brainwise.me"));
-	const expectedText = atob(config.value._t || btoa("Powered by"));
+	const expectedBrand = atob(config.value._l || btoa("BrainWise"))
+	const expectedUrl = atob(
+		config.value._u || btoa("https://nexus.brainwise.me"),
+	)
+	const expectedText = atob(config.value._t || btoa("Powered by"))
 
 	// Check if values have been tampered
 	if (linkText.value !== expectedBrand) {
-		linkText.value = expectedBrand;
-		logClientEvent("modification", { field: "brand_name", attempted_value: linkText.value });
+		linkText.value = expectedBrand
+		logClientEvent("modification", {
+			field: "brand_name",
+			attempted_value: linkText.value,
+		})
 	}
 	if (footerLink.value !== expectedUrl) {
-		footerLink.value = expectedUrl;
-		logClientEvent("modification", { field: "brand_url", attempted_value: footerLink.value });
+		footerLink.value = expectedUrl
+		logClientEvent("modification", {
+			field: "brand_url",
+			attempted_value: footerLink.value,
+		})
 	}
 	if (footerText.value !== expectedText) {
-		footerText.value = expectedText;
-		logClientEvent("modification", { field: "brand_text", attempted_value: footerText.value });
+		footerText.value = expectedText
+		logClientEvent("modification", {
+			field: "brand_text",
+			attempted_value: footerText.value,
+		})
 	}
 
-	const linkEl = footerRoot.value.querySelector(".footer-link");
+	const linkEl = footerRoot.value.querySelector(".footer-link")
 	if (linkEl) {
 		if (linkEl.textContent.trim() !== expectedBrand) {
-			linkEl.textContent = expectedBrand;
+			linkEl.textContent = expectedBrand
 		}
 		if (linkEl.getAttribute("href") !== expectedUrl) {
-			linkEl.setAttribute("href", expectedUrl);
+			linkEl.setAttribute("href", expectedUrl)
 		}
-		linkEl.setAttribute("rel", "noopener noreferrer");
-		linkEl.setAttribute("target", "_blank");
+		linkEl.setAttribute("rel", "noopener noreferrer")
+		linkEl.setAttribute("target", "_blank")
 	}
 
-	const textEl = footerRoot.value.querySelector(".footer-text");
+	const textEl = footerRoot.value.querySelector(".footer-text")
 	if (textEl && textEl.textContent.trim() !== expectedText) {
-		textEl.textContent = expectedText;
+		textEl.textContent = expectedText
 	}
-};
+}
 
 const ensureStylePresence = () => {
 	if (!styleElement || !document.head.contains(styleElement)) {
-		styleElement = document.createElement("style");
+		styleElement = document.createElement("style")
 		styleElement.textContent = `
 			.pos-footer-component {
 				pointer-events: auto !important;
@@ -199,158 +212,163 @@ const ensureStylePresence = () => {
 				color: #2563eb;
 				text-decoration: underline;
 			}
-		`;
-		document.head.appendChild(styleElement);
+		`
+		document.head.appendChild(styleElement)
 	}
-};
+}
 
 const restoreFooter = () => {
-	if (!footerRoot.value) return;
+	if (!footerRoot.value) return
 
-	const rootEl = footerRoot.value;
-	const isInDom = document.body.contains(rootEl);
+	const rootEl = footerRoot.value
+	const isInDom = document.body.contains(rootEl)
 
 	if (!isInDom) {
-		logClientEvent("removal", { restored: true });
+		logClientEvent("removal", { restored: true })
 
 		const parentTarget =
-			originalParent && document.contains(originalParent) ? originalParent : document.body;
+			originalParent && document.contains(originalParent)
+				? originalParent
+				: document.body
 
-		if (originalNextSibling && originalNextSibling.parentNode === parentTarget) {
-			parentTarget.insertBefore(rootEl, originalNextSibling);
+		if (
+			originalNextSibling &&
+			originalNextSibling.parentNode === parentTarget
+		) {
+			parentTarget.insertBefore(rootEl, originalNextSibling)
 		} else {
-			parentTarget.appendChild(rootEl);
+			parentTarget.appendChild(rootEl)
 		}
 	}
 
-	ensureBranding();
-};
+	ensureBranding()
+}
 
 // Track link clicks
 const handleLinkClick = () => {
-	const timestamp = Date.now();
-	sessionStorage.setItem("_bw_lc", timestamp.toString());
-	logClientEvent("link_click", { url: footerLink.value });
-};
+	const timestamp = Date.now()
+	sessionStorage.setItem("_bw_lc", timestamp.toString())
+	logClientEvent("link_click", { url: footerLink.value })
+}
 
 // Integrity check function
 const checkIntegrity = () => {
-	const elements = document.querySelectorAll(".pos-footer-component");
+	const elements = document.querySelectorAll(".pos-footer-component")
 
 	if (elements.length === 0) {
-		console.warn("[POS System] Footer component integrity check failed");
-		sessionStorage.setItem("_bw_ic", Date.now().toString());
-		logClientEvent("integrity_fail", { reason: "element_not_found" });
-		restoreFooter();
+		console.warn("[POS System] Footer component integrity check failed")
+		sessionStorage.setItem("_bw_ic", Date.now().toString())
+		logClientEvent("integrity_fail", { reason: "element_not_found" })
+		restoreFooter()
 	} else {
 		// Check visibility
 		elements.forEach((el) => {
-			const style = window.getComputedStyle(el);
+			const style = window.getComputedStyle(el)
 			if (
 				style.display === "none" ||
 				style.visibility === "hidden" ||
 				style.opacity === "0"
 			) {
-				console.warn("[POS System] Footer visibility modified");
-				sessionStorage.setItem("_bw_vc", Date.now().toString());
+				console.warn("[POS System] Footer visibility modified")
+				sessionStorage.setItem("_bw_vc", Date.now().toString())
 				logClientEvent("visibility_change", {
 					display: style.display,
 					visibility: style.visibility,
 					opacity: style.opacity,
-				});
-					el.style.display = "flex";
-					el.style.visibility = "visible";
-					el.style.opacity = "1";
-				}
-			});
+				})
+				el.style.display = "flex"
+				el.style.visibility = "visible"
+				el.style.opacity = "1"
+			}
+		})
 	}
 
-	ensureStylePresence();
-	ensureBranding();
-};
+	ensureStylePresence()
+	ensureBranding()
+}
 
 // Mutation observer to detect DOM changes
 const observeFooter = () => {
 	if (typeof MutationObserver !== "undefined") {
-		const targetNode = document.body;
+		const targetNode = document.body
 		const observerConfig = {
 			childList: true,
 			subtree: true,
 			attributes: true,
 			attributeFilter: ["style", "class"],
-		};
+		}
 
 		visibilityObserver = new MutationObserver((mutations) => {
 			mutations.forEach((mutation) => {
 				if (mutation.type === "childList" || mutation.type === "attributes") {
-					const footerExists = document.querySelector(".pos-footer-component");
+					const footerExists = document.querySelector(".pos-footer-component")
 					if (!footerExists && mutation.removedNodes.length > 0) {
-						sessionStorage.setItem("_bw_rm", Date.now().toString());
-						logClientEvent("removal", { mutation_type: mutation.type });
-						restoreFooter();
+						sessionStorage.setItem("_bw_rm", Date.now().toString())
+						logClientEvent("removal", { mutation_type: mutation.type })
+						restoreFooter()
 					}
 					if (
 						mutation.target &&
 						footerRoot.value &&
 						mutation.target === footerRoot.value
 					) {
-						ensureBranding();
+						ensureBranding()
 					}
 				}
-			});
-		});
+			})
+		})
 
-		visibilityObserver.observe(targetNode, observerConfig);
+		visibilityObserver.observe(targetNode, observerConfig)
 	}
-};
+}
 
 // Lifecycle hooks
 onMounted(async () => {
 	// Load configuration from backend
-	await loadBrandingConfig();
+	await loadBrandingConfig()
 
 	// Start integrity checks
-	const checkInterval = config.value._i || 10000;
-	integrityTimer = setInterval(checkIntegrity, checkInterval);
+	const checkInterval = config.value._i || 10000
+	integrityTimer = setInterval(checkIntegrity, checkInterval)
 
 	// Start DOM observation
-	observeFooter();
+	observeFooter()
 
 	// Initial integrity check
-	setTimeout(checkIntegrity, 1000);
+	setTimeout(checkIntegrity, 1000)
 
 	// Add protective CSS dynamically
-	ensureStylePresence();
+	ensureStylePresence()
 
 	if (footerRoot.value) {
-		originalParent = footerRoot.value.parentNode;
-		originalNextSibling = footerRoot.value.nextSibling;
-		ensureBranding();
+		originalParent = footerRoot.value.parentNode
+		originalNextSibling = footerRoot.value.nextSibling
+		ensureBranding()
 	}
 
 	if (typeof window !== "undefined") {
-		window.addEventListener("focus", ensureBranding, { passive: true });
+		window.addEventListener("focus", ensureBranding, { passive: true })
 	}
-});
+})
 
 onBeforeUnmount(() => {
 	// Cleanup
 	if (integrityTimer) {
-		clearInterval(integrityTimer);
+		clearInterval(integrityTimer)
 	}
 	if (validationTimer) {
-		clearInterval(validationTimer);
+		clearInterval(validationTimer)
 	}
 	if (visibilityObserver) {
-		visibilityObserver.disconnect();
+		visibilityObserver.disconnect()
 	}
 	if (styleElement && document.head.contains(styleElement)) {
-		document.head.removeChild(styleElement);
+		document.head.removeChild(styleElement)
 	}
 	if (typeof window !== "undefined") {
-		window.removeEventListener("focus", ensureBranding);
+		window.removeEventListener("focus", ensureBranding)
 	}
-});
+})
 </script>
 
 <style scoped>
