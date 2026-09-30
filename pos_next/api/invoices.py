@@ -861,6 +861,25 @@ def _validate_item_rates(
 		# attributed rows are offer-driven, not manual; free rows and
 		# package rows are priced server-side elsewhere; returns mirror the
 		# original invoice's prices.
+		#
+		# EXEMPTION — explicit-discount rows: the client prices a manual
+		# discount as a net rate below the list price while keeping
+		# discount_percentage/amount populated, so without this exemption
+		# every code-authorized discount lands in the rate-edit lane and is
+		# thrown out on profiles where allow_user_to_edit_rate is off — that
+		# gate's own default. A discount row is guarded by the discount code
+		# gate instead (overrides/discount_code.py — code required at validate
+		# AND submit), so the exemption moves nothing past security: the row
+		# still cannot submit without a valid code. A row claiming discount
+		# fields while also carrying the manual-edit flag stays in the rate
+		# lane, and a pure rate hack (rate cut with zero discount fields)
+		# keeps being caught here.
+		discount_only_row = not cint(
+			item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0
+		) and (
+			flt(item.get("discount_percentage") or 0) > 0
+			or flt(item.get("discount_amount") or 0) > 0
+		)
 		server_plr = _resolve_server_price_list_rate(server_prices, item)
 		server_detected = (
 			bool(pos_profile)
@@ -868,6 +887,7 @@ def _validate_item_rates(
 			and not item_rule_names
 			and not cint(item.get("is_free_item") or 0)
 			and not item.get("pos_package")
+			and not discount_only_row
 			and server_plr > 0
 			and 0 < item_rate < flt(server_plr, rate_precision)
 		)

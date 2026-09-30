@@ -14,6 +14,7 @@ from unittest import mock
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import flt
 
 from pos_next.api.invoices import (
 	_sync_existing_invoice,
@@ -433,6 +434,176 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		self.assertEqual(by_name[si.name]["doctype"], "Sales Invoice")
 		self.assertTrue(by_name[posi_name]["items"])
 		self.assertTrue(by_name[si.name]["items"])
+
+
+class TestDiscountRowRateGateInteraction(FrappeTestCase):
+	"""DECISION 30 Sep: with ``allow_user_to_edit_rate`` off (the default),
+	an explicit-discount row (net rate below list, discount fields populated,
+	manual flag 0) is the DISCOUNT channel — guarded by the discount code
+	gate, not by the rate-edit gate. The checkout prices a discount as a net
+	rate, so without the server_detected exemption every code-authorized
+	discount was unsubmittable on default settings. The rate lane must keep
+	catching a pure rate hack (rate cut with NO discount fields) and a row
+	that wears the manual-edit flag."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.original_rate_edit = frappe.db.get_single_value(
+			"POS Next Global Settings", "allow_user_to_edit_rate"
+		)
+		# the decision presumes the gate's own default (off); pin it so the
+		# tests mean the same thing on every site
+		frappe.db.set_single_value("POS Next Global Settings", "allow_user_to_edit_rate", 0)
+		cls._code_name = None
+		if not frappe.db.exists("POS Discount Confirmation Code", {"code": "TSTRATE8"}):
+			doc = frappe.get_doc(
+				{
+					"doctype": "POS Discount Confirmation Code",
+					"code": "TSTRATE8",
+					"status": "Active",
+					"company_scope": "All Outlets",
+				}
+			).insert(ignore_permissions=True)
+			cls._code_name = doc.name
+		# The rate gate needs a SERVER price basis: without an Item Price the
+		# server_plr is 0 and even a bare rate hack has nothing to be caught
+		# against. Fixture deleted in tearDownClass.
+		cls._item_price_name = None
+		probe = frappe.db.get_value(
+			"POS Profile",
+			_PROFILE_FILTER,
+			["name", "company", "warehouse", "selling_price_list"],
+			as_dict=True,
+			order_by="creation asc",
+		)
+		cls.profile = probe
+		cls.item = frappe.get_all(
+			"Item",
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			pluck="name",
+			limit=1,
+		)[0]
+		cls.stock_uom = frappe.db.get_value("Item", cls.item, "stock_uom")
+		existing = frappe.db.exists(
+			"Item Price",
+			{
+				"item_code": cls.item,
+				"price_list": probe.selling_price_list,
+				"price_list_rate": 100,
+			},
+		)
+		if existing:
+			cls._item_price_name = None
+		else:
+			ip = frappe.get_doc(
+				{
+					"doctype": "Item Price",
+					"item_code": cls.item,
+					"price_list": probe.selling_price_list,
+					"uom": cls.stock_uom,
+					"price_list_rate": 100,
+				}
+			).insert(ignore_permissions=True)
+			cls._item_price_name = ip.name
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		if cls._code_name:
+			frappe.delete_doc(
+				"POS Discount Confirmation Code", cls._code_name, force=1, ignore_permissions=True
+			)
+		if cls._item_price_name:
+			frappe.delete_doc("Item Price", cls._item_price_name, force=1, ignore_permissions=True)
+		frappe.db.set_single_value(
+			"POS Next Global Settings",
+			"allow_user_to_edit_rate",
+			cls.original_rate_edit or 0,
+		)
+		frappe.db.commit()
+		super().tearDownClass()
+
+	def setUp(self):
+		self.case = TestSubmitInvoicePOSIMode()
+		self.case.setUp()
+
+	def tearDown(self):
+		self.case.tearDown()
+
+	def _discounted_payload(self, with_code=True):
+		item = {
+			"item_code": self.case.item,
+			"qty": 1,
+			"rate": 90,
+			"price_list_rate": 100,
+			"uom": self.case_stock_uom(),
+			"discount_percentage": 10,
+			"discount_amount": 10,
+			"warehouse": self.case.profile.warehouse,
+		}
+		overrides = {
+			"items": [item],
+			"payments": [{"mode_of_payment": self.case.mode[0], "amount": 90}],
+		}
+		if with_code:
+			overrides["discount_confirmation_code"] = "TSTRATE8"
+		return self.case._payload(**overrides)
+
+	def case_stock_uom(self):
+		return frappe.db.get_value("Item", self.case.item, "stock_uom")
+
+	def test_discount_row_with_code_submits_when_rate_edit_disabled(self):
+		result = submit_invoice(invoice=self._discounted_payload(with_code=True))
+		self.assertEqual(result.get("status"), 1)
+		name = result.get("name")
+		row = frappe.db.get_value(
+			"POS Invoice Item",
+			{"parent": name, "parenttype": "POS Invoice"},
+			["rate", "price_list_rate", "discount_percentage"],
+			as_dict=True,
+		)
+		self.assertEqual(flt(row.rate), 90)
+		self.assertEqual(flt(row.price_list_rate), 100)
+		self.assertEqual(flt(row.discount_percentage), 10)
+		self.assertEqual(flt(frappe.db.get_value("POS Invoice", name, "grand_total")), 90)
+		self.assertEqual(
+			frappe.db.get_value("POS Invoice", name, "discount_confirmation_code"), "TSTRATE8"
+		)
+		self.case._created.append(name)
+
+	def test_discount_row_without_code_throws_discount_gate_not_rate_gate(self):
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			submit_invoice(invoice=self._discounted_payload(with_code=False))
+		message = str(ctx.exception)
+		self.assertNotIn("Rate editing is not allowed", message)
+		self.assertIn("discount code from head office", message)
+
+	def test_rate_hack_without_discount_fields_still_hits_rate_gate(self):
+		payload = self.case._payload(
+			items=[
+				{
+					"item_code": self.case.item,
+					"qty": 1,
+					"rate": 50,
+					"price_list_rate": 50,
+					"uom": self.case_stock_uom(),
+					"warehouse": self.case.profile.warehouse,
+				}
+			],
+			payments=[{"mode_of_payment": self.case.mode[0], "amount": 50}],
+		)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			submit_invoice(invoice=payload)
+		self.assertIn("Rate editing is not allowed", str(ctx.exception))
+
+	def test_discount_fields_with_manual_flag_still_hits_rate_gate(self):
+		payload = self._discounted_payload(with_code=True)
+		payload["items"][0]["rate"] = 50
+		payload["items"][0]["is_rate_manually_edited"] = 1
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			submit_invoice(invoice=payload)
+		self.assertIn("Rate editing is not allowed", str(ctx.exception))
 
 
 class TestSubmitInvoiceSalesOrderPayload(FrappeTestCase):
