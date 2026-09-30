@@ -224,16 +224,12 @@ doc_events = {
 # Scheduled Tasks
 # ---------------
 
+# Branding monitor jobs are intentionally unscheduled: the tampering alerts
+# spammed every System Manager's notifications. Task functions stay in
+# pos_next/tasks/branding_monitor.py (still covered by tests).
 scheduler_events = {
-	"hourly": [
-		"pos_next.tasks.branding_monitor.monitor_branding_integrity",
-	],
 	"daily": [
 		"pos_next.tasks.cleanup_expired_promotions.cleanup_expired_promotions",
-		"pos_next.tasks.branding_monitor.validate_all_active_sessions",
-	],
-	"monthly": [
-		"pos_next.tasks.branding_monitor.reset_tampering_counter",
 	],
 }
 

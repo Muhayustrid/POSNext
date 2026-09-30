@@ -47,16 +47,10 @@ const footerStyle = computed(() => ({
 	textAlign: config.value._s?.ta || "center",
 	fontSize: config.value._s?.fs || "13px",
 	color: config.value._s?.c || "#6b7280",
-	zIndex: config.value._s?.z || 100,
 	userSelect: "none",
 	WebkitUserSelect: "none",
 	MozUserSelect: "none",
 	msUserSelect: "none",
-	position: "fixed",
-	bottom: "0",
-	left: "0",
-	right: "0",
-	width: "100%",
 }));
 
 // Protection mechanisms
@@ -185,10 +179,6 @@ const ensureStylePresence = () => {
 			.pos-footer-component {
 				pointer-events: auto !important;
 				min-height: 45px;
-				position: fixed !important;
-				bottom: 0 !important;
-				left: 0 !important;
-				right: 0 !important;
 			}
 			.pos-footer-component .footer-content {
 				display: flex;
@@ -268,18 +258,11 @@ const checkIntegrity = () => {
 					visibility: style.visibility,
 					opacity: style.opacity,
 				});
-				el.style.display = "flex";
-				el.style.visibility = "visible";
-				el.style.opacity = "1";
-			}
-			// Ensure position stays fixed
-			if (style.position !== "fixed") {
-				el.style.position = "fixed";
-				el.style.bottom = "0";
-				el.style.left = "0";
-				el.style.right = "0";
-			}
-		});
+					el.style.display = "flex";
+					el.style.visibility = "visible";
+					el.style.opacity = "1";
+				}
+			});
 	}
 
 	ensureStylePresence();
