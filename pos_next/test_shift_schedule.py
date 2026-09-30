@@ -485,9 +485,13 @@ class TestBackdateExemption(unittest.TestCase):
 		)
 		frappe.flags.pos_next_backdate_entry = True
 		try:
+			# evaluate nowdate() outside the patch: it patches the shared
+			# frappe.db.get_value, and nowdate()'s System Settings read must
+			# not see the mocked shift row while Frappe loads its meta
+			today, tomorrow = nowdate(), add_days(nowdate(), 1)
 			with patch("pos_next.shift_schedule.frappe.db.get_value", return_value=row):
-				self.assertTrue(_backdate_exempt(self._doc(nowdate()), "POSA-OS-0001"))
-				self.assertFalse(_backdate_exempt(self._doc(add_days(nowdate(), 1)), "POSA-OS-0001"))
+				self.assertTrue(_backdate_exempt(self._doc(today), "POSA-OS-0001"))
+				self.assertFalse(_backdate_exempt(self._doc(tomorrow), "POSA-OS-0001"))
 		finally:
 			frappe.flags.pos_next_backdate_entry = None
 
