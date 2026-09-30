@@ -243,8 +243,11 @@ const PaymentDialogStub = defineComponent({
 const ShiftOpeningDialogStub = defineComponent({
 	name: "ShiftOpeningDialog",
 	props: { modelValue: { type: Boolean, default: false } },
-	emits: ["shift-opened"],
-	template: `<button data-test="shift-opened" @click="$emit('shift-opened')"></button>`,
+	emits: ["shift-opened", "close-existing-shift"],
+	template: `<span>
+		<button data-test="shift-opened" @click="$emit('shift-opened')"></button>
+		<button data-test="close-existing-shift" @click="$emit('close-existing-shift', 'POS-OPEN-9')"></button>
+	</span>`,
 })
 
 const ShiftClosingDialogStub = defineComponent({
@@ -538,6 +541,34 @@ describe("shift boundary cart isolation (COR-FE-03)", () => {
 
 		expect(cartStore.posProfile).toBe("Profile 1")
 		expect(cartStore.invoiceItems).toHaveLength(1)
+	})
+})
+
+describe("mobile tab switch (webview regression)", () => {
+	it("switches tabs synchronously in the click, not on a later animation frame", async () => {
+		await mountPOS()
+		expect(uiStore.mobileActiveTab).toBe("items")
+
+		// No await before the assert: the old requestAnimationFrame wrapper
+		// never fired in webviews that suspend rendering, leaving the tab
+		// dead until the next real frame (often forever).
+		wrapper.find('[aria-label="View cart"]').trigger("click")
+		expect(uiStore.mobileActiveTab).toBe("cart")
+
+		await flushPromises()
+		expect(uiStore.mobileActiveTab).toBe("cart")
+	})
+})
+
+describe("close-existing-shift handoff (step 3 Close & Open New)", () => {
+	it("closes the opening dialog and routes the close through the page-level dialog", async () => {
+		await mountPOS({ ShiftOpeningDialog: ShiftOpeningDialogStub })
+
+		await wrapper.find('[data-test="close-existing-shift"]').trigger("click")
+		await flushPromises()
+
+		expect(uiStore.showOpenShiftDialog).toBe(false)
+		expect(uiStore.showCloseShiftDialog).toBe(true)
 	})
 })
 

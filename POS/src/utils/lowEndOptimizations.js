@@ -214,6 +214,34 @@ class DOMBatcher {
 export const domBatcher = new DOMBatcher();
 
 /**
+ * Run a callback via requestAnimationFrame with a setTimeout fallback.
+ *
+ * In paused/occluded webviews (visibilityState stays "visible") rAF callbacks
+ * never fire, which would silently drop user actions. The timeout guarantees
+ * execution; the one-shot guard ensures exactly-once semantics whichever
+ * scheduler wins.
+ *
+ * @param {Function} callback - Function to execute
+ * @param {number} timeoutMs - Fallback delay in milliseconds
+ */
+export function runFrameSafe(callback, timeoutMs = 32) {
+	let executed = false;
+	let rafId = 0;
+	let timerId = null;
+
+	const run = () => {
+		if (executed) return;
+		executed = true;
+		if (rafId) cancelAnimationFrame(rafId);
+		if (timerId !== null) clearTimeout(timerId);
+		callback();
+	};
+
+	timerId = setTimeout(run, timeoutMs);
+	rafId = requestAnimationFrame(run);
+}
+
+/**
  * Optimize click handler for low-end devices
  * Prevents click delays and ensures immediate feedback
  *
@@ -273,12 +301,14 @@ export function createOptimizedClickHandler(handler, options = {}) {
 			// Only trigger if touch was quick and didn't move
 			const touchDuration = Date.now() - touchStartTime;
 			if (!touchMoved && touchDuration < 500) {
-				event.preventDefault(); // Prevent mouse events
 				touchHandled = true;
 				touchEndTime = Date.now();
 
-				// Use requestAnimationFrame for smooth execution
-				requestAnimationFrame(() => {
+				// NOTE: no preventDefault here — the listener is registered
+				// as passive by consumers (e.g. @touchend.passive), so
+				// preventDefault has no effect. The ghost-click guard in the
+				// click handler below covers the duplicate-click case.
+				runFrameSafe(() => {
 					handler(event);
 				});
 			}
@@ -288,9 +318,14 @@ export function createOptimizedClickHandler(handler, options = {}) {
 		},
 
 		click: (event) => {
+			// Lazy ghost-click expiry: reset the flag here instead of a
+			// per-instance setInterval so N items don't leak N timers.
+			if (touchHandled && Date.now() - touchEndTime >= GHOST_CLICK_THRESHOLD) {
+				touchHandled = false;
+			}
+
 			// Prevent ghost clicks after touch events
-			const timeSinceTouchEnd = Date.now() - touchEndTime;
-			if (touchHandled && timeSinceTouchEnd < GHOST_CLICK_THRESHOLD) {
+			if (touchHandled) {
 				// This is a ghost click from a touch event - ignore it
 				event.preventDefault();
 				event.stopPropagation();
@@ -298,23 +333,11 @@ export function createOptimizedClickHandler(handler, options = {}) {
 			}
 
 			// Real click from mouse or non-touch device
-			requestAnimationFrame(() => {
+			runFrameSafe(() => {
 				handler(event);
 			});
 		},
 	};
-
-	// Reset touchHandled flag after GHOST_CLICK_THRESHOLD
-	// to prevent indefinite blocking of mouse clicks
-	const resetTouchHandled = () => {
-		if (touchHandled) {
-			const timeSinceTouchEnd = Date.now() - touchEndTime;
-			if (timeSinceTouchEnd >= GHOST_CLICK_THRESHOLD) {
-				touchHandled = false;
-			}
-		}
-	};
-	setInterval(resetTouchHandled, GHOST_CLICK_THRESHOLD);
 
 	return handlers;
 }

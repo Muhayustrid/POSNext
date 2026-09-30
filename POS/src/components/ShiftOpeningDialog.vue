@@ -193,12 +193,7 @@
 							<Button variant="solid" theme="blue" @click="resumeShift">
 								{{ __("Resume Shift") }}
 							</Button>
-							<Button
-								variant="subtle"
-								theme="gray"
-								@click="closeAndOpenNew"
-								:disabled="closingExistingShift"
-							>
+							<Button variant="subtle" theme="gray" @click="closeAndOpenNew">
 								{{ __("Close & Open New") }}
 							</Button>
 						</div>
@@ -244,13 +239,6 @@
 			</div>
 		</template>
 	</Dialog>
-
-	<ShiftClosingDialog
-		v-if="existingShift"
-		v-model="showClosingDialog"
-		:opening-shift="existingShift?.pos_opening_shift?.name"
-		@shift-closed="handleExistingShiftClosed"
-	/>
 </template>
 
 <script setup>
@@ -260,14 +248,18 @@ import { useShift } from "../composables/useShift";
 import { useFormatters } from "../composables/useFormatters";
 import { formatAmountInput, parseAmountInput } from "../utils/amountInput";
 import { serverErrorMessage } from "../utils/apiWrapper";
-import ShiftClosingDialog from "./ShiftClosingDialog.vue";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
 
 const props = defineProps({
 	modelValue: Boolean,
 });
 
-const emit = defineEmits(["update:modelValue", "shift-opened", "dialog-closed"]);
+const emit = defineEmits([
+	"update:modelValue",
+	"shift-opened",
+	"dialog-closed",
+	"close-existing-shift",
+]);
 
 const open = computed({
 	get: () => props.modelValue,
@@ -281,9 +273,6 @@ const step = ref(1);
 const selectedProfile = ref(null);
 const openingBalances = ref({});
 const existingShift = ref(null);
-const showClosingDialog = ref(false);
-const closingExistingShift = ref(false);
-const restartProfileName = ref(null);
 
 // Get POS Profiles
 const profilesResource = createResource({
@@ -309,7 +298,12 @@ const paymentMethods = computed(() => {
 	);
 });
 
-// Watch dialog open state
+// Watch dialog open state.
+// Reset happens when the dialog OPENS (inside initDialog), never on close:
+// tearing the DOM down (step=1, profiles=null) while the reka-ui unmount
+// transition is running leaves the dialog stuck on screen with no way to
+// close it. Data surviving through close is invisible — the next open
+// re-initializes from scratch.
 // Use { immediate: true } to ensure initDialog runs even when
 // the component mounts with open already true (e.g., after logout with dialog open)
 watch(
@@ -317,26 +311,16 @@ watch(
 	(isOpen) => {
 		if (isOpen) {
 			initDialog();
-		} else {
-			resetDialog();
 		}
 	},
-	{ immediate: true }
+	{ immediate: true },
 );
 
-watch(showClosingDialog, (isOpen) => {
-	closingExistingShift.value = isOpen;
-	if (!isOpen && existingShift.value) {
-		restartProfileName.value = null;
-	}
-});
-
 async function initDialog() {
-	step.value = 1;
-	selectedProfile.value = null;
-	existingShift.value = null;
-	openingBalances.value = {};
-	dialogDataResource.reset();
+	// Reset first, then fetch — a reopen must not inherit the previous
+	// session's step/profile/errors, and the fetch must repopulate a
+	// clean resource.
+	resetDialog();
 
 	try {
 		// Await profile fetch to ensure data is loaded before proceeding
@@ -408,39 +392,16 @@ function closeAndOpenNew() {
 		return;
 	}
 
-	restartProfileName.value = existingShift.value.pos_profile?.name || null;
-	showClosingDialog.value = true;
+	// The page-level ShiftClosingDialog (POSSale.vue) owns closing the stale
+	// shift — the shared checkOpeningShift already mirrored it into
+	// shiftStore.currentShift, so the page dialog has the right opening shift.
+	// handleShiftClosed there reopens this dialog once the close settles.
+	emit("close-existing-shift", existingShift.value.pos_opening_shift.name);
+	closeDialog("close-and-open-new");
 }
 
 function closeDialog(reason) {
 	open.value = false;
 	emit("dialog-closed", { reason });
-}
-
-async function handleExistingShiftClosed() {
-	showClosingDialog.value = false;
-	const profileToRestore = restartProfileName.value;
-	restartProfileName.value = null;
-	existingShift.value = null;
-	step.value = 1;
-	openingBalances.value = {};
-
-	await checkOpeningShift.fetch();
-
-	if (!profilesResource.data || profilesResource.data.length === 0) {
-		await profilesResource.fetch();
-	}
-
-	if (profileToRestore) {
-		const matchedProfile = profilesResource.data?.find(
-			(profile) => profile.name === profileToRestore
-		);
-
-		if (matchedProfile) {
-			selectedProfile.value = matchedProfile;
-			await dialogDataResource.fetch();
-			step.value = 2;
-		}
-	}
 }
 </script>

@@ -106,6 +106,7 @@
 			v-model="showShiftDialog"
 			@shift-opened="handleShiftOpened"
 			@dialog-closed="handleDialogClosed"
+			@close-existing-shift="handleCloseExistingShift"
 		/>
 	</div>
 </template>
@@ -115,6 +116,7 @@ import { FeatherIcon } from "frappe-ui";
 import { onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import ShiftOpeningDialog from "../components/ShiftOpeningDialog.vue";
+import { usePOSUIStore } from "../stores/posUI";
 import { session } from "../data/session";
 import { useSessionLock } from "../composables/useSessionLock";
 import { cleanupUserSession } from "../utils/sessionCleanup";
@@ -125,6 +127,7 @@ import { logger } from "@/utils/logger";
 const log = logger.create("Login");
 
 const router = useRouter();
+const uiStore = usePOSUIStore();
 const { cachePasswordHashFromLogin } = useSessionLock();
 
 const loginForm = reactive({
@@ -215,6 +218,14 @@ function handleDialogClosed({ reason }) {
 	if (reason === "cancelled" || reason === "resumed") {
 		router.push({ name: "POSSale" });
 	}
+}
+
+function handleCloseExistingShift() {
+	// The closing dialog only lives in POSSale; flag it so it opens right
+	// after navigation (shiftStore.currentShift was already populated by the
+	// opening dialog's checkOpeningShift resource).
+	uiStore.showCloseShiftDialog = true;
+	router.push({ name: "POSSale" });
 }
 
 // Clear error when user starts typing

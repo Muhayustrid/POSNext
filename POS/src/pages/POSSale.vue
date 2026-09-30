@@ -534,6 +534,8 @@
 			<ShiftOpeningDialog
 				v-model="uiStore.showOpenShiftDialog"
 				@shift-opened="handleShiftOpened"
+				@dialog-closed="uiStore.showOpenShiftDialog = false"
+				@close-existing-shift="handleCloseExistingShift"
 			/>
 
 			<!-- Shift Closing Dialog -->
@@ -1961,6 +1963,15 @@ async function handleShiftOpened() {
 	showSuccess(__("You can now start making sales"));
 }
 
+// Step 3 "Close & Open New": the stale shift was found by the opening
+// dialog's check but the session is not live yet. Route the close through
+// the page-level ShiftClosingDialog (shiftStore.currentShift already holds
+// it); handleShiftClosed reopens the opening dialog once it settles.
+function handleCloseExistingShift() {
+	uiStore.showOpenShiftDialog = false;
+	uiStore.showCloseShiftDialog = true;
+}
+
 async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
 	showSuccess(__("Shift closed successfully"));
@@ -3351,11 +3362,9 @@ function handlePromotionSaved(data) {
 	showSuccess(data.message || __("Promotion saved successfully"));
 }
 
-// Optimized tab switching for mobile with RAF for smooth transitions
+// Direct switch: requestAnimationFrame never fires in webviews that suspend
+// rendering, which left mobile tab navigation dead.
 function handleTabSwitch(tab) {
-	// Use requestAnimationFrame to ensure smooth transitions
-	requestAnimationFrame(() => {
-		uiStore.setMobileTab(tab);
-	});
+	uiStore.setMobileTab(tab);
 }
 </script>
