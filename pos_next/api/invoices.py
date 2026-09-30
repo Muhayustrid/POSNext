@@ -24,6 +24,7 @@ from pos_next.invoice_type import (
 	sales_invoice_union,
 )
 from pos_next.overrides.discount_code import verify_transaction_rule_names
+from pos_next.pos_next.doctype.pos_coupon.pos_coupon import expected_coupon_discount
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -1081,6 +1082,17 @@ def _strip_server_managed_fields(payload):
 	# either crash link validation or poison the one_use/release accounting.
 	cleaned.pop("coupon_code", None)
 	cleaned.pop("pos_coupon_code", None)
+	# Gate state is server-owned (RECHECK): a smuggled is_pos=0 would mute the
+	# whole discount-code gate at the save-before-submit, and is_consolidated=1
+	# short-circuits it on every save (ERPNext only re-checks consolidated
+	# invoices on cancel). The frontend always sends is_pos=1 and never sends
+	# is_consolidated. is_cash_or_non_trade_discount changes the coupon basis
+	# math (apply_discount_amount early-returns, keeping totals untouched while
+	# money still moves via the header) — the frontend never sends it, and the
+	# coupon lane derives its basis from the coupon itself.
+	cleaned.pop("is_pos", None)
+	cleaned.pop("is_consolidated", None)
+	cleaned.pop("is_cash_or_non_trade_discount", None)
 	items = cleaned.get("items")
 	if isinstance(items, list) and any(isinstance(item, dict) for item in items):
 		cleaned["items"] = [
@@ -1090,6 +1102,92 @@ def _strip_server_managed_fields(payload):
 		for item in items
 	]
 	return cleaned
+
+
+_APPLY_DISCOUNT_ON_OPTIONS = ("Grand Total", "Net Total")
+
+
+def _coupon_apply_discount_on(coupon_code):
+	"""apply_discount_on of the coupon the payload carries — a light lookup
+	only; check_coupon_code owns the real validation and runs after the
+	totals. None when the code does not resolve (the default below applies
+	and the coupon validation throws its own message later)."""
+	if not coupon_code or not isinstance(coupon_code, str):
+		return None
+	if not frappe.db.table_exists("POS Coupon"):
+		return None
+	return frappe.db.get_value("POS Coupon", {"coupon_code": coupon_code.upper()}, "apply_on")
+
+
+def _ensure_apply_discount_on(invoice_doc, coupon_code=None):
+	"""Resolve the header discount basis BEFORE calculate_taxes_and_totals —
+	ERPNext throws "Please select Apply Discount On" from inside the
+	calculation (apply_discount_amount) the moment a header discount exists,
+	so a missing basis fails the whole checkout (HTTP 417 today).
+
+	Never client-invented: a supplied value must be one of the two ERPNext
+	options (whitelisted here — apply_discount_on is not stripped from the
+	payload, so without this check it would be a mass-assignment vector), an
+	absent one falls back to the coupon's own apply_on, else "Grand Total".
+	A valid value survives untouched — the offer relay lane may legitimately
+	send one. A stamped coupon overrides all of this in
+	_apply_stamped_coupon_discount (the coupon owns the basis).
+	"""
+	if not flt(invoice_doc.get("discount_amount") or 0):
+		return
+	requested = (invoice_doc.get("apply_discount_on") or "").strip()
+	if requested:
+		if requested not in _APPLY_DISCOUNT_ON_OPTIONS:
+			frappe.throw(_("Invalid Apply Discount On value: {0}").format(requested))
+		return
+	apply_on = _coupon_apply_discount_on(coupon_code)
+	invoice_doc.apply_discount_on = apply_on if apply_on in _APPLY_DISCOUNT_ON_OPTIONS else "Grand Total"
+
+
+def _apply_stamped_coupon_discount(invoice_doc):
+	"""SERVER-OWN the header discount for coupon-stamped invoices.
+
+	Once check_coupon_code passed and pos_coupon_code is stamped, the client's
+	discount_amount / apply_discount_on are not consulted at all: the coupon's
+	own raw parameters (discount_percentage / discount_amount, capped by
+	max_amount) decide everything, computed against the SERVER's pre-discount
+	totals. This kills the basis-inflation crafts (a forged apply_discount_on,
+	a smuggled is_cash_or_non_trade_discount, or an overclaimed amount — the
+	browser cannot estimate item-level tax templates anyway), and it makes the
+	tolerance band obsolete: what lands on the doc IS the coupon's math.
+
+	Mechanics: zero the claim, run one calculate pass to get the pre-discount
+	totals (no circularity — the basis does not depend on the discount),
+	expected_coupon_discount reads the coupon against that basis, the amount
+	is set on the doc and a second pass produces final totals. Runs on BOTH
+	checkout branches: update_invoice (every draft save) and the
+	existing-draft submit (before its save-before-submit). Returns fail
+	closed — a stamped return is refused by the validate-hook enforcement,
+	never re-discounted here.
+	"""
+	coupon_code = (invoice_doc.get("pos_coupon_code") or "").strip()
+	if not coupon_code or invoice_doc.get("is_return"):
+		return
+	if not frappe.db.table_exists("POS Coupon"):
+		return
+	coupon = frappe.db.get_value(
+		"POS Coupon",
+		{"coupon_code": coupon_code.upper()},
+		["apply_on", "discount_type", "discount_percentage", "discount_amount", "max_amount"],
+		as_dict=True,
+	)
+	if not coupon:
+		return
+
+	precision = invoice_doc.precision("discount_amount")
+	invoice_doc.apply_discount_on = coupon.apply_on or "Grand Total"
+	invoice_doc.discount_amount = 0
+	invoice_doc.additional_discount_percentage = 0
+	invoice_doc.calculate_taxes_and_totals()  # pre-discount totals (basis)
+
+	expected = expected_coupon_discount(coupon, invoice_doc)
+	invoice_doc.discount_amount = flt(max(expected, 0.0), precision)
+	invoice_doc.calculate_taxes_and_totals()  # final totals, consistent
 
 
 def _resolve_target_doctype(payload_doctype):
@@ -1932,6 +2030,11 @@ def update_invoice(data):
 		# ========================================================================
 		invoice_doc.set_missing_values(for_validate=True)
 
+		# A2: the header discount needs its basis before the calculation —
+		# ERPNext throws from inside calculate_taxes_and_totals otherwise.
+		# The coupon key was captured pre-strip (payload_coupon_code above).
+		_ensure_apply_discount_on(invoice_doc, payload_coupon_code)
+
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
 		if invoice_doc.grand_total is None:
@@ -1963,6 +2066,13 @@ def update_invoice(data):
 				# as a clean ValidationError, not an AttributeError in str ops.
 				if not isinstance(payload_coupon_code, str):
 					frappe.throw(_("Invalid coupon code"))
+				# Fail closed: a coupon never applies to a return — refuse the
+				# claim outright instead of stamping the return (which would
+				# burn/release quota and let the coupon "explain" a refund).
+				if invoice_doc.get("is_return"):
+					frappe.throw(
+						_("Coupon {0} cannot be used on a return invoice.").format(payload_coupon_code)
+					)
 				# Validate POS Coupon exists and is valid
 				if frappe.db.table_exists("POS Coupon"):
 					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
@@ -1986,10 +2096,17 @@ def update_invoice(data):
 					# the per-customer gate. Custom field; ERPNext's coupon_code
 					# Link must stay empty — see _strip_server_managed_fields.
 					invoice_doc.pos_coupon_code = coupon_result.get("coupon").get("coupon_code")
-			else:
-				# Cart has no coupon: mirror that honestly on the draft so a
-				# stale stamp can't burn quota at submit.
-				invoice_doc.pos_coupon_code = None
+		else:
+			# Cart has no coupon: mirror that honestly on the draft so a
+			# stale stamp can't burn quota at submit.
+			invoice_doc.pos_coupon_code = None
+
+		# The stamped coupon now OWNS the header discount: force its basis and
+		# recompute the amount server-side (two calculate passes, final totals
+		# consistent). Returns never reach here — the stamp refuses them above
+		# and the validate-hook enforcement throws on any stamped return.
+		if doctype != "Sales Order" and invoice_doc.get("pos_coupon_code"):
+			_apply_stamped_coupon_discount(invoice_doc)
 
 		# Validate stock availability before saving draft
 		# is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
@@ -2616,6 +2733,20 @@ def submit_invoice(invoice=None, data=None):
 		# Save before submit
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+		# A2 on the existing-draft branch too: it never re-runs update_invoice,
+		# so a legacy draft or a crafted submit payload could reach the validate
+		# calculation with a header discount and no basis. The stamped coupon
+		# (read from the doc — payloads carry no coupon stamp) decides the
+		# fallback basis, mirroring update_invoice.
+		_ensure_apply_discount_on(invoice_doc, invoice_doc.get("pos_coupon_code"))
+		# RECHECK: server-own the stamped coupon's discount on this branch too
+		# — the client claim (discount_amount / apply_discount_on /
+		# is_cash_or_non_trade_discount, all stripped) is recomputed from the
+		# coupon against the doc's own totals, then totals are recalculated
+		# before the save. A stamped return never gets here re-discounted: the
+		# validate-hook enforcement refuses it.
+		if doctype != "Sales Order":
+			_apply_stamped_coupon_discount(invoice_doc)
 		invoice_doc.save()
 
 		# Submit invoice
@@ -3719,6 +3850,13 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	# Ensure POS flags are set
 	return_doc.is_pos = invoice_info.is_pos
 	return_doc.pos_profile = invoice_info.pos_profile
+	# A coupon never rides a return (fail closed): make_sales_return copies
+	# every mapped field including the server stamp — drop it here so the
+	# coupon can never explain a return's discount and its quota cannot be
+	# wrongly released by the return's cancel. A client CLAIMING a coupon on a
+	# return is refused outright in update_invoice; the validate-hook
+	# enforcement throws on any stamped return that still exists (legacy).
+	return_doc.pos_coupon_code = None
 
 	# Aggregate quantities already returned from previous return invoices
 	ret_si = frappe.qb.DocType(doctype)

@@ -137,45 +137,62 @@ def _get_customer_coupon_usage_count(customer, coupon_code):
 	return used_count
 
 
-def apply_coupon_discount(coupon, cart_total, net_total=None):
-	"""Calculate discount amount based on coupon configuration"""
-	from frappe.utils import flt
+def coupon_base_amount(coupon, doc):
+	"""Server-side pre-discount basis for the coupon, from a SAVED doc.
 
-	# Determine the base amount for discount calculation
-	base_amount = cart_total if coupon.apply_on == "Grand Total" else (net_total or cart_total)
+	The stored totals are AFTER the header discount: ERPNext distributes
+	discount_amount across the rows and recalculates
+	(apply_discount_amount, erpnext/controllers/taxes_and_totals.py), so the
+	pre-discount basis the coupon promises against is the stored total plus
+	the stored discount_amount — exact for both "Grand Total" and "Net Total"
+	up to currency rounding. A Grand Total cash/non-trade discount never
+	reduces the totals (apply_discount_amount returns early), so its basis is
+	the stored grand_total alone.
+	"""
+	discount = flt(doc.get("discount_amount") or 0)
+	if (coupon.apply_on or "Grand Total") == "Net Total":
+		return flt(doc.get("net_total") or 0) + discount
+	if doc.get("is_cash_or_non_trade_discount"):
+		return flt(doc.get("grand_total") or 0)
+	return flt(doc.get("grand_total") or 0) + discount
 
-	# Check minimum amount
-	if coupon.min_amount and flt(base_amount) < flt(coupon.min_amount):
-		return {
-			"valid": False,
-			"message": _("Minimum cart amount of {0} is required").format(
-				frappe.format_value(coupon.min_amount, {"fieldtype": "Currency"})
-			),
-			"discount": 0,
-		}
 
-	# Calculate discount
-	discount = 0
+def expected_coupon_discount(coupon, doc):
+	"""The header discount `coupon` promises against invoice `doc`.
+
+	The single calculator for both the checkout recompute
+	(overrides/discount_code.enforce_stamped_coupon_discount) and the
+	discount-code exemption (stamped_coupon_explains_header), so a coupon can
+	never excuse more than it grants.
+
+	Pure: no DB access, no throws. An unknown discount_type grants nothing.
+	"""
+	base = coupon_base_amount(coupon, doc)
 	if coupon.discount_type == "Percentage":
-		discount = flt(base_amount) * flt(coupon.discount_percentage) / 100
+		expected = base * flt(coupon.discount_percentage or 0) / 100
 	elif coupon.discount_type == "Amount":
-		discount = flt(coupon.discount_amount)
+		expected = flt(coupon.discount_amount or 0)
+	else:
+		return 0.0
 
-	# Apply maximum discount limit
-	if coupon.max_amount and flt(discount) > flt(coupon.max_amount):
-		discount = flt(coupon.max_amount)
+	# Apply maximum discount limit, then never exceed the basis itself
+	# (mirrors the old apply_coupon_discount).
+	max_amount = flt(coupon.max_amount or 0)
+	if max_amount > 0:
+		expected = min(expected, max_amount)
+	if expected > base:
+		expected = base
+	return max(expected, 0.0)
 
-	# Ensure discount doesn't exceed cart total
-	if discount > base_amount:
-		discount = base_amount
 
-	return {
-		"valid": True,
-		"discount": discount,
-		"discount_type": coupon.discount_type,
-		"discount_percentage": coupon.discount_percentage if coupon.discount_type == "Percentage" else None,
-		"apply_on": coupon.apply_on,
-	}
+def coupon_min_amount_unmet(coupon, doc):
+	"""True when the coupon's minimum spend is not met on the coupon's own
+	basis (server totals of the saved doc — the same basis the CouponDialog
+	UI check reads)."""
+	min_amount = flt(coupon.min_amount or 0)
+	if min_amount <= 0:
+		return False
+	return coupon_base_amount(coupon, doc) < min_amount
 
 
 def increment_coupon_usage(coupon_code, customer=None):

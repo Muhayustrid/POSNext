@@ -46,6 +46,10 @@ from frappe.utils import cint, flt, getdate, now_datetime
 from pos_next.api.settings_resolver import get_effective_pos_setting
 from pos_next.overrides.pos_offer_usage import parse_applied_offer_rules
 from pos_next.overrides.pricing_rule import MIN_MAX_OPTIONS
+from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
+	coupon_min_amount_unmet,
+	expected_coupon_discount,
+)
 
 CODE_DOCTYPE = "POS Discount Confirmation Code"
 CODE_COMPANY_DOCTYPE = "POS Discount Code Company"
@@ -350,6 +354,120 @@ def verify_transaction_rule_names(rule_names, doc):
 	)
 
 
+# ==========================================================================
+# Stamped POS Coupon (server recompute)
+# ==========================================================================
+
+
+def _doc_precision(doc):
+	"""Currency precision of the doc's discount_amount, tolerating plain dicts
+	in unit tests (Document.precision does not exist there)."""
+	try:
+		return doc.precision("discount_amount")
+	except Exception:
+		return None
+
+
+def _stamped_coupon(doc):
+	"""The stamped POS Coupon row for this invoice, or None.
+
+	The stamp (``pos_coupon_code``) is written server-side in update_invoice
+	and stripped from every payload — a present stamp is the only coupon
+	statement this module trusts. A stamp whose coupon row has since been
+	deleted confers nothing."""
+	stamp = (doc.get("pos_coupon_code") or "").strip()
+	if not stamp or not frappe.db.table_exists("POS Coupon"):
+		return None
+	return frappe.db.get_value(
+		"POS Coupon",
+		{"coupon_code": stamp.upper()},
+		[
+			"name",
+			"coupon_code",
+			"apply_on",
+			"discount_type",
+			"discount_percentage",
+			"discount_amount",
+			"min_amount",
+			"max_amount",
+		],
+		as_dict=True,
+	)
+
+
+def enforce_stamped_coupon_discount(doc, method=None):
+	"""Server-own verification of the stamped coupon (validate hook).
+
+	Runs FIRST in validate_invoice_discounts — above the is_consolidated and
+	is_pos early-returns — so a smuggled is_pos=0 / is_consolidated=1 cannot
+	switch the coupon lane off (RECHECK #2). It only ever touches docs with a
+	server-stamped pos_coupon_code, so non-POS / consolidated invoices without
+	one are unaffected.
+
+	- A stamped RETURN is refused outright: a coupon never explains a return's
+	  discount (ERPNext folds the return discount allocation into
+	  discount_amount, taxes_and_totals.set_discount_amount:870-884). The
+	  checkout refuses coupon claims on returns and the return mapper drops
+	  the copied stamp; this is the safety net for anything else.
+	- min_amount must be met on the coupon's own basis (server totals).
+	- doc.discount_amount must EQUAL the coupon's recomputed amount at
+	  currency precision — no band: update_invoice /
+	  submit_invoice (_apply_stamped_coupon_discount) write exactly this
+	  figure, so anything else on a stamped doc is a fabricated one.
+
+	Throws roll back the whole save.
+	"""
+	coupon = _stamped_coupon(doc)
+	if not coupon:
+		return
+
+	if doc.get("is_return"):
+		frappe.throw(_("Coupon {0} cannot be used on a return invoice.").format(coupon.coupon_code))
+
+	if coupon_min_amount_unmet(coupon, doc):
+		frappe.throw(
+			_("Coupon {0} requires a minimum spend of {1}.").format(
+				coupon.coupon_code,
+				frappe.format_value(coupon.min_amount, {"fieldtype": "Currency"}),
+			)
+		)
+
+	expected = expected_coupon_discount(coupon, doc)
+	precision = _doc_precision(doc)
+	discount = flt(doc.get("discount_amount") or 0, precision)
+	if discount != flt(expected, precision):
+		frappe.throw(
+			_("Discount {0} does not match coupon {1} (expected {2}).").format(
+				frappe.format_value(discount, {"fieldtype": "Currency"}),
+				coupon.coupon_code,
+				frappe.format_value(expected, {"fieldtype": "Currency"}),
+			)
+		)
+
+
+def stamped_coupon_explains_header(doc):
+	"""B3 exemption: the stamped coupon fully explains the header discount, so
+	the discount is not MANUAL and needs no head-office confirmation code.
+
+	The checkout writes exactly the coupon's recomputed amount
+	(_apply_stamped_coupon_discount), so the test is an exact match at
+	currency precision — no tolerance band. Fail closed: False for returns
+	(a coupon never explains a return's discount), for a stamp without a
+	live coupon row, and when the stored amount is not the coupon's math
+	(the excess/shortfall stays on the manual code-gate lane).
+	"""
+	if doc.get("is_return"):
+		return False
+	coupon = _stamped_coupon(doc)
+	if not coupon:
+		return False
+	expected = expected_coupon_discount(coupon, doc)
+	if expected <= 0:
+		return False
+	precision = _doc_precision(doc)
+	return flt(doc.get("discount_amount") or 0, precision) == flt(expected, precision)
+
+
 def invoice_has_manual_discount(doc):
 	"""True when the invoice discounts anything manually: the header additional
 	discount, or any item row whose discount is not fully explained by a
@@ -358,7 +476,9 @@ def invoice_has_manual_discount(doc):
 	Offer-driven discounts (POS Offer promotions, computed server-side) are
 	exempt: the header only when the invoice-level stash carries a verified
 	Transaction rule that reconciles with the header discount (R3), an item
-	when its own claims reconcile with the row discount (R2)."""
+	when its own claims reconcile with the row discount (R2). A stamped coupon
+	that fully explains the header (B3) is exempt the same way — mismatches
+	were already refused by enforce_stamped_coupon_discount."""
 	verified_rules, invoice_claims = _verified_applied_rules(doc)
 
 	if flt(doc.get("discount_amount") or 0) > 0 or flt(doc.get("additional_discount_percentage") or 0) > 0:
@@ -366,7 +486,7 @@ def invoice_has_manual_discount(doc):
 			name in verified_rules and _header_rule_exempts(verified_rules[name], doc)
 			for name in invoice_claims
 		)
-		if not has_transaction_rule:
+		if not has_transaction_rule and not stamped_coupon_explains_header(doc):
 			return True
 
 	scope_map = _item_scope_map(verified_rules)
@@ -468,12 +588,20 @@ def refund_code_required(pos_profile):
 
 def validate_invoice_discounts(doc, method=None):
 	"""Sales Invoice validate hook — the hard gate (draft save and submit)."""
+	# FIRST: the stamped coupon's own lane — deliberately ABOVE the
+	# is_consolidated / is_pos early-returns, so a payload-smuggled
+	# is_pos=0 / is_consolidated=1 cannot mute it (RECHECK #2; those fields
+	# are now stripped from payloads too). It touches only coupon-stamped
+	# docs; a doc without a stamp falls through exactly as before.
+	enforce_stamped_coupon_discount(doc, method)
 	if doc.get("is_consolidated"):
 		return
 	if not doc.get("is_pos"):
 		return
 	if doc.get("is_return"):
-		# Refund gate — every return needs a code when the profile requires one.
+		# Refund gate — every return needs a code when the profile requires
+		# one. A coupon never explains a return's discount (fail closed): the
+		# stamped recompute above refuses stamped returns outright.
 		if refund_code_required(doc.get("pos_profile")):
 			validate_code(doc.get("discount_confirmation_code"), doc.get("company"))
 		return

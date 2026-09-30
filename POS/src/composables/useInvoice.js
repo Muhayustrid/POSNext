@@ -39,6 +39,10 @@ export function useInvoice() {
 	const additionalDiscount = ref(0);
 	const buyerName = ref("");
 	const couponCode = ref(null);
+	// The applied coupon's apply_on ("Grand Total"|"Net Total"); ERPNext throws
+	// "Please select Apply Discount On" whenever discount_amount is set without
+	// apply_discount_on, so the checkout payload must always carry it.
+	const couponApplyOn = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -610,6 +614,9 @@ export function useInvoice() {
 
 		// Store coupon code for tracking
 		couponCode.value = discount.code || discount.name;
+		// Remember the coupon's discount base so the checkout payload can send
+		// apply_discount_on; default matches the server-side fallback.
+		couponApplyOn.value = discount.apply_on || "Grand Total";
 
 		const baseAmount =
 			typeof discount.base_amount === "number" ? discount.base_amount : subtotal.value;
@@ -644,6 +651,7 @@ export function useInvoice() {
 
 		// Clear coupon code
 		couponCode.value = null;
+		couponApplyOn.value = null;
 
 		// Rebuild cache after removing discount
 		rebuildIncrementalCache();
@@ -1035,6 +1043,10 @@ export function useInvoice() {
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
+			// ERPNext throws "Please select Apply Discount On" whenever
+			// discount_amount is set without apply_discount_on, so the payload
+			// always carries the coupon's base (server default: Grand Total).
+			apply_discount_on: couponApplyOn.value || "Grand Total",
 			discount_confirmation_code: restrictionStore.code || "",
 			is_pos: 1,
 			update_stock: 1,
@@ -1130,6 +1142,9 @@ export function useInvoice() {
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
+					// Same as saveDraft: ERPNext throws without apply_discount_on
+					// whenever discount_amount is set.
+					apply_discount_on: couponApplyOn.value || "Grand Total",
 					discount_confirmation_code: restrictionStore.code || "",
 					is_pos: 1,
 					update_stock: 1, // Critical: ensures stock is updated
@@ -1310,6 +1325,7 @@ export function useInvoice() {
 		additionalDiscount.value = 0;
 		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
+		couponApplyOn.value = null;
 		// One-time HQ code is consumed with the invoice it was submitted on
 		restrictionStore.clearCode();
 
@@ -1340,6 +1356,7 @@ export function useInvoice() {
 		additionalDiscount.value = 0;
 		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
+		couponApplyOn.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;

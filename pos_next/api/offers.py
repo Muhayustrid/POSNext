@@ -682,9 +682,31 @@ def get_active_coupons(customer: str, company: str) -> list[dict]:
 	return coupons
 
 
+# SEC-08: response whitelist — only the fields the POS coupon dialog consumes.
+# Internal fields (disabled, used, maximum_use, valid_from, valid_upto) are
+# fetched for validation below but never returned to the client.
+_COUPON_RESPONSE_FIELDS = (
+	"coupon_name",
+	"coupon_code",
+	"coupon_type",
+	"discount_type",
+	"discount_percentage",
+	"discount_amount",
+	"min_amount",
+	"max_amount",
+	"apply_on",
+	"customer",
+)
+
+
 @frappe.whitelist()
 def validate_coupon(coupon_code: str, company: str, customer: str | None = None) -> dict:
 	"""Validate a coupon code and return its details"""
+	# SEC-08: coupon codes are bearer secrets; only users with POS Coupon read
+	# (POS front-end users) may validate them — same gate as get_active_coupons.
+	if not frappe.has_permission("POS Coupon", "read"):
+		frappe.throw(_("Not permitted to read POS Coupons"), frappe.PermissionError)
+
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}
 
@@ -696,7 +718,10 @@ def validate_coupon(coupon_code: str, company: str, customer: str | None = None)
 	# Fetch coupon with case-insensitive code matching
 	# Note: coupon_code field is unique, so we can fetch directly
 	coupon = frappe.db.get_value(
-		"POS Coupon", {"coupon_code": coupon_code, "company": company}, ["*"], as_dict=1
+		"POS Coupon",
+		{"coupon_code": coupon_code, "company": company},
+		[*_COUPON_RESPONSE_FIELDS, "disabled", "used", "maximum_use", "valid_from", "valid_upto"],
+		as_dict=1,
 	)
 
 	if not coupon:
@@ -725,4 +750,5 @@ def validate_coupon(coupon_code: str, company: str, customer: str | None = None)
 	if coupon.customer and coupon.customer != customer:
 		return {"valid": False, "message": _("This coupon is not valid for this customer")}
 
-	return {"valid": True, "coupon": coupon}
+	# Strip internal validation fields — the client only gets the whitelist.
+	return {"valid": True, "coupon": {field: coupon.get(field) for field in _COUPON_RESPONSE_FIELDS}}

@@ -3,8 +3,22 @@
 // an explicit 0 or negative is rejected instead.
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const { invoicePayloads } = vi.hoisted(() => ({ invoicePayloads: [] }))
+
 vi.mock("frappe-ui", () => ({
-	createResource: vi.fn(() => ({ loading: false, data: null, error: null, reload: vi.fn() })),
+	createResource: vi.fn(() => ({
+		loading: false,
+		data: null,
+		error: null,
+		reload: vi.fn(),
+		// updateInvoiceResource.submit({ data: invoiceData }) — record every
+		// doctype-bearing payload. submitInvoiceResource.submit rides the same
+		// factory but its data carries no doctype, so it never lands here.
+		submit: vi.fn(async (arg) => {
+			if (arg?.data?.doctype) invoicePayloads.push(arg.data)
+			return { data: { name: "POS-INV-0001" } }
+		}),
+	})),
 }))
 vi.mock("@/utils/offline", () => ({
 	isOffline: () => false,
@@ -88,5 +102,81 @@ describe("updateItemQuantity quantity validation (COR-FE-12)", () => {
 		updateItemQuantity("ITEM-1", 5)
 
 		expect(invoiceItems.value[0].quantity).toBe(5)
+	})
+})
+
+// A1: ERPNext throws "Please select Apply Discount On" inside
+// calculate_taxes_and_totals whenever discount_amount is set without
+// apply_discount_on, so BOTH checkout payload blocks (saveDraft and
+// submitInvoice) must always carry it: the active coupon's apply_on, or the
+// server default "Grand Total" for a header discount without a coupon.
+describe("checkout payload apply_discount_on (A1)", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		invoicePayloads.length = 0
+	})
+
+	function setupInvoice() {
+		const invoice = useInvoice()
+		invoice.invoiceItems.value = [
+			{
+				item_code: "ITEM-1",
+				item_name: "Item 1",
+				quantity: 2,
+				rate: 10000,
+				price_list_rate: 10000,
+				amount: 20000,
+			},
+		]
+		// subtotal is fed by the incremental cache (useInvoice.js:202); assigning
+		// invoiceItems directly does not rebuild it. Without this, applyDiscount
+		// clamps the coupon amount against a subtotal of 0.
+		invoice.rebuildIncrementalCache()
+		return invoice
+	}
+
+	it("saveDraft with an active coupon sends apply_discount_on = coupon.apply_on", async () => {
+		const { applyDiscount, saveDraft } = setupInvoice()
+
+		applyDiscount({
+			name: "KOUPON-NET",
+			code: "NET10",
+			amount: 5000,
+			apply_on: "Net Total",
+		})
+		await saveDraft()
+
+		expect(invoicePayloads).toHaveLength(1)
+		expect(invoicePayloads[0].coupon_code).toBe("NET10")
+		expect(invoicePayloads[0].discount_amount).toBe(5000)
+		expect(invoicePayloads[0].apply_discount_on).toBe("Net Total")
+	})
+
+	it("submitInvoice with an active coupon sends apply_discount_on = coupon.apply_on", async () => {
+		const { applyDiscount, submitInvoice } = setupInvoice()
+
+		applyDiscount({
+			name: "KOUPON-NET",
+			code: "NET10",
+			amount: 5000,
+			apply_on: "Net Total",
+		})
+		await submitInvoice()
+
+		expect(invoicePayloads).toHaveLength(1)
+		expect(invoicePayloads[0].coupon_code).toBe("NET10")
+		expect(invoicePayloads[0].apply_discount_on).toBe("Net Total")
+	})
+
+	it("header discount without a coupon sends apply_discount_on 'Grand Total'", async () => {
+		const { additionalDiscount, saveDraft } = setupInvoice()
+
+		additionalDiscount.value = 2500
+		await saveDraft()
+
+		expect(invoicePayloads).toHaveLength(1)
+		expect(invoicePayloads[0].coupon_code).toBeNull()
+		expect(invoicePayloads[0].discount_amount).toBe(2500)
+		expect(invoicePayloads[0].apply_discount_on).toBe("Grand Total")
 	})
 })
