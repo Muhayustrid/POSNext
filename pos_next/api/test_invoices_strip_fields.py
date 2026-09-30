@@ -54,11 +54,21 @@ class TestStripServerManagedFields(unittest.TestCase):
 	def test_leaves_unrelated_keys_untouched(self):
 		payload = {
 			"customer": "CUST-1",
-			"is_pos": 1,
 			"items": [{"item_code": "ITEM-1", "qty": 2}],
 			"payments": [{"mode_of_payment": "Cash"}],
 		}
 		self.assertEqual(payload, _strip_server_managed_fields(payload))
+
+	def test_strips_is_pos_client_guess(self):
+		# 4a568c0 made is_pos server-owned (checkout re-resolves it after
+		# the strip) — a client guess must not survive.
+		payload = {
+			"customer": "CUST-1",
+			"is_pos": 1,
+			"items": [{"item_code": "ITEM-1", "qty": 2}],
+		}
+		cleaned = _strip_server_managed_fields(payload)
+		self.assertNotIn("is_pos", cleaned)
 
 	def test_does_not_mutate_original_payload(self):
 		payload = {"pos_applied_offer_rules": '["PR-A"]', "packed_items": [{"item_code": "ITEM-1"}]}

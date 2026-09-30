@@ -26,7 +26,7 @@ from frappe.rate_limiter import rate_limit
 # SEC-21: signing (and the certificate it serves) is only for print-capable
 # POS roles. Rate limiting rides on frappe.rate_limiter, already used by
 # api/auth.py and api/printing.py.
-_PRINT_ROLES = ("POSNext Cashier", "Nexus POS Manager", "System Manager")
+_PRINT_ROLES = ("POSNext Cashier", "POSNext Manager", "System Manager")
 
 
 def _require_print_role():

@@ -4,15 +4,16 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from pos_next.api.offers import validate_coupon
+from pos_next.api.offers import _COUPON_RESPONSE_FIELDS, validate_coupon
 
 
 class TestValidateCoupon(unittest.TestCase):
 	# new_callable=MagicMock: some environments have unittest.mock auto-detect
 	# frappe.db as async and substitute an AsyncMock, which returns coroutines
 	# instead of the configured values. Force a plain MagicMock explicitly.
+	@patch("pos_next.api.offers.frappe.has_permission", return_value=True)
 	@patch("pos_next.api.offers.frappe.db", new_callable=MagicMock)
-	def test_coupons_not_enabled_takes_precedence_over_missing_customer(self, mock_db):
+	def test_coupons_not_enabled_takes_precedence_over_missing_customer(self, mock_db, _mock_perm):
 		"""Table-existence must be checked before the customer requirement, so a
 		site without POS Coupon set up reports the accurate reason even when no
 		customer is selected either."""
@@ -27,8 +28,9 @@ class TestValidateCoupon(unittest.TestCase):
 		for call in mock_db.get_value.call_args_list:
 			self.assertNotEqual(call.args[0] if call.args else None, "POS Coupon")
 
+	@patch("pos_next.api.offers.frappe.has_permission", return_value=True)
 	@patch("pos_next.api.offers.frappe.db", new_callable=MagicMock)
-	def test_missing_customer_is_rejected_with_friendly_message(self, mock_db):
+	def test_missing_customer_is_rejected_with_friendly_message(self, mock_db, _mock_perm):
 		"""No customer selected must return a clean message, not crash on the
 		coupon lookup (regression test for PN-77)."""
 		mock_db.table_exists.return_value = True
@@ -40,8 +42,9 @@ class TestValidateCoupon(unittest.TestCase):
 		for call in mock_db.get_value.call_args_list:
 			self.assertNotEqual(call.args[0] if call.args else None, "POS Coupon")
 
+	@patch("pos_next.api.offers.frappe.has_permission", return_value=True)
 	@patch("pos_next.api.offers.frappe.db", new_callable=MagicMock)
-	def test_empty_string_customer_is_also_rejected(self, mock_db):
+	def test_empty_string_customer_is_also_rejected(self, mock_db, _mock_perm):
 		"""The frontend sends '' rather than omitting the param — must be treated
 		the same as no customer at all."""
 		mock_db.table_exists.return_value = True
@@ -51,8 +54,10 @@ class TestValidateCoupon(unittest.TestCase):
 		self.assertFalse(result["valid"])
 		self.assertEqual(result["message"], "Please choose a customer")
 
+	@patch("pos_next.api.offers.getdate", return_value=__import__("datetime").date(2026, 1, 1))
+	@patch("pos_next.api.offers.frappe.has_permission", return_value=True)
 	@patch("pos_next.api.offers.frappe.db", new_callable=MagicMock)
-	def test_valid_customer_proceeds_to_coupon_lookup(self, mock_db):
+	def test_valid_customer_proceeds_to_coupon_lookup(self, mock_db, _mock_perm, _mock_date):
 		mock_db.table_exists.return_value = True
 		mock_db.get_value.return_value = None  # coupon not found
 
@@ -60,6 +65,11 @@ class TestValidateCoupon(unittest.TestCase):
 
 		self.assertFalse(result["valid"])
 		self.assertEqual(result["message"], "Invalid coupon code")
+		# 4a568c0 narrowed the fetched columns to the server-owned response
+		# fields instead of SELECT *
 		mock_db.get_value.assert_any_call(
-			"POS Coupon", {"coupon_code": "SAVE10", "company": "Test Company"}, ["*"], as_dict=1
+			"POS Coupon",
+			{"coupon_code": "SAVE10", "company": "Test Company"},
+			[*_COUPON_RESPONSE_FIELDS, "disabled", "used", "maximum_use", "valid_from", "valid_upto"],
+			as_dict=1,
 		)

@@ -1,9 +1,9 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
-"""Two-persona role system: positive matrix for Nexus POS Manager.
+"""Two-persona role system: positive matrix for POSNext Manager.
 
-A user holding ONLY the Nexus POS Manager role must:
+A user holding ONLY the POSNext Manager role must:
 - hold the full back-office flow: Sales Invoice create/submit/cancel/amend,
   Payment Entry + Purchase Order + Purchase Receipt submission lifecycle,
   Promotional Scheme maintenance, POS Settings read/write,
@@ -29,10 +29,10 @@ class TestManagerPermissions(FrappeTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        if not frappe.db.exists("Role", "Nexus POS Manager"):
-            raise unittest.SkipTest("Nexus POS Manager role does not exist on this site")
+        if not frappe.db.exists("Role", "POSNext Manager"):
+            raise unittest.SkipTest("POSNext Manager role does not exist on this site")
 
-        # a user whose ONLY role is Nexus POS Manager — the pure manager probe
+        # a user whose ONLY role is POSNext Manager — the pure manager probe
         cls.manager = f"manager-perm.{uuid.uuid4().hex[:8]}@example.com"
         frappe.get_doc(
             {"doctype": "User", "email": cls.manager, "first_name": "Manager Perm Tester"}
@@ -43,7 +43,7 @@ class TestManagerPermissions(FrappeTestCase):
                 "parent": cls.manager,
                 "parenttype": "User",
                 "parentfield": "roles",
-                "role": "Nexus POS Manager",
+                "role": "POSNext Manager",
             }
         ).insert(ignore_permissions=True)
         frappe.clear_cache(user=cls.manager)

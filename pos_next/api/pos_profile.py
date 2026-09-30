@@ -10,7 +10,7 @@ from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
 # Role manajemen POS (SEC-NEW-10): management-level endpoints and profile
 # settings are for these roles, or for the profile's own users.
-_MANAGEMENT_ROLES = {"System Manager", "Nexus POS Manager"}
+_MANAGEMENT_ROLES = {"System Manager", "POSNext Manager"}
 
 
 def _is_management_user():

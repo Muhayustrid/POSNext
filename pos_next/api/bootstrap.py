@@ -9,7 +9,7 @@ to initialize the POS application. Instead of making 5+ sequential API calls,
 the frontend fetches everything in one request.
 
 Data Returned:
-    - can_switch_to_desk: True if user has role "Nexus POS Manager" (desk link in POS)
+    - can_switch_to_desk: True if user has role "POSNext Manager" (desk link in POS)
     - locale: User's language preference (e.g., "en", "ar")
     - precision: Number formatting settings from System Settings
         - currency: Decimal places for totals (default: 2)
@@ -67,7 +67,7 @@ def get_initial_data():
 		"site_name": frappe.local.site,
 		"locale": _get_user_language(),
 		"precision": _get_precision_settings(),
-		"can_switch_to_desk": "Nexus POS Manager" in frappe.get_roles(),
+		"can_switch_to_desk": "POSNext Manager" in frappe.get_roles(),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,

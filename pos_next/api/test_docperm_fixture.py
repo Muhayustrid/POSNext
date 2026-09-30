@@ -18,7 +18,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 FIXTURE = ("pos_next", "fixtures", "custom_docperm.json")
-POS_ROLES = {"POSNext Cashier", "Nexus POS Manager"}
+POS_ROLES = {"POSNext Cashier", "POSNext Manager"}
 
 # Allowlist doctype — sumber kebenaran:
 # - Sales Invoice, Payment Entry, POS Closing Entry, POS Opening Entry,
@@ -26,10 +26,11 @@ POS_ROLES = {"POSNext Cashier", "Nexus POS Manager"}
 #   pos_next/api/test_cashier_permissions.py (matriks SEC-13 + 4 test baru
 #   Promotional Scheme / POS Production Recipe read-only, gate _PRINT_ROLES).
 # - Bin, Item, Territory, Warehouse, Customer, Sales Invoice Item:
-#   fixture warisan (HEAD) persona kasir (POSNext Cashier + Stock User +
-#   POS Profile User outlet), lihat blok permissions JSON doctype app.
+#   fixture persona kasir (POSNext Cashier + POS Profile User outlet —
+#   single role sejak rombakan role 30 Sep), lihat blok permissions JSON
+#   doctype app.
 # - Company, Purchase Order, Purchase Receipt (entri pn-mgr-*):
-#   paket Nexus POS Manager — persona manager berdiri sendiri tanpa role core.
+#   paket POSNext Manager — persona manager berdiri sendiri tanpa role core.
 # - Account (select=1 tanpa read, kedua role):
 #   ERPNext v16 party.account_perm_check() menuntut select/read Account saat
 #   set_missing_values meresolusi debit_to — field server-managed yang tidak

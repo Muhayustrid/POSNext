@@ -83,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UOM Handling Refactor** (#225)
   - Refactored UOM handling in EditItemDialog for better price and factor display
 
-- **Nexus POS Manager Role**
+- **POSNext Manager Role**
   - New role for desk switching functionality
   - "Switch To Desk" button in POS Sale page
 

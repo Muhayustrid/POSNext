@@ -98,9 +98,11 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 			).insert(ignore_permissions=True)
 
 		# A and C are both users of the profile: C proves the ownership gate
-		# (not just the profile gate) blocks the IDOR. Both get the minimal
-		# cashier-adjacent roles (Item/Customer/Account read, no invoice-doctype
-		# write — C must stay behind the ownership gate).
+		# (not just the profile gate) blocks the IDOR. Both get minimal
+		# cashier-ADJACENT roles (Item/Customer reads via Stock User, no
+		# invoice-doctype write) — an artificial probe persona, NOT the
+		# official single-role recipe (POSNext Cashier holds invoice write,
+		# which would bypass what this test must prove).
 		for email, extra_roles in ((cls.cashier, ()), (cls.cashier2, ("Sales User",))):
 			for role in ("Stock User",) + extra_roles:
 				frappe.get_doc(

@@ -8,8 +8,9 @@ record a backdated sale or return on that shift through the regular invoice
 API, then re-close via the normal closing flow (totals recompute from every
 submitted invoice on the shift).
 
-Every entrypoint here is gated on an HQ role AND the profile's POS Settings
-``allow_change_posting_date`` flag. ``submit_backdate_invoice`` sets the
+Every entrypoint here is gated on an HQ role — System Manager, POSNext
+Manager, or the native HQ personas Sales Manager / Accounts Manager — AND the
+profile's POS Settings ``allow_change_posting_date`` flag. ``submit_backdate_invoice`` sets the
 request-scoped ``frappe.flags.pos_next_backdate_entry`` marker, which is the
 only thing the posting-date policy (api/invoices.py), the shift schedule gate
 (shift_schedule.py) and the return validity check honour — a client cannot
@@ -24,7 +25,7 @@ from frappe.utils import cint, getdate, nowdate
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
 
-BACKDATE_ROLES = ("System Manager", "Nexus POS Manager")
+BACKDATE_ROLES = ("System Manager", "POSNext Manager", "Sales Manager", "Accounts Manager")
 
 
 def has_backdate_role():

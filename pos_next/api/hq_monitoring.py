@@ -31,7 +31,7 @@ All metrics come from the same POS sales dataset:
   orders == pax claim; no pax source exists either).
 
 Permissions:
-- Role gate (System Manager / Accounts Manager / Sales Manager / Nexus POS
+- Role gate (System Manager / Accounts Manager / Sales Manager / POSNext
   Manager), then company scope via User Permissions on "Company" and POS
   Profile scope via User Permissions on "POS Profile" (see pos_next.hq_scope).
 - A forged company (outside the user's scope) raises PermissionError.
@@ -76,7 +76,7 @@ from pos_next.target_basis import (
 	get_target_basis,
 )
 
-HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "Nexus POS Manager")
+HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "POSNext Manager")
 
 MAX_RANGE_DAYS = 366
 MAX_PAGE_SIZE = 50

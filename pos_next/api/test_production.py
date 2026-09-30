@@ -659,11 +659,11 @@ class TestCreateProduction(InvoiceTypeAmbientMixin, FrappeTestCase):
 
 	def test_assigned_cashier_can_produce_on_own_profile(self):
 		# acceptance branch of the gate: a user assigned to the profile (via
-		# POS Profile User) still produces on it. Nexus POS Manager rather than
+		# POS Profile User) still produces on it. POSNext Manager rather than
 		# POSNext Cashier because the permission-enforced POS Production Log
 		# submit needs write, which the cashier role does not carry.
-		if not frappe.db.exists("Role", "Nexus POS Manager"):
-			self.skipTest("Nexus POS Manager role missing")
+		if not frappe.db.exists("Role", "POSNext Manager"):
+			self.skipTest("POSNext Manager role missing")
 		cashier = self._make_user("Prod Sec Cashier")
 		frappe.get_doc(
 			{
@@ -671,7 +671,7 @@ class TestCreateProduction(InvoiceTypeAmbientMixin, FrappeTestCase):
 				"parent": cashier,
 				"parenttype": "User",
 				"parentfield": "roles",
-				"role": "Nexus POS Manager",
+				"role": "POSNext Manager",
 			}
 		).insert(ignore_permissions=True)
 		# membership is exactly what the gate checks

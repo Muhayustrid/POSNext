@@ -118,10 +118,10 @@ class TestMediumGatesSecurity(FrappeTestCase):
 				}
 			).insert(ignore_permissions=True)
 
-		# Roles on the cashier only (never on cashier2/intruder): the real
+		# Roles on the cashier only (never on cashier2/intruder): the single
 		# POSNext Cashier role (Customer read + POS Opening Shift write for
-		# the closing flow) plus Stock User for the invoice submit recipe.
-		for role in ("Stock User", "POSNext Cashier"):
+		# the closing flow; its Custom DocPerm covers the invoice submit).
+		for role in ("POSNext Cashier",):
 			frappe.get_doc(
 				{
 					"doctype": "Has Role",

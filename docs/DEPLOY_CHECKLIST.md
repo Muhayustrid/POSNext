@@ -30,7 +30,7 @@ yang lama mengarah ke sini.
 - [ ] Search item ≥3 char mengembalikan hasil (jalur FULLTEXT; tanpa index pun kini fallback LIKE — jangan error).
 - [ ] Allowed Locales = `{"en","id"}`.
 - [ ] Flag Stock Settings `enable_serial_and_batch_no_for_item` untuk outlet yang memakai batch.
-- [ ] Role persona (POSNext Cashier / Nexus POS Manager) ter-import via fixture.
+- [ ] Role persona (POSNext Cashier / POSNext Manager) ter-import via fixture.
 - [ ] Smoke kasir: buka shift → jual 1 item → Paid → retur → tutup shift seimbang.
 
 ## 3. Rollback

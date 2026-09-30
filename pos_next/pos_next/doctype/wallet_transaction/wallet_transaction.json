@@ -209,7 +209,7 @@
   {
    "create": 1,
    "read": 1,
-   "role": "Nexus POS Manager",
+   "role": "POSNext Manager",
    "write": 1
   }
  ],

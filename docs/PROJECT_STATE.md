@@ -79,7 +79,7 @@ di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
 - **Grup 9 `2d16754` — bug checkout kasir dua-persona** (ditemukan lewat E2E
   kasir nyata): ERPNext v16 `account_perm_check()` menuntut akses Account
   saat resolusi `debit_to`. Fix: Custom DocPerm **Account select=1** (tanpa
-  read) untuk POSNext Cashier + Nexus POS Manager (fixture + DB),
+  read) untuk POSNext Cashier + POSNext Manager (fixture + DB),
   `get_sales_persons` ignore_permissions, test baru
   `test_cashier_checkout_permissions`, hygiene fixture test (Item Price
   reuse-or-create, sweep Wallet Transaction, role fixture session-summary).
@@ -510,8 +510,9 @@ hermetik — bukan uninstall nyata.
   /home/frappe/.local/bin/bench --site <site> execute pos_next.<modul>.<fn>`
   (bench di `/home/frappe/.local/bin/bench`, bukan `env/bin`).
 - Administrator password: `admin`. Kasir dua-persona:
-  `kasir.pku@posnext.test` / `kasir123` (POSNext Cashier + Stock User,
-  terdaftar di `applicable_for_users` profil `POS - PKU DELANGGU`).
+  `kasir.pku@posnext.test` / `kasir123` (POSNext Cashier saja — single role,
+  Custom DocPerm menutupi kebutuhan stok; terdaftar di `applicable_for_users`
+  profil `POS - PKU DELANGGU`).
 - Shift aktif kini `POSA-OS-26-0000048` milik kasir uji (kas awal 0);
   shift sebelumnya ditutup seimbang lewat `POSA-CS-26-0000016` (27 Sep).
 - Test backend WAJIB serial via

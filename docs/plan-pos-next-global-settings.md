@@ -102,7 +102,7 @@ rombakan terlalu besar.
 - `issingle: 1`, **module `"POS Next"`** (case persis seperti `modules.txt`; jangan
   "Pos Next"). Route otomatis: `/app/pos-next-global-settings`.
 - **Permissions (WAJIB, mengikuti pola POS Settings/brainwise_branding)**: System Manager
-  full; Sales Manager, Nexus POS Manager, Sales User read-only.
+  full; Sales Manager, POSNext Manager, Sales User read-only.
 - Field (definisi disalin verbatim dari pos_settings.json; deskripsi `allowed_locales`
   dikoreksi "defaults to English and Arabic" menjadi "defaults to English and Indonesian"
   karena default sebenarnya {en, id}):

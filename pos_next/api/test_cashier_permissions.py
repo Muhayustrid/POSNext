@@ -323,7 +323,7 @@ class TestCashierPermissions(FrappeTestCase):
         from pos_next.api.qz import _PRINT_ROLES
 
         self.assertTrue(
-            {"POSNext Cashier", "Nexus POS Manager"}.issubset(set(_PRINT_ROLES)),
+            {"POSNext Cashier", "POSNext Manager"}.issubset(set(_PRINT_ROLES)),
             "both POS roles must stay in the QZ direct-print gate",
         )
         self._assert_matrix("Sales Invoice", granted=("print",), denied=())

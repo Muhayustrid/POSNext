@@ -34,7 +34,7 @@ from pos_next.api.wallet import (
 )
 
 ADMIN = "Administrator"
-MANAGEMENT_ROLE = "Nexus POS Manager"
+MANAGEMENT_ROLE = "POSNext Manager"
 
 # Schedule-safe profile (same filter as the other security suites on this
 # shared dev site).
@@ -81,7 +81,7 @@ class TestEndpointSecurityGates(FrappeTestCase):
             }
         ).insert(ignore_permissions=True)
 
-        for role in ("Stock User", "POSNext Cashier"):
+        for role in ("POSNext Cashier",):
             frappe.get_doc(
                 {
                     "doctype": "Has Role",

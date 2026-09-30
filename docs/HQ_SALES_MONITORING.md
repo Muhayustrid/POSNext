@@ -196,7 +196,7 @@ dikecualikan).
 ## Perizinan
 
 - Endpoint hanya untuk peran **System Manager, Accounts Manager, Sales Manager,
-  Nexus POS Manager**.
+  POSNext Manager**.
 - Lingkup perusahaan mengikuti **User Permission** doctype Company
   (`pos_next.hq_scope`). Perusahaan yang dipalsukan di luar izin → PermissionError,
   bukan diam-diam difilter; tanpa filter perusahaan, hasil otomatis dibatasi ke
@@ -213,7 +213,7 @@ dikecualikan).
   (Int non-negatif), `notes`.
 - Unik per (company, bulan) lewat autoname `POS-TGT-{company}-{month_start}`.
 - Hak akses: tulis hanya **System Manager** & **Accounts Manager**;
-  **Sales Manager** & **Nexus POS Manager** hanya baca.
+  **Sales Manager** & **POSNext Manager** hanya baca.
 
 ## Uji & Verifikasi Lokal
 

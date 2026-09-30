@@ -31,7 +31,7 @@ from pos_next.price_group_ownership import (
 logger = logging.getLogger(__name__)
 
 # Roles shipped by the app (hooks.py:fixtures) and their Custom DocPerms
-UNINSTALL_ROLES = ("POSNext Cashier", "Nexus POS Manager")
+UNINSTALL_ROLES = ("POSNext Cashier", "POSNext Manager")
 UNINSTALL_WORKSPACES = ("POSNext",)
 UNINSTALL_WORKSPACE_SIDEBARS = ("POSNext",)
 

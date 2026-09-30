@@ -116,10 +116,6 @@
   {
    "read": 1,
    "role": "Sales User"
-  },
-  {
-   "read": 1,
-   "role": "POS User"
   }
  ],
  "sort_field": "modified",

@@ -363,9 +363,9 @@ def extend_deadline(opening_shift, new_deadline):
 	e.g. to let offline invoices stranded by the deadline sync before closing.
 	Forward-only, HQ roles only, writes a Comment for the audit trail.
 	"""
-	if not {"System Manager", "Nexus POS Manager"} & set(frappe.get_roles()):
+	if not {"System Manager", "POSNext Manager"} & set(frappe.get_roles()):
 		frappe.throw(
-			_("Only System Managers or Nexus POS Managers can extend a shift schedule deadline"),
+			_("Only System Managers or POSNext Managers can extend a shift schedule deadline"),
 			frappe.PermissionError,
 		)
 
