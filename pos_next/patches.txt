@@ -25,3 +25,4 @@ pos_next.patches.v2_13_0.retire_pos_package_outlet_profile
 pos_next.patches.v2_13_0.remove_duplicate_pos_invoice_custom_fields
 pos_next.patches.v2_14_0.reorder_pos_settings_fields
 pos_next.patches.v2_15_0.rename_nexus_pos_manager_role
+pos_next.patches.v2_16_0.move_company_target_fields_to_buying_tab

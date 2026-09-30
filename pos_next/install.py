@@ -296,7 +296,10 @@ CUSTOM_FIELDS = {
 			"fieldname": "pos_overall_sales_target",
 			"label": "Overall Sales Target",
 			"fieldtype": "Currency",
-			"insert_after": "default_currency",
+			# sit with the ERPNext goals pair (Monthly Sales Target / Total
+			# Monthly Sales) in the Buying and Selling tab — the v2_16_0 patch
+			# re-seats fields created before this position existed
+			"insert_after": "total_monthly_sales",
 			"non_negative": 1,
 			"description": "One-time payback target for this outlet. HQ Sales Monitoring tracks cumulative POS net sales (tax incl.) against it.",
 		},
