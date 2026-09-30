@@ -520,15 +520,21 @@ class TestMediumGatesSecurity(FrappeTestCase):
 
 		frappe.set_user(self.intruder)
 		try:
-			with self.assertRaises(frappe.PermissionError):
-				check_invoice_return_validity(invoice)
+			# since the return-gate fix (28 Sep) the validity endpoint answers a
+			# structured wrong_outlet verdict instead of raising, so the cashier
+			# can route the customer to the issuing outlet
+			verdict = check_invoice_return_validity(invoice)
+			self.assertFalse(verdict.get("valid"))
+			self.assertEqual("wrong_outlet", verdict.get("error_type"))
 		finally:
 			frappe.set_user(ADMIN)
 
 		# the invoice's own profile member still gets the verdict
 		frappe.set_user(self.cashier)
 		try:
-			self.assertIn("valid", check_invoice_return_validity(invoice))
+			verdict = check_invoice_return_validity(invoice)
+			self.assertIn("valid", verdict)
+			self.assertNotEqual("wrong_outlet", verdict.get("error_type"))
 		finally:
 			frappe.set_user(ADMIN)
 

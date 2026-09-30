@@ -29,7 +29,12 @@ QTY_B = 2
 
 
 def _warehouse():
-	return frappe.db.get_value("Warehouse", {"company": COMPANY, "is_group": 0}, "name")
+	# oldest non-group warehouse, pinned: without an order the value drifts as
+	# other test modules add warehouses, and older receipts (skipped whenever
+	# the batch still has qty) would sit in a warehouse this run never queries
+	return frappe.db.get_value(
+		"Warehouse", {"company": COMPANY, "is_group": 0}, "name", order_by="creation asc"
+	)
 
 
 def _ensure_batch_item(item_code):
@@ -79,11 +84,15 @@ def _ensure_fixtures():
 	batch_b = _ensure_batch(BATCH_B_ID, ITEM_B)
 	frappe.db.commit()
 
-	# Stock receipts are the expensive part; only run them when the batch is
-	# still empty at the test warehouse.
-	if not flt(frappe.db.get_value("Batch", batch_a, "batch_qty")):
+	# Stock receipts are the expensive part; only run them when the batch has
+	# no qty AT THE QUERIED WAREHOUSE (Batch.batch_qty is site-wide — a legacy
+	# receipt in another warehouse would otherwise skip the receipt and leave
+	# this run querying an empty warehouse).
+	from erpnext.stock.doctype.batch.batch import get_batch_qty
+
+	if not flt(get_batch_qty(batch_a, _warehouse())):
 		_receipt(ITEM_A, batch_a, QTY_A)
-	if not flt(frappe.db.get_value("Batch", batch_b, "batch_qty")):
+	if not flt(get_batch_qty(batch_b, _warehouse())):
 		_receipt(ITEM_B, batch_b, QTY_B)
 	return batch_a, batch_b
 

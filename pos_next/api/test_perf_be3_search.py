@@ -62,6 +62,29 @@ class TestItemSearchPredicateShape(unittest.TestCase):
 		self.assertEqual(params, ["%***%"])
 
 
+class TestItemSearchWithoutFulltextIndex(unittest.TestCase):
+	"""Fresh sites can miss ft_item_pos_search (new-site --install-app marks
+	the DDL patch applied without running it): the predicate must degrade to
+	all-LIKE over the same columns — never MATCH, which would error the search."""
+
+	def test_long_words_take_the_like_path_when_index_missing(self):
+		sql, params = build_item_search_condition(["nasi", "es"], fulltext_available=False)
+		self.assertNotIn("MATCH(", sql)
+		self.assertEqual(sql.count("LIKE %s"), 2)
+		self.assertIn(" AND ", sql)
+		self.assertEqual(params, ["%nasi%", "%es%"])
+
+	def test_like_wildcards_in_input_are_escaped(self):
+		sql, params = build_item_search_condition(["a_b%c"], fulltext_available=False)
+		self.assertEqual(params, ["%a\\_b\\%c%"])
+		self.assertEqual(sql.count("LIKE %s"), 1)
+
+	def test_fallback_condition_is_valid_sql_and_matches(self):
+		sql, params = build_item_search_condition(["nasi"], fulltext_available=False)
+		rows = frappe.db.sql(f"SELECT name FROM `tabItem` i WHERE {sql} LIMIT 1", params)
+		self.assertIsInstance(rows, (list, tuple))
+
+
 def _profile():
 	"""A POS Profile with no item-group restriction so test items are visible."""
 	for row in frappe.get_all("POS Profile", pluck="name", limit=50):

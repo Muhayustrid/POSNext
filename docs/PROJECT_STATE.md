@@ -3,7 +3,51 @@
 Dokumen status proyek yang hidup: dibaca sekali untuk tahu ke mana proyek
 berada. Diperbarui manual setiap milestone besar. Detail teknis lengkap ada
 di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
-`docs/DEPLOY_CHECKLIST_SECURITY_AUDIT_FIXES.md`.
+`docs/DEPLOY_CHECKLIST.md`.
+
+## Status rilis (per 30 September 2026)
+
+| Hal | Nilai |
+| --- | --- |
+| Versi app | 2.13.0 (3 manifest: `pos_next/__init__.py`, `POS/package.json`, root `package.json` — `scripts/version-bump.sh` kini men-bump ketiganya) |
+| `main` | `7143a70` = `origin/main`; **working tree di atasnya memuat fix audit batch-1 + batch-2 (belum di-commit — tunggu review orchestrator)** |
+| Produksi (Frappe Cloud) | masih `b6f7ae9`-era; deploy berikutnya = main + fix batch (wajib build + migrate, lihat `docs/DEPLOY_CHECKLIST.md`) |
+| Site uji dev | `roti-posnext-test.localhost:8001` (bundle build; jangan diganggu saat test) |
+| Site test-runner | `posnext.localhost` |
+
+### Sesi 29–30 Sep — penutupan penuh temuan audit (working tree, uncommitted)
+
+- **Batch-1 (P1)**: `after_install` + `after_migrate` kini menjalankan `ensure_site_indexes()`
+  (re-execute patch DDL v2_12_0 — FULLTEXT `ft_item_pos_search` + index Payment Entry
+  Reference) sehingga site fresh `new-site --install-app` dan site lama yang terlanjur
+  rusak sama-sama tersembuhkan; fallback LIKE di `api/items.py` saat index absen
+  (cek `information_schema` per call, escape `%`/`_`); `required_apps = ["erpnext"]`;
+  `clear_cache("Pricing Rule")` di `cleanup_expired_promotions`.
+- **Batch-2 (P2 + P3)**:
+  - Guard kolom warisan posawesome (`posa_*`/`custom_*`) di 6 kelompok titik baca
+    (`block_sale`, `allow_delete`, `cash_mode` ×2, `posa_is_printed`/`posa_pos_opening_shift`
+    di jalur Sales Invoice — termasuk choke-point `sales_invoice_union` di
+    `invoice_type.py` —, `custom_brands_table` via `meta.has_field` (field Table),
+    `custom_bank_deposit`) + `pos_next/tests/test_legacy_column_guards.py` (15 test).
+  - Resolver `get_effective_pos_setting` tak lagi 1054 untuk field tak dikenal;
+    `get_effective_cash_mode_of_payment` kini ter-gate keanggotaan profil;
+    `branding_monitor` dedupe alert via redis (maks 1/jenis/hari).
+  - Endpoint mati `get_draft_invoices` DIHAPUS (beserta test modulnya; frontend tak
+    pernah memanggil — draft server tetap terlihat di Invoice History).
+  - Toast error submit kini menampilkan pesan server (`parseError` menerima
+    `_server_messages` string maupun array ter-parse).
+  - Utang test/seed: `_seed_fresh_sites.py run_runner()` kini menyemai Customer Group
+    + Territory tree, `_Test Customer`, 6 master Stock Entry Type (`is_standard=1`
+    wajib), flag `enable_serial_and_batch_no_for_item`; `test_pos_offer_usage` stub
+    cache-safe; `test_hq_monitoring` mengikuti currency situs (bukan IDR hardcode).
+- **Koreksi audit penting**: folder `pos_next/pos_next/custom/*.json` BUKAN kode mati —
+  ke-11 file membawa `sync_on_migrate` dan disinkron frappe saat install/migrate
+  (`installer.py` → `sync_customizations`); di situlah kolom warisan `posa_*`/`custom_*`
+  berasal pada site fresh. Komentar lama install.py yang menyatakan "never applied"
+  sudah dikoreksi. Folder dipertahankan.
+- **Known-debt**: flake/kegagalan sweep terkait isolasi mock `System Settings`
+  (pola pre-warm `frappe.client_cache` sudah diterapkan di modul yang terdampak —
+  lihat laporan sweep 30 Sep untuk sisa daftarnya), dan `CLN §7` quick-wins.
 
 ## Status rilis (per 27 September 2026)
 

@@ -92,6 +92,21 @@ def get_sales_report_doctypes():
 
 _SI_EXCLUSION = "IFNULL({prefix}.is_consolidated, 0) = 0"
 
+# Legacy posawesome column on Sales Invoice: install.py only creates it on
+# POS Invoice, so a fresh self-standing site (POS Invoice mode) has no SI
+# shift links at all — querying the column there is SQL 1054.
+_LEGACY_SHIFT_COLUMN = "posa_pos_opening_shift"
+
+
+def _branch_queryable(dt, columns, where):
+	"""False when a union branch must be dropped: it references the legacy
+	shift column the site does not have. A site without the column holds no
+	shift-linked Sales Invoice rows, so skipping the branch matches reality
+	instead of erroring."""
+	if dt != SALES_INVOICE or frappe.db.has_column(dt, _LEGACY_SHIFT_COLUMN):
+		return True
+	return _LEGACY_SHIFT_COLUMN not in columns and _LEGACY_SHIFT_COLUMN not in where
+
 
 def _branch_where(dt, where, exclude_consolidated):
 	cond = where.format(dt=dt) if where else ""
@@ -118,11 +133,17 @@ def sales_invoice_union(columns, where=""):
 	exclude = POS_INVOICE in doctypes
 	parts = []
 	for dt in doctypes:
+		if not _branch_queryable(dt, columns, where):
+			continue
 		cond = _branch_where(dt, where, exclude)
 		# only substitute when the caller asked for it, so a projection that
 		# legitimately contains other braces is never reformatted
 		cols = columns.format(dt=dt) if "{dt}" in columns else columns
 		parts.append(f"(SELECT {cols} FROM `tab{dt}` si{cond})")
+	if not parts:
+		dt = doctypes[0]
+		cols = columns.format(dt=dt) if "{dt}" in columns else columns
+		parts.append(f"(SELECT {cols} FROM `tab{dt}` si WHERE 1 = 0)")
 	return f"({' UNION ALL '.join(parts)}) si"
 
 
@@ -136,10 +157,18 @@ def sales_invoice_item_union(columns, where=""):
 	exclude = POS_INVOICE in doctypes
 	parts = []
 	for dt in doctypes:
+		if not _branch_queryable(dt, columns, where):
+			continue
 		cond = _branch_where(dt, where, exclude)
 		parts.append(
 			f"(SELECT {columns} FROM `tab{dt} Item` sii "
 			f"INNER JOIN `tab{dt}` si ON si.name = sii.parent{cond})"
+		)
+	if not parts:
+		dt = doctypes[0]
+		parts.append(
+			f"(SELECT {columns} FROM `tab{dt} Item` sii "
+			f"INNER JOIN `tab{dt}` si ON si.name = sii.parent WHERE 1 = 0)"
 		)
 	return f"({' UNION ALL '.join(parts)}) sii"
 

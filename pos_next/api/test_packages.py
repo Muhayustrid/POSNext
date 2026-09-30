@@ -719,16 +719,30 @@ class TestPackageAccessControl(unittest.TestCase):
 	def test_get_packages_rejects_users_without_profile_access(self):
 		"""pos_profile comes from the caller, so an unassigned user must not be
 		able to read another outlet's packages and pricing."""
-		user = frappe.db.get_value(
-			"User", {"enabled": 1, "user_type": "System User", "name": ("!=", "Administrator")}, "name"
-		)
-		if not user:
-			self.skipTest("no non-admin user available")
+		# Any enabled System User will not do: sites where that user is a
+		# System Manager (POS Profile write) or the profile's own member —
+		# e.g. via stranded fixtures — legitimately pass the gate. A dedicated
+		# roleless user keeps the expectation deterministic.
+		user = "_pnxt_pkg_noaccess@example.com"
+		if not frappe.db.exists("User", user):
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": user,
+					"first_name": "Pkg No Access",
+					"enabled": 1,
+					"user_type": "System User",
+					"send_welcome_email": 0,
+				}
+			).insert(ignore_permissions=True)
+			frappe.db.commit()
 
 		frappe.set_user(user)
-
-		with self.assertRaises(frappe.PermissionError):
-			get_packages(PROFILE)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_packages(PROFILE)
+		finally:
+			frappe.set_user("Administrator")
 
 
 class TestOutletScoping(unittest.TestCase):

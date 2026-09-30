@@ -81,6 +81,10 @@ class TestWalletDoubleSpend(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# wallet math hits today()/getdate inside the tests; a cold System
+		# Settings client cache would drag that through whatever frappe.db
+		# mock a test has active. Warm it once, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
 		cls.company = get_default_company()
 		cls.customer = _make_customer(CUSTOMER)
 		cls.wallet = get_or_create_wallet(cls.customer, cls.company, force_create=True)
@@ -202,6 +206,10 @@ class TestCouponUsageRace(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# wallet math hits today()/getdate inside the tests; a cold System
+		# Settings client cache would drag that through whatever frappe.db
+		# mock a test has active. Warm it once, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
 		cls.company = get_default_company()
 
 	def _make_coupon(self, maximum_use):
@@ -260,6 +268,10 @@ class TestReferralSelfFarm(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# wallet math hits today()/getdate inside the tests; a cold System
+		# Settings client cache would drag that through whatever frappe.db
+		# mock a test has active. Warm it once, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
 		cls.company = get_default_company()
 		cls.referrer = _make_customer(REFERRER)
 		if not frappe.db.exists("Referral Code", {"customer": cls.referrer}):
@@ -434,6 +446,10 @@ class TestCouponReleaseOnCancel(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# wallet math hits today()/getdate inside the tests; a cold System
+		# Settings client cache would drag that through whatever frappe.db
+		# mock a test has active. Warm it once, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
 		cls.company = get_default_company()
 
 	def setUp(self):
@@ -729,6 +745,10 @@ class TestApplyReferralCodeGate(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
+		# wallet math hits today()/getdate inside the tests; a cold System
+		# Settings client cache would drag that through whatever frappe.db
+		# mock a test has active. Warm it once, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
 		cls.company = get_default_company()
 		cls.referrer = _make_customer("_SEC1422 Gate Referrer")
 		if frappe.db.exists("Referral Code", {"customer": cls.referrer}):

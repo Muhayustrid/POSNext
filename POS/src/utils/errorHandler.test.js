@@ -42,3 +42,32 @@ describe("cleanErrorMessage XSS hardening (SEC-NEW-06)", () => {
 		expect(window.__xss).toBeUndefined()
 	})
 })
+
+describe("parseError server-message extraction", () => {
+	it("accepts _server_messages already parsed as an array of objects", () => {
+		// some frappe-ui paths surface the pre-parsed form; JSON.parse on an
+		// array used to throw and fall back to the generic message
+		const ctx = parseError({
+			_server_messages: [{ message: "Diskon melebihi batas", title: "Validasi" }],
+		})
+
+		expect(ctx.message).toBe("Diskon melebihi batas")
+		expect(ctx.title).toBe("Validasi")
+	})
+
+	it("accepts _server_messages already parsed as an array of JSON strings", () => {
+		const ctx = parseError({
+			_server_messages: [JSON.stringify({ message: "Stok tidak cukup" })],
+		})
+
+		expect(ctx.message).toBe("Stok tidak cukup")
+	})
+
+	it("still parses the plain JSON-string form", () => {
+		const ctx = parseError({
+			_server_messages: JSON.stringify([JSON.stringify({ message: "Kode HQ wajib" })]),
+		})
+
+		expect(ctx.message).toBe("Kode HQ wajib")
+	})
+})

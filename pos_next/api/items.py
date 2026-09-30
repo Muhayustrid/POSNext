@@ -1165,7 +1165,13 @@ FULLTEXT_MIN_TOKEN_SIZE = 3
 _BOOLEAN_MODE_SPECIALS = set('+-><()~*"@')
 
 
-def build_item_search_condition(search_words):
+def _like_param(word):
+	# literal substring: % _ and the LIKE escape char lose their wildcard meaning
+	escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+	return f"%{escaped}%"
+
+
+def build_item_search_condition(search_words, fulltext_available=True):
 	"""Build the word predicate for POS item search over
 	name/item_name/item_group/description (all words ANDed, word-order
 	independent, same semantics as the old per-word CONCAT LIKE).
@@ -1173,7 +1179,9 @@ def build_item_search_condition(search_words):
 	Words of FULLTEXT_MIN_TOKEN_SIZE+ characters become MATCH ... AGAINST
 	'+word*' IN BOOLEAN MODE against ft_item_pos_search (prefix match at
 	token start, so "gor" still finds "Goreng"); shorter words keep the
-	substring LIKE.
+	substring LIKE. With fulltext_available=False (site missing the index —
+	new-site --install-app marks DDL patches applied without running them)
+	every word takes the substring LIKE path over the same columns.
 
 	Returns:
 		tuple: (sql_fragment, params) in placeholder order.
@@ -1183,15 +1191,35 @@ def build_item_search_condition(search_words):
 	params = []
 	for word in search_words:
 		ft_word = "".join(ch for ch in word if ch not in _BOOLEAN_MODE_SPECIALS)
-		if len(ft_word) >= FULLTEXT_MIN_TOKEN_SIZE:
+		if fulltext_available and len(ft_word) >= FULLTEXT_MIN_TOKEN_SIZE:
 			word_conditions.append(
 				"MATCH(i.name, i.item_name, i.item_group, i.description) AGAINST(%s IN BOOLEAN MODE)"
 			)
 			params.append(f"+{ft_word}*")
 		else:
 			word_conditions.append(f"{search_text} LIKE %s")
-			params.append(f"%{word}%")
+			params.append(_like_param(word))
 	return " AND ".join(word_conditions), params
+
+
+def _item_fulltext_index_exists():
+	"""True when ft_item_pos_search exists on tabItem, checked per call.
+
+	A cached "yes" would put MATCH() back into queries on a site whose index
+	was dropped and error the whole search again, so pay the one cheap
+	information_schema lookup per search request.
+	"""
+	return bool(
+		frappe.db.sql(
+			"""
+			SELECT 1 FROM information_schema.STATISTICS
+			WHERE table_schema = DATABASE()
+			AND table_name = 'tabItem'
+			AND index_name = 'ft_item_pos_search'
+			LIMIT 1
+			"""
+		)
+	)
 
 
 @frappe.whitelist()
@@ -1267,8 +1295,12 @@ def get_items(
 			search_words = [word.strip() for word in effective_search_term.split() if word.strip()]
 
 			# Word-order independent hybrid: FULLTEXT prefix for words >= 3 chars,
-			# substring LIKE for shorter ones (see build_item_search_condition)
-			word_condition, word_params = build_item_search_condition(search_words)
+			# substring LIKE for shorter ones (see build_item_search_condition).
+			# Sites without the index (DDL patch skipped by set_as_patched) take
+			# the all-LIKE path — MATCH() there would error the whole search.
+			word_condition, word_params = build_item_search_condition(
+				search_words, fulltext_available=_item_fulltext_index_exists()
+			)
 
 			# Also match if a barcode equals the search term. That OR can only
 			# ever match when some barcode equals the whole term, and its mere

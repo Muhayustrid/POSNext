@@ -28,8 +28,12 @@ from pos_next.price_group_ownership import (
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Custom Fields live here, not in fixtures: hooks.py:fixtures exports only Role /
-# Custom DocPerm, and pos_next/pos_next/custom/*.json is never applied.
+# Custom Fields live in TWO places: the CUSTOM_FIELDS dict below (pos_next's
+# own fields, upserted on install/migrate) and pos_next/pos_next/custom/*.json
+# — the legacy posawesome-era fields (posa_* / custom_*), which carry
+# sync_on_migrate and ARE applied by frappe's sync_customizations on every
+# install/migrate (frappe.installer calls it at install_app). Keep that folder
+# in sync with any guard reading those fields.
 CUSTOM_FIELDS = {
 	"Sales Invoice": [
 		{
@@ -421,6 +425,29 @@ CUSTOM_FIELDS = {
 	}
 
 
+def ensure_site_indexes():
+	"""Run the site-level DDL index patches, skipping indexes that already exist.
+
+	new-site --install-app marks every patch applied in the Patch Log WITHOUT
+	running it (frappe.installer install_app, set_as_patched=True), so the
+	v2_12_0 DDL patches (FULLTEXT ft_item_pos_search on tabItem, index on
+	tabPayment Entry Reference) never run on sites created that way and
+	MATCH()-based item search errors out. Called from after_install for fresh
+	sites and after_migrate to heal sites installed before this was known.
+	The patches are guarded and idempotent; one failing DDL is logged, never
+	raised, so install/migrate still completes.
+	"""
+	from pos_next.patches.v2_12_0.add_item_pos_search_index import execute as add_item_index
+	from pos_next.patches.v2_12_0.add_payment_entry_reference_index import execute as add_per_index
+
+	for patch in (add_item_index, add_per_index):
+		try:
+			patch()
+		except Exception:
+			frappe.log_error(title="POS Next Site Index Setup Error", message=frappe.get_traceback())
+			log_message("POS Next: a site index patch failed (see Error Log)", level="error")
+
+
 def after_install():
 	"""Hook that runs after app installation"""
 	try:
@@ -432,6 +459,7 @@ def after_install():
 		sync_custom_fields()
 		ensure_price_group_custom_fields()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
+		ensure_site_indexes()
 
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
@@ -460,6 +488,7 @@ def after_migrate():
 		sync_custom_fields(quiet=True)
 		ensure_price_group_custom_fields(quiet=True)
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
+		ensure_site_indexes()
 
 		# Clear cache
 		frappe.clear_cache()

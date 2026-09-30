@@ -462,27 +462,33 @@ def _aggregate_payments(scope, cash_mode, pos_profile=None):
 	# production only mints single-invoice PEs, so allocating by
 	# per.allocated_amount can wait for a real case.
 	if scope.shifts:
-		for row in frappe.db.sql(
-			"""
-			SELECT pe.mode_of_payment, SUM(pe.base_paid_amount) AS amount
-			FROM `tabPayment Entry` pe
-			WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive'
-				AND EXISTS (
-					SELECT 1 FROM `tabPayment Entry Reference` per
-					WHERE per.parent = pe.name
-						AND per.reference_doctype IN ('Sales Invoice', 'POS Invoice')
-						AND per.reference_name IN (
-							SELECT name FROM `tabPOS Invoice`
-							WHERE docstatus = 1 AND posa_pos_opening_shift IN %(shifts)s
-							UNION
-							SELECT name FROM `tabSales Invoice`
-							WHERE docstatus = 1 AND posa_pos_opening_shift IN %(shifts)s
-						)
-				)
-			GROUP BY pe.mode_of_payment
-			""",
-			{"shifts": scope.shifts},
-			as_dict=True,
+		shift_invoice_branches = [
+			f"SELECT name FROM `tab{dt}`"
+			f" WHERE docstatus = 1 AND posa_pos_opening_shift IN %(shifts)s"
+			for dt in ("POS Invoice", "Sales Invoice")
+			if frappe.db.has_column(dt, "posa_pos_opening_shift")
+		]
+		# legacy shift columns absent: no invoice can be linked to a shift,
+		# so no Payment Entry can match either
+		for row in (
+			frappe.db.sql(
+				f"""
+				SELECT pe.mode_of_payment, SUM(pe.base_paid_amount) AS amount
+				FROM `tabPayment Entry` pe
+				WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive'
+					AND EXISTS (
+						SELECT 1 FROM `tabPayment Entry Reference` per
+						WHERE per.parent = pe.name
+							AND per.reference_doctype IN ('Sales Invoice', 'POS Invoice')
+							AND per.reference_name IN ({" UNION ".join(shift_invoice_branches)})
+					)
+				GROUP BY pe.mode_of_payment
+				""",
+				{"shifts": scope.shifts},
+				as_dict=True,
+			)
+			if shift_invoice_branches
+			else []
 		):
 			payments[row.mode_of_payment] = payments.get(row.mode_of_payment, 0) + flt(row.amount)
 

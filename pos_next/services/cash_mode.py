@@ -21,7 +21,9 @@ def get_cash_mode_of_payment(pos_profile):
 	the profile's own Cash-type payment row (the default row first, then
 	profile order), then the generic "Cash".
 	"""
-	if pos_profile:
+	if pos_profile and frappe.db.has_column("POS Profile", "posa_cash_mode_of_payment"):
+		# legacy posawesome field: absent on self-standing sites, where the
+		# payment rows below are the real chain
 		configured = frappe.db.get_value("POS Profile", pos_profile, "posa_cash_mode_of_payment")
 		if configured:
 			return configured

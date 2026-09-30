@@ -658,7 +658,10 @@ def create_pos_profile(*arg, **parameters):
 			)
 			pos_profile.append("customer_groups", {"customer_group": customer_group_name})
 
-	if isinstance(brands, list) and len(brands) > 0:
+	if isinstance(brands, list) and len(brands) > 0 and frappe.get_meta("POS Profile").has_field("custom_brands_table"):
+		# legacy posawesome table field (shipped by pos_next/pos_next/custom/
+		# pos_profile.json): absent in the meta on sites without it — skip
+		# silently, the UI hides brands
 		for brand in brands:
 			brand_name = brand if isinstance(brand, str) else brand.get("brand") or brand.get("name")
 			if brand_name:
@@ -748,7 +751,10 @@ def update_pos_profile(*args, **parameters):
 			if customer_group_name:
 				pos_profile.append("customer_groups", {"customer_group": customer_group_name})
 
-	if brands is not None:
+	if brands is not None and frappe.get_meta("POS Profile").has_field("custom_brands_table"):
+		# legacy posawesome table field (shipped by pos_next/pos_next/custom/
+		# pos_profile.json): absent in the meta on sites without it — leave
+		# alone (no rows can exist there anyway)
 		pos_profile.custom_brands_table = []
 		for brand in brands:
 			brand_name = brand if isinstance(brand, str) else brand.get("brand") or brand.get("name")

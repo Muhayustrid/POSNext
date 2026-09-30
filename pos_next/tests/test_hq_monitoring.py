@@ -83,7 +83,7 @@ class TestHQMonitoring(IntegrationTestCase):
 		# Dedicated companies (the shared default company carries unrelated POS
 		# invoices from other tests / the site). Nothing here is committed, so
 		# the class-end rollback removes every artifact.
-		cls.currency_a = "IDR"
+		cls.currency_a = get_default_currency()
 		cls.currency_b = next((c for c in ("USD", "EUR", "SGD") if c != cls.currency_a), "USD")
 		cls.company_a = cls._make_hq_company("_Test HQ Co A", cls.currency_a)
 		cls.company_b = cls._make_hq_company("_Test HQ Co B", cls.currency_b)
@@ -1082,7 +1082,7 @@ class TestTargetBasis(IntegrationTestCase):
 		# Company custom fields (overall target) must exist before the first
 		# migrate of a fresh checkout, same as the monitoring suite.
 		sync_custom_fields(quiet=True)
-		cls.currency = "IDR"
+		cls.currency = get_default_currency()
 		cls.company_gp = cls._make_company("_Test TB GP Co", "TBGP")
 		cls.company_np = cls._make_company("_Test TB NP Co", "TBNP")
 		for company in (cls.company_gp, cls.company_np):

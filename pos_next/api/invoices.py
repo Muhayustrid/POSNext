@@ -1292,7 +1292,7 @@ def _should_block(pos_profile):
 		return False
 
 	# Fall back to the POS Profile's block toggle
-	if pos_profile:
+	if pos_profile and frappe.db.has_column("POS Profile", "posa_block_sale_beyond_available_qty"):
 		# COR-BE-10: an explicit 0 (toggle off) must survive — the old
 		# `cint(value or 1)` flipped every 0 back into a block. Only an
 		# unset/empty value defaults to blocking.
@@ -1301,8 +1301,9 @@ def _should_block(pos_profile):
 			return True
 		return bool(cint(value))
 
-	# Default to blocking if no profile specified
-	return True
+	# No profile specified defaults to blocking; a profile without the legacy
+	# toggle (self-standing site) never asked to block
+	return not pos_profile
 
 
 def _validate_stock_on_invoice(invoice_doc):
@@ -2950,53 +2951,6 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 
 @frappe.whitelist()
-def get_draft_invoices(pos_opening_shift, doctype=None):
-	"""Get all draft invoices for a POS opening shift."""
-	# resolve at call time: a "Sales Invoice" default would be frozen at import
-	# and stale after a mode switch; explicit doctypes pass through untouched
-	doctype = doctype or get_pos_invoice_doctype()
-	filters = {
-		"docstatus": 0,
-	}
-
-	# SEC-NEW-02: the shift filter was dead — has_column checked
-	# "pos_opening_shift" but the real column (install.py) is
-	# "posa_pos_opening_shift" — so the filter below never applied and no
-	# ownership gate existed: every cashier received every cashier's drafts
-	# and could resume (overwrite) a peer's cart. The response contract (a
-	# list of draft docs for one shift) is unchanged; only the row set is.
-	if frappe.db.has_column(doctype, "posa_pos_opening_shift"):
-		filters["posa_pos_opening_shift"] = pos_opening_shift
-
-	# Ownership lane: a cashier only resumes their own drafts; System/Nexus
-	# POS Managers (same role set shift_schedule.py gates deadline extensions
-	# with) still see the whole shift. Deliberately NOT
-	# frappe.has_permission(doctype, "read") — that grant is doc-wide on this
-	# site, so it cannot separate cashier from manager here.
-	if frappe.session.user != "Administrator" and not (
-		{"System Manager", "Nexus POS Manager"} & set(frappe.get_roles())
-	):
-		filters["owner"] = frappe.session.user
-
-	# Performance: Get all invoice names first
-	invoices_list = frappe.get_list(
-		doctype,
-		filters=filters,
-		fields=["name"],
-		limit_page_length=0,
-		order_by="modified desc",
-	)
-
-	# Performance: Batch load all documents at once using get_cached_doc
-	# This leverages Frappe's internal caching and is faster than individual queries
-	data = []
-	for invoice in invoices_list:
-		data.append(frappe.get_cached_doc(doctype, invoice["name"]))
-
-	return data
-
-
-@frappe.whitelist()
 def delete_invoice(invoice):
 	"""Delete draft invoice."""
 	doctype = get_pos_invoice_doctype()
@@ -3611,8 +3565,13 @@ def _remap_foreign_payment_modes(payments_data, current_profile, original_profil
 		current_type_map.setdefault(row.type, row.mode_of_payment)
 
 	# Default fallback: posa_cash_mode_of_payment > first Cash type > first mode
+	# (legacy field: absent on self-standing sites, where the type map decides)
 	default_mode = (
-		frappe.db.get_value("POS Profile", current_profile, "posa_cash_mode_of_payment")
+		(
+			frappe.db.get_value("POS Profile", current_profile, "posa_cash_mode_of_payment")
+			if frappe.db.has_column("POS Profile", "posa_cash_mode_of_payment")
+			else None
+		)
 		or current_type_map.get("Cash")
 		or (rows[0].mode_of_payment if rows else None)
 	)

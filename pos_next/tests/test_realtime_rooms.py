@@ -141,6 +141,13 @@ class TestProfileUpdatedRoom(unittest.TestCase):
 
 
 class TestCustomerEventRooms(unittest.TestCase):
+	@classmethod
+	def setUpClass(cls):
+		# A cold System Settings client cache drags now() -> get_system_timezone
+		# -> get_doc through meta loading, which consumes the test's global
+		# frappe.get_all mock. Warm it for real, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
+
 	def test_fans_out_to_enabled_profile_rooms_only(self):
 		doc = FakeDoc(
 			doctype="Customer",

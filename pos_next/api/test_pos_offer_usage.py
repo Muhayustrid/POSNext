@@ -31,6 +31,17 @@ SESSION_PATCH = patch(
 )
 
 
+def _warm_system_settings_cache():
+	"""Populate the System Settings client cache outside any patch.
+
+	DB_PATCH mocks ``frappe.db`` globally; a cold client cache would drag
+	``today() -> get_system_timezone -> get_doc("System Settings")`` through
+	the mocked db mid-test. One real fetch per class keeps every later
+	``today()`` on the cache path.
+	"""
+	frappe.client_cache.get_doc("System Settings")
+
+
 def make_offer(**kwargs):
 	values = dict(
 		name="Promo Gula",
@@ -47,6 +58,10 @@ def make_offer(**kwargs):
 
 
 class TestGetQuotaInfo(unittest.TestCase):
+	@classmethod
+	def setUpClass(cls):
+		_warm_system_settings_cache()
+
 	def test_not_enforced_returns_none(self):
 		self.assertIsNone(get_quota_info(make_offer(enforce_usage_quota=0), "Company A"))
 
@@ -98,6 +113,10 @@ class TestGetQuotaInfo(unittest.TestCase):
 
 
 class TestCheckQuota(unittest.TestCase):
+	@classmethod
+	def setUpClass(cls):
+		_warm_system_settings_cache()
+
 	def test_throws_when_exhausted(self):
 		with DB_PATCH as mock_db:
 			mock_db.count.return_value = 2
@@ -210,6 +229,10 @@ class TestValidateHook(unittest.TestCase):
 
 
 class TestSubmitAndCancel(unittest.TestCase):
+	@classmethod
+	def setUpClass(cls):
+		_warm_system_settings_cache()
+
 	def make_invoice(self, **kwargs):
 		values = dict(is_pos=1, is_return=0, company="Company A", posting_date="2026-09-05", name="INV-1")
 		values.update(kwargs)
@@ -223,10 +246,17 @@ class TestSubmitAndCancel(unittest.TestCase):
 			mock_db.count.return_value = 1
 			inserted = []
 
-			def fake_get_doc(payload):
-				doc = frappe._dict(payload)
-				doc.insert = lambda *a, **k: inserted.append(payload) or doc
-				return doc
+			def fake_get_doc(*args, **kwargs):
+				# dict-payload form = the usage-ledger insert (intercepted);
+				# get_doc(doctype, name) form = System Settings fetched by the
+				# timezone machinery — answer a minimal stub, get_system_timezone
+				# only reads .time_zone
+				if args and isinstance(args[0], dict):
+					payload = args[0]
+					doc = frappe._dict(payload)
+					doc.insert = lambda *a, **k: inserted.append(payload) or doc
+					return doc
+				return frappe._dict({"doctype": args[0] if args else None, "time_zone": None})
 
 			mock_get_doc.side_effect = fake_get_doc
 
@@ -246,10 +276,17 @@ class TestSubmitAndCancel(unittest.TestCase):
 			mock_get_all.side_effect = resolve_side_effect([offer], {"PR-A": "S-Promo Gula"})
 			inserted = []
 
-			def fake_get_doc(payload):
-				doc = frappe._dict(payload)
-				doc.insert = lambda *a, **k: inserted.append(payload) or doc
-				return doc
+			def fake_get_doc(*args, **kwargs):
+				# dict-payload form = the usage-ledger insert (intercepted);
+				# get_doc(doctype, name) form = System Settings fetched by the
+				# timezone machinery — answer a minimal stub, get_system_timezone
+				# only reads .time_zone
+				if args and isinstance(args[0], dict):
+					payload = args[0]
+					doc = frappe._dict(payload)
+					doc.insert = lambda *a, **k: inserted.append(payload) or doc
+					return doc
+				return frappe._dict({"doctype": args[0] if args else None, "time_zone": None})
 
 			mock_get_doc.side_effect = fake_get_doc
 

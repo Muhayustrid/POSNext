@@ -108,6 +108,13 @@ class TestSubmitLegAttribution(unittest.TestCase):
 	validate_invoice_discounts gates a codeless offer cart.
 	"""
 
+	@classmethod
+	def setUpClass(cls):
+		# The gate mocks frappe.get_all globally; a cold System Settings client
+		# cache drags now()/getdate through meta loading, which would consume
+		# that mock. Warm it for real, outside the patches.
+		frappe.client_cache.get_doc("System Settings")
+
 	@staticmethod
 	def _rebuild_rows(cleaned_items):
 		"""Mimic BaseDocument.update: fresh rows solely from payload fields."""

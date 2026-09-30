@@ -67,6 +67,9 @@ class BankDeposits(Document):
 			frappe.throw(_("Bank Transaction Document is required"))
 
 	def on_submit(self):
+		if not frappe.db.has_column("POS Closing Shift", "custom_bank_deposit"):
+			# legacy posawesome column: nothing to stamp on this site
+			return
 		frappe.db.set_value(
 			"POS Closing Shift",
 			self.pos_closing_shift,
@@ -76,6 +79,8 @@ class BankDeposits(Document):
 		)
 
 	def on_cancel(self):
+		if not frappe.db.has_column("POS Closing Shift", "custom_bank_deposit"):
+			return
 		frappe.db.set_value(
 			"POS Closing Shift",
 			self.pos_closing_shift,

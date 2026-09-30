@@ -11,6 +11,20 @@ import json
 import frappe
 from frappe.utils import get_datetime, now
 
+# One alert per issue kind per day: a persistent condition (tampering count
+# stuck above the threshold, signature still missing) must not re-notify
+# every hourly run. The marker lives in redis, so a redis restart can cost
+# one extra alert — acceptable for an alerting path.
+_ALERT_TTL_SECONDS = 24 * 60 * 60
+
+
+def _alert_recently_sent(kind):
+	return bool(frappe.cache().get_value(f"bw-branding-alert:{kind}"))
+
+
+def _mark_alert_sent(kind):
+	frappe.cache().set_value(f"bw-branding-alert:{kind}", 1, expires_in_sec=_ALERT_TTL_SECONDS)
+
 
 def monitor_branding_integrity():
 	"""
@@ -29,15 +43,19 @@ def monitor_branding_integrity():
 
 		# Check for excessive tampering attempts
 		if doc.tampering_attempts and doc.tampering_attempts > 50:
-			# Send notification to System Managers
-			send_tampering_alert(doc)
+			if not _alert_recently_sent("tampering"):
+				# Send notification to System Managers
+				send_tampering_alert(doc)
+				_mark_alert_sent("tampering")
 
 		# Verify signature integrity
 		if not doc.encrypted_signature:
-			frappe.log_error(
-				title="BrainWise Branding - Missing Signature",
-				message="Branding configuration is missing encrypted signature. Please resave the BrainWise Branding document.",
-			)
+			if not _alert_recently_sent("signature"):
+				frappe.log_error(
+					title="BrainWise Branding - Missing Signature",
+					message="Branding configuration is missing encrypted signature. Please resave the BrainWise Branding document.",
+				)
+				_mark_alert_sent("signature")
 
 		# Log monitoring activity
 		frappe.logger().info(

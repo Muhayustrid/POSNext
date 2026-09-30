@@ -150,3 +150,40 @@ class TestDisableExpiredPromotionalSchemes(unittest.TestCase):
 		self.assertEqual(set_value.call_count, 0)
 		self.assertEqual(len(updates), 1)
 		self.assertIn("IN", updates[0])
+
+
+class TestPricingRuleCacheClearing(unittest.TestCase):
+	"""The bulk UPDATE bypasses the ORM: the Pricing Rule doctype cache must
+	be dropped exactly when rows were actually disabled."""
+
+	def test_clear_cache_when_rows_disabled(self):
+		fake_rules = [frappe._dict(name="_PERF18 rule", title="_PERF18", valid_upto="2020-01-01")]
+		clear_calls = []
+		real_sql = frappe.db.sql
+
+		def fake_sql(query, *args, **kwargs):
+			text = _norm(query)
+			if text.upper().startswith("SELECT") and "tabPricing Rule" in text:
+				return fake_rules
+			if text.upper().startswith("UPDATE"):
+				return len(fake_rules)
+			return real_sql(query, *args, **kwargs)
+
+		with (
+			mock.patch("frappe.db.sql", side_effect=fake_sql),
+			mock.patch("frappe.clear_cache", side_effect=lambda **kwargs: clear_calls.append(kwargs)),
+		):
+			result = disable_expired_pricing_rules()
+
+		self.assertEqual(result["disabled_count"], 1)
+		self.assertEqual(clear_calls, [{"doctype": "Pricing Rule"}])
+
+	def test_no_clear_cache_when_nothing_disabled(self):
+		with (
+			mock.patch("frappe.db.sql", return_value=[]),
+			mock.patch("frappe.clear_cache") as clear_cache,
+		):
+			result = disable_expired_pricing_rules()
+
+		self.assertEqual(result["disabled_count"], 0)
+		clear_cache.assert_not_called()

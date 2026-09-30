@@ -192,11 +192,21 @@ class POSClosingShift(Document):
 					frappe.db.set_value("Sales Invoice", sales_invoice, "pos_closing_entry", None)
 
 	def delete_draft_invoices(self):
-		if frappe.get_value("POS Profile", self.pos_profile, "posa_allow_delete"):
-			doctype = get_pos_invoice_doctype()
-			# posa_is_printed exists only on Sales Invoice (see
-			# submit_printed_invoices) — POS Invoice drafts are always deletable
-			printed_cond = "posa_is_printed = 0 and " if doctype == "Sales Invoice" else ""
+		if not frappe.db.has_column("POS Profile", "posa_allow_delete"):
+			# legacy posawesome toggle absent on self-standing sites:
+			# nothing is ever deletable
+			return
+		if not frappe.get_value("POS Profile", self.pos_profile, "posa_allow_delete"):
+			return
+		doctype = get_pos_invoice_doctype()
+		if not frappe.db.has_column(doctype, "posa_pos_opening_shift"):
+			# a site without the legacy shift column holds no shift-linked drafts
+			return
+		# posa_is_printed exists only on Sales Invoice (see
+		# submit_printed_invoices) — POS Invoice drafts are always deletable
+		printed_cond = ""
+		if doctype == "Sales Invoice" and frappe.db.has_column(doctype, "posa_is_printed"):
+			printed_cond = "posa_is_printed = 0 and "
 			data = frappe.db.sql(
 				f"""
 		select
@@ -487,6 +497,9 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 
 	data = []
 	for dt in doctypes:
+		if not frappe.db.has_column(dt, "posa_pos_opening_shift"):
+			# legacy column: a site without it holds no shift-linked rows here
+			continue
 		# A consolidated POS Invoice (legacy data only — parity rows are never
 		# consolidated) already had its books posted to the Sales Invoice that
 		# absorbed it, so counting it here would double it.
@@ -540,8 +553,16 @@ def get_payments_entries(pos_opening_shift):
 	nothing is counted twice. Same match shape as sales_recap
 	_aggregate_payments - keep the two in sync when the scoping rules change.
 	"""
+	shift_invoice_branches = [
+		f"SELECT name FROM `tab{dt}` WHERE docstatus = 1 AND posa_pos_opening_shift = %(shift)s"
+		for dt in ("POS Invoice", "Sales Invoice")
+		if frappe.db.has_column(dt, "posa_pos_opening_shift")
+	]
+	if not shift_invoice_branches:
+		# legacy shift columns absent: no invoice can be linked to the shift
+		return []
 	return frappe.db.sql(
-		"""
+		f"""
 		SELECT pe.name, pe.mode_of_payment, pe.paid_amount, pe.base_paid_amount,
 			pe.target_exchange_rate, pe.reference_no, pe.posting_date, pe.party
 		FROM `tabPayment Entry` pe
@@ -550,16 +571,10 @@ def get_payments_entries(pos_opening_shift):
 				SELECT 1 FROM `tabPayment Entry Reference` per
 				WHERE per.parent = pe.name
 					AND per.reference_doctype IN ('Sales Invoice', 'POS Invoice')
-					AND per.reference_name IN (
-						SELECT name FROM `tabPOS Invoice`
-						WHERE docstatus = 1 AND posa_pos_opening_shift = %s
-						UNION
-						SELECT name FROM `tabSales Invoice`
-						WHERE docstatus = 1 AND posa_pos_opening_shift = %s
-					)
+					AND per.reference_name IN ({" UNION ".join(shift_invoice_branches)})
 			)
 		""",
-		(pos_opening_shift, pos_opening_shift),
+		{"shift": pos_opening_shift},
 		as_dict=True,
 	)
 
@@ -572,6 +587,12 @@ def _get_cash_mode_of_payment(pos_profile):
 @frappe.whitelist()
 def get_effective_cash_mode_of_payment(pos_profile):
 	"""Effective cash Mode of Payment of a profile (Desk closing preview)."""
+	# The resolved name is a drawer account, not public catalog data: only the
+	# profile's own users and profile writers may resolve it (same gate shape
+	# as packages._assert_profile_access).
+	from pos_next.api.packages import _assert_profile_access
+
+	_assert_profile_access(pos_profile)
 	return _resolve_cash_mode(pos_profile)
 
 
@@ -890,6 +911,12 @@ def _count_pending_printed_drafts(pos_opening_shift):
 	doctype = get_pos_invoice_doctype()
 	if doctype != SALES_INVOICE:
 		return 0
+	if not (
+		frappe.db.has_column(SALES_INVOICE, "posa_pos_opening_shift")
+		and frappe.db.has_column(SALES_INVOICE, "posa_is_printed")
+	):
+		# legacy columns absent: no shift-linked printed drafts can exist
+		return 0
 	return frappe.db.count(
 		doctype,
 		{
@@ -906,6 +933,12 @@ def submit_printed_invoices(pos_opening_shift, doctype):
 		# printed-draft state. Returning early also guarantees we never submit
 		# unprinted drafts: without the posa_is_printed filter below,
 		# frappe.get_all would match EVERY draft on the shift.
+		return
+	if not (
+		frappe.db.has_column(doctype, "posa_pos_opening_shift")
+		and frappe.db.has_column(doctype, "posa_is_printed")
+	):
+		# legacy columns absent: no shift-linked printed drafts can exist
 		return
 	invoices_list = frappe.get_all(
 		doctype,

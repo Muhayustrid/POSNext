@@ -255,6 +255,9 @@ def _get_transaction_counts(data):
 
 def _get_bank_deposit_data(data):
 	"""Batch-fetch bank deposit amount and date per shift."""
+	if not frappe.db.has_column("POS Closing Shift", "custom_bank_deposit"):
+		# legacy posawesome column: no bank-deposit links exist on this site
+		return {}
 	shift_names = list({row.shift for row in data})
 	if not shift_names:
 		return {}

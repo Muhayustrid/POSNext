@@ -86,11 +86,19 @@ def get_effective_pos_setting(pos_profile, fieldname):
 	"""Effective value of one POS Settings field for a POS Profile.
 
 	An enabled row wins as-is (None included); otherwise the global single's
-	persisted value, else the single's meta default.
+	persisted value, else the single's meta default. A fieldname that is not
+	a column of the current POS Settings table raises SQL 1054 from the row
+	tier — answer it through the global tier instead of crashing. (Checked by
+	exception, not by meta: tests mock frappe.db globally, and loading meta
+	through such a mock breaks frappe internals.)
 	"""
-	row = _enabled_row(pos_profile, ["name", fieldname])
-	if row:
-		return row.get(fieldname)
+	try:
+		row = _enabled_row(pos_profile, ["name", fieldname])
+		if row:
+			return row.get(fieldname)
+	except Exception:
+		# not a column of this POS Settings table — the global tier owns it
+		pass
 	return _global_value(fieldname)
 
 
@@ -99,7 +107,8 @@ def get_effective_pos_settings(pos_profile, fields=None):
 
 	The enabled row's values for the requested fields (all mirror fields when
 	`fields` is None), else the global fallback per field. Both tiers carry
-	"enabled": 1; the global tier also carries "pos_profile".
+	"enabled": 1; the global tier also carries "pos_profile". Unknown fields
+	(row fetch uses "*", so it cannot 1054) resolve to None.
 	"""
 	names = list(fields) if fields is not None else _mirror_fields()
 	row = _enabled_row(pos_profile, "*")

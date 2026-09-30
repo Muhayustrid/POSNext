@@ -36,6 +36,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # File paths
 INIT_FILE="$PROJECT_ROOT/pos_next/__init__.py"
 PACKAGE_JSON="$PROJECT_ROOT/POS/package.json"
+ROOT_PACKAGE_JSON="$PROJECT_ROOT/package.json"
 
 # Check if files exist
 if [ ! -f "$INIT_FILE" ]; then
@@ -45,6 +46,11 @@ fi
 
 if [ ! -f "$PACKAGE_JSON" ]; then
     print_error "Cannot find $PACKAGE_JSON"
+    exit 1
+fi
+
+if [ ! -f "$ROOT_PACKAGE_JSON" ]; then
+    print_error "Cannot find $ROOT_PACKAGE_JSON"
     exit 1
 fi
 
@@ -112,11 +118,20 @@ print_success "Updated __init__.py"
 # Update package.json
 print_info "Updating $PACKAGE_JSON..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+    sed -i '' "s/\"version\": *\"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
 else
-    sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+    sed -i "s/\"version\": *\"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
 fi
 print_success "Updated package.json"
+
+# Update root package.json (kept in lockstep with the two manifests above)
+print_info "Updating $ROOT_PACKAGE_JSON..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s/\"version\": *\"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$ROOT_PACKAGE_JSON"
+else
+    sed -i "s/\"version\": *\"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$ROOT_PACKAGE_JSON"
+fi
+print_success "Updated root package.json"
 
 # Display summary
 echo

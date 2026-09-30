@@ -1,5 +1,8 @@
 # Checklist Deploy — Branch `security-audit-fixes` (grup remediasi audit 1-6)
 
+> **BERSEJARAH**: branch ini sudah ter-merge ke `main`. Untuk deploy kondisi
+> `main` sekarang (v2.13.0 + fix batch audit), pakai `docs/DEPLOY_CHECKLIST.md`.
+
 Tanggal disusun: 25 Sep 2026. Berlaku untuk deploy ke Frappe Cloud (production).
 Semua langkah di bawah sudah diverifikasi di situs dev `posnext.localhost` +
 `roti-posnext-test.localhost` pada state final branch.

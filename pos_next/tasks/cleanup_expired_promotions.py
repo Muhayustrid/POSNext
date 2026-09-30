@@ -56,6 +56,11 @@ def disable_expired_pricing_rules():
 		# Commit all changes
 		frappe.db.commit()
 
+		if disabled_count:
+			# raw UPDATE bypasses the ORM and leaves stale cached Pricing Rule
+			# docs (get_cached_doc consumers) serving until the next restart
+			frappe.clear_cache(doctype="Pricing Rule")
+
 		# Log summary
 		summary = f"Disabled {disabled_count} expired pricing rule(s)"
 		if errors:
@@ -130,6 +135,8 @@ def disable_expired_promotional_schemes():
 
 		# Commit all changes
 		frappe.db.commit()
+		# no clear_cache here: ERPNext has no get_cached_doc("Promotional
+		# Scheme") consumers, unlike Pricing Rule above
 
 		# Log summary
 		summary = f"Disabled {disabled_count} expired promotional scheme(s)"

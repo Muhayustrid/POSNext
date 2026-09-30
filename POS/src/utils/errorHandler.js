@@ -91,11 +91,16 @@ export function parseError(error) {
 		context.message = cleanErrorMessage(error.messages[0]);
 	} else if (error._server_messages) {
 		try {
-			const serverMessages = JSON.parse(error._server_messages);
-			if (serverMessages && serverMessages.length > 0) {
-				const firstMessage = JSON.parse(serverMessages[0]);
-				context.message = cleanErrorMessage(firstMessage.message || firstMessage.title);
-				if (firstMessage.title) context.title = firstMessage.title;
+			// frappe sends a JSON string, but some callers (and frappe-ui
+			// versions) surface it already parsed — accept both, and both
+			// element shapes (JSON string or object)
+			const raw = error._server_messages;
+			const serverMessages = typeof raw === "string" ? JSON.parse(raw) : raw;
+			const list = Array.isArray(serverMessages) ? serverMessages : [serverMessages];
+			if (list.length > 0) {
+				const first = typeof list[0] === "string" ? JSON.parse(list[0]) : list[0];
+				context.message = cleanErrorMessage(first.message || first.title);
+				if (first.title) context.title = first.title;
 			}
 		} catch (parseError) {
 			console.error("Error parsing _server_messages:", parseError);
