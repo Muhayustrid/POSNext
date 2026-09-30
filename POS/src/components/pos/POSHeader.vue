@@ -30,9 +30,11 @@
 			<div
 				class="flex-1 min-w-0 flex justify-between items-center gap-1 sm:gap-2 px-2 sm:px-4 md:px-6"
 			>
-				<!-- Left Side: Brand Info -->
-				<div class="flex items-center gap-1 sm:gap-4 min-w-0 flex-1 overflow-hidden">
-					<div class="min-w-0 flex-shrink overflow-hidden">
+					<!-- Left Side: Brand Info -->
+					<div class="flex items-center gap-1 sm:gap-4 min-w-0 flex-1 overflow-hidden">
+						<!-- min-w keeps the profile line readable on narrow headers;
+						     truncate + title are only the last-resort fallbacks -->
+						<div class="min-w-24 flex-shrink overflow-hidden">
 						<div class="flex items-center gap-1 sm:gap-2">
 							<h1
 								class="text-xs sm:text-base font-bold text-gray-900 truncate flex-shrink"
@@ -51,6 +53,7 @@
 						<p
 							v-if="profileName"
 							class="text-[9px] sm:text-xs text-gray-500 truncate hidden sm:block mt-0.5"
+							:title="profileName"
 						>
 							{{ profileName }}
 						</p>

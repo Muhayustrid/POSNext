@@ -358,9 +358,11 @@
 			</div>
 		</div>
 
-		<!-- Initial Loading State - Show spinner while fetching items -->
+		<!-- Initial Loading State - Show spinner while fetching items.
+		     Also held while the POS Profile data itself hasn't loaded yet, so
+		     unfiltered cross-profile items are never rendered or clickable. -->
 		<div
-			v-if="loading && (!filteredItems || filteredItems.length === 0)"
+			v-if="(!profileLoaded || loading) && (!filteredItems || filteredItems.length === 0)"
 			class="flex-1 flex items-center justify-center p-3"
 		>
 			<div class="text-center py-8">
@@ -406,9 +408,9 @@
 			</div>
 		</div>
 
-		<!-- Grid View -->
+		<!-- Grid View - held until profile data is loaded -->
 		<div
-			v-if="viewMode === 'grid'"
+			v-if="viewMode === 'grid' && profileLoaded"
 			key="grid"
 			class="flex-1 flex flex-col overflow-hidden min-h-0"
 		>
@@ -694,9 +696,9 @@
 			</div>
 		</div>
 
-		<!-- Table View -->
+		<!-- Table View - held until profile data is loaded -->
 		<div
-			v-if="viewMode === 'list'"
+			v-if="viewMode === 'list' && profileLoaded"
 			key="list"
 			class="flex-1 flex flex-col overflow-hidden min-h-0"
 		>
@@ -1072,6 +1074,7 @@ const {
 	brands,
 	loading,
 	loadingMore,
+	profileLoaded,
 	hasMore,
 	cacheSyncing,
 	cacheStats,

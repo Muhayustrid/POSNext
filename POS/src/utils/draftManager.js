@@ -107,8 +107,15 @@ export async function updateDraft(draftId, invoiceData) {
 	});
 }
 
-// Get all draft invoices
-export async function getAllDrafts() {
+// Drafts live on a shared device, but belong to the account that saved them.
+// Reads are scoped to the active user; ownerless (pre-owner-scope) drafts stay
+// visible to every account so old data is never silently hidden.
+export function isDraftVisible(draft, owner) {
+	return draft.owner == null || draft.owner === owner;
+}
+
+// Get all draft invoices visible to the given owner
+export async function getAllDrafts(owner) {
 	const database = await initDB();
 
 	return new Promise((resolve, reject) => {
@@ -117,10 +124,11 @@ export async function getAllDrafts() {
 		const request = store.getAll();
 
 		request.onsuccess = () => {
-			// Sort by created_at descending
-			const drafts = request.result.sort(
-				(a, b) => new Date(b.created_at) - new Date(a.created_at)
-			);
+			// ponytail: in-memory filter instead of an owner index — a few dozen
+			// drafts per device at most; bump DB_VERSION only if that changes.
+			const drafts = request.result
+				.filter((draft) => isDraftVisible(draft, owner))
+				.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 			resolve(drafts);
 		};
 		request.onerror = () => reject(request.error);
@@ -165,30 +173,30 @@ export async function deleteDraft(draftId) {
 	});
 }
 
-// Clear all drafts
-export async function clearAllDrafts() {
+// Clear all drafts. Unscoped (owner == null) wipes the whole store — used by
+// logout cleanup. With an owner, only deletes drafts that owner can see so
+// other accounts' drafts survive a "Clear All" in the dialog.
+export async function clearAllDrafts(owner) {
 	const database = await initDB();
 
-	return new Promise((resolve, reject) => {
-		const transaction = database.transaction([STORE_NAME], "readwrite");
-		const store = transaction.objectStore(STORE_NAME);
-		const request = store.clear();
+	if (owner == null) {
+		return new Promise((resolve, reject) => {
+			const transaction = database.transaction([STORE_NAME], "readwrite");
+			const store = transaction.objectStore(STORE_NAME);
+			const request = store.clear();
 
-		request.onsuccess = () => resolve(true);
-		request.onerror = () => reject(request.error);
-	});
+			request.onsuccess = () => resolve(true);
+			request.onerror = () => reject(request.error);
+		});
+	}
+
+	const drafts = await getAllDrafts(owner);
+	await Promise.all(drafts.map((draft) => deleteDraft(draft.draft_id)));
+	return true;
 }
 
-// Get drafts count
-export async function getDraftsCount() {
-	const database = await initDB();
-
-	return new Promise((resolve, reject) => {
-		const transaction = database.transaction([STORE_NAME], "readonly");
-		const store = transaction.objectStore(STORE_NAME);
-		const request = store.count();
-
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
-	});
+// Get drafts count visible to the given owner
+export async function getDraftsCount(owner) {
+	const drafts = await getAllDrafts(owner);
+	return drafts.length;
 }

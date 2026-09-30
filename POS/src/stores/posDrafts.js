@@ -1,3 +1,4 @@
+import { getActiveUserId } from "@/data/user";
 import {
 	deleteDraft,
 	getDraftsCount,
@@ -20,7 +21,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	// Actions
 	async function updateDraftsCount() {
 		try {
-			draftsCount.value = await getDraftsCount();
+			draftsCount.value = await getDraftsCount(getActiveUserId());
 		} catch (error) {
 			console.error("Error getting drafts count:", error);
 		}
@@ -28,7 +29,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 	async function loadDrafts() {
 		try {
-			drafts.value = await getAllDrafts();
+			drafts.value = await getAllDrafts(getActiveUserId());
 			draftsCount.value = drafts.value.length;
 		} catch (error) {
 			console.error("Error loading drafts:", error);
@@ -52,6 +53,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 		try {
 			const draftData = {
+				owner: getActiveUserId(), // Scope the draft to the active account
 				pos_profile: posProfile,
 				customer,
 				buyer_name: buyerName?.trim() || "",

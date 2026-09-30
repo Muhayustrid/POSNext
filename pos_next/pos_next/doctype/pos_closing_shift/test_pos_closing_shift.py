@@ -17,6 +17,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import nowdate
 
+from pos_next.api.invoices import submit_invoice
 from pos_next.invoice_type import SALES_INVOICE
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
@@ -76,3 +77,20 @@ class TestPendingPrintedDraftsCount(POSInvoiceModeMixin, FrappeTestCase):
 		self._fabricate_pos_draft()
 		preview = self._preview()
 		self.assertEqual(preview["pending_printed_drafts"], 0)
+
+
+class TestPreviewTransactionsCarryPostingTime(POSInvoiceModeMixin, FrappeTestCase):
+	"""The closing preview's pos_transactions rows carry a truthy posting_time
+	(ShiftClosingDialog.vue renders formatTime(invoice.posting_time)); the
+	child-table set in make_closing_shift_from_opening deliberately strips it,
+	so only the display payload must hold it."""
+
+	def test_every_pos_transaction_has_posting_time(self):
+		name = submit_invoice(invoice=self._payload()).get("name")
+		self._created.append(name)
+		opening = frappe.get_doc("POS Opening Shift", self.shift.name)
+		preview = make_closing_shift_from_opening(json.dumps(opening.as_dict(), default=str))
+		transactions = preview["pos_transactions"]
+		self.assertTrue(transactions)
+		for txn in transactions:
+			self.assertTrue(txn.get("posting_time"), f"{txn.get('name')} has no posting_time")

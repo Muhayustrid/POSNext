@@ -1240,8 +1240,8 @@
 										<input
 											:value="formatQuantity(item.quantity)"
 											@click.stop
-											@input="updateQuantity(item, $event.target.value)"
-											@blur="handleQuantityBlur(item)"
+											@input="updateQuantity(item, $event)"
+											@blur="handleQuantityBlur(item, $event)"
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
@@ -2258,11 +2258,11 @@ function decrementQuantity(item) {
  * @param {String} value - New quantity value from input
  */
 
-function updateQuantity(item, value) {
+function updateQuantity(item, event) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const qty = Number.parseFloat(value);
+	const qty = Number.parseFloat(event.target.value);
 
 	// If the input isn't a valid number (e.g., user cleared the field), do nothing
 	if (isNaN(qty)) return;
@@ -2272,6 +2272,14 @@ function updateQuantity(item, value) {
 
 	// For positive numbers, update quantity immediately (no rounding here while typing)
 	emit("update-quantity", item.item_code, qty, item.uom);
+
+	// If the store rejected the update (e.g. stock validation keeps the
+	// committed quantity and only toasts), snap the field back to the
+	// committed value — the :value binding won't rewrite the DOM because the
+	// bound value never changed.
+	if (item.quantity !== qty) {
+		event.target.value = formatQuantity(item.quantity);
+	}
 }
 
 /**
@@ -2282,7 +2290,7 @@ function updateQuantity(item, value) {
  *
  * @param {Object} item - Cart item that lost focus
  */
-function handleQuantityBlur(item) {
+function handleQuantityBlur(item, event) {
 	// When user leaves the input field, round and validate
 	if (!item.quantity || item.quantity <= 0) {
 		// If quantity is 0 or invalid, remove the item
@@ -2292,6 +2300,11 @@ function handleQuantityBlur(item) {
 		const roundedQty = Math.round(item.quantity * 10000) / 10000;
 		if (roundedQty !== item.quantity) {
 			emit("update-quantity", item.item_code, roundedQty, item.uom);
+		} else if (event?.target) {
+			// Nothing was committed on this blur (e.g. field was cleared, or a
+			// typed value was rejected) — snap the field back to the committed
+			// quantity so it can't keep showing a value the store refused.
+			event.target.value = formatQuantity(item.quantity);
 		}
 	}
 }

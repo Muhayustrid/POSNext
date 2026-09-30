@@ -67,6 +67,12 @@ if (typeof window !== "undefined") {
 	}, 500); // Check every 500ms for cookie changes
 }
 
+// Stable account identity for per-user data (drafts, session lock). Same
+// fallback chain as the session lock uses.
+export function getActiveUserId() {
+	return userData.userId || window.frappe?.session?.user || null;
+}
+
 export const useUserData = () => ({
 	userName: computed(() => userData.getDisplayName()),
 	userImage: computed(() => userData.getImageUrl()),

@@ -120,6 +120,7 @@ vi.mock("@/data/user", () => ({
 			return "K"
 		},
 	}),
+	getActiveUserId: () => "user",
 	userResource: { fetch: vi.fn(), loading: false, data: null },
 	useUserData: () => ({
 		userName: { value: "Kasir" },
@@ -271,6 +272,30 @@ const InvoiceCartSaveStub = defineComponent({
 	name: "InvoiceCart",
 	emits: ["save-draft"],
 	template: `<button data-test="save-draft" @click="$emit('save-draft')"></button>`,
+})
+
+// Cart quick-action stub that emits view-shift the way the real grid does.
+const InvoiceCartViewShiftStub = defineComponent({
+	name: "InvoiceCart",
+	emits: ["view-shift"],
+	template: `<button data-test="view-shift" @click="$emit('view-shift')"></button>`,
+})
+
+// Renders the named header slots so the in-page menu-items buttons are in the
+// DOM (the default stub drops named slots).
+const POSHeaderSlotStub = defineComponent({
+	name: "POSHeader",
+	template: `<div><slot name="menu-items" /><slot name="additional-actions" /></div>`,
+})
+
+// Probe exposing the shell's open state and requested view as attributes.
+const POSMenuDialogProbe = defineComponent({
+	name: "POSMenuDialog",
+	props: {
+		open: { type: Boolean, default: false },
+		initialView: { type: String, default: null },
+	},
+	template: `<div data-test="pos-menu" :data-open="String(open)" :data-view="initialView || ''"></div>`,
 })
 
 const ALL_DIALOG_STUBS = {
@@ -557,6 +582,43 @@ describe("mobile tab switch (webview regression)", () => {
 
 		await flushPromises()
 		expect(uiStore.mobileActiveTab).toBe("cart")
+	})
+})
+
+describe("View Shift with active shift", () => {
+	it("opens the shift dashboard from the header menu instead of the resume dialog", async () => {
+		await mountPOS({
+			POSHeader: POSHeaderSlotStub,
+			POSMenuDialog: POSMenuDialogProbe,
+		})
+
+		const viewShift = wrapper
+			.findAll("button")
+			.find((b) => b.text().includes("View Shift"))
+		expect(viewShift).toBeTruthy()
+		await viewShift.trigger("click")
+		await flushPromises()
+
+		const menu = wrapper.find('[data-test="pos-menu"]')
+		expect(menu.attributes("data-open")).toBe("true")
+		expect(menu.attributes("data-view")).toBe("dashboard")
+		// "Existing Shift Found" (resume/close-and-open-new) must stay closed.
+		expect(uiStore.showOpenShiftDialog).toBe(false)
+	})
+
+	it("opens the shift dashboard from the cart quick action too", async () => {
+		await mountPOS({
+			InvoiceCart: InvoiceCartViewShiftStub,
+			POSMenuDialog: POSMenuDialogProbe,
+		})
+
+		await wrapper.find('[data-test="view-shift"]').trigger("click")
+		await flushPromises()
+
+		const menu = wrapper.find('[data-test="pos-menu"]')
+		expect(menu.attributes("data-open")).toBe("true")
+		expect(menu.attributes("data-view")).toBe("dashboard")
+		expect(uiStore.showOpenShiftDialog).toBe(false)
 	})
 })
 

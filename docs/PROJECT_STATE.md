@@ -5,17 +5,17 @@ berada. Diperbarui manual setiap milestone besar. Detail teknis lengkap ada
 di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
 `docs/DEPLOY_CHECKLIST.md`.
 
-## Status rilis (per 30 September 2026)
+## Status rilis (per 30 September 2026, malam)
 
 | Hal | Nilai |
 | --- | --- |
-| Versi app | 2.13.0 (3 manifest: `pos_next/__init__.py`, `POS/package.json`, root `package.json` — `scripts/version-bump.sh` kini men-bump ketiganya) |
-| `main` | `7143a70` = `origin/main`; **working tree di atasnya memuat fix audit batch-1 + batch-2 (belum di-commit — tunggu review orchestrator)** |
-| Produksi (Frappe Cloud) | masih `b6f7ae9`-era; deploy berikutnya = main + fix batch (wajib build + migrate, lihat `docs/DEPLOY_CHECKLIST.md`) |
+| Versi app | 2.15.0 (3 manifest: `pos_next/__init__.py`, `POS/package.json`, root `package.json` — `scripts/version-bump.sh` men-bump ketiganya) |
+| `main` | `fc7cd4b` = `origin/main` (pohon bersih, tidak ada working-tree mengambang); 6 commit di atas `7143a70`: `7da78ba` fix audit 29 Sep, `43d378a` gate diskon manual, `4a568c0` alur kupon, `f9171c2` naming series global, `a39d966` rombak role 4 persona, `fc7cd4b` fix 2 temuan E2E |
+| Produksi (Frappe Cloud) | deploy masih tertunda; sumber deploy berikutnya = `main` `fc7cd4b` — **wajib migrate (patch rename role v2_15_0 + sync page roles + perm doctype HQ) DAN build frontend**, lihat `docs/DEPLOY_CHECKLIST.md` |
 | Site uji dev | `roti-posnext-test.localhost:8001` (bundle build; jangan diganggu saat test) |
 | Site test-runner | `posnext.localhost` |
 
-### Sesi 29–30 Sep — penutupan penuh temuan audit (working tree, uncommitted)
+### Sesi 29–30 Sep — penutupan penuh temuan audit (di-commit `7da78ba`, ter-push)
 
 - **Batch-1 (P1)**: `after_install` + `after_migrate` kini menjalankan `ensure_site_indexes()`
   (re-execute patch DDL v2_12_0 — FULLTEXT `ft_item_pos_search` + index Payment Entry
@@ -48,6 +48,72 @@ di `docs/superpowers/plans/` (handoff per fase) dan checklist deploy di
 - **Known-debt**: flake/kegagalan sweep terkait isolasi mock `System Settings`
   (pola pre-warm `frappe.client_cache` sudah diterapkan di modul yang terdampak —
   lihat laporan sweep 30 Sep untuk sisa daftarnya), dan `CLN §7` quick-wins.
+
+## Sesi 30 Sep — rombak role 4 persona native-first (di-commit `a39d966` + `fc7cd4b`, ter-push)
+
+Rombak total sistem role ke 4 persona dengan prinsip native-first (pakai role
+bawaan ERPNext bila cocok; buat/rename hanya bila lebih bersik dipisah).
+`main` = `origin/main` di `fc7cd4b`.
+
+- **Matriks final**:
+  - **Kasir = `POSNext Cashier`, 1 role saja** — Stock User tidak lagi
+    dibundel; Custom DocPerm Bin/Item/Warehouse menutupi kebutuhan stok
+    (dibuktikan `test_cashier_single_role`: insert → submit POS Invoice Paid +
+    Stock Ledger Entry terpotong, tanpa Stock User). Role bawaan ERPNext
+    Stock User TIDAK dihapus dari sistem — hanya keluar dari resep kasir;
+    kasir lama yang sudah ter-bundel boleh dibiarkan. Resep akun kasir:
+    role POSNext Cashier + WAJIB terdaftar di `applicable_for_users` POS
+    Profile outlet (tanpa itu tak bisa buka shift) + user_type System User.
+  - **Manager outlet = `POSNext Manager`** (rename dari `Nexus POS Manager`).
+  - **HQ = native `Sales Manager` + `Accounts Manager`** (target outlet, kode
+    diskon, backdate, wallet; TANPA akses PO/PR outlet) — dibuktikan
+    `test_hq_native_permissions`.
+  - **Admin = System Manager**. Persona Supervisor sengaja tidak dibuat.
+- **Patch `v2_15_0/rename_nexus_pos_manager_role`**: rename idempotent +
+  `_sync_page_roles()` (migrate TIDAK me-refresh roles Page existing —
+  folder file = `page.replace("-","_")`; 3 page: backdate-entry,
+  hq-sales-monitoring, outlet-targets) + cabang delete shell lama bila role
+  baru sudah terbentuk duluan oleh fixtures.
+- **20 file .py gate + 28 JSON doctype/page/report** ikut rename; perm HQ
+  native ditambah (pos_monthly_target Sales Manager +write/create, kode
+  diskon +create/read, backdate-entry 4 role); cleanup Website Manager/POS
+  User dari beberapa doctype.
+- **Jebakan terbukti sesi ini**: (1) fixtures ter-import SEBELUM patch saat
+  migrate → "Another Role exists" → cabang delete-shell; (2)
+  `developer_mode` in-process MENIMPA file JSON app saat save Page (sekali
+  salah path menulis = roles di JSON app ikut terhapus) → matikan
+  `frappe.conf.developer_mode = 0` dulu; (3) role ditambah SETELAH insert
+  User → user_type ter-derive "Website User" → 403 seluruh /desk — set
+  System User + clear_cache + re-login.
+- **Test**: modul baru `test_cashier_single_role` +
+  `test_hq_native_permissions`; fix regresi pre-existing `4a568c0`
+  (offers: mock has_permission + patch getdate; strip_fields: `is_pos`
+  keluar dari payload untouched). Catatan: test IDOR
+  `test_invoice_authorization_security` SENGAJA tetap memakai persona tanpa
+  invoice-write (bukti ownership gate) — Stock User di situ by design.
+- **Verifikasi penuh**: sweep backend 974 OK, vitest 613/613, build host OK,
+  migrate 2 situs, E2E HTTP 3 persona + E2E IAB penuh (invoice
+  `ACC-PSINV-2026-00013` Paid 80.000; tutup shift `POSA-CS-26-0000003`
+  variance 0; Switch To Desk; HQ buka page backdate-entry).
+- **Fix 2 temuan E2E browser (`fc7cd4b`)**:
+  1. Dialog Open Shift macet pasca-sukses (Cancel tak merespons) — reset
+     dipindah dari watcher close ke awal `initDialog()`, nested
+     `<ShiftClosingDialog>` dikeluarkan dari ShiftOpeningDialog (fragment
+     multi-root sumber kerentanan unmount), emit baru `close-existing-shift`
+     ditangani di POSSale.vue + Login.vue.
+  2. Klik kartu item mati saat webview stalled (rAF tak pernah fire walau
+     visibilityState=visible) — `runFrameSafe()` race idempoten
+     rAF-vs-setTimeout(32 ms) di `lowEndOptimizations.js`,
+     `setInterval(resetTouchHandled)` bocor per-instance dihapus (lazy
+     expiry di handler), `handleTabSwitch` dieksekusi langsung tanpa rAF.
+     Test baru: 6 dialog + 5 util + 2 POSSale.
+- **Akun uji persona (situs uji `roti-posnext-test.localhost`)**:
+  `kasir.uji@posnext.test` / `Kasir#Uji#2026!`, `manager.uji@posnext.test` /
+  `Manager#Uji#2026!`, `hq.uji@posnext.test` / `HQ#Uji#2026!`; profil
+  `KASIR UJI`; manager terdaftar di `applicable_for_users`.
+- **Deploy produksi**: WAJIB migrate + build frontend; user kasir lama tak
+  perlu diubah (role lama tetap berfungsi), akun HQ diberi role native
+  Sales/Accounts Manager.
 
 ## Status rilis (per 27 September 2026)
 
@@ -450,11 +516,13 @@ otorisasi user — belum di-push**):
 1. **Deploy produksi** — user deploy `dbcf9c7` ke FC 27 Sep (repo-side benar: saat
    itu `dbcf9c7` = tip main; verifikasi hidup dari luar ambigu — lihat ronde-6).
    Perlu dipastikan deploy itu sudah melewati **migrate + build frontend**
-   (About → pos_next 2.13.0; baris "Ukuran Teks" di UserMenu). Sumber deploy
-   berikutnya `main` = `6161681` (fitur produksi Work Order + pilih batch) —
-   kali ini **wajib migrate DAN build frontend**: doctype/patch produksi baru
-   + custom field Work Order `posa_*` + field baru 2 doctype + id.csv; detail
-   di sesi 27–28 Sep di bawah. Smoke test per
+   (About → pos_next 2.15.0; baris "Ukuran Teks" di UserMenu). Sumber deploy
+   berikutnya `main` = `fc7cd4b` (rombak role 4 persona + fix E2E; di bawahnya
+   juga mengangkut naming series global `f9171c2`, alur kupon `4a568c0`, gate
+   diskon manual `43d378a`, fix audit 29 Sep `7da78ba`) — **wajib migrate DAN
+   build frontend**: patch rename role v2_15_0 + sync page roles + perm doctype
+   HQ + doctype/patch Work Order + custom field `posa_*` + id.csv; detail di
+   sesi 27–28 Sep dan sesi 30 Sep di atas. Smoke test per
    `docs/DEPLOY_CHECKLIST_SECURITY_AUDIT_FIXES.md` tetap berlaku (SELECT pra-cek
    PE legacy; item 3 §1: jalankan `pos_next.audit.run` — angka pembanding situs
    test ada di item A7 di atas).
@@ -513,8 +581,14 @@ hermetik — bukan uninstall nyata.
   `kasir.pku@posnext.test` / `kasir123` (POSNext Cashier saja — single role,
   Custom DocPerm menutupi kebutuhan stok; terdaftar di `applicable_for_users`
   profil `POS - PKU DELANGGU`).
-- Shift aktif kini `POSA-OS-26-0000048` milik kasir uji (kas awal 0);
-  shift sebelumnya ditutup seimbang lewat `POSA-CS-26-0000016` (27 Sep).
+- Akun uji persona 4-role (30 Sep, situs uji `roti-posnext-test.localhost`):
+  `kasir.uji@posnext.test` / `Kasir#Uji#2026!` (System User, POSNext Cashier
+  saja, profil `KASIR UJI`), `manager.uji@posnext.test` /
+  `Manager#Uji#2026!` (POSNext Manager), `hq.uji@posnext.test` /
+  `HQ#Uji#2026!` (System User, Sales Manager + Accounts Manager).
+- Situs uji pasca-E2E 30 Sep: shift terakhir ditutup seimbang via
+  `POSA-CS-26-0000003` (invoice `ACC-PSINV-2026-00013`); buka shift baru
+  sebelum uji berikutnya.
 - Test backend WAJIB serial via
   `docker exec -w /workspace/development/frappe-bench erpnext16_dev-frappe-1
   ./env/bin/python apps/pos_next/pos_next/_pn_run_tests.py <modul>`;

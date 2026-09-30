@@ -654,6 +654,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 			{
 				invoice_field: invoice.name,
 				"posting_date": invoice.posting_date,
+				"posting_time": invoice.posting_time,
 				"grand_total": 0,
 				"transaction_currency": invoice.get("currency") or company_currency,
 				"transaction_amount": flt(invoice.get("grand_total")),
@@ -668,6 +669,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 		{
 			invoice_field: invoice.name,
 			"posting_date": invoice.posting_date,
+			"posting_time": invoice.posting_time,
 			"grand_total": base_grand_total,
 			"transaction_currency": invoice.get("currency") or company_currency,
 			"transaction_amount": flt(invoice.get("grand_total")),

@@ -114,16 +114,8 @@ button.active\:scale-95:active,
 	animation: dialog-overlay-in 100ms ease-out;
 }
 
-.dialog-leave-active {
-	animation: dialog-overlay-out 150ms ease-in;
-}
-
 .dialog-content-enter-active {
 	animation: dialog-content-in 100ms ease-out;
-}
-
-.dialog-content-leave-active {
-	animation: dialog-content-out 150ms ease-in;
 }
 
 @keyframes dialog-overlay-in {
@@ -135,15 +127,6 @@ button.active\:scale-95:active,
 	}
 }
 
-@keyframes dialog-overlay-out {
-	from {
-		opacity: 1;
-	}
-	to {
-		opacity: 0;
-	}
-}
-
 @keyframes dialog-content-in {
 	from {
 		opacity: 0.5;
@@ -152,17 +135,6 @@ button.active\:scale-95:active,
 	to {
 		opacity: 1;
 		transform: scale(1);
-	}
-}
-
-@keyframes dialog-content-out {
-	from {
-		opacity: 1;
-		transform: scale(1);
-	}
-	to {
-		opacity: 0.5;
-		transform: scale(0.98);
 	}
 }
 

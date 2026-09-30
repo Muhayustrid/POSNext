@@ -20,6 +20,16 @@ const draftManager = vi.hoisted(() => ({
 
 vi.mock("@/utils/draftManager", () => draftManager)
 
+const dataUser = vi.hoisted(() => ({
+	getActiveUserId: vi.fn(() => "kasir.uji"),
+}))
+
+vi.mock("@/data/user", () => dataUser)
+
+// The real visibility predicate — the mocked module above can't prove that
+// foreign/legacy/own drafts are classified correctly.
+const { isDraftVisible } = await vi.importActual("@/utils/draftManager")
+
 import { usePOSDraftsStore } from "./posDrafts"
 
 const ITEMS = [
@@ -78,5 +88,42 @@ describe("posDrafts discount round-trip (COR-FE-02)", () => {
 
 		expect(data.applied_coupon).toBeNull()
 		expect(data.additional_discount).toBe(0)
+	})
+})
+
+describe("per-user draft scope", () => {
+	beforeEach(() => {
+		dataUser.getActiveUserId.mockReturnValue("kasir.uji")
+	})
+
+	it("stamps the active user as owner on the saved draft payload", async () => {
+		const store = usePOSDraftsStore()
+
+		await store.saveDraftInvoice(ITEMS, "CUST-1", "Budi", "Profile 1")
+
+		expect(draftManager.saveDraft.mock.calls[0][0].owner).toBe("kasir.uji")
+	})
+
+	it("scopes the badge count and the drafts list to the active user", async () => {
+		const store = usePOSDraftsStore()
+
+		await store.updateDraftsCount()
+		await store.loadDrafts()
+
+		expect(draftManager.getDraftsCount).toHaveBeenCalledWith("kasir.uji")
+		expect(draftManager.getAllDrafts).toHaveBeenCalledWith("kasir.uji")
+	})
+
+	it("counts drafts owned by another user as invisible", () => {
+		expect(isDraftVisible({ owner: "administrator" }, "kasir.uji")).toBe(false)
+	})
+
+	it("still shows legacy drafts that have no owner", () => {
+		expect(isDraftVisible({}, "kasir.uji")).toBe(true)
+		expect(isDraftVisible({ owner: null }, "kasir.uji")).toBe(true)
+	})
+
+	it("shows drafts owned by the active user", () => {
+		expect(isDraftVisible({ owner: "kasir.uji" }, "kasir.uji")).toBe(true)
 	})
 })

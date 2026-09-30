@@ -48,6 +48,7 @@ vi.mock("frappe-ui", async () => {
 
 import ItemsSelector from "./ItemsSelector.vue";
 import { useItemSearchStore } from "@/stores/itemSearch";
+import { call } from "@/utils/apiWrapper";
 
 function makeItems(count, prefix) {
 	return Array.from({ length: count }, (_, i) => ({
@@ -155,6 +156,123 @@ describe("ItemsSelector search pagination (PERF-12)", () => {
 
 		expect(cardNames(wrapper)[0]).toContain("BBB Item 1");
 		expect(wrapper.find('button[aria-label="Go to page 2"]').exists()).toBe(true);
+		wrapper.unmount();
+	});
+});
+
+// FIX C: after a reload the catalog briefly showed EVERY item across POS
+// Profiles while get_pos_profile_data was still in flight. The grid must stay
+// held (spinner, no cards) until the profile data — including a profile with
+// zero item-group filters — has loaded.
+describe("ItemsSelector profile-ready gating (FIX C)", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		localStorage.setItem(VIEW_PREF_KEY, "grid");
+		vi.mocked(call).mockReset();
+		vi.mocked(call).mockImplementation(async () => ({ message: [] }));
+	});
+
+	async function mountWithProfile(profileResponse, itemResponse) {
+		vi.mocked(call).mockImplementation(async (url) => {
+			if (url === "pos_next.api.pos_profile.get_pos_profile_data") {
+				return profileResponse;
+			}
+			if (url === "pos_next.api.items.get_items") {
+				return { message: itemResponse };
+			}
+			return { message: [] };
+		});
+		const pinia = createPinia();
+		setActivePinia(pinia);
+		const wrapper = mount(ItemsSelector, {
+			props: { posProfile: "Kasir 1", cartItems: [], currency: "IDR" },
+			global: {
+				plugins: [pinia],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { LazyImage: true, WarehouseAvailabilityDialog: true },
+			},
+		});
+		await flushPromises();
+		return { wrapper, store: useItemSearchStore() };
+	}
+
+	const beverage = (code, name) => ({
+		item_code: code,
+		item_name: name,
+		item_group: "Beverages",
+		rate: 1000,
+		uom: "Nos",
+	});
+
+	it("renders no items while the profile data is still loading", async () => {
+		// get_pos_profile_data never resolves (slow network simulation)
+		vi.mocked(call).mockImplementation(
+			async (url) =>
+				url === "pos_next.api.pos_profile.get_pos_profile_data"
+					? new Promise(() => {})
+					: { message: [] }
+		);
+		const pinia = createPinia();
+		setActivePinia(pinia);
+		const wrapper = mount(ItemsSelector, {
+			props: { posProfile: "Kasir 1", cartItems: [], currency: "IDR" },
+			global: {
+				plugins: [pinia],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { LazyImage: true, WarehouseAvailabilityDialog: true },
+			},
+		});
+		await flushPromises();
+		const store = useItemSearchStore();
+		expect(store.profileLoaded).toBe(false);
+		expect(store.loading).toBe(true);
+
+		// Even with items forced into the store (stale cache scenario), the
+		// catalog must not render them unfiltered.
+		store.allItems = makeItems(5, "XXX");
+		await flushPromises();
+
+		expect(wrapper.find("div.grid.grid-cols-2").exists()).toBe(false);
+		expect(itemCards(wrapper)).toHaveLength(0);
+		expect(wrapper.text()).toContain("Loading items...");
+		wrapper.unmount();
+	});
+
+	it("renders profile-filtered items once the profile has loaded", async () => {
+		const { wrapper, store } = await mountWithProfile(
+			{
+				message: null,
+				pos_profile: { item_groups: [{ item_group: "Beverages" }] },
+				item_groups_hierarchy: [{ item_group: "Beverages" }],
+			},
+			[
+				beverage("BEV-1", "Kopi Susu"),
+				beverage("BEV-2", "Es Teh"),
+				{ item_code: "OTH-1", item_name: "Other Item", item_group: "Other", rate: 1000, uom: "Nos" },
+			]
+		);
+
+		expect(store.profileLoaded).toBe(true);
+		expect(wrapper.find("div.grid.grid-cols-2").exists()).toBe(true);
+		const names = cardNames(wrapper);
+		expect(names).toHaveLength(2); // off-profile "Other Item" is filtered out
+		expect(names.join(", ")).toContain("Kopi Susu");
+		wrapper.unmount();
+	});
+
+	it("treats a profile with zero item groups as loaded, not pending", async () => {
+		const { wrapper, store } = await mountWithProfile(
+			{
+				message: null,
+				pos_profile: { item_groups: [] },
+				item_groups_hierarchy: [],
+			},
+			[beverage("BEV-1", "Kopi Susu"), beverage("BEV-2", "Es Teh")]
+		);
+
+		expect(store.profileLoaded).toBe(true);
+		expect(wrapper.find("div.grid.grid-cols-2").exists()).toBe(true);
+		expect(cardNames(wrapper)).toHaveLength(2);
 		wrapper.unmount();
 	});
 });

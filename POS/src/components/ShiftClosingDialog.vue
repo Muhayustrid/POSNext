@@ -73,7 +73,7 @@
 									{{ __("Duration") }}
 								</div>
 								<div class="text-base md:text-lg font-semibold text-gray-900">
-									{{ getShiftDuration() }}
+									{{ shiftDurationSnapshot }}
 								</div>
 							</div>
 						</div>
@@ -1045,6 +1045,10 @@ const syncBlockMessage = computed(() =>
 )
 
 const closingData = ref(null)
+// Duration is pinned once when the dialog data loads. After a successful
+// submit the shift state resets (period_end changes), which would recompute
+// the header duration to "0m" while the report is still on screen.
+const shiftDurationSnapshot = ref(null)
 const closingDataResource = getClosingShiftData
 const submitResource = submitClosingShift
 const showInvoiceDetails = ref(false)
@@ -1136,6 +1140,7 @@ async function loadClosingData() {
 		}
 
 		closingData.value = data
+		shiftDurationSnapshot.value = getShiftDuration()
 
 		// Auto-expand invoice details if there are few invoices
 		if (invoiceCount.value > 0 && invoiceCount.value <= 10) {
@@ -1278,6 +1283,7 @@ function closeDialog() {
 
 	open.value = false
 	closingData.value = null
+	shiftDurationSnapshot.value = null
 	showInvoiceDetails.value = false
 	showSuccessReport.value = false // Reset report view
 	errorMessage.value = "" // Clear error messages

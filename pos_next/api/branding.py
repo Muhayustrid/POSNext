@@ -9,9 +9,16 @@ Provides secure branding configuration and validation endpoints
 import base64
 import hashlib
 import json
+import time
 
 import frappe
 from frappe import _
+
+
+def _is_record_changed_error(exc):
+	"""MySQL 1020: another writer bumped the Single between read and write."""
+	text = str(exc)
+	return "1020" in text or "Record has changed" in text
 
 
 @frappe.whitelist(allow_guest=False)
@@ -115,9 +122,21 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 				},
 			)
 
-		# Update last validation time
-		frappe.db.set_value("BrainWise Branding", doc.name, "last_validation", frappe.utils.now())
-		frappe.db.commit()
+		# Update last validation time.  Every POSFooter mount and its 5-minute
+		# timer writes this Single, so parallel calls race on tabSingles and
+		# MySQL rejects with 1020 "Record has changed" — retry once after a
+		# rollback instead of failing the whole validation.
+		for attempt in (1, 2):
+			try:
+				frappe.db.set_value("BrainWise Branding", doc.name, "last_validation", frappe.utils.now())
+				frappe.db.commit()
+				break
+			except Exception as e:
+				if attempt == 1 and _is_record_changed_error(e):
+					frappe.db.rollback()
+					time.sleep(0.2)
+					continue
+				raise
 
 		return {
 			"valid": is_valid,
@@ -125,7 +144,11 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 			"message": "Validation successful" if is_valid else "Branding mismatch detected",
 		}
 	except Exception as e:
-		frappe.log_error(f"Error validating branding: {e!s}", "BrainWise Branding Validation")
+		if _is_record_changed_error(e):
+			# benign concurrency loss: keep it out of the Error Log doctype
+			frappe.logger("brainwise_branding").warning(f"Branding validation lost write race: {e!s}")
+		else:
+			frappe.log_error(f"Error validating branding: {e!s}", "BrainWise Branding Validation")
 		return {"valid": False, "error": str(e)}
 
 

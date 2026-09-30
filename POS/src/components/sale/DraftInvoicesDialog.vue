@@ -199,6 +199,7 @@ import {
 	formatCurrency as formatCurrencyUtil,
 	roundCurrency,
 } from "@/utils/currency";
+import { getActiveUserId } from "@/data/user";
 import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager";
 import { printInvoiceCustom } from "@/utils/printInvoice";
 import { useToast } from "@/composables/useToast";
@@ -249,7 +250,7 @@ onMounted(() => {
 
 async function loadDrafts() {
 	try {
-		drafts.value = await getAllDrafts();
+		drafts.value = await getAllDrafts(getActiveUserId());
 	} catch (error) {
 		console.error("Error loading drafts:", error);
 		showError(__("Failed to load draft invoices"));
@@ -305,7 +306,7 @@ async function confirmDeleteDraft() {
 
 async function confirmClearAll() {
 	try {
-		await clearAllDrafts();
+		await clearAllDrafts(getActiveUserId());
 		await loadDrafts();
 		showClearAllDialog.value = false;
 

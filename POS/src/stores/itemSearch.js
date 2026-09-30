@@ -96,6 +96,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	const loadingMore = ref(false);
 	const searching = ref(false); // Separate loading state for search
 	const posProfile = ref(null);
+	// True once get_pos_profile_data has resolved (or was restored from session
+	// cache). NOT inferred from profileItemGroups.length — a profile without
+	// item-group filters legitimately has 0 groups. Until true, the catalog
+	// must show nothing rather than unfiltered cross-profile items.
+	const profileLoaded = ref(false);
 	const cartItems = ref([]);
 
 	// Sorting state - for user-triggered sorting filters
@@ -494,6 +499,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	};
 
 	const filteredItems = computed(() => {
+		// Profile not ready yet (get_pos_profile_data in flight or failed):
+		// show an empty catalog instead of falling through to the unfiltered
+		// branch below, which would leak items from other POS Profiles.
+		if (!profileLoaded.value) return [];
+
 		// Step 1: Determine source items (search results or all items)
 		const sourceItems = searchTerm.value?.trim() ? searchResults.value : allItems.value;
 
@@ -702,6 +712,16 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 */
 	async function loadAllItems(profile, forceServerFetch = false) {
 		if (!profile) {
+			return;
+		}
+
+		// Guard: don't fetch/store items against profile data that hasn't been
+		// loaded yet — profileItemGroups would read as empty and trigger the
+		// unfiltered path (loads every item across profiles). setPosProfile sets
+		// profileLoaded before its own call; other callers (manual refresh,
+		// exposed loadItems) only run post-init, so they pass through.
+		if (!profileLoaded.value) {
+			log.debug("loadAllItems skipped — profile data not loaded yet", { profile });
 			return;
 		}
 
@@ -2159,6 +2179,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		posProfile.value = profile;
 		serverDataFresh.value = false;
 
+		// Synchronously mark the profile as not-ready and show loading so the
+		// catalog can never render unfiltered items while the profile fetch is
+		// in flight (the reload flicker bug).
+		profileLoaded.value = false;
+		loading.value = true;
+
 		if (posProfileUpdateCleanup) {
 			posProfileUpdateCleanup();
 			posProfileUpdateCleanup = null;
@@ -2169,6 +2195,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			itemGroups.value = [];
 			brands.value = [];
 			selectedBrand.value = null;
+			loading.value = false;
 			return;
 		}
 
@@ -2184,6 +2211,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Set hierarchical item groups (with child_groups) - INSTANT tab display!
 			itemGroups.value = data?.item_groups_hierarchy || [];
 			log.info(`Loaded ${itemGroups.value.length} item groups with hierarchy`);
+
+			// Profile data is in place — the catalog may render (0 groups is a
+			// valid loaded state). Must happen before loadAllItems so its guard
+			// lets the item fetch through.
+			profileLoaded.value = true;
 
 			// Cache profile data for offline use (survives component remount)
 			try {
@@ -2225,6 +2257,9 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						`Restored ${itemGroups.value.length} item groups from session cache (offline)`
 					);
 
+					// Restored profile data counts as loaded
+					profileLoaded.value = true;
+
 					// Still load items from IndexedDB cache
 					if (autoLoadItems) {
 						loadAllItems(profile);
@@ -2238,6 +2273,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			profileItemGroups.value = [];
 			itemGroups.value = [];
 			brands.value = [];
+			// Fetch failed with no session cache: don't leave the catalog in a
+			// permanent loading/hold state. Fail open — allItems is empty here,
+			// so the catalog stays empty until a manual refresh recovers it.
+			profileLoaded.value = true;
+			loading.value = false;
 		}
 	}
 
@@ -2266,6 +2306,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		loadingMore,
 		searching,
 		posProfile,
+		profileLoaded,
 		cartItems,
 		hasMore,
 		totalItemsLoaded,
