@@ -15,6 +15,10 @@
 		"test:coverage": "vitest run --coverage",
 		"copy-html-entry": "cp ../pos_next/public/pos/index.html ../pos_next/www/pos.html"
 	},
+	"resolutions": {
+		"nopt": "9.0.0",
+		"baseline-browser-mapping": "^2.9.19"
+	},
 	"dependencies": {
 		"@abdulrysr/saudi-riyal-new-symbol-font": "^1.0.8",
 		"@babel/helper-compilation-targets": "^7.28.6",
@@ -48,8 +52,5 @@
 		"vitest": "^2.1.9",
 		"workbox-build": "^7.3.0",
 		"workbox-window": "^7.3.0"
-	},
-	"resolutions": {
-		"baseline-browser-mapping": "^2.9.19"
 	}
 }
