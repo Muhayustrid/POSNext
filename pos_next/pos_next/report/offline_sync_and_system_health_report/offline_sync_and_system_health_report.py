@@ -100,7 +100,7 @@ def get_data(filters):
 			1=1
 			{conditions}
 		ORDER BY
-			ois.synced_at DESC
+			COALESCE(ois.synced_at, ois.creation) DESC
 	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
@@ -187,10 +187,14 @@ def get_conditions(filters):
 	conditions = _company_conditions(filters)
 
 	if filters.get("from_date"):
-		conditions.append("ois.synced_at >= %(from_date)s")
+		# Pending rows have synced_at NULL — count them from creation time
+		# instead, or the default 7-day window would hide every Pending row.
+		# DATE() on both sides so "to_date = today" covers the whole day
+		# (same semantics as the Sales vs Shifts reference report).
+		conditions.append("DATE(COALESCE(ois.synced_at, ois.creation)) >= %(from_date)s")
 
 	if filters.get("to_date"):
-		conditions.append("ois.synced_at <= %(to_date)s")
+		conditions.append("DATE(COALESCE(ois.synced_at, ois.creation)) <= %(to_date)s")
 
 	if filters.get("pos_profile"):
 		conditions.append("ois.pos_profile = %(pos_profile)s")

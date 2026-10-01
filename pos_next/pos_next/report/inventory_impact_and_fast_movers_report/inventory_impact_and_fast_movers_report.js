@@ -40,7 +40,6 @@ frappe.query_reports["Inventory Impact and Fast Movers Report"] = {
 			label: __("POS Profile"),
 			fieldtype: "Link",
 			options: "POS Profile",
-			reqd: 1,
 			get_query: function () {
 				const company = frappe.query_report.get_filter_value("company");
 				return company ? { filters: { company: company } } : {};
