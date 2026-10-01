@@ -5,6 +5,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, time_diff_in_hours
 
+from pos_next.hq_scope import apply_company_scope
+
 
 def execute(filters=None):
 	data, payment_methods = get_data(filters)
@@ -284,7 +286,9 @@ def _get_bank_deposit_data(data):
 
 def get_conditions(filters):
 	"""Build WHERE conditions"""
-	conditions = []
+	# Company first: explicit filter plus the user's User Permission scope.
+	# A forged company (outside the scope) raises before any SQL runs.
+	conditions = apply_company_scope(filters, "pcs")
 
 	if filters.get("from_date"):
 		conditions.append("pcs.period_end_date >= %(from_date)s")

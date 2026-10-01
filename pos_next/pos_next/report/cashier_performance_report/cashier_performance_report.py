@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from pos_next.hq_scope import apply_company_scope
 from pos_next.invoice_type import sales_invoice_union
 
 # pos_transactions stores the invoice in `sales_invoice` (legacy) or
@@ -16,7 +17,7 @@ def _invoice_from():
 	"""``si`` source: POS Invoice + legacy Sales Invoice (non-consolidated)
 	union with the columns this module reads."""
 	return sales_invoice_union(
-		"si.name, si.docstatus, si.is_pos, si.is_return, si.posting_date,"
+		"si.name, si.docstatus, si.is_pos, si.is_return, si.company, si.posting_date,"
 		" si.pos_profile, si.owner, si.grand_total, si.discount_amount",
 		where="si.docstatus = 1 AND si.is_pos = 1",
 	)
@@ -187,7 +188,9 @@ def get_data(filters):
 
 def get_conditions(filters):
 	"""Build WHERE conditions for the invoice query"""
-	conditions = []
+	# Company first: explicit filter plus the user's User Permission scope.
+	# A forged company (outside the scope) raises before any SQL runs.
+	conditions = apply_company_scope(filters, "si")
 
 	if filters.get("from_date"):
 		conditions.append("si.posting_date >= %(from_date)s")
@@ -216,7 +219,7 @@ def get_conditions(filters):
 
 def _build_shift_conditions(filters):
 	"""Build WHERE conditions for the shift count query"""
-	conditions = []
+	conditions = apply_company_scope(filters, "pcs")
 
 	if filters.get("from_date"):
 		conditions.append("pcs.period_start_date >= %(from_date)s")

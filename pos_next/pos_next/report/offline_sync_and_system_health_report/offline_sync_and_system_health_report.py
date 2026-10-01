@@ -5,6 +5,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, time_diff_in_hours
 
+from pos_next.hq_scope import apply_company_scope
+
 
 def execute(filters=None):
 	columns = get_columns()
@@ -151,9 +153,38 @@ def get_data(filters):
 	return data
 
 
+def _company_conditions(filters):
+	"""Company scope for the sync query.
+
+	``Offline Invoice Sync`` has no company column, so scope through what the
+	row carries: the joined invoices (``pi``/``si``) and its POS Profile.
+	Pending rows have no invoice link yet (created with empty pointers, see
+	pos_next/api/invoices.py ``_ensure_offline_uniqueness``), so without the
+	profile arm a scope would hide every Pending row. Both scope calls return
+	the same fragments in the same order (explicit filter, then User Permission
+	scope), so they are OR-paired per position; each pair gets the matching
+	profile arm.
+	"""
+	pi_scope = apply_company_scope(filters, "pi")
+	si_scope = apply_company_scope(filters, "si")
+	conditions = []
+	for pi_cond, si_cond in zip(pi_scope, si_scope, strict=True):
+		# Match the fragment kind: explicit filter arm uses "=", the
+		# User Permission scope arm uses "IN %(company_scope)s".
+		pp_company = (
+			"pp.company = %(company)s" if "%(company)s" in pi_cond else "pp.company IN %(company_scope)s"
+		)
+		conditions.append(
+			f"({pi_cond} OR {si_cond} OR EXISTS ("
+			f"SELECT 1 FROM `tabPOS Profile` pp "
+			f"WHERE pp.name = ois.pos_profile AND {pp_company}))"
+		)
+	return conditions
+
+
 def get_conditions(filters):
 	"""Build WHERE conditions"""
-	conditions = []
+	conditions = _company_conditions(filters)
 
 	if filters.get("from_date"):
 		conditions.append("ois.synced_at >= %(from_date)s")

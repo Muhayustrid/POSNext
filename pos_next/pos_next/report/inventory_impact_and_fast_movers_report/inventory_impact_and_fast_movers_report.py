@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from pos_next.hq_scope import apply_company_scope, resolve_company_scope
 from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
 # pos_transactions stores the invoice in `sales_invoice` (legacy) or
@@ -21,10 +22,10 @@ def _sold_items_from():
 			"sii.parent, sii.item_code, sii.item_name, sii.qty, sii.amount, sii.rate",
 			where="si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0",
 		)}
-		INNER JOIN {sales_invoice_union(
-			"si.name, si.docstatus, si.is_pos, si.is_return, si.posting_date, si.pos_profile",
-			where="si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0",
-		)} ON si.name = sii.parent"""
+			INNER JOIN {sales_invoice_union(
+				"si.name, si.docstatus, si.is_pos, si.is_return, si.company, si.posting_date, si.pos_profile",
+				where="si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0",
+			)} ON si.name = sii.parent"""
 
 
 def execute(filters=None):
@@ -129,7 +130,7 @@ def get_data(filters):
 
 	# Batch-fetch current stock levels (single query instead of N+1)
 	item_codes = [row.item_code for row in data]
-	stock_map = _get_stock_map(item_codes, warehouse)
+	stock_map = _get_stock_map(item_codes, warehouse, filters)
 
 	for row in data:
 		row.current_stock = flt(stock_map.get(row.item_code, 0), 2)
@@ -191,27 +192,55 @@ def get_data(filters):
 	return sorted_data
 
 
-def _get_stock_map(item_codes, warehouse=None):
+def _warehouse_scope_sql(filters, warehouse_col, binds):
+	"""SQL clause limiting ``warehouse_col`` to warehouses of the active
+	company scope ("" when unrestricted). Bin/Item carry no company column,
+	so without this a no-warehouse stock lookup would span every company.
+	The matching bind value is written into ``binds``."""
+	if filters.get("company"):
+		binds["company"] = filters["company"]
+		return (
+			f"AND {warehouse_col} IN "
+			"(SELECT name FROM `tabWarehouse` WHERE company = %(company)s)"
+		)
+	companies, _restricted = resolve_company_scope(filters)
+	if not companies:
+		return ""
+	binds["company_scope"] = companies
+	return (
+		f"AND {warehouse_col} IN "
+		"(SELECT name FROM `tabWarehouse` WHERE company IN %(company_scope)s)"
+	)
+
+
+def _get_stock_map(item_codes, warehouse=None, filters=None):
 	"""Fetch current stock for all items in a single query.
 
 	Returns dict {item_code: actual_qty}.
 	When warehouse is specified, returns stock for that warehouse only.
-	Otherwise sums across all warehouses.
+	Otherwise sums across all warehouses — limited to the active company
+	scope via its warehouses (Bin has no company column).
 	"""
 	if not item_codes:
 		return {}
 
-	placeholders = ", ".join(["%s"] * len(item_codes))
+	params = {"item_codes": item_codes}
+	scope_sql = ""
+
+	if warehouse:
+		params["warehouse"] = warehouse
+	else:
+		scope_sql = _warehouse_scope_sql(filters, "warehouse", params)
 
 	if warehouse:
 		rows = frappe.db.sql(
 			f"""
 			SELECT item_code, actual_qty
 			FROM `tabBin`
-			WHERE item_code IN ({placeholders})
-			AND warehouse = %s
+			WHERE item_code IN %(item_codes)s
+			AND warehouse = %(warehouse)s
 		""",
-			[*item_codes, warehouse],
+			params,
 			as_dict=1,
 		)
 	else:
@@ -219,10 +248,11 @@ def _get_stock_map(item_codes, warehouse=None):
 			f"""
 			SELECT item_code, SUM(actual_qty) as actual_qty
 			FROM `tabBin`
-			WHERE item_code IN ({placeholders})
+			WHERE item_code IN %(item_codes)s
+			{scope_sql}
 			GROUP BY item_code
 		""",
-			item_codes,
+			params,
 			as_dict=1,
 		)
 
@@ -259,6 +289,9 @@ def _get_zero_stock_items(filters, warehouse, sold_item_codes):
 	if warehouse:
 		warehouse_join = "AND b.warehouse = %(warehouse)s"
 		params["warehouse"] = warehouse
+	else:
+		# No warehouse given: keep bins inside the active company scope
+		warehouse_join = _warehouse_scope_sql(filters, "b.warehouse", params)
 
 	where = (" AND " + " AND ".join(conditions)) if conditions else ""
 
@@ -292,7 +325,9 @@ def _get_zero_stock_items(filters, warehouse, sold_item_codes):
 
 def get_conditions(filters):
 	"""Build WHERE conditions"""
-	conditions = []
+	# Company first: explicit filter plus the user's User Permission scope.
+	# A forged company (outside the scope) raises before any SQL runs.
+	conditions = apply_company_scope(filters, "si")
 
 	if filters.get("from_date"):
 		conditions.append("si.posting_date >= %(from_date)s")
