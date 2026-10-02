@@ -127,7 +127,15 @@ class POSPackage(Document):
 		item = frappe.db.get_value(
 			"Item",
 			self.parent_item,
-			["is_stock_item", "is_sales_item", "is_fixed_asset", "has_batch_no", "has_serial_no", "disabled"],
+			[
+				"is_stock_item",
+				"is_sales_item",
+				"is_fixed_asset",
+				"has_batch_no",
+				"has_serial_no",
+				"disabled",
+				"item_name",
+			],
 			as_dict=True,
 		)
 		if not item:
@@ -160,6 +168,29 @@ class POSPackage(Document):
 					"Item {0} is already used by a Product Bundle. Use a dedicated item for the package."
 				).format(frappe.bold(self.parent_item))
 			)
+
+		# Two active catalog cards with the same item_name read as one product
+		# to a cashier (the grid shows names, not codes), so a same-named leftover
+		# item resurfaces next to the package parent as a plain, bundle-less card.
+		if item.item_name:
+			conflict = frappe.db.get_value(
+				"Item",
+				{
+					"item_name": item.item_name,
+					"name": ["!=", self.parent_item],
+					"disabled": 0,
+					"is_sales_item": 1,
+				},
+				"name",
+			)
+			if conflict:
+				frappe.throw(
+					_(
+						"Another enabled sales item {0} already uses the same Item Name {1} as the Package Item {2}. Disable or rename it — two active items with the same name show up as duplicate cards in the POS."
+					).format(
+						frappe.bold(conflict), frappe.bold(item.item_name), frappe.bold(self.parent_item)
+					)
+				)
 
 	def validate_component_items(self):
 		"""Included items and options must be sellable items distinct from the package item."""

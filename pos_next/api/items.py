@@ -78,6 +78,24 @@ def _fetch_uom_prices_map(item_codes, price_list, transaction_date=None, selling
 	return uom_prices_map
 
 
+def _package_parent_codes(item_codes):
+	"""Item codes that parent an enabled POS Package (one bulk lookup).
+
+	The flag is deliberately global — validity dates and outlet scoping stay
+	with the frontend, which hides a parent whose package is not purchasable
+	on the active POS Profile (see posPackages store).
+	"""
+	if not item_codes:
+		return set()
+	return set(
+		frappe.get_all(
+			"POS Package",
+			filters={"parent_item": ["in", item_codes], "disabled": 0},
+			pluck="parent_item",
+		)
+	)
+
+
 def _fetch_item_uom_prices(item_code, price_list, transaction_date=None):
 	"""Fetch UOM prices for one item valid on transaction_date."""
 	if not item_code or not price_list:
@@ -464,6 +482,11 @@ def search_by_barcode(barcode, pos_profile):
 		)
 
 		item_details["uom_prices"] = uom_prices
+
+		# Package parent marker (same flag as get_items) so the SPA can guard
+		# parents whose package is not purchasable on this profile.
+		if item_code in _package_parent_codes([item_code]):
+			item_details["is_package_parent"] = True
 
 		# Apply resolved barcode data (weighted/priced) to the item details
 		if resolved_barcode_data:
@@ -1455,6 +1478,8 @@ def get_items(
 				for attr in attributes:
 					attributes_map.setdefault(attr["parent"], {})[attr["attribute"]] = attr["attribute_value"]
 
+		package_parents = _package_parent_codes(item_codes)
+
 		# Enrich items with price, stock, barcode, and UOM data
 		for item in items:
 			stock_uom = item.get("stock_uom")
@@ -1566,6 +1591,11 @@ def get_items(
 			# it means a Product Bundle definition exists for this item.
 			if item["item_code"] in bundle_availability_map:
 				item["is_bundle"] = True
+
+			# Package parent marker: lets the SPA hide/block parents whose
+			# package is not purchasable on the active POS Profile.
+			if item["item_code"] in package_parents:
+				item["is_package_parent"] = True
 
 			# Add warehouse to item (needed for stock validation)
 			item["warehouse"] = pos_profile_doc.warehouse
@@ -1730,6 +1760,8 @@ def get_items_bulk(
 		if item_codes and warehouse:
 			bundle_availability_map = _calculate_bundle_availability_bulk(item_codes, warehouse)
 
+		package_parents = _package_parent_codes(item_codes)
+
 		# Variant attributes (only when variants are included)
 		attributes_map = {}
 		if not exclude_variants:
@@ -1768,6 +1800,10 @@ def get_items_bulk(
 			# Bundle marker
 			if item_code in bundle_availability_map:
 				item["is_bundle"] = True
+
+			# Package parent marker (parity with get_items)
+			if item_code in package_parents:
+				item["is_package_parent"] = True
 
 			# UOMs
 			all_uoms = uom_map.get(item_code, []) or []

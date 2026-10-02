@@ -35,6 +35,7 @@ vi.mock("frappe-ui", async () => {
 
 import { call } from "@/utils/apiWrapper";
 import { useItemSearchStore } from "./itemSearch";
+import { usePOSPackagesStore } from "./posPackages";
 
 const PROFILE_URL = "pos_next.api.pos_profile.get_pos_profile_data";
 const ITEMS_URL = "pos_next.api.items.get_items";
@@ -149,5 +150,93 @@ describe("itemSearch profileLoaded gating (FIX C)", () => {
 		expect(store.profileLoaded).toBe(true);
 		expect(store.loading).toBe(false);
 		expect(store.filteredItems).toEqual([]);
+	});
+});
+
+describe("itemSearch package parent handling", () => {
+	beforeEach(() => {
+		setActivePinia(createPinia());
+		sessionStorage.clear();
+		vi.mocked(call).mockReset();
+		vi.mocked(call).mockImplementation(async () => ({ message: [] }));
+	});
+
+	// Unfiltered profile (zero item groups) so filteredItems passes every
+	// catalog row through and only the package-parent filter decides.
+	async function bootStore(items) {
+		vi.mocked(call).mockImplementation(async (url) => {
+			if (url === PROFILE_URL) {
+				return { message: null, pos_profile: { item_groups: [] }, item_groups_hierarchy: [] };
+			}
+			if (url === ITEMS_URL) return { message: items };
+			return { message: [] };
+		});
+		const store = useItemSearchStore();
+		await store.setPosProfile("Kasir 1");
+		await flushPromises();
+		return store;
+	}
+
+	function parentItem() {
+		return {
+			item_code: "PKG-1",
+			item_name: "Paket 1",
+			item_group: "Beverages",
+			rate: 50000,
+			uom: "Nos",
+			is_package_parent: true,
+		};
+	}
+
+	it("hides a package parent whose package is not purchasable on the profile", async () => {
+		const store = await bootStore([
+			parentItem(),
+			makeItem("ROTI-1", "Ropi Coklat", "Beverages"),
+		]);
+
+		const codes = store.filteredItems.map((i) => i.item_code);
+		expect(codes).toEqual(["ROTI-1"]);
+	});
+
+	it("keeps the parent visible once its package is eligible", async () => {
+		const store = await bootStore([
+			parentItem(),
+			makeItem("ROTI-1", "Ropi Coklat", "Beverages"),
+		]);
+		const packages = usePOSPackagesStore();
+		packages.setPackages([{ name: "PKG-DOC-1", parent_item: "PKG-1" }]);
+		packages.fetchedProfile = "Kasir 1";
+
+		const codes = store.filteredItems.map((i) => i.item_code);
+		expect(codes).toContain("PKG-1");
+		expect(codes).toContain("ROTI-1");
+	});
+
+		it("re-evaluates an already-rendered catalog when packages load (cache key)", async () => {
+		// Packages arrive AFTER the items (they load in parallel). The first
+		// render hides the parent; the eligible set landing must un-hide it
+		// without any item reload — this fails if filteredItemsCache keeps
+		// serving the pre-packages list.
+		const store = await bootStore([parentItem()]);
+		expect(store.filteredItems.map((i) => i.item_code)).toEqual([]);
+
+		const packages = usePOSPackagesStore();
+		packages.setPackages([{ name: "PKG-DOC-1", parent_item: "PKG-1" }]);
+		packages.fetchedProfile = "Kasir 1";
+
+		expect(store.filteredItems.map((i) => i.item_code)).toEqual(["PKG-1"]);
+	});
+
+	it("appendAllItems dedupes re-delivered rows by item_code", () => {
+		const store = useItemSearchStore();
+		store.allItems = [makeItem("ROTI-1", "Ropi Coklat", "Beverages")];
+
+		// Pagination drift redelivers ROTI-1 alongside a genuinely new row.
+		store.appendAllItems([
+			makeItem("ROTI-1", "Ropi Coklat", "Beverages"),
+			makeItem("TEH-1", "Es Teh", "Beverages"),
+		]);
+
+		expect(store.allItems.map((i) => i.item_code)).toEqual(["ROTI-1", "TEH-1"]);
 	});
 });

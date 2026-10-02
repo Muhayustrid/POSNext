@@ -2004,6 +2004,16 @@ function handleItemSelected(item, autoAdd = false) {
 		return;
 	}
 
+	// A package parent without a purchasable package on this profile must not
+	// be billed as a bare parent line. fetchedProfile gates the race window
+	// while packages are still loading (pkg lookup would fail spuriously).
+	if (item.is_package_parent && packagesStore.fetchedProfile) {
+		showError(
+			__("Package {0} is not available for the active POS Profile.", [item.item_name])
+		);
+		return;
+	}
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {

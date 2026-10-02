@@ -839,5 +839,66 @@ class TestRandomGroupKeys(unittest.TestCase):
 			self.assertNotIn("sama", key)
 
 
+class TestPackageParentCatalogFlag(unittest.TestCase):
+	"""The catalog flags package parents (is_package_parent) and saving a
+	package is blocked while another enabled sales item shares the parent's
+	item_name (the duplicate-card trap in the cashier grid)."""
+
+	TWIN = "_PNXT_PKG_PARENT_TWIN"
+
+	@classmethod
+	def setUpClass(cls):
+		_ensure_package()
+		frappe.db.commit()
+
+	def _fetch_map(self):
+		from pos_next.api.items import get_items
+
+		rows = get_items(PROFILE, limit=200) or []
+		return {r["item_code"]: r for r in rows}
+
+	def test_parent_flagged_and_component_not(self):
+		by_code = self._fetch_map()
+		self.assertIn(PARENT_ITEM, by_code)
+		self.assertTrue(by_code[PARENT_ITEM].get("is_package_parent"))
+		self.assertIn(LAPTOP, by_code)
+		self.assertFalse(by_code[LAPTOP].get("is_package_parent"))
+
+	def test_bulk_flags_parent_too(self):
+		from pos_next.api.items import get_items_bulk
+
+		group = frappe.db.get_value("Item", PARENT_ITEM, "item_group")
+		rows = get_items_bulk(PROFILE, item_groups=json.dumps([group]), limit=200) or []
+		by_code = {r["item_code"]: r for r in rows}
+		self.assertTrue(by_code.get(PARENT_ITEM, {}).get("is_package_parent"))
+		self.assertFalse(by_code.get(LAPTOP, {}).get("is_package_parent"))
+
+	def test_flag_cleared_when_package_disabled(self):
+		try:
+			frappe.db.set_value("POS Package", PACKAGE, "disabled", 1)
+			by_code = self._fetch_map()
+			self.assertIn(PARENT_ITEM, by_code)
+			self.assertNotIn("is_package_parent", by_code[PARENT_ITEM])
+		finally:
+			frappe.db.set_value("POS Package", PACKAGE, "disabled", 0)
+			frappe.db.commit()
+
+	def test_duplicate_item_name_blocks_save(self):
+		_ensure_item(self.TWIN, "PNXT Year End Laptop Package", is_stock_item=False)
+		frappe.db.commit()
+		try:
+			with self.assertRaises(frappe.ValidationError):
+				frappe.get_doc("POS Package", PACKAGE).save(ignore_permissions=True)
+
+			# Disabled twins don't block, and the save must go through clean.
+			frappe.db.set_value("Item", self.TWIN, "disabled", 1)
+			frappe.db.commit()
+			frappe.get_doc("POS Package", PACKAGE).save(ignore_permissions=True)
+		finally:
+			if frappe.db.exists("Item", self.TWIN):
+				frappe.delete_doc("Item", self.TWIN, ignore_permissions=True, force=True)
+			frappe.db.commit()
+
+
 if __name__ == "__main__":
 	unittest.main()

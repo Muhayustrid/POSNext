@@ -10,6 +10,7 @@ import { computed, ref, watch } from "vue";
 import { useStockStore } from "./stock";
 import { usePOSSettingsStore } from "./posSettings";
 import { usePOSShiftStore } from "./posShift";
+import { usePOSPackagesStore } from "./posPackages";
 import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile";
 
 const log = logger.create("ItemSearch");
@@ -79,6 +80,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	// Get shift store for warehouse info (for batch/serial caching)
 	const shiftStore = usePOSShiftStore();
+
+	// Package parents are hidden unless their package is purchasable on the
+	// active profile (see filteredItems Step 1b)
+	const packagesStore = usePOSPackagesStore();
 
 	// Real-time POS Profile updates
 	const { onPosProfileUpdate } = useRealtimePosProfile();
@@ -424,9 +429,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	function appendAllItems(items) {
 		if (!Array.isArray(items) || items.length === 0) return;
-		allItems.value.push(...items);
+		// Pagination drift can re-deliver an already-loaded item; the grid keys
+		// by item_code, so a re-pushed row would render as a duplicate card.
+		const existing = new Set(allItems.value.map((i) => i.item_code));
+		const uniqueItems = items.filter((i) => i && !existing.has(i.item_code));
+		if (uniqueItems.length === 0) return;
+
+		allItems.value.push(...uniqueItems);
 		allItemsVersion.value += 1;
-		registerItems(items, registeredAllItems); // Initializes stock in stock store
+		registerItems(uniqueItems, registeredAllItems); // Initializes stock in stock store
 		clearBaseCache();
 	}
 
@@ -505,16 +516,31 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		if (!profileLoaded.value) return [];
 
 		// Step 1: Determine source items (search results or all items)
-		const sourceItems = searchTerm.value?.trim() ? searchResults.value : allItems.value;
+		let sourceItems = searchTerm.value?.trim() ? searchResults.value : allItems.value;
 
 		if (!sourceItems?.length) return [];
+
+		// Step 1b: Hide package parents whose package is not purchasable on
+		// this profile (expired, or scoped to another outlet). A parent has no
+		// standalone meaning — selling it would bill an empty parent line.
+		// The some() guard keeps catalogs without packages off the packages
+		// store's reactive graph.
+		if (sourceItems.some((i) => i.is_package_parent)) {
+			sourceItems = sourceItems.filter(
+				(item) => !item.is_package_parent || packagesStore.isPackageItem(item.item_code)
+			);
+		}
 
 		// Step 2: Create cache key based on current filter state
 		// Key format: "itemGroup_version_searchTerm"
 		// This ensures cache invalidates when data or filters change
+		// The packages marker (profile + eligible count) invalidates the cached
+		// list once packages finish loading and Step 1b starts hiding parents.
 		const filterKey = `${selectedItemGroup.value || "all"}_${selectedBrand.value || "all"}_${
 			allItemsVersion.value
-		}_${searchTerm.value || ""}`;
+		}_${searchTerm.value || ""}_${packagesStore.fetchedProfile || "none"}:${
+			packagesStore.packageItemCodes.size
+		}`;
 
 		// Step 3: Check cache for filtered results
 		let list;
@@ -2328,6 +2354,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		// ========================================================================
 		loadAllItems,
 		loadMoreItems,
+		appendAllItems,
 		fetchPage,
 		searchItems,
 		loadItemGroups,
