@@ -59,7 +59,7 @@ from datetime import datetime, timedelta
 
 import frappe
 from frappe import _
-from frappe.utils import flt, get_first_day, get_last_day, getdate, now_datetime, nowdate
+from frappe.utils import cint, flt, get_first_day, get_last_day, getdate, now_datetime, nowdate
 
 from pos_next.hq_scope import (
 	expand_company_descendants,
@@ -68,6 +68,12 @@ from pos_next.hq_scope import (
 	resolve_company_scope,
 )
 from pos_next.invoice_type import get_pos_invoice_doctype, sales_invoice_item_union, sales_invoice_union
+from pos_next.services.cash_mode import get_cash_mode_of_payment
+from pos_next.services.sales_recap import (
+	_aggregate_payments,
+	_aggregate_totals,
+	shift_scope,
+)
 from pos_next.target_basis import (
 	GROSS_PROFIT,
 	NET_PROFIT,
@@ -252,6 +258,9 @@ def get_sales_monitoring(
 			default_ccy,
 			{"a": _clean_category(category_a), "b": _clean_category(category_b)},
 		),
+		"payments": _payments_section(range_where, range_params, default_ccy, currency_map, scope["companies"]),
+		"recent": _recent_section(range_where, range_params),
+		"returns": _returns_section(range_where, range_params, default_ccy),
 		"category_top": _category_top(
 			scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"], currency_map, default_ccy
 		),
@@ -278,7 +287,76 @@ def get_sales_monitoring(
 		scope["companies"], currency_map, default_ccy, window, monthly, mtd_rows, profiles=scope["profiles"]
 	)
 	result["targets"]["overall"] = _overall_target_section(scope, currency_map)
+	result["shifts"] = _shifts_section(scope, currency_map)
 	return result
+
+
+@frappe.whitelist()
+def export_rankings_xlsx(
+	products=None, outlets=None, outlet_performance=None, from_date=None, to_date=None
+):
+	"""Excel export of the monitoring tables: the client sends the rows of
+	each section it wants (product ranking page, outlet ranking, and/or the
+	full outlet-performance schema); each non-empty section becomes a
+	header + rows block in one sheet."""
+	_check_hq_access()
+	import json
+
+	from frappe.utils.xlsxutils import build_xlsx_response
+
+	def _rows(raw):
+		try:
+			data = json.loads(raw or "[]")
+		except ValueError:
+			data = []
+		return [row for row in data if isinstance(row, list)]
+
+	tb = _target_basis_payload()
+	mlabel = tb.get("monthly_label") or _("Net Sales")
+	olabel = tb.get("overall_label") or _("Net Sales")
+	sections = [
+		(
+			[_("No"), _("Name"), _("Sold Quantity"), _("Total Sales"), _("Share %")],
+			products,
+		),
+		(
+			[_("No"), _("Name"), _("Total Sales"), _("Transactions"), _("Average"), _("Share %")],
+			outlets,
+		),
+		(
+			[
+				_("Outlet (Company)"),
+				_("POS Profiles"),
+				_("Currency"),
+				_("Net Sales"),
+				_("Transactions"),
+				_("Avg Ticket"),
+				_("Share %"),
+				f"{_('Target')} {mlabel} ({_('monthly')})",
+				_("Target Transactions"),
+				f"{mlabel} {_('MTD')}",
+				_("MTD Transactions"),
+				_("Achievement %"),
+				f"{_('Projected')} {mlabel}",
+				f"{_('Overall Target')} ({olabel})",
+				f"{olabel} {_('Cumulative')}",
+				_("Overall Achievement %"),
+			],
+			outlet_performance,
+		),
+	]
+	data = []
+	for headers, raw in sections:
+		if not raw:
+			continue
+		if data:
+			data.append([])
+		data += [headers] + _rows(raw)
+	if not data:
+		frappe.throw(_("Nothing to export"))
+	# provide_binary_file appends the extension itself.
+	filename = "hq-rankings-{}".format(from_date or nowdate())
+	return build_xlsx_response(data, filename)
 
 
 @frappe.whitelist()
@@ -906,6 +984,218 @@ def _item_group_and_descendants(group):
 	return frappe.get_all(
 		"Item Group", filters={"lft": [">=", row.lft], "rgt": ["<=", row.rgt]}, pluck="name"
 	)
+
+
+def _payments_section(where, params, default_ccy, currency_map, companies):
+	"""Mode-of-payment spread over the range: child payment rows joined to
+	the invoice union, default-currency companies only (same rule as the
+	category datasets). Amounts are base_amount — the money that actually
+	moved, tax included; return rows ride along as negatives so the shares
+	stay net and honest. ponytail: cash is not netted for change here —
+	drawer semantics, not distribution semantics."""
+	ccy_companies = [c for c in companies if currency_map.get(c) == default_ccy]
+	if not ccy_companies:
+		return {"rows": [], "currency": default_ccy, "modes_with_sales": 0}
+	rows = frappe.db.sql(
+		f"""
+		SELECT sip.mode_of_payment, SUM(sip.base_amount) AS amount
+		FROM {sales_invoice_union("si.name", where)}
+		JOIN `tabSales Invoice Payment` sip ON sip.parent = si.name
+		GROUP BY sip.mode_of_payment
+		ORDER BY amount DESC
+		""",
+		params,
+		as_dict=True,
+	)
+	positive = [r for r in rows if flt(r.amount) > 0]
+	total = sum(flt(r.amount) for r in positive)
+	return {
+		"rows": [
+			{
+				"mode_of_payment": r.mode_of_payment,
+				"amount": flt(r.amount),
+				"share_pct": ratio(r.amount, total),
+			}
+			for r in positive[:5]
+		],
+		"currency": default_ccy,
+		"modes_with_sales": len(positive),
+	}
+
+
+def _recent_section(where, params, limit=10):
+	"""Latest invoices in the range (sale or return): the raw feed behind
+	the Recent transactions table and, client-side, the Live activity card."""
+	rows = frappe.db.sql(
+		f"""
+		SELECT name, posting_date, posting_time, company, customer,
+			grand_total, is_return, currency
+		FROM {sales_invoice_union(
+			"si.name, si.posting_date, si.posting_time, si.company, si.customer,"
+			" si.grand_total, si.is_return, si.currency",
+			where,
+		)}
+		ORDER BY posting_date DESC, posting_time DESC, name DESC
+		LIMIT {cint(limit)}
+		""",
+		params,
+		as_dict=True,
+	)
+	# Dominant payment per invoice: the child row with the biggest amount.
+	names = [r.name for r in rows]
+	modes = {}
+	if names:
+		for m in frappe.db.sql(
+			"""
+			SELECT parent, mode_of_payment
+			FROM `tabSales Invoice Payment`
+			WHERE parent IN %(hq_names)s
+			ORDER BY parent, ABS(base_amount) DESC
+			""",
+			{"hq_names": list(names)},
+			as_dict=True,
+		):
+			modes.setdefault(m.parent, m.mode_of_payment)
+	return {
+		"rows": [
+			{
+				"name": r.name,
+				"time": str(r.posting_time or "")[:5],
+				"company": r.company,
+				"customer": r.customer,
+				"mode_of_payment": modes.get(r.name),
+				"grand_total": flt(r.grand_total),
+				"is_return": bool(r.is_return),
+				"currency": r.currency,
+			}
+			for r in rows
+		]
+	}
+
+
+def _returns_section(where, params, default_ccy, limit=10):
+	"""Return totals over the range plus the latest return invoices. No
+	return-reason field exists in the data, so rows carry the first item
+	name instead — nothing is fabricated."""
+	counts = frappe.db.sql(
+		f"""
+		SELECT
+			SUM(CASE WHEN is_return = 1 THEN 1 ELSE 0 END) AS returns_count,
+			SUM(CASE WHEN is_return = 0 THEN 1 ELSE 0 END) AS sales_count,
+			SUM(CASE WHEN is_return = 1 THEN ABS(base_grand_total) ELSE 0 END) AS returns_value
+		FROM {sales_invoice_union("si.is_return, si.base_grand_total", where)}
+		""",
+		params,
+		as_dict=True,
+	)[0]
+	returns_count = cint(counts.returns_count)
+	sales_count = cint(counts.sales_count)
+	rows = frappe.db.sql(
+		f"""
+		SELECT name, posting_date, posting_time, ABS(base_grand_total) AS amount, currency
+		FROM {sales_invoice_union(
+			"si.name, si.posting_date, si.posting_time, si.base_grand_total, si.currency",
+			where + " AND si.is_return = 1",
+		)}
+		ORDER BY posting_date DESC, posting_time DESC
+		LIMIT {cint(limit)}
+		""",
+		params,
+		as_dict=True,
+	)
+	# First item label per return: POS and legacy invoices keep items in two
+	# child tables, so one lookup per table beats a branch-specific subquery.
+	names = [r.name for r in rows]
+	first_items = {}
+	for child_table, parenttype in (
+		("tabPOS Invoice Item", "POS Invoice"),
+		("tabSales Invoice Item", "Sales Invoice"),
+	):
+		if not names:
+			break
+		for r in frappe.db.sql(
+			f"SELECT parent, MIN(item_name) AS item FROM `{child_table}`"
+			" WHERE parent IN %(hq_names)s AND parenttype = %(hq_type)s"
+			" GROUP BY parent",
+			{"hq_names": list(names), "hq_type": parenttype},
+			as_dict=True,
+		):
+			first_items.setdefault(r.parent, r.item)
+	return {
+		"value": flt(counts.returns_value),
+		"count": returns_count,
+		"rate": flt(returns_count) / (returns_count + sales_count)
+		if (returns_count + sales_count)
+		else None,
+		"currency": default_ccy,
+		"rows": [
+			{
+				"name": r.name,
+				"time": str(r.posting_time or "")[:5],
+				"amount": flt(r.amount),
+				"currency": r.currency,
+				"first_item": first_items.get(r.name),
+			}
+			for r in rows
+		],
+	}
+
+
+def _shifts_section(scope, currency_map, limit=10):
+	"""Latest shifts in company scope (open first, then newest) with the
+	recap service's cash semantics: cash_expected already nets change and
+	cash returns, open and closed shifts share one code path.
+	ponytail: ~10 small shift-scoped queries per shift — batch into one
+	grouped query only if the shift count ever matters."""
+	shifts = frappe.db.sql(
+		"""
+		SELECT os.name, os.user, os.company, os.pos_profile, os.status,
+			os.period_start_date
+		FROM `tabPOS Opening Shift` os
+		WHERE os.docstatus = 1 AND os.company IN %(hq_companies)s
+			AND (os.status = 'Open' OR os.posting_date >= %(hq_from)s)
+		ORDER BY os.status = 'Open' DESC, os.period_start_date DESC,
+			os.creation DESC
+		LIMIT %(hq_limit)s
+		""",
+		{
+			"hq_companies": list(scope["companies"]),
+			"hq_from": scope.get("from_date"),
+			"hq_limit": cint(limit),
+		},
+		as_dict=True,
+	)
+	if not shifts:
+		return []
+	users = {
+		u.name: u.full_name
+		for u in frappe.get_all(
+			"User",
+			filters={"name": ["in", [s.user for s in shifts if s.user]]},
+			fields=["name", "full_name"],
+		)
+	}
+	rows = []
+	for shift in shifts:
+		shift_cash_mode = get_cash_mode_of_payment(shift.pos_profile)
+		shift_sc = shift_scope(shift.name)
+		totals = _aggregate_totals(shift_sc)
+		payments = _aggregate_payments(shift_sc, shift_cash_mode, shift.pos_profile)
+		rows.append(
+			{
+				"name": shift.name,
+				"cashier": shift.user,
+				"cashier_name": users.get(shift.user) or shift.user,
+				"outlet": shift.company,
+				"currency": currency_map.get(shift.company),
+				"opening": payments.get("opening_cash"),
+				"sales": totals.get("gross_sales"),
+				"cash": payments.get("cash_collected"),
+				"expected_closing": payments.get("cash_expected"),
+				"status": shift.status,
+			}
+		)
+	return rows
 
 
 def _item_group_names():
@@ -1582,6 +1872,10 @@ def _empty_payload(scope, notice):
 		"item_groups": [],
 		"category_products": {"a": {}, "b": {}},
 		"category_top": {"rows": [], "currency": None, "groups_with_sales": 0},
+		"payments": {"rows": [], "currency": None, "modes_with_sales": 0},
+		"recent": {"rows": []},
+		"returns": {"value": 0, "count": 0, "rate": None, "rows": [], "currency": None},
+		"shifts": [],
 		"highlights": {},
 		"channels": {"available": False},
 		"pax": {"available": False},

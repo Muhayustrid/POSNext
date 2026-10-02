@@ -1,9 +1,10 @@
-/* HQ Sales Monitoring — desk page styles (layout v5).
+/* HQ Sales Monitoring — desk page styles (layout v7).
    Surfaces, text and the accent follow Frappe's theme variables so the page
    tracks light/dark and custom themes. Structure: scope strip, ONE hero
-   metric block (Total Sales dominant, companions in a hairline row, daily
-   rhythm as footnote), Outlet Performance table, the mini strip, 2x2 chart
-   grid, full-width peak hour and product ranking. */
+   metric block (Total Sales dominant, three companions in a hairline row,
+   daily rhythm as footnote), Outlet Performance table (6 columns, targets
+   folded into one stacked progress cell), ONE Rankings card with four
+   ranked bar-lists, full-width peak hour and product ranking. */
 
 #page-hq-sales-monitoring .page-form,
 .hq-monitor {
@@ -33,6 +34,13 @@
 	flex: 0 1 170px;
 	min-width: 140px;
 	max-width: 260px;
+}
+
+/* The custom range reads "01-10-2026 to 02-10-2026" - needs one more lane. */
+#page-hq-sales-monitoring .page-form > [data-fieldname="custom_range"] {
+	flex: 0 1 230px;
+	min-width: 170px;
+	max-width: 320px;
 }
 
 .hq-scope {
@@ -104,24 +112,12 @@
 	border-top: 1px solid var(--border-color, #dfe7ef);
 }
 
-/* Minis: ONE strip card, four equal slots split by thin left borders. */
+/* Hero companions: three slots split by thin left borders. .hq-minis now
+   only lives inside the hero card (the standalone mini strip is gone). */
 .hq-minis {
 	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 0 16px;
-}
-
-.hq-charts {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 12px;
-	margin-bottom: 12px;
-	/* Cards in one row share a height; an empty card opts out (compact). */
-	align-items: stretch;
-}
-
-.hq-card--donut:has(.hq-empty-line) {
-	align-self: start;
 }
 
 .hq-card {
@@ -132,10 +128,6 @@
 	margin-bottom: 12px;
 	min-width: 0;
 	box-shadow: var(--shadow-xs);
-}
-
-.hq-charts .hq-card {
-	margin-bottom: 0;
 }
 
 .hq-card-title {
@@ -253,13 +245,6 @@
 .hq-mini + .hq-mini {
 	border-left: 1px solid var(--border-color, #f1f3f5);
 	padding-left: 16px;
-}
-
-.hq-mini .hq-kpi-name {
-	font-size: 18px;
-	line-height: 1.4;
-	white-space: normal;
-	overflow-wrap: anywhere;
 }
 
 .hq-mini .hq-kpi-sub {
@@ -421,6 +406,27 @@
 	font-variant-numeric: tabular-nums;
 }
 
+/* Merged target cell: bar + bold pct on top, "MTD / Target" as a quiet
+   sub line; the wider column keeps both lines on one row each. */
+.hq-ach-top {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+}
+
+.hq-ach-sub {
+	display: block;
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 3px;
+	white-space: nowrap;
+}
+
+.hq-table--outlets .hq-ach {
+	min-width: 180px;
+}
+
 /* Tax toggle on the Total Sales card */
 .hq-toggle {
 	border: 1px solid var(--border-color, #d0d7de);
@@ -446,129 +452,206 @@
 	outline-offset: 1px;
 }
 
-/* Donut + accessible value legend */
-.hq-donut {
+/* Rankings: ONE card, four bar-list blocks in a 2-col grid; the right
+   column carries a hairline divider instead of being its own card. */
+.hq-rank-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 2px 0;
+}
+
+.hq-rank-block {
+	min-width: 0;
+	padding: 8px 24px 16px 0;
+}
+
+.hq-rank-block:nth-child(even) {
+	border-left: 1px solid var(--border-color, #f1f3f5);
+	padding-left: 24px;
+}
+
+.hq-rank-head {
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--heading-color, var(--text-color));
 	display: flex;
-	align-items: center;
-	gap: 12px;
+	align-items: baseline;
+	gap: 8px;
 	flex-wrap: wrap;
+	margin-bottom: 4px;
 }
 
-.hq-donut-chart {
-	width: 100%;
+.hq-rank-head-sub {
+	font-size: 11px;
+	font-weight: 400;
+	color: var(--text-muted);
 }
 
-.hq-legend {
+.hq-rank-foot {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 6px;
+}
+
+.hq-rank-list {
 	list-style: none;
 	margin: 0;
 	padding: 0;
-	flex: 1 1 220px;
-	min-width: 200px;
 }
 
-/* Grid rows keep dot / label / value / pct in true columns: values stack
-   right-aligned whatever the label length does above them. */
-.hq-legend li {
+/* Two-line item: [rank / label / value / pct] row, then a thin bar whose
+   lane starts at the label column so ranks stay outside the bars. */
+.hq-rank-item {
+	padding: 6px 0 7px;
+}
+
+.hq-rank-row {
 	display: grid;
-	grid-template-columns: 10px minmax(0, 1fr) max-content 56px;
+	grid-template-columns: 18px minmax(0, 1fr) max-content 52px;
 	column-gap: 8px;
 	align-items: baseline;
-	padding: 4px 0;
 }
 
-.hq-legend li:not(:last-child) {
+.hq-rank-no {
+	color: var(--text-muted);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-rank-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.hq-rank-value {
+	font-variant-numeric: tabular-nums;
+	justify-self: end;
+}
+
+.hq-rank-pct {
+	justify-self: end;
+	color: var(--text-muted);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+.hq-rank-track {
+	height: 4px;
+	border-radius: 2px;
+	background: var(--control-bg, #edf0f3);
+	margin: 5px 0 0 26px;
+	overflow: hidden;
+}
+
+.hq-rank-bar {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--primary, #2490ef);
+	-webkit-print-color-adjust: exact;
+	print-color-adjust: exact;
+}
+
+/* Product + Outlet Ranking: two tables share one card; denser cells keep
+   both comfortable in half the width. */
+.hq-card--tables .hq-table th,
+.hq-card--tables .hq-table td {
+	padding: 6px 8px;
+}
+
+/* Both block heads are one row tall (title left, tool right) so the two
+   tables start at exactly the same height; the export buttons share the
+   right edge. */
+.hq-rank-head--tools {
+	min-height: 36px;
+	align-items: center;
+}
+
+.hq-rank-head--tools .hq-select {
+	flex: 0 1 190px;
+	min-width: 150px;
+}
+
+.hq-rank-head--tools .hq-rank-export {
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+/* Bottom monitors: two two-card rows (shifts | returns, recent | activity).
+   The table card gets the wider lane; both fold to one column on phones. */
+.hq-duo {
+	display: grid;
+	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+	gap: 12px;
+	margin-bottom: 12px;
+	/* equal-height cards per row: both sides carry up to 10 rows */
+	align-items: stretch;
+}
+
+.hq-duo .hq-card {
+	margin-bottom: 0;
+}
+
+.hq-neg {
+	color: var(--danger, #d63939);
+}
+
+.hq-status--open {
+	color: #2e7d54;
+}
+
+.hq-shift-cashier {
+	font-weight: 600;
+}
+
+/* Returns card: three quiet KPI tiles + the latest return rows. */
+.hq-ret-kpis {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 0 12px;
+	padding-bottom: 8px;
+	margin-bottom: 4px;
 	border-bottom: 1px solid var(--border-color, #f1f3f5);
 }
 
-.hq-dot {
-	width: 10px;
-	height: 10px;
-	border-radius: 3px;
-	align-self: center;
+.hq-ret-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 10px;
+	padding: 6px 0;
 }
 
-/* Legend name cell: full name in the title tooltip; the visible label
-   clamps to two lines so one monster test-name can never break the value
-   columns' alignment. */
-.hq-legend-name {
+.hq-ret-row + .hq-ret-row {
+	border-top: 1px solid var(--border-color, #f1f3f5);
+}
+
+.hq-ret-name {
 	min-width: 0;
 }
 
-.hq-legend-label {
-	display: -webkit-box;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-	overflow: hidden;
-	overflow-wrap: anywhere;
-}
-
-.hq-legend-sub {
-	display: inline-block;
-	color: var(--text-muted);
-	font-size: 11px;
-	font-weight: 400;
-	white-space: nowrap;
-	margin-top: 1px;
-}
-
-.hq-legend-value {
-	justify-self: end;
-	font-variant-numeric: tabular-nums;
-}
-
-.hq-legend-pct {
-	justify-self: end;
-	color: var(--text-muted);
-	font-size: 11px;
-	font-variant-numeric: tabular-nums;
-}
-
-/* Secondary quantity in a legend row (Top Selling <category> cards):
-   consolidated into the .hq-legend-sub rule above. */
-
-/* Donut figure: a fixed square slot — frappe-charts sizes the ring from
-   min(inner box dims) minus its reserved paddings (190 -> ~80px ring, the
-   size the page had before the tidy pass). The ring is re-centered into the
-   slot from its measured bbox (JS); overflow clips whatever the chart's
-   redraws paint beyond the slot, so no transform can ever cover the caption
-   below or spill past the card edge. */
-.hq-donut-figure {
-	position: relative;
-	flex: 0 0 190px;
-	width: 190px;
-	height: 190px;
-	overflow: hidden;
-}
-
-.hq-donut-chart {
-	width: 100%;
-	height: 100%;
-}
-
-/* The svg box is taller than the figure (frappe-charts reserves vertical
-   space); the transparent overflow is pointer-dead so it never blocks the
-   legend or footnote below. */
-.hq-donut-chart svg {
-	display: block;
-	pointer-events: none;
-}
-
-.hq-donut-chart svg path {
-	pointer-events: auto;
-}
-
-.hq-donut-center {
-	position: absolute;
-	inset: 0;
+/* Activity feed rows mirror the recent table's data, read as events. */
+.hq-act-row {
 	display: flex;
-	align-items: center;
-	justify-content: center;
-	pointer-events: none;
-	white-space: nowrap;
-	font-size: 13px;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 10px;
+	padding: 7px 0;
+}
+
+.hq-act-row + .hq-act-row {
+	border-top: 1px solid var(--border-color, #f1f3f5);
+}
+
+.hq-act-title {
 	font-weight: 600;
-	color: var(--heading-color, var(--text-color));
-	font-variant-numeric: tabular-nums;
+}
+
+.hq-act-row .hq-money,
+.hq-ret-row .hq-money {
+	white-space: nowrap;
 }
 
 .hq-item-code {
@@ -652,29 +735,9 @@
 	}
 }
 
-/* Peak Hour card (full width): window selects sit inline above the chart. */
+/* Peak Hour card (full width). */
 .hq-card--hours {
 	margin-top: 12px;
-}
-
-.hq-hour-controls {
-	display: flex;
-	align-items: end;
-	gap: 10px;
-	flex-wrap: wrap;
-	margin-top: 8px;
-}
-
-.hq-ctl {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	font-size: 11px;
-	color: var(--text-muted);
-}
-
-.hq-ctl .hq-select {
-	max-width: 110px;
 }
 
 .hq-pager {
@@ -682,22 +745,6 @@
 	align-items: center;
 	gap: 10px;
 	margin-top: 10px;
-}
-
-.hq-notes {
-	font-size: 12px;
-	color: var(--text-muted);
-}
-
-.hq-notes summary {
-	cursor: pointer;
-	font-weight: 600;
-	font-size: 13px;
-	color: var(--heading-color, var(--text-color));
-}
-
-.hq-notes .hq-kpi-sub {
-	margin-top: 6px;
 }
 
 .hq-footer {
@@ -715,31 +762,8 @@
 	overflow-x: auto;
 }
 
-/* Mid width: charts stack, mini strips (hero companions + Sorotan) fold to
-   2x2. */
-@media screen and (max-width: 1280px) {
-	.hq-charts {
-		grid-template-columns: 1fr;
-	}
-
-	/* Mini strips (Sorotan + Ritme Harian) fold to 2x2; the hairline
-	   follows the column pair instead of every sibling. */
-	.hq-minis {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px 16px;
-	}
-
-	.hq-mini + .hq-mini {
-		border-left: none;
-		padding-left: 0;
-	}
-
-	.hq-mini:nth-child(even) {
-		border-left: 1px solid var(--border-color, #f1f3f5);
-		padding-left: 16px;
-	}
-}
-
+/* Tablet and below: the hero companion row folds to stacked rows with top
+   hairlines, the rankings grid folds to one column. */
 @media screen and (max-width: 768px) {
 	.hq-kpi-value {
 		font-size: 16px;
@@ -748,21 +772,48 @@
 	.hq-hero-value {
 		font-size: 22px;
 	}
-}
 
-/* Phone: everything single column, donut above legend, category rows wrap. */
-@media screen and (max-width: 480px) {
-	/* Mini strip becomes 2x2; hairlines step aside for spacing. */
 	.hq-minis {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px 16px;
+		grid-template-columns: 1fr;
+		gap: 10px;
 	}
 
 	.hq-mini + .hq-mini {
 		border-left: none;
 		padding-left: 0;
+		border-top: 1px solid var(--border-color, #f1f3f5);
+		padding-top: 10px;
 	}
 
+	.hq-rank-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.hq-rank-block {
+		padding-right: 0;
+	}
+
+	.hq-rank-block:nth-child(even) {
+		border-left: none;
+		padding-left: 0;
+	}
+
+	.hq-rank-block + .hq-rank-block {
+		border-top: 1px solid var(--border-color, #f1f3f5);
+	}
+
+	.hq-duo {
+		grid-template-columns: 1fr;
+		gap: 12px;
+	}
+
+	.hq-duo .hq-card {
+		margin-bottom: 0;
+	}
+}
+
+/* Phone: single column, comfortable card padding, filters wrap. */
+@media screen and (max-width: 480px) {
 	.hq-card {
 		padding: 12px;
 	}
@@ -770,19 +821,6 @@
 	#page-hq-sales-monitoring .page-form > .frappe-control {
 		flex: 1 1 45%;
 		min-width: 150px;
-	}
-
-	.hq-donut {
-		flex-direction: column;
-		align-items: stretch;
-	}
-
-	.hq-donut-figure {
-		margin: 0 auto;
-	}
-
-	.hq-donut-chart {
-		min-width: 0;
 	}
 }
 

@@ -487,6 +487,32 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(row["share_pct"], 100.0)  # share inside one currency
 		self.assertEqual([p["pos_profile"] for p in row["profiles"]], [self.profile_a])
 
+	def test_payments_recent_returns_card_sections(self):
+		data = self._payload()
+		# payments: child payment rows grouped per mode, default currency only
+		pm = data["payments"]
+		self.assertTrue(pm["rows"], "fixture invoices carry payment rows")
+		self.assertEqual(pm["currency"], self.currency_a)
+		self.assertTrue(all(r["amount"] > 0 for r in pm["rows"]))
+		self.assertTrue(all(r["share_pct"] > 0 for r in pm["rows"]))
+		amounts = [r["amount"] for r in pm["rows"]]
+		self.assertEqual(amounts, sorted(amounts, reverse=True))
+		# recent: newest first (bounded page), sale/return flag + mode resolved
+		recent = data["recent"]["rows"]
+		self.assertTrue(recent)
+		self.assertLessEqual(len(recent), 8)
+		self.assertTrue(all(r["mode_of_payment"] for r in recent))
+		self.assertTrue(any(r["is_return"] for r in recent), "refund fixture visible in the feed")
+		# returns: rate denominator counts every invoice in the same window
+		ret = data["returns"]
+		self.assertEqual(ret["count"], 1)
+		self.assertGreater(ret["value"], 0)
+		self.assertAlmostEqual(ret["rate"], 0.25, places=2)  # 1 return of 4 invoices
+		self.assertTrue(ret["rows"])
+		self.assertTrue(ret["rows"][0]["first_item"])
+		# no opening-shift fixture in this class: the section is present but quiet
+		self.assertEqual(data["shifts"], [])
+
 	def test_category_top_positive_only_labeled_currency(self):
 		data = self._payload()
 		ct = data["category_top"]
@@ -1409,6 +1435,25 @@ class TestTargetBasis(IntegrationTestCase):
 	# ------------------------------------------------------------------
 	# default basis
 	# ------------------------------------------------------------------
+
+	def test_shift_summary_reuses_recap_cash_semantics(self):
+		# The open GP shift sold through the real pipeline: the HQ shift row
+		# must mirror the recap service's numbers (cash_expected nets change
+		# and cash returns) instead of a second hand-rolled formula.
+		data = self._dashboard(self.company_gp)
+		shifts = data["shifts"]
+		self.assertTrue(shifts, "open shift fixture visible")
+		shift = shifts[0]
+		self.assertEqual(shift["outlet"], self.company_gp)
+		self.assertEqual(shift["status"], "Open")
+		self.assertEqual(shift["currency"], self.currency)
+		self.assertGreater(shift["sales"], 0)
+		self.assertGreaterEqual(shift["opening"], 0)
+		self.assertGreaterEqual(shift["expected_closing"], shift["opening"])
+		# the same invoices feed the mode-of-payment ranking
+		pm = data["payments"]
+		self.assertTrue(pm["rows"])
+		self.assertTrue(all(r["amount"] > 0 for r in pm["rows"]))
 
 	def test_default_basis_reports_net_sales_and_legacy_numbers(self):
 		self._restore_default_basis()
