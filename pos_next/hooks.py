@@ -11,15 +11,15 @@ app_license = "agpl-3.0"
 required_apps = ["erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "pos_next",
-# 		"logo": "/assets/pos_next/logo.png",
-# 		"title": "POS Next",
-# 		"route": "/pos_next",
-# 		"has_permission": "pos_next.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "pos_next",
+		"logo": "/assets/pos_next/icons/desktop_icons/solid/posnext.svg",
+		"title": "POSNext",
+		"route": "/app/posnext",
+		"has_permission": "pos_next.api.permission.has_app_permission",
+	}
+]
 
 # Includes in <head>
 # ------------------

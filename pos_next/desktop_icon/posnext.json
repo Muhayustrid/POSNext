@@ -1,0 +1,15 @@
+{
+ "app": "pos_next",
+ "bg_color": "gray",
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon": "point-of-sale",
+ "icon_type": "Link",
+ "idx": 1,
+ "label": "POSNext",
+ "link_to": "POSNext",
+ "link_type": "Workspace Sidebar",
+ "logo_url": "/assets/pos_next/icons/desktop_icons/solid/posnext.svg",
+ "name": "POSNext",
+ "standard": 1
+}
