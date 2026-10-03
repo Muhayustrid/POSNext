@@ -83,3 +83,28 @@ try:
 	patch_round_floats_in_compat(document_module)
 except Exception:
 	pass
+
+
+# frappe 16.36: WorkspaceSidebar.get_can_read_items forgets to return, so
+# get_cached() stores None and every DocType/Report sidebar link (POS Invoice,
+# ...) drops out for non-Administrator users. Guarded no-op once frappe drops
+# the buggy method (develop already rewrote the class).
+def _apply_workspace_sidebar_hotfix():
+	from frappe.desk.doctype.workspace_sidebar.workspace_sidebar import WorkspaceSidebar
+
+	if "get_can_read_items" not in vars(WorkspaceSidebar):
+		return
+
+	def get_can_read_items(self):
+		if not self.user.can_read:
+			self.user.build_permissions()
+		return self.user.can_read
+
+	WorkspaceSidebar.get_can_read_items = get_can_read_items
+
+
+if frappe:
+	try:
+		_apply_workspace_sidebar_hotfix()
+	except Exception:
+		pass
