@@ -1,5 +1,5 @@
 {
-	"comment": "Shared expectation table for the package price allocator. Read by BOTH pos_next/api/test_package_allocation_gate.py (TestAllocatePackageRates) and POS/src/utils/packageAllocation.test.js (shared mirror table), so the Python server allocator and the JS offline mirror cannot drift. Invariant per row: sum(rate_i * qty_per_package_i * package_qty) == package_price * package_qty.",
+		"comment": "Shared expectation table for the package price allocator. Read by BOTH pos_next/api/test_package_allocation_gate.py (TestAllocatePackageRates) and POS/src/utils/packageAllocation.test.js (shared mirror table), so the Python server allocator and the JS offline mirror cannot drift. Invariant per row: sum(rate_i * qty_per_package_i * package_qty) == package_price * package_qty — EXCEPT rows with \"exact_sum\": false, which pin the fail-closed shape instead (rates still asserted, all >= 0, sum deliberately misses so the server sum check rejects the invoice). The remainder is carried by the last qty-1 child whose weight is above 0; a zero-weight qty-1 child must never carry it (its share is 0, so the leftover would book negative). With no eligible child the last child carries it and the sum can only be exact when the remainder divides its quantity, so a row here without an eligible carrier must either divide evenly or carry \"exact_sum\": false.",
 	"cases": [
 		{
 			"name": "brief: 23k split over 20k + 10k weights, remainder to the last line",
@@ -69,6 +69,40 @@
 				{ "qty_per_package": 1, "price_list_rate": 0 }
 			],
 			"expected_rates": [5000, 4999]
+		},
+		{
+			"name": "brief B1: qty1 line carries the remainder so a qty2 last line cannot break the sum",
+			"package_price": 25000,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 20000 },
+				{ "qty_per_package": 2, "price_list_rate": 5000 }
+			],
+			"expected_rates": [16666, 4167]
+		},
+		{
+			"name": "repro: zero-weight qty-1 last line must NOT carry the remainder (no negative rates)",
+			"package_price": 20000,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 3, "price_list_rate": 5000 },
+				{ "qty_per_package": 1, "price_list_rate": 0 }
+			],
+			"expected_rates": [6667, 0],
+			"exact_sum": false
+		},
+		{
+			"name": "no qty-1 carrier: all lines qty>=2, last line carries the remainder exactly",
+			"package_price": 20000,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 2, "price_list_rate": 5000 },
+				{ "qty_per_package": 2, "price_list_rate": 5000 }
+			],
+			"expected_rates": [5000, 5000]
 		},
 		{
 			"name": "invariant: qty>1 line weights at package qty 5",

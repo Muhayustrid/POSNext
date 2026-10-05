@@ -173,6 +173,8 @@ export function quotePackageLocally(
 	// With no component rows there is nowhere to move the money; the parent
 	// keeps it and the snapshot stays legacy-shaped (no allocation marker).
 	const allocationApplied = Boolean(allocate && componentLines.length);
+	// Preview-only: server re-quotes with get_precision("Sales Invoice Item",
+	// "rate"); getPrecision().currency is the closest mirror, normally identical.
 	const allocationPrecision = getPrecision().currency;
 	let parentRate = total;
 	if (allocationApplied) {

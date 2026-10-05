@@ -109,6 +109,32 @@ describe("allocatePackageRates (mirror of packages.py)", () => {
 		expect(allocatedSum(rates, children, 5)).toBe(500)
 	})
 
+	// B1 review repro: the qty-1 line absorbs the rounding remainder; a qty>1
+	// last line (16667 x 1 + 4166 x 2 = 24999) would break the invariant.
+	it("B1: the last qty-1 line carries the remainder, not the qty>1 last line", () => {
+		const children = [
+			{ qty_per_package: 1, price_list_rate: 20000 },
+			{ qty_per_package: 2, price_list_rate: 5000 },
+		]
+
+		const rates = allocatePackageRates(25000, children)
+
+		expect(rates).toEqual([16666, 4167])
+		expect(allocatedSum(rates, children)).toBe(25000)
+	})
+
+	it("all-multiples lines: the last line carries it, exact only when it divides", () => {
+		const children = [
+			{ qty_per_package: 2, price_list_rate: 5000 },
+			{ qty_per_package: 2, price_list_rate: 5000 },
+		]
+
+		expect(allocatePackageRates(20000, children)).toEqual([5000, 5000])
+		expect(allocatedSum(allocatePackageRates(20000, children), children)).toBe(20000)
+		// 25001 cannot divide across qty-2 lines; the server fails closed here.
+		expect(allocatePackageRates(25001, children)).toEqual([6250, 6250])
+	})
+
 	it("rounds 7 across three equal lines with the remainder last", () => {
 		const children = [
 			{ qty_per_package: 1, price_list_rate: 1 },
@@ -165,6 +191,9 @@ describe("shared expectation table (Python server <-> JS mirror)", () => {
 		)
 
 		expect(rates).toEqual(testCase.expected_rates)
+		// A negative component rate must never be booked, even on
+		// fail-closed shapes (the server sum check rejects those).
+		for (const rate of rates) expect(rate).toBeGreaterThanOrEqual(0)
 
 		const allocated = rates.reduce(
 			(sum, rate, index) =>
@@ -173,9 +202,31 @@ describe("shared expectation table (Python server <-> JS mirror)", () => {
 			0,
 		)
 		const expected = testCase.package_price * testCase.package_qty
-		expect(Number(allocated.toFixed(testCase.precision))).toBe(
-			Number(expected.toFixed(testCase.precision)),
-		)
+		if (testCase.exact_sum ?? true) {
+			expect(Number(allocated.toFixed(testCase.precision))).toBe(
+				Number(expected.toFixed(testCase.precision)),
+			)
+		} else {
+			// Pinned fail-closed shape: the invoice sum check must reject this.
+			expect(Number(allocated.toFixed(testCase.precision))).not.toBe(
+				Number(expected.toFixed(testCase.precision)),
+			)
+		}
+	})
+
+	// User repro: a zero-weight qty-1 last line must not absorb the leftover
+	// as a negative rate ([6667, -1] before the fix).
+	it("zero-weight qty-1 line never carries the remainder (no negative rates)", () => {
+		const children = [
+			{ qty_per_package: 3, price_list_rate: 5000 },
+			{ qty_per_package: 1, price_list_rate: 0 },
+		]
+
+		const rates = allocatePackageRates(20000, children)
+
+		expect(rates).toEqual([6667, 0])
+		for (const rate of rates) expect(rate).toBeGreaterThanOrEqual(0)
+		expect(allocatedSum(rates, children)).not.toBe(20000)
 	})
 
 	it("covers every brief case at least once", () => {

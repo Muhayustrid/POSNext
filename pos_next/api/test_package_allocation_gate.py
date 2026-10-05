@@ -13,6 +13,7 @@ pos_next.api.test_package_allocation_gate
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -28,6 +29,8 @@ from pos_next.api.packages import (
 	_rate_precision,
 	_validate_return_packages,
 	allocate_package_rates,
+	get_packages,
+	quote,
 	validate_invoice_packages,
 )
 from pos_next.api.test_packages import (
@@ -39,6 +42,7 @@ from pos_next.api.test_packages import (
 	BASE_PRICE,
 	COMPANY,
 	COMPONENT_ROLE,
+	HEADPHONE,
 	PACKAGE,
 	PARENT_ITEM,
 	PARENT_ROLE,
@@ -142,6 +146,9 @@ class TestAllocatePackageRates(unittest.TestCase):
 					case["precision"],
 				)
 				self.assertEqual(rates, case["expected_rates"])
+				# A negative component rate must never be booked, even on
+				# fail-closed shapes (the sum check below rejects those).
+				self.assertTrue(all(rate >= 0 for rate in rates), rates)
 
 	def test_shared_table_satisfies_the_exact_sum_invariant(self):
 		for case in self.cases:
@@ -157,7 +164,65 @@ class TestAllocatePackageRates(unittest.TestCase):
 					for rate, child in zip(rates, case["children"], strict=True)
 				)
 				expected = case["package_price"] * case["package_qty"]
-				self.assertEqual(flt(allocated, case["precision"]), flt(expected, case["precision"]))
+				if case.get("exact_sum", True):
+					self.assertEqual(flt(allocated, case["precision"]), flt(expected, case["precision"]))
+				else:
+					# Pinned fail-closed shape: no qty-1 line with weight > 0
+					# exists, so the remainder cannot divide exactly — the
+					# invoice sum check must reject this (never silently sell).
+					self.assertNotEqual(
+						flt(allocated, case["precision"]), flt(expected, case["precision"])
+					)
+
+	def test_zero_weight_qty1_line_never_carries_the_remainder(self):
+		"""User repro: [qty3 @5000, qty1 @0] @20000 used to yield [6667, -1].
+		The zero-weight qty-1 line must not carry the leftover as a negative
+		rate — it is clamped to 0 and the sum misses, failing closed."""
+		rates = allocate_package_rates(
+			20000,
+			[
+				{"qty_per_package": 3, "price_list_rate": 5000},
+				{"qty_per_package": 1, "price_list_rate": 0},
+			],
+			precision=0,
+		)
+
+		self.assertEqual(rates, [6667, 0])
+		self.assertTrue(all(rate >= 0 for rate in rates), rates)
+		self.assertNotEqual(sum(rate * qty for rate, qty in zip(rates, (3, 1), strict=True)), 20000)
+
+	def test_b1_qty1_carrier_absorbs_the_remainder(self):
+		"""Review repro: [qty1 @20000, qty2 @5000] @25000 used to yield
+		[16667, 4166] (sum 24999) because the qty>1 last line carried the
+		remainder. The qty-1 line must carry it instead."""
+		children = [
+			{"qty_per_package": 1, "price_list_rate": 20000},
+			{"qty_per_package": 2, "price_list_rate": 5000},
+		]
+		rates = allocate_package_rates(25000, children, precision=0)
+
+		self.assertEqual(rates, [16666, 4167])
+		self.assertEqual(
+			sum(rate * child["qty_per_package"] for rate, child in zip(rates, children, strict=True)), 25000
+		)
+
+	def test_without_a_qty1_carrier_the_sum_can_miss(self):
+		"""Documented boundary: with every line a multiple and an odd remainder
+		no line can absorb, the last line carries it and the sum can miss the
+		package price. validate_invoice_packages fails closed on this (and
+		POS Package's own validate rejects such definitions when allocation is
+		on), so the allocator itself stays pure and non-throwing."""
+		rates = allocate_package_rates(
+			25001,
+			[
+				{"qty_per_package": 2, "price_list_rate": 5000},
+				{"qty_per_package": 2, "price_list_rate": 5000},
+			],
+			precision=0,
+		)
+
+		self.assertEqual(rates, [6250, 6250])
+		self.assertNotEqual(sum(rate * 2 for rate in rates), 25001)
 
 
 class TestAllocationGate(unittest.TestCase):
@@ -599,18 +664,20 @@ class TestReturnAllocationRates(FrappeTestCase):
 		frappe.db.commit()
 		cls.company = COMPANY
 
-	def _insert_invoice(self, doctype, rows, instance="pkg-ret-gate"):
-		parent = frappe.get_doc(
-			{
-				"doctype": doctype,
-				"company": self.company,
-				"customer": frappe.db.get_value("Customer", {"disabled": 0}, "name"),
-				"pos_profile": PROFILE,
-				"is_pos": 1,
-				"update_stock": 0,
-				"posting_date": frappe.utils.nowdate(),
-			}
-		)
+	def _insert_invoice(self, doctype, rows, instance="pkg-ret-gate", grand_total=None):
+		parent_fields = {
+			"doctype": doctype,
+			"company": self.company,
+			"customer": frappe.db.get_value("Customer", {"disabled": 0}, "name"),
+			"pos_profile": PROFILE,
+			"is_pos": 1,
+			"update_stock": 0,
+			"posting_date": frappe.utils.nowdate(),
+		}
+		if grand_total is not None:
+			parent_fields["grand_total"] = grand_total
+			parent_fields["net_total"] = grand_total
+		parent = frappe.get_doc(parent_fields)
 		parent.db_insert()
 		inserted = []
 		for idx, vals in enumerate(rows, start=1):
@@ -740,6 +807,74 @@ class TestReturnAllocationRates(FrappeTestCase):
 				self.assertEqual(by_code[PARENT_ITEM].rate, BASE_PRICE, doctype)
 				self.assertEqual(by_code[COMPONENT_A].rate, 0, doctype)
 				self.assertEqual(by_code[COMPONENT_B].rate, 0, doctype)
+			finally:
+				frappe.db.rollback()
+
+	def test_duplicate_component_full_return_mirrors_each_origin_rate(self):
+		"""H2: two component rows of the SAME item_code carry independently
+		rounded rates (3333 and 3334). The return must refund each row at its
+		origin row's rate — averaging per item_code (3333.5 → 3334) over-refunds.
+		Asserts grand_total(return) == -grand_total(original)."""
+		for doctype in ("Sales Invoice", "POS Invoice"):
+			link_field = "sales_invoice_item" if doctype == "Sales Invoice" else "pos_invoice_item"
+			instance = f"pkg-ret-dup-{doctype[:2]}"
+			rows = [
+				{
+					"item_code": PARENT_ITEM,
+					"qty": 1,
+					"rate": 0,
+					"pos_package": PACKAGE,
+					"pos_package_instance": instance,
+					"pos_package_role": PARENT_ROLE,
+				},
+				{
+					"item_code": COMPONENT_A,
+					"qty": 1,
+					"rate": 3333,
+					"pos_package": PACKAGE,
+					"pos_package_instance": instance,
+					"pos_package_role": COMPONENT_ROLE,
+				},
+				{
+					"item_code": COMPONENT_A,
+					"qty": 1,
+					"rate": 3334,
+					"pos_package": PACKAGE,
+					"pos_package_instance": instance,
+					"pos_package_role": COMPONENT_ROLE,
+				},
+			]
+			original, inserted = self._insert_invoice(doctype, rows, grand_total=6667)
+			try:
+				return_doc = frappe.get_doc(
+					{
+						"doctype": doctype,
+						"company": self.company,
+						"customer": frappe.db.get_value("Customer", {"disabled": 0}, "name"),
+						"pos_profile": PROFILE,
+						"is_return": 1,
+						"return_against": original.name,
+						"currency": frappe.db.get_value("Company", self.company, "default_currency"),
+					}
+				)
+				for row in inserted:
+					return_doc.append(
+						"items",
+						{
+							"item_code": row.item_code,
+							"qty": -flt(row.qty),
+							"rate": 0,
+							"uom": "Nos",
+							"conversion_factor": 1,
+							link_field: row.name,
+						},
+					)
+
+				_validate_return_packages(return_doc)
+
+				rates = [flt(row.rate) for row in return_doc.items]
+				self.assertEqual(rates, [0, 3333, 3334], doctype)
+				self.assertEqual(flt(return_doc.grand_total), -6667, doctype)
 			finally:
 				frappe.db.rollback()
 
@@ -1061,6 +1196,466 @@ class TestIdrZeroPrecisionAllocation(FrappeTestCase):
 			frappe.db.set_default("currency_precision", original_precision)
 			frappe.db.set_default("number_format", original_format)
 			frappe.clear_cache()
+
+
+# --- B1: qty-1 remainder carrier + offline preview → sync ---------------------
+
+B1_PACKAGE = "_PNXT B1 Carrier Package"
+B1_NO_CARRIER_PACKAGE = "_PNXT B1 No Carrier Package"
+B1_ROTI = "_PNXT_PKG_B1_ROTI"
+B1_TEH = "_PNXT_PKG_B1_TEH"
+B1_PARENT = "_PNXT_PKG_PARENT_B1"
+B1_NO_CARRIER_PARENT = "_PNXT_PKG_PARENT_B1NC"
+
+
+def _ensure_b1_packages():
+	"""B1 repro fixture: Roti qty1 @20k + Teh qty2 @5k sold as a 25k package.
+
+	The odd per-unit split (16666.67 / 4166.67) only sums to 25k when the qty-1
+	Roti line carries the remainder. The no-carrier variant (every line qty 2/3,
+	25k at precision 0) can never split exactly — used to pin the fail-closed
+	checkout guard for definitions that slipped past save validation (e.g. the
+	toggle flipped on after the package was saved).
+	"""
+	_ensure_item(B1_ROTI, "PNXT B1 Roti", is_stock_item=False)
+	_ensure_item(B1_TEH, "PNXT B1 Teh", is_stock_item=False)
+	# Non-stock on purpose: these fixture items carry 2020-dated prices on the
+	# shared test site, and other suites pick the newest STOCK sales item and
+	# insert their own 2020-01-01 price — which would then collide. Correct
+	# items created by an earlier run of this fixture.
+	frappe.db.set_value("Item", B1_ROTI, "is_stock_item", 0, update_modified=False)
+	frappe.db.set_value("Item", B1_TEH, "is_stock_item", 0, update_modified=False)
+	_ensure_item(B1_PARENT, "PNXT B1 Carrier Package", is_stock_item=False)
+	_ensure_item(B1_NO_CARRIER_PARENT, "PNXT B1 No Carrier Package", is_stock_item=False)
+
+	price_list = _ensure_inr_price_list()
+	currency = frappe.db.get_value("Company", COMPANY, "default_currency") or "INR"
+	for item_code, rate in ((B1_ROTI, 20_000.0), (B1_TEH, 5_000.0)):
+		if frappe.db.exists("Item Price", {"item_code": item_code, "price_list": price_list, "selling": 1}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": item_code,
+				"price_list": price_list,
+				"selling": 1,
+				"buying": 0,
+				"currency": currency,
+				"valid_from": "2020-01-01",
+				"price_list_rate": rate,
+			}
+		).insert(ignore_permissions=True)
+
+	vals = frappe.db.get_value("POS Profile", PROFILE, ["company", "warehouse"], as_dict=True)
+	for name, parent, items, base_price in (
+		(B1_PACKAGE, B1_PARENT, [{"item_code": B1_ROTI, "qty": 1}, {"item_code": B1_TEH, "qty": 2}], 25_000.0),
+		(
+			# Every line a multiple, and the leftover over the qty-3 last line
+			# does not divide (25000 - 3572 = 21428; 21428/3 = 7142.67).
+			B1_NO_CARRIER_PACKAGE,
+			B1_NO_CARRIER_PARENT,
+			[{"item_code": B1_TEH, "qty": 2}, {"item_code": B1_ROTI, "qty": 3}],
+			25_000.0,
+		),
+	):
+		if frappe.db.exists("POS Package", name):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "POS Package",
+				"package_name": name,
+				"company": COMPANY,
+				"currency": currency,
+				"parent_item": parent,
+				"base_price": base_price,
+				"items": items,
+				"outlets": [{"company": vals.company, "warehouse": vals.warehouse, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+
+
+class TestB1CarrierAndOfflineSync(FrappeTestCase):
+	"""The review repro: [qty1 @20000, qty2 @5000] @25000 used to split
+	[16667, 4166] (Σ 24999) because the qty>1 line carried the remainder. The
+	qty-1 line carries it now, and the sync-side invariant gate
+	(_verify_package_allocation_totals) accepts the exact same preview."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		_set_allocation(0)
+		_ensure_package()
+		_ensure_zero_precision_package()
+		_ensure_b1_packages()
+		frappe.db.commit()
+
+	def setUp(self):
+		_set_allocation(1)
+
+	def tearDown(self):
+		_set_allocation(0)
+
+	@staticmethod
+	def _zero_precision():
+		original_precision = frappe.db.get_default("currency_precision")
+		original_format = frappe.db.get_default("number_format")
+		frappe.db.set_default("currency_precision", 0)
+		frappe.db.set_default("number_format", "#,###")
+		frappe.clear_cache()
+		return original_precision, original_format
+
+	def _preview_rows(self, result, package):
+		parent, *components = result["lines"]
+		rows = [
+			frappe._dict(
+				{
+					"item_code": parent["item_code"],
+					"qty": 1,
+					"rate": 0,
+					"price_list_rate": 0,
+					"pos_package": package,
+					"pos_package_instance": "pkg-b1",
+					"pos_package_role": PARENT_ROLE,
+					"pos_package_snapshot": json.dumps(result["snapshot"]),
+				}
+			)
+		]
+		for line in components:
+			rows.append(
+				frappe._dict(
+					{
+						"item_code": line["item_code"],
+						"qty": line["qty"],
+						"rate": line["rate"],
+						"price_list_rate": line["rate"],
+						"pos_package": package,
+						"pos_package_instance": "pkg-b1",
+						"pos_package_role": COMPONENT_ROLE,
+					}
+				)
+			)
+		return rows
+
+	def test_b1_repro_splits_exactly_and_sync_gate_accepts_the_preview(self):
+		original_precision, original_format = self._zero_precision()
+		try:
+			result = quote(B1_PACKAGE, [], PROFILE, allocate=True)
+			self.assertEqual(flt(result["total"], 0), 25_000)
+
+			parent, *components = result["lines"]
+			self.assertEqual(parent["rate"], 0)
+			self.assertEqual([line["rate"] for line in components], [16_666, 4_167])
+			allocated = sum(flt(line["rate"]) * flt(line["qty"]) for line in components)
+			self.assertEqual(flt(allocated, 0), 25_000)
+
+			# Offline preview → sync: the payload-side invariant gate and the
+			# server re-quote must both accept the same rates (L2).
+			doc = _doc(self._preview_rows(result, B1_PACKAGE))
+			_verify_package_allocation_totals(doc, 0)
+			validate_invoice_packages(doc)
+
+			self.assertEqual(
+				[r.rate for r in doc["items"] if r.pos_package_role == COMPONENT_ROLE],
+				[16_666.0, 4_167.0],
+			)
+		finally:
+			frappe.db.set_default("currency_precision", original_precision)
+			frappe.db.set_default("number_format", original_format)
+			frappe.clear_cache()
+
+	def test_no_carrier_definition_fails_closed_at_invoice_validate(self):
+		"""Boundary kept as a truthful backstop: a package whose every line is a
+		multiple (saved while the toggle was off, so POS Package validate passed)
+		cannot be split exactly when allocation turns on — the checkout guard
+		must refuse with the carrier hint instead of booking a miscount."""
+		original_precision, original_format = self._zero_precision()
+		try:
+			result = quote(B1_NO_CARRIER_PACKAGE, [], PROFILE, allocate=True)
+			self.assertTrue(result["snapshot"].get("allocation"))
+			doc = _doc(self._preview_rows(result, B1_NO_CARRIER_PACKAGE))
+
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_invoice_packages(doc)
+			self.assertIn("quantity 1", str(ctx.exception))
+		finally:
+			frappe.db.set_default("currency_precision", original_precision)
+			frappe.db.set_default("number_format", original_format)
+			frappe.clear_cache()
+
+
+class TestValidateSingleToggleReadAndPostingDate(unittest.TestCase):
+	"""M2: one toggle read per validate_invoice_packages however many package
+	instances the invoice carries. M3: the invoice's posting_date prices the
+	allocation weights (backdated invoices / delayed offline syncs)."""
+
+	@classmethod
+	def setUpClass(cls):
+		_ensure_package()
+		frappe.db.commit()
+		cls.pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+
+	def setUp(self):
+		_set_allocation(1)
+
+	def tearDown(self):
+		_set_allocation(0)
+
+	def _group_rows(self, instance):
+		result = quote(
+			PACKAGE,
+			[
+				{
+					"group_key": "accessory",
+					"options": [{"option_id": _option_id(self.pkg, COMPONENT_A), "qty": 1}],
+				}
+			],
+			PROFILE,
+			allocate=True,
+		)
+		rows = []
+		for line in result["lines"]:
+			rows.append(
+				frappe._dict(
+					{
+						"item_code": line["item_code"],
+						"qty": line["qty"],
+						"rate": line["rate"],
+						"price_list_rate": line["rate"],
+						"pos_package": PACKAGE,
+						"pos_package_instance": instance,
+						"pos_package_role": line["role"],
+						"pos_package_snapshot": (
+							json.dumps(result["snapshot"]) if line["role"] == PARENT_ROLE else None
+						),
+					}
+				)
+			)
+		return rows
+
+	def test_toggle_is_read_once_for_two_package_instances(self):
+		doc = _doc(self._group_rows("pkg-m2-a") + self._group_rows("pkg-m2-b"))
+		calls = []
+
+		def _counting_toggle():
+			calls.append(1)
+			return True
+
+		with patch("pos_next.api.packages._package_allocation_enabled", side_effect=_counting_toggle):
+			validate_invoice_packages(doc)
+
+		self.assertEqual(len(calls), 1)
+
+	def test_posting_date_flows_into_the_allocation_weights(self):
+		doc = _doc(self._group_rows("pkg-m3"), posting_date="2026-01-15")
+		captured = {}
+
+		def _fetch(item_codes, price_list, transaction_date=None, selling=None):
+			captured["date"] = transaction_date
+			return {}
+
+		with patch("pos_next.api.packages._fetch_uom_prices_map", side_effect=_fetch):
+			validate_invoice_packages(doc)
+
+		self.assertEqual(captured.get("date"), "2026-01-15")
+
+
+class TestPricingRuleCannotTouchPackageRows(FrappeTestCase):
+	"""H3: an item-level Min/Max Pricing Rule (whose bulk pass
+	apply_min_max_price_discounts runs as a validate hook AFTER
+	validate_invoice_packages) must not re-price a component row. The fix
+	clears the rows' pricing_rules attribution, so the later hook finds no
+	target on package rows — while a standalone row under the same rule is
+	still discounted, proving the rule itself is live."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		_ensure_package()
+		frappe.db.commit()
+		cls.company = COMPANY
+		cls.warehouse = frappe.db.get_value("POS Profile", PROFILE, "warehouse")
+		cls.pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+
+	def setUp(self):
+		_set_allocation(1)
+
+	def tearDown(self):
+		_set_allocation(0)
+		for name in frappe.get_all(
+			"Pricing Rule", filters={"title": "_PNXT H3 Component Rule"}, pluck="name"
+		):
+			frappe.delete_doc("Pricing Rule", name, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
+	def _seed_rule(self):
+		existing = frappe.db.get_value("Pricing Rule", {"title": "_PNXT H3 Component Rule"}, "name")
+		if existing:
+			frappe.delete_doc("Pricing Rule", existing, force=True, ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Pricing Rule",
+				"title": "_PNXT H3 Component Rule",
+				"selling": 1,
+				"company": self.company,
+				"currency": frappe.db.get_value("Company", self.company, "default_currency"),
+				"apply_on": "Item Code",
+				"items": [{"item_code": COMPONENT_A}, {"item_code": HEADPHONE}],
+				"price_or_product_discount": "Price",
+				"rate_or_discount": "Discount Percentage",
+				"apply_discount_on_price": "Max",
+				"discount_percentage": 10,
+				"valid_from": frappe.utils.nowdate(),
+				"min_qty": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.commit()
+
+	def test_component_rows_survive_an_item_pricing_rule(self):
+		self._seed_rule()
+
+		result = quote(
+			PACKAGE,
+			[
+				{
+					"group_key": "accessory",
+					"options": [{"option_id": _option_id(self.pkg, COMPONENT_A), "qty": 1}],
+				}
+			],
+			PROFILE,
+			allocate=True,
+		)
+		self.assertTrue(result["snapshot"].get("allocation"))
+
+		inv = frappe.new_doc("Sales Invoice")
+		inv.customer = frappe.db.get_value("Customer", {"disabled": 0}, "name")
+		inv.company = self.company
+		inv.pos_profile = PROFILE
+		inv.is_pos = 0
+		inv.set_posting_time = 1
+		inv.currency = frappe.db.get_value("Company", self.company, "default_currency")
+		inv.selling_price_list = frappe.db.get_value("POS Profile", PROFILE, "selling_price_list")
+		for line in result["lines"]:
+			inv.append(
+				"items",
+				{
+					"item_code": line["item_code"],
+					"qty": line["qty"],
+					"rate": line["rate"],
+					"price_list_rate": line["rate"],
+					"uom": line.get("uom") or "Nos",
+					"warehouse": self.warehouse,
+					"pos_package": PACKAGE,
+					"pos_package_instance": "pkg-h3-gate",
+					"pos_package_role": line["role"],
+					"pos_package_snapshot": (
+						json.dumps(result["snapshot"]) if line["role"] == PARENT_ROLE else None
+					),
+				},
+			)
+		# A standalone row under the same rule: proof the rule fires at all.
+		inv.append(
+			"items",
+			{
+				"item_code": HEADPHONE,
+				"qty": 1,
+				"rate": 500_000,
+				"price_list_rate": 500_000,
+				"uom": "Nos",
+				"warehouse": self.warehouse,
+			},
+		)
+		inv.set_missing_values()
+		# The leak exists exactly on documents where ERPNext's own engine runs.
+		inv.ignore_pricing_rule = 0
+		inv.flags.ignore_validate = False
+
+		inv.run_method("validate")
+
+		for row in inv.items:
+			if row.get("pos_package_role"):
+				self.assertFalse(row.get("pricing_rules"), row.item_code)
+		component_rows = [r for r in inv.items if r.pos_package_role == COMPONENT_ROLE]
+		allocated = sum(flt(r.rate) * flt(r.qty) for r in component_rows)
+		self.assertEqual(flt(allocated, 2), flt(result["total"], 2))
+		# The rule stayed live: the standalone row carries its discount.
+		self.assertEqual(flt(inv.items[-1].discount_percentage), 10.0)
+
+
+class TestAllocationCarrierValidation(FrappeTestCase):
+	"""B1 guard on the POS Package doctype itself (save-time, not checkout):
+	while allocation is on, a definition whose every line is a multiple is
+	rejected with a clear message; a qty-1 line (included item or option with
+	Qty Per Unit 1) makes it saveable. With the toggle off the legacy shape
+	stays untouched."""
+
+	PACKAGE_NAME = "_PNXT Carrier Guard Package"
+	PARENT = "_PNXT_PKG_PARENT_CARRIER_GUARD"
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		_ensure_package()
+		_ensure_item(cls.PARENT, "PNXT Carrier Guard Package", is_stock_item=False)
+		frappe.db.commit()
+
+	def setUp(self):
+		_set_allocation(1)
+
+	def tearDown(self):
+		_set_allocation(0)
+		frappe.db.delete("POS Package", {"package_name": self.PACKAGE_NAME})
+		frappe.db.commit()
+
+	def _make(self, items=None, groups=None, options=None):
+		vals = frappe.db.get_value("POS Profile", PROFILE, ["company", "warehouse"], as_dict=True)
+		return frappe.get_doc(
+			{
+				"doctype": "POS Package",
+				"package_name": self.PACKAGE_NAME,
+				"company": COMPANY,
+				"currency": frappe.db.get_value("Company", COMPANY, "default_currency"),
+				"parent_item": self.PARENT,
+				"base_price": 1_000.0,
+				"items": items or [],
+				"groups": groups or [],
+				"options": options or [],
+				"outlets": [{"company": vals.company, "warehouse": vals.warehouse, "enabled": 1}],
+			}
+		)
+
+	def test_all_multiples_are_rejected_with_a_carrier_hint(self):
+		doc = self._make(items=[{"item_code": COMPONENT_A, "qty": 2}])
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			doc.insert(ignore_permissions=True)
+
+		self.assertIn("quantity 1", str(ctx.exception))
+
+	def test_a_qty1_included_item_makes_it_saveable(self):
+		doc = self._make(
+			items=[{"item_code": COMPONENT_A, "qty": 2}, {"item_code": COMPONENT_B, "qty": 1}]
+		)
+		doc.insert(ignore_permissions=True)
+
+		self.assertTrue(doc.name)
+
+	def test_qty_per_unit_one_option_is_a_carrier(self):
+		doc = self._make(
+			groups=[{"group_key": "carrier_group", "label": "Carrier", "min_qty": 1, "max_qty": 1}],
+			options=[
+				{"group_key": "carrier_group", "item_code": COMPONENT_A, "qty_per_unit": 1}
+			],
+		)
+		doc.insert(ignore_permissions=True)
+
+		self.assertTrue(doc.name)
+
+	def test_toggle_off_keeps_all_multiples_saveable(self):
+		_set_allocation(0)
+		doc = self._make(items=[{"item_code": COMPONENT_A, "qty": 2}])
+		doc.insert(ignore_permissions=True)
+
+		self.assertTrue(doc.name)
 
 
 if __name__ == "__main__":
