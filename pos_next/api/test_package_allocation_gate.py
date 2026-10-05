@@ -1,8 +1,10 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
-"""Fase 3 tests: SEC-23 package-allocation gate, offer exclusion, return
-doctype links, invoice-level discount distribution and parent-row tax/stock.
+"""Fase 3-4 tests: SEC-23 package-allocation gate, offer exclusion, return
+doctype links, invoice-level discount distribution, parent-row tax/stock,
+tax-inclusive extraction, IDR 0-decimal precision and the shared
+Python<->JS allocator expectation table.
 
 Run via pos_next/_pn_run_tests.py
 pos_next.api.test_package_allocation_gate
@@ -10,6 +12,7 @@ pos_next.api.test_package_allocation_gate
 
 import json
 import unittest
+from pathlib import Path
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -21,7 +24,12 @@ from pos_next.api.invoices import (
 	_validate_item_rates,
 	_verify_package_allocation_totals,
 )
-from pos_next.api.packages import _validate_return_packages
+from pos_next.api.packages import (
+	_rate_precision,
+	_validate_return_packages,
+	allocate_package_rates,
+	validate_invoice_packages,
+)
 from pos_next.api.test_packages import (
 	BACKPACK as COMPONENT_A,
 )
@@ -35,6 +43,8 @@ from pos_next.api.test_packages import (
 	PARENT_ITEM,
 	PARENT_ROLE,
 	PROFILE,
+	_ensure_inr_price_list,
+	_ensure_item,
 	_ensure_package,
 	_option_id,
 )
@@ -44,6 +54,13 @@ from pos_next.api.test_packages import (
 from pos_next.tests._posi_test_utils import _set_invoice_type
 
 ALLOCATION_FLAG = "enable_pos_package_allocation"
+
+# One expectation table for both implementations: read here and by
+# POS/src/utils/packageAllocation.test.js, so the server allocator and the
+# offline mirror are pinned to identical rates for every brief case.
+SHARED_CASES_PATH = (
+	Path(__file__).resolve().parents[2] / "POS" / "src" / "utils" / "packageAllocation.cases.json"
+)
 
 
 def _set_allocation(value):
@@ -100,6 +117,47 @@ def _doc(rows, **fields):
 	doc = frappe._dict({"is_return": 0, "pos_profile": PROFILE, **fields})
 	doc["items"] = rows
 	return doc
+
+
+class TestAllocatePackageRates(unittest.TestCase):
+	"""Pure unit tests of ``allocate_package_rates``, driven by the shared
+	expectation table at POS/src/utils/packageAllocation.cases.json — the same
+	file POS/src/utils/packageAllocation.test.js reads. Both implementations
+	are pinned to identical rates for every brief case (23k over 20k+10k, qty 2,
+	3-item rounding, zero-priced child, IDR precision 0) so the server
+	allocator and the offline preview cannot drift."""
+
+	@classmethod
+	def setUpClass(cls):
+		with SHARED_CASES_PATH.open(encoding="utf-8") as handle:
+			cls.cases = json.load(handle)["cases"]
+
+	def test_shared_expectation_table_matches_server_allocator(self):
+		for case in self.cases:
+			with self.subTest(case=case["name"]):
+				rates = allocate_package_rates(
+					case["package_price"],
+					case["children"],
+					case["package_qty"],
+					case["precision"],
+				)
+				self.assertEqual(rates, case["expected_rates"])
+
+	def test_shared_table_satisfies_the_exact_sum_invariant(self):
+		for case in self.cases:
+			with self.subTest(case=case["name"]):
+				rates = allocate_package_rates(
+					case["package_price"],
+					case["children"],
+					case["package_qty"],
+					case["precision"],
+				)
+				allocated = sum(
+					rate * child["qty_per_package"] * case["package_qty"]
+					for rate, child in zip(rates, case["children"], strict=True)
+				)
+				expected = case["package_price"] * case["package_qty"]
+				self.assertEqual(flt(allocated, case["precision"]), flt(expected, case["precision"]))
 
 
 class TestAllocationGate(unittest.TestCase):
@@ -267,6 +325,33 @@ class TestInvoiceLevelDiscount(FrappeTestCase):
 		rate_money = sum(flt(c.rate) * flt(c.qty) for c in components)
 		self.assertAlmostEqual(rate_money, package_total, places=2)
 
+	def test_percentage_header_discount_keeps_the_allocation_basis(self):
+		"""A percentage invoice discount (the coupon lane's companion: a coupon
+		is stamped as a header discount and distributed by the same ERPNext
+		apply_discount_amount) gives the zero parent a zero share, splits the
+		discount proportionally across the components and leaves the allocation
+		basis itself untouched."""
+		inv, package_total = self._allocation_invoice()
+		inv.additional_discount_percentage = 5
+		inv.apply_discount_on = "Grand Total"
+
+		inv.run_method("validate")
+
+		self.assertGreater(flt(inv.discount_amount), 0)
+		parent = self._by_role(inv, PARENT_ROLE)[0]
+		components = self._by_role(inv, COMPONENT_ROLE)
+		self.assertEqual(parent.rate, 0)
+		self.assertEqual(flt(parent.net_amount), 0)
+		self.assertEqual(flt(parent.get("distributed_discount_amount") or 0), 0)
+
+		distributed = [flt(c.get("distributed_discount_amount") or 0) for c in components]
+		self.assertTrue(all(share > 0 for share in distributed), distributed)
+		# Proportional split: equal-valued lines get equal shares, up to
+		# ERPNext's per-row rounding of the distributed amount (a cent).
+		self.assertLess(abs(distributed[0] - distributed[1]), 0.02)
+		rate_money = sum(flt(c.rate) * flt(c.qty) for c in components)
+		self.assertAlmostEqual(rate_money, package_total, places=2)
+
 
 class TestParentRowTaxAndStock(FrappeTestCase):
 	"""The allocation-mode parent is a zero-rate group header: it must not be
@@ -403,6 +488,43 @@ class TestParentRowTaxAndStock(FrappeTestCase):
 				validate_invoice_packages(inv)
 
 			self.assertIn("On Item Quantity", str(ctx.exception), doctype)
+
+	def test_inclusive_value_tax_keeps_grand_total_at_package_price(self):
+		"""Tax-inclusive ON: the package price is the gross amount, so the tax
+		must be extracted from it rather than added on top — grand_total equals
+		the package price exactly (no double tax) and the zero-rate parent stays
+		untaxed."""
+		if not self.tax_account:
+			self.skipTest("no tax account on site")
+		for doctype in ("Sales Invoice", "POS Invoice"):
+			inv, total = self._allocation_invoice(doctype)
+			inv.append(
+				"taxes",
+				{
+					"charge_type": "On Net Total",
+					"account_head": self.tax_account,
+					"rate": 11,
+					"description": "VAT included",
+					"included_in_print_rate": 1,
+				},
+			)
+			inv.calculate_taxes_and_totals()
+
+			parent = next(r for r in inv.items if r.pos_package_role == PARENT_ROLE)
+			self.assertEqual(parent.rate, 0, doctype)
+			self.assertGreater(flt(inv.total_taxes_and_charges), 0, doctype)
+			self.assertLess(flt(inv.net_total), flt(total), doctype)
+			self.assertEqual(flt(inv.grand_total, 2), flt(total, 2), doctype)
+
+			details = inv.get("_item_wise_tax_details") or []
+			parent_tax = flt(
+				sum(
+					d.get("amount") or 0
+					for d in details
+					if d.get("item") is not None and d["item"].item_code == parent.item_code
+				)
+			)
+			self.assertEqual(parent_tax, 0, doctype)
 
 	def test_parent_moves_no_stock(self):
 		"""The parent item is non-stock and the ledger loop gates on
@@ -562,7 +684,7 @@ class TestReturnAllocationRates(FrappeTestCase):
 					"pos_package_role": COMPONENT_ROLE,
 				},
 			]
-			parent, inserted = self._insert_invoice(doctype, rows)
+			_parent, inserted = self._insert_invoice(doctype, rows)
 			try:
 				full = self._return_doc(doctype, inserted, link_field)
 				_validate_return_packages(full)
@@ -799,6 +921,146 @@ class TestOfferExclusionOnPackageRows(FrappeTestCase):
 		row = response["items"][0]
 		self.assertIn(flt(row.get("discount_percentage") or 0), (0.0,))
 		self.assertFalse(row.get("pricing_rules"))
+
+
+# --- IDR 0-decimal precision, end to end -------------------------------------
+
+ZERO_PRECISION_PACKAGE = "_PNXT IDR Precision Package"
+ZERO_PRECISION_PARENT = "_PNXT_PKG_PARENT_IDR"
+ZERO_PRECISION_ROTI = "_PNXT_PKG_ROTI"
+ZERO_PRECISION_TEH = "_PNXT_PKG_TEH"
+
+
+def _ensure_zero_precision_package():
+	"""Brief fixture: Roti 20k + Teh 10k sold as a 23k package, priced in the
+	profile's own selling list, so allocation weights are 20k/10k."""
+	_ensure_item(ZERO_PRECISION_PARENT, "PNXT IDR Precision Package", is_stock_item=False)
+	_ensure_item(ZERO_PRECISION_ROTI, "PNXT Roti", is_stock_item=True)
+	_ensure_item(ZERO_PRECISION_TEH, "PNXT Teh", is_stock_item=True)
+
+	price_list = _ensure_inr_price_list()
+	currency = frappe.db.get_value("Company", COMPANY, "default_currency") or "INR"
+	for item_code, rate in ((ZERO_PRECISION_ROTI, 20_000.0), (ZERO_PRECISION_TEH, 10_000.0)):
+		if frappe.db.exists("Item Price", {"item_code": item_code, "price_list": price_list, "selling": 1}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": item_code,
+				"price_list": price_list,
+				"selling": 1,
+				"buying": 0,
+				"currency": currency,
+				"valid_from": "2020-01-01",
+				"price_list_rate": rate,
+			}
+		).insert(ignore_permissions=True)
+
+	if frappe.db.exists("POS Package", ZERO_PRECISION_PACKAGE):
+		return
+	vals = frappe.db.get_value("POS Profile", PROFILE, ["company", "warehouse"], as_dict=True)
+	frappe.get_doc(
+		{
+			"doctype": "POS Package",
+			"package_name": ZERO_PRECISION_PACKAGE,
+			"company": COMPANY,
+			"currency": currency,
+			"parent_item": ZERO_PRECISION_PARENT,
+			"base_price": 23_000.0,
+			"items": [
+				{"item_code": ZERO_PRECISION_ROTI, "qty": 1},
+				{"item_code": ZERO_PRECISION_TEH, "qty": 1},
+			],
+			"outlets": [{"company": vals.company, "warehouse": vals.warehouse, "enabled": 1}],
+		}
+	).insert(ignore_permissions=True)
+
+
+class TestIdrZeroPrecisionAllocation(FrappeTestCase):
+	"""Brief case 'presisi IDR 0 desimal': Roti 20k + Teh 10k as a 23k package,
+	quoted and validated at rate precision 0. The test site runs at precision 2
+	(INR), so the test flips the same two defaults an IDR site carries
+	(System Settings currency_precision=0 and number_format '#,###') and
+	restores them in a finally block."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		_ensure_package()
+		_ensure_zero_precision_package()
+		frappe.db.commit()
+
+	def setUp(self):
+		_set_allocation(1)
+
+	def tearDown(self):
+		_set_allocation(0)
+
+	def test_quote_and_invoice_validate_at_zero_precision(self):
+		from pos_next.api.packages import quote
+
+		original_precision = frappe.db.get_default("currency_precision")
+		original_format = frappe.db.get_default("number_format")
+		try:
+			frappe.db.set_default("currency_precision", 0)
+			frappe.db.set_default("number_format", "#,###")
+			frappe.clear_cache()
+
+			self.assertEqual(_rate_precision(), 0, "precision flip must take effect")
+
+			result = quote(ZERO_PRECISION_PACKAGE, [], PROFILE, allocate=True)
+			self.assertEqual(flt(result["total"], 0), 23_000)
+			self.assertEqual(result["snapshot"]["allocation"]["precision"], 0)
+
+			parent, *components = result["lines"]
+			self.assertEqual(parent["rate"], 0)
+			self.assertEqual([line["rate"] for line in components], [15_333, 7_667])
+			self.assertTrue(all(float(line["rate"]).is_integer() for line in components))
+
+			snapshot = json.dumps(result["snapshot"])
+			rows = [
+				frappe._dict(
+					{
+						"item_code": parent["item_code"],
+						"qty": 1,
+						"rate": 0,
+						"price_list_rate": 0,
+						"pos_package": ZERO_PRECISION_PACKAGE,
+						"pos_package_instance": "pkg-idr-precision",
+						"pos_package_role": PARENT_ROLE,
+						"pos_package_snapshot": snapshot,
+					}
+				)
+			]
+			for line in components:
+				rows.append(
+					frappe._dict(
+						{
+							"item_code": line["item_code"],
+							"qty": line["qty"],
+							"rate": line["rate"],
+							"price_list_rate": line["rate"],
+							"pos_package": ZERO_PRECISION_PACKAGE,
+							"pos_package_instance": "pkg-idr-precision",
+							"pos_package_role": COMPONENT_ROLE,
+						}
+					)
+				)
+			doc = _doc(rows)
+			validate_invoice_packages(doc)
+
+			self.assertEqual(rows[0].rate, 0)
+			component_rows = [r for r in rows if r.pos_package_role == COMPONENT_ROLE]
+			self.assertEqual([r.rate for r in component_rows], [15_333.0, 7_667.0])
+			allocated = sum(flt(r.rate) * flt(r.qty) for r in component_rows)
+			self.assertEqual(flt(allocated, 0), 23_000)
+
+			# The payload-side invariant gate must also accept it at precision 0.
+			_verify_package_allocation_totals(doc, 0)
+		finally:
+			frappe.db.set_default("currency_precision", original_precision)
+			frappe.db.set_default("number_format", original_format)
+			frappe.clear_cache()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
+import sharedCases from "./packageAllocation.cases.json"
+
 import {
 	allocatePackageRates,
 	componentPriceListRate,
@@ -147,6 +149,46 @@ describe("allocatePackageRates (mirror of packages.py)", () => {
 	it("returns [] for no children", () => {
 		expect(allocatePackageRates(23000, [])).toEqual([])
 		expect(allocatePackageRates(23000, null)).toEqual([])
+	})
+})
+
+describe("shared expectation table (Python server <-> JS mirror)", () => {
+	// Same JSON file is read by pos_next/api/test_package_allocation_gate.py
+	// (TestAllocatePackageRates), so an edit to either allocator that drifts
+	// from the table fails on both sides.
+	it.each(sharedCases.cases)("$name", (testCase) => {
+		const rates = allocatePackageRates(
+			testCase.package_price,
+			testCase.children,
+			testCase.package_qty,
+			testCase.precision,
+		)
+
+		expect(rates).toEqual(testCase.expected_rates)
+
+		const allocated = rates.reduce(
+			(sum, rate, index) =>
+				sum +
+				rate * testCase.children[index].qty_per_package * testCase.package_qty,
+			0,
+		)
+		const expected = testCase.package_price * testCase.package_qty
+		expect(Number(allocated.toFixed(testCase.precision))).toBe(
+			Number(expected.toFixed(testCase.precision)),
+		)
+	})
+
+	it("covers every brief case at least once", () => {
+		const names = sharedCases.cases.map((c) => c.name).join(" | ")
+		for (const needle of [
+			"20k + 10k",
+			"package qty 2",
+			"3-item rounding",
+			"zero-priced child",
+			"IDR 0-decimal",
+		]) {
+			expect(names).toContain(needle)
+		}
 	})
 })
 

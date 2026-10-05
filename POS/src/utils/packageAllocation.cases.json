@@ -1,0 +1,97 @@
+{
+	"comment": "Shared expectation table for the package price allocator. Read by BOTH pos_next/api/test_package_allocation_gate.py (TestAllocatePackageRates) and POS/src/utils/packageAllocation.test.js (shared mirror table), so the Python server allocator and the JS offline mirror cannot drift. Invariant per row: sum(rate_i * qty_per_package_i * package_qty) == package_price * package_qty.",
+	"cases": [
+		{
+			"name": "brief: 23k split over 20k + 10k weights, remainder to the last line",
+			"package_price": 23000,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 20000 },
+				{ "qty_per_package": 1, "price_list_rate": 10000 }
+			],
+			"expected_rates": [15333, 7667]
+		},
+		{
+			"name": "brief: package qty 2 doubles the money but keeps per-unit rates",
+			"package_price": 23000,
+			"package_qty": 2,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 20000 },
+				{ "qty_per_package": 1, "price_list_rate": 10000 }
+			],
+			"expected_rates": [15333, 7667]
+		},
+		{
+			"name": "brief: 3-item rounding carries the remainder to the last line",
+			"package_price": 7,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 1 },
+				{ "qty_per_package": 1, "price_list_rate": 1 },
+				{ "qty_per_package": 1, "price_list_rate": 1 }
+			],
+			"expected_rates": [2, 2, 3]
+		},
+		{
+			"name": "brief: zero-priced child keeps rate 0 and does not disturb the split",
+			"package_price": 23000,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 20000 },
+				{ "qty_per_package": 1, "price_list_rate": 0 },
+				{ "qty_per_package": 1, "price_list_rate": 10000 }
+			],
+			"expected_rates": [15333, 0, 7667]
+		},
+		{
+			"name": "brief: IDR 0-decimal precision rounds a 3-way split and still sums exactly",
+			"package_price": 10000,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 1 },
+				{ "qty_per_package": 1, "price_list_rate": 1 },
+				{ "qty_per_package": 1, "price_list_rate": 1 }
+			],
+			"expected_rates": [3333, 3333, 3334]
+		},
+		{
+			"name": "fallback: no price-list rates anywhere => quantity weights",
+			"package_price": 9999,
+			"package_qty": 1,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 0 },
+				{ "qty_per_package": 1, "price_list_rate": 0 }
+			],
+			"expected_rates": [5000, 4999]
+		},
+		{
+			"name": "invariant: qty>1 line weights at package qty 5",
+			"package_price": 100,
+			"package_qty": 5,
+			"precision": 0,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 2000 },
+				{ "qty_per_package": 3, "price_list_rate": 1000 }
+			],
+			"expected_rates": [40, 20]
+		},
+		{
+			"name": "precision 2: exact thirds survive a fractional currency",
+			"package_price": 100,
+			"package_qty": 1,
+			"precision": 2,
+			"children": [
+				{ "qty_per_package": 1, "price_list_rate": 20 },
+				{ "qty_per_package": 1, "price_list_rate": 30 },
+				{ "qty_per_package": 1, "price_list_rate": 50 }
+			],
+			"expected_rates": [20, 30, 50]
+		}
+	]
+}
