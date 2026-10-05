@@ -347,3 +347,97 @@ class TestGetSalesRecap(FrappeTestCase):
 		self.assertEqual(recap["product_discount"], 12500.0)
 		mock_collect.assert_called_once_with(doc["pos_transactions"])
 		mock_discount.assert_called_once_with({("SINV-0001", "Sales Invoice")})
+
+class TestEodReportCashierName(FrappeTestCase):
+	"""The EOD template shows the User's display name, not the login email."""
+
+	@staticmethod
+	def _clear_jinja_env_cache():
+		import frappe
+
+		# Local.__iter__ yields (key, value) pairs, so `key in frappe.local`
+		# is always False — delete directly and treat absence as done. The env
+		# caches the `frappe` namespace built when it is first created, so a
+		# patched frappe.db.get_value is only visible after this reset.
+		for key in ("jenv_restricted", "jenv_unrestricted"):
+			try:
+				delattr(frappe.local, key)
+			except AttributeError:
+				pass
+
+	def test_cashier_row_prints_display_name_with_login_fallback(self):
+		import json
+		import os
+		from types import SimpleNamespace
+		from unittest.mock import patch
+
+		import frappe
+
+		template_path = os.path.join(
+			os.path.dirname(__file__),
+			"..",
+			"..",
+			"print_format",
+			"pos_next_eod_report",
+			"pos_next_eod_report.json",
+		)
+		with open(template_path) as template_file:
+			template = json.load(template_file)["html"]
+
+		doc = SimpleNamespace(
+			name="POCLO-TEST-0001",
+			company="Test Co",
+			user="kasir@example.com",
+			period_start_date="2026-10-05 08:00:00",
+			period_end_date="2026-10-05 17:00:00",
+		)
+		recap = {
+			"total_sales": 0,
+			"total_order": 0,
+			"average_per_order": 0,
+			"cash": {
+				"opening_balance": 0,
+				"cash_payment": 0,
+				"total_expense": 0,
+				"cash_in_hand": 0,
+			},
+			"payment_methods": [],
+			"total_cash": 0,
+			"total_non_cash": 0,
+			"methods_grand_total": 0,
+			"service_charge": 0,
+			"tax_total": 0,
+			"product_discount": 0,
+			"payment_discount": 0,
+			"refund_total": 0,
+			"categories": [],
+		}
+		context = {
+			"doc": doc,
+			"get_sales_recap": lambda _doc: recap,
+			"format_rupiah": lambda value=0: f"Rp {value}",
+		}
+
+		# Happy path: the User record carries a display name. A real function
+		# (not a Mock) is required — Jinja's sandbox refuses MagicMock callables.
+		def get_value_with_name(*_args, **_kwargs):
+			return "Kasir Contoh"
+
+		# No User record / no full name -> the login id is the honest fallback.
+		def get_value_without_name(*_args, **_kwargs):
+			return None
+
+		with patch("frappe.db.get_value", new=get_value_with_name):
+			self._clear_jinja_env_cache()
+			rendered = frappe.render_template(template, context)
+		self.assertIn("Kasir Contoh", rendered)
+		self.assertNotIn("kasir@example.com", rendered)
+
+		with patch("frappe.db.get_value", new=get_value_without_name):
+			self._clear_jinja_env_cache()
+			rendered = frappe.render_template(template, context)
+		self.assertIn("kasir@example.com", rendered)
+
+		# Leave a clean env behind: the cached namespace would otherwise keep
+		# the stubbed get_value alive for every later render in this process.
+		self._clear_jinja_env_cache()
