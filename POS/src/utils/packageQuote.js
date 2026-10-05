@@ -240,3 +240,107 @@ export function selectionsToChoices(selections = {}) {
 			.map(([optionId, qty]) => ({ option_id: optionId, qty: Number(qty) })),
 	}));
 }
+
+/**
+ * Split cart rows into offer-eligible rows and package rows. Stage-1 rule:
+ * offers never apply to package lines, so every caller that evaluates an
+ * offer against cart items must route its candidate list through this and
+ * report the excluded codes to the cashier (never a silent skip).
+ *
+ * @param {Array<Object>} items - Cart rows
+ * @returns {{eligible: Array<Object>, excluded: Array<Object>, excludedItemCodes: Array<string>}}
+ */
+export function splitOfferEligibleRows(items = []) {
+	const eligible = [];
+	const excluded = [];
+	for (const item of items || []) {
+		if (item?.package_instance) excluded.push(item);
+		else eligible.push(item);
+	}
+	return {
+		eligible,
+		excluded,
+		excludedItemCodes: [...new Set(excluded.map((item) => item.item_code).filter(Boolean))],
+	};
+}
+
+/**
+ * Split queued/submitted item rows into package groups and standalone rows.
+ *
+ * Offline-edit rows arrive in submission format (``pos_package_instance`` etc.
+ * — the names `formatItemsForSubmission` writes), while cart rows use the
+ * short names (``package_instance``). A row carrying one of the submission
+ * markers but no usable linkage would silently lose its package when loaded
+ * through ``cartStore.addItem`` — those land in ``malformed`` so the caller
+ * can fail closed and requote instead.
+ *
+ * @param {Array<Object>} items - Submission-format item rows
+ * @returns {{groups: Array<{instance: string, parent: Object, components: Array<Object>}>, standalone: Array<Object>, malformed: Array<Object>}}
+ */
+export function collectSubmissionPackageGroups(items = []) {
+	const byInstance = new Map();
+	const standalone = [];
+	const malformed = [];
+
+	for (const item of items || []) {
+		const instance = item?.pos_package_instance || item?.package_instance || null;
+		if (!instance) {
+			if (item?.pos_package || item?.pos_package_role) malformed.push(item);
+			else standalone.push(item);
+			continue;
+		}
+
+		let group = byInstance.get(instance);
+		if (!group) {
+			group = { instance, parent: null, components: [] };
+			byInstance.set(instance, group);
+		}
+		const role = item.pos_package_role || item.package_role;
+		if (role === PACKAGE_ROLE) {
+			if (group.parent) malformed.push(item);
+			else group.parent = item;
+		} else {
+			group.components.push(item);
+		}
+	}
+
+	const groups = [];
+	for (const group of byInstance.values()) {
+		if (!group.parent || !group.components.length) malformed.push(group.parent || group.components[0]);
+		else groups.push(group);
+	}
+
+	return { groups, standalone, malformed };
+}
+
+/**
+ * Selection map ({group_key: {option_id: qty}}) from a package snapshot —
+ * object or JSON string. Returns null when the snapshot carries no usable
+ * selections, so the caller can block instead of quoting an empty package.
+ *
+ * @param {Object|string|null} snapshot
+ * @returns {Object<string, Object<string, number>>|null}
+ */
+export function snapshotSelectionsToMap(snapshot) {
+	let data = snapshot;
+	if (typeof snapshot === "string") {
+		try {
+			data = JSON.parse(snapshot);
+		} catch {
+			return null;
+		}
+	}
+	if (!data || typeof data !== "object" || !Array.isArray(data.selections)) return null;
+
+	const selections = {};
+	for (const selection of data.selections) {
+		const groupKey = selection?.group_key;
+		const optionId = selection?.option_id;
+		const qty = Number(selection?.qty) || 0;
+		if (!groupKey || !optionId || qty <= 0) continue;
+		if (!selections[groupKey]) selections[groupKey] = {};
+		const picks = selections[groupKey];
+		picks[optionId] = (picks[optionId] || 0) + qty;
+	}
+	return selections;
+}

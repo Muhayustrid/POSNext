@@ -14,6 +14,12 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate, nowtime
 
 from pos_next.api.items import _fetch_uom_prices_map
+from pos_next.api.packages import (
+	ALLOCATION_MODE,
+	COMPONENT_ROLE,
+	PARENT_ROLE,
+	_package_allocation_enabled,
+)
 from pos_next.api.settings_resolver import (
 	get_effective_pos_setting,
 	get_effective_pos_settings,
@@ -274,6 +280,18 @@ def log_manual_rate_edit(item, invoice_name, user=None, doctype=DOCTYPE_SALES_IN
 	).insert(ignore_permissions=True)
 
 
+def _is_package_row(row):
+	"""True for a POS Package line (parent or component).
+
+	The offer payload carries the same linkage the invoice rows do — the
+	frontend adds pos_package/pos_package_instance/pos_package_role to
+	buildOfferEvaluationPayload. Either marker is enough to identify the row:
+	the parent always carries both, a component could theoretically arrive with
+	only the instance.
+	"""
+	return bool(row.get("pos_package") or row.get("pos_package_instance"))
+
+
 def _row_offer_claims(row):
 	"""The offer rules attributed to one payload row for the SEC-23 replay:
 	the client-carried ``pricing_rules`` marker, else the server-written
@@ -365,9 +383,15 @@ def _replay_offer_rates(
 	for idx, row in enumerate(rows):
 		item_code = row.get(FIELD_ITEM_CODE)
 		qty = flt(row.get("qty") or row.get("quantity") or 0)
-		claims = _row_offer_claims(row)
 		if not item_code or qty <= 0:
 			continue
+		# Package rows stay in the engine input: apply_offers feeds them too
+		# (whole-cart mixed conditions and transaction totals), then drops
+		# their per-row results. The replay must see the same row for a
+		# quantity/amount window to evaluate identically — but never its
+		# claims: apply_offers strips package promotional metadata, and a
+		# forged claim must not steer the Min/Max ranking or a rate.
+		claims = set() if _is_package_row(row) else _row_offer_claims(row)
 		claims_list.append(claims)
 		cached = item_details_map.get(item_code)
 		if cint(row.get("is_free_item") or 0):
@@ -642,9 +666,15 @@ def _verify_offer_rate_magnitudes(
 	claimed_all.update(_parse_relayed_offer_rules(relayed_offer_rules))
 	claimed_all.update(_parse_relayed_offer_rules(invoice_doc.get("pos_applied_offer_rules")))
 	for idx, row in enumerate(rows):
-		if row.get("pos_package"):
+		if _is_package_row(row):
 			# Package rows are re-quoted from the snapshot server-side
-			# (packages.validate_invoice_packages) — outside this gate.
+			# (packages.validate_invoice_packages) — outside this gate. That
+			# covers BOTH shapes: legacy components at rate 0 and
+			# allocation-mode components carrying the split price (> 0), so a
+			# zero-rate component of an allocation group is never mistaken for
+			# a suspicious rate-0 row. The allocation invariant (components sum
+			# to the package price) is checked by
+			# _verify_package_allocation_totals below.
 			continue
 		claims = _row_offer_claims(row)
 		claimed_all.update(claims)
@@ -758,6 +788,95 @@ def _verify_offer_rate_magnitudes(
 	frappe.throw(violations[0])
 
 
+def _verify_package_allocation_totals(invoice_doc, rate_precision):
+	"""SEC-23 companion: an allocation group's component rates must sum to the
+	package price recorded in its parent snapshot.
+
+	Package rows are excluded from the per-row replay (they are re-quoted from
+	the snapshot by packages.validate_invoice_packages), which also means an
+	allocation component carrying a forged rate would slip past every other
+	check. This closes that hole from the payload alone:
+
+	- Only groups whose parent snapshot carries ``allocation.mode ==
+	  proportional`` are examined — legacy groups (no marker, components at
+	  rate 0) stay on the old path, untouched.
+	- The expected money is the snapshot's package total x parent qty; the
+	  components must account for exactly that much. Allocation components
+	  legitimately rate > 0, so the rate-0 suspicion of the SEC-23 replay does
+	  not apply to them.
+
+	The check is deliberately read-only: the caller's rows are never mutated
+	here (pricing stays in validate_invoice_packages).
+	"""
+	if not _package_allocation_enabled():
+		# Marker present but the toggle is off: validate_invoice_packages will
+		# re-quote the group in legacy shape, so the allocation invariant does
+		# not describe the document that will be saved.
+		return
+	if invoice_doc.get("is_return") or cint(invoice_doc.get("is_consolidated") or 0):
+		return
+
+	instances = {}
+	for row in invoice_doc.get("items") or []:
+		instance = row.get("pos_package_instance")
+		if instance and row.get("pos_package"):
+			instances.setdefault(instance, []).append(row)
+
+	if not instances:
+		return
+
+	for instance, rows in instances.items():
+		parents = [r for r in rows if r.get("pos_package_role") == PARENT_ROLE]
+		if len(parents) != 1:
+			# A malformed group is validate_invoice_packages' call — it throws
+			# with the user-facing "must have exactly one package line" message.
+			continue
+
+		parent = parents[0]
+		snapshot = parent.get("pos_package_snapshot")
+		if isinstance(snapshot, str):
+			try:
+				snapshot = json.loads(snapshot or "{}")
+			except (ValueError, TypeError):
+				continue
+		if not isinstance(snapshot, dict):
+			continue
+
+		allocation = snapshot.get("allocation")
+		if not isinstance(allocation, dict) or allocation.get("mode") != ALLOCATION_MODE:
+			continue
+
+		package_total = snapshot.get("total")
+		if package_total is None:
+			# Allocation snapshots are always written with their total
+			# (packages.py:quote). A marker without one is forged or corrupted;
+			# refuse instead of skipping the invariant.
+			frappe.throw(
+				_("Package {0}: allocation snapshot is missing its total. Reload the cart.").format(
+					frappe.bold(parent.get("pos_package") or instance)
+				)
+			)
+
+		expected = flt(package_total, rate_precision) * flt(parent.get("qty") or parent.get("quantity") or 0)
+		allocated = 0.0
+		for row in rows:
+			if row.get("pos_package_role") != COMPONENT_ROLE:
+				continue
+			allocated += flt(row.get(FIELD_RATE) or 0) * flt(row.get("qty") or row.get("quantity") or 0)
+
+		if flt(allocated, rate_precision) != expected:
+			frappe.throw(
+				_(
+					"Package {0}: component rates total {1} but the package price is {2}. "
+					"Reload the cart and re-add the package."
+				).format(
+					frappe.bold(parent.get("pos_package") or instance),
+					frappe.bold(flt(allocated, rate_precision)),
+					frappe.bold(expected),
+				)
+			)
+
+
 def _validate_item_rates(
 	invoice_doc, pos_profile, pos_settings_cache, pos_profile_doc=None, relayed_offer_rules=None
 ):
@@ -805,9 +924,20 @@ def _validate_item_rates(
 		rate_precision,
 		relayed_offer_rules=relayed_offer_rules,
 	)
+	# Allocation groups are outside the per-row replay above (package rows are
+	# re-quoted from the snapshot); verify their internal arithmetic here.
+	_verify_package_allocation_totals(invoice_doc, rate_precision)
 	# Collect applied pricing rule names before we clear item.pricing_rules
 	applied_rule_names_seen = set()
 	for item in invoice_doc.get("items", []):
+		if _is_package_row(item) and _row_offer_claims(item):
+			# Stage-1 package/offer rule: offers never apply to package lines.
+			# apply_offers already excludes them (and reports the exclusion),
+			# so a claim here is either a tampered payload or a draft saved
+			# before the rule existed. Fail explicitly instead of silently
+			# repricing: the cashier must re-add the package to refresh its
+			# linkage.
+			frappe.throw(_("Offers do not apply to package lines. Remove the offer or re-add the package."))
 		item_rate = flt(item.rate or 0)
 		discount_pct = flt(item.discount_percentage or 0)
 		frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
@@ -887,7 +1017,7 @@ def _validate_item_rates(
 			and not invoice_doc.get("is_return")
 			and not item_rule_names
 			and not cint(item.get("is_free_item") or 0)
-			and not item.get("pos_package")
+			and not _is_package_row(item)
 			and not discount_only_row
 			and server_plr > 0
 			and 0 < item_rate < flt(server_plr, rate_precision)
@@ -4418,15 +4548,22 @@ def apply_offers(invoice_data, selected_offers=None):
 		if not items:
 			return {"items": []}
 
+		# Package lines never receive offers (stage 1) — reported even on the
+		# early returns so the POS can explain an unchanged package to the
+		# cashier instead of silently failing the offer.
+		excluded_package_items = sorted(
+			{item.get("item_code") for item in items if _is_package_row(item) and item.get("item_code")}
+		)
+
 		if not invoice.get("pos_profile") or not erpnext_apply_pricing_rule:
 			# Either no POS profile supplied or ERPNext promotional engine unavailable
-			return {"items": items}
+			return {"items": items, "package_rows_excluded": excluded_package_items}
 
 		profile = frappe.get_cached_doc("POS Profile", invoice.get("pos_profile"))
 
 		# Respect POS Profile's ignore_pricing_rule setting
 		if profile.ignore_pricing_rule:
-			return {"items": items}
+			return {"items": items, "package_rows_excluded": excluded_package_items}
 
 		# Batch fetch all item details in a single query (reduces N queries to 1)
 		item_codes = list({item.get("item_code") for item in items if item.get("item_code")})
@@ -4442,6 +4579,7 @@ def apply_offers(invoice_data, selected_offers=None):
 		pricing_items = []
 		index_map = []
 		prepared_items = [frappe._dict(row) for row in items]
+		package_rows_excluded = []
 
 		for idx, item in enumerate(prepared_items):
 			item_code = item.get("item_code")
@@ -4449,6 +4587,15 @@ def apply_offers(invoice_data, selected_offers=None):
 
 			if not item_code or qty <= 0:
 				continue
+
+			if _is_package_row(item):
+				# Stage-1 rule: offers never apply to package lines. The row
+				# still enters the engine (mixed-condition quantities and
+				# transaction-level revenue stay whole-cart), but its result is
+				# skipped below and its promotional metadata is cleared here —
+				# the response lists the exclusion explicitly so the POS can
+				# tell the cashier (never a silent skip).
+				package_rows_excluded.append(item_code)
 
 			# Use batch-fetched item details
 			cached = item_details_map.get(item_code)
@@ -4493,7 +4640,10 @@ def apply_offers(invoice_data, selected_offers=None):
 			item.applied_promotional_schemes = []
 
 		if not pricing_items:
-			return {"items": items}
+			return {
+				"items": items,
+				"package_rows_excluded": sorted(set(package_rows_excluded)),
+			}
 
 		company_currency = frappe.get_cached_value("Company", profile.company, "default_currency")
 
@@ -4553,7 +4703,7 @@ def apply_offers(invoice_data, selected_offers=None):
 		pricing_results = erpnext_apply_pricing_rule(pricing_args, doc=pricing_args) or []
 
 		if not pricing_results:
-			return {"items": items}
+			return {"items": items, "package_rows_excluded": excluded_package_items}
 
 		raw_rule_names = set()
 		for result in pricing_results:
@@ -4657,7 +4807,7 @@ def apply_offers(invoice_data, selected_offers=None):
 			rule_map = {name: details for name, details in rule_map.items() if name in selected_offer_names}
 
 		if not rule_map:
-			return {"items": items}
+			return {"items": items, "package_rows_excluded": excluded_package_items}
 
 		applied_rules = set()
 		# Deduplicate free items using a dict keyed by (item_code, pricing_rule).
@@ -4690,9 +4840,17 @@ def apply_offers(invoice_data, selected_offers=None):
 			if not applicable_rule_names:
 				continue
 
+			item_doc = prepared_items[item_index]
+			if _is_package_row(item_doc):
+				# Stage-1 rule: package lines never carry an offer. The engine
+				# result is dropped here (before applied_rules/attribution), so
+				# the UI never marks an offer "applied" on the strength of a
+				# package row and no per-item discount can land on it.
+				package_rows_excluded.append(item_doc.get("item_code"))
+				continue
+
 			applied_rules.update(applicable_rule_names)
 
-			item_doc = prepared_items[item_index]
 			qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
 			price_list_rate = flt(
 				result.get("price_list_rate") or item_doc.get("price_list_rate") or item_doc.get("rate") or 0
@@ -4817,6 +4975,10 @@ def apply_offers(invoice_data, selected_offers=None):
 			"items": [dict(item) for item in prepared_items],
 			"free_items": [dict(item) for item in free_items_map.values()],
 			"applied_pricing_rules": sorted(applied_rules),
+			# Stage-1 package/offer rule: package lines were excluded from the
+			# engine. Listed explicitly (not silently skipped) so the POS can
+			# tell the cashier why an offer did not touch them.
+			"package_rows_excluded": sorted(set(package_rows_excluded)),
 			# Header-level (transaction-scope) discount surfaced from
 			# _evaluate_transaction_offers. Frontend should apply these to the
 			# invoice header (additionalDiscount + apply_discount_on) when

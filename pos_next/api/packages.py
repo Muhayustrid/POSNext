@@ -32,7 +32,7 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate, nowdate
+from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 from pos_next.api.items import _fetch_uom_prices_map
 
@@ -238,9 +238,44 @@ def _index_choices(choices):
 	return indexed
 
 
-def _rate_precision():
-	"""Currency precision for invoice rates (System Settings; IDR = 0)."""
-	return cint(frappe.get_precision("Sales Invoice Item", "rate"))
+def _rate_precision(child_doctype="Sales Invoice Item"):
+	"""Currency precision for invoice rates (System Settings; IDR = 0).
+
+	``child_doctype`` selects the child table whose meta carries the precision —
+	the two invoice item doctypes can be configured apart, tiny as the odds are.
+	"""
+	return cint(frappe.get_precision(child_doctype, "rate"))
+
+
+def _return_row_link_field(doc):
+	"""Child-row back-link field for a return document.
+
+	ERPNext maps returns through a doctype-specific pointer: Sales Invoice Item
+	uses ``sales_invoice_item``, POS Invoice Item uses ``pos_invoice_item``
+	(controllers/sales_and_purchase_return.py:make_return_doc). Restoring
+	package metadata must read the same column the mapper wrote.
+	"""
+	return "pos_invoice_item" if doc.get("doctype") == "POS Invoice" else "sales_invoice_item"
+
+
+def _return_child_doctype(doc):
+	"""Child table of the return document itself ("{doctype} Item")."""
+	return f"{doc.get('doctype')} Item" if doc.get("doctype") else "Sales Invoice Item"
+
+
+def _original_child_doctype(return_against, default):
+	"""Child table of the ORIGINAL invoice a return points at.
+
+	The site's invoice type is switchable, so the original can live in the
+	other table than the return being validated; the row links and the package
+	metadata are stored per original doctype.
+	"""
+	if return_against:
+		if frappe.db.exists("Sales Invoice", return_against):
+			return "Sales Invoice Item"
+		if frappe.db.exists("POS Invoice", return_against):
+			return "POS Invoice Item"
+	return default
 
 
 def _package_allocation_enabled():
@@ -562,21 +597,33 @@ def _restore_return_package_metadata(doc):
 	restoring them a credit note looks package-free and skips every guard below —
 	letting the priced parent be refunded while its components are dropped.
 
-	Membership is re-derived from the original invoice through
-	``sales_invoice_item`` (the link ERPNext itself uses for return tracking), so
-	the client never gets to declare which rows belong to a package.
+	Membership is re-derived from the original invoice through the doctype's
+	row link (``sales_invoice_item`` for Sales Invoice, ``pos_invoice_item``
+	for POS Invoice — the same link ERPNext itself uses for return tracking),
+	so the client never gets to declare which rows belong to a package.
 	"""
 	rows = doc.get("items") or []
+	link_field = _return_row_link_field(doc)
+
+	# Cross-mode returns (POS Invoice sale, Sales Invoice return — the mode is
+	# switchable) arrive with the field name of the ORIGINAL doctype, which is
+	# not necessarily the one the return document carries. Prefer the target
+	# doctype's link; fall back to the other only when no row carries it.
+	other_field = "sales_invoice_item" if link_field == "pos_invoice_item" else "pos_invoice_item"
+	if not any(row.get(link_field) for row in rows) and any(row.get(other_field) for row in rows):
+		link_field = other_field
+
+	# Source rows live in the ORIGINAL invoice's child table, which can differ
+	# from the return's when the site's invoice type changed in between.
+	child_doctype = _original_child_doctype(doc.get("return_against"), _return_child_doctype(doc))
 
 	link_names = [
-		row.sales_invoice_item
-		for row in rows
-		if not row.get("pos_package_instance") and row.get("sales_invoice_item")
+		row.get(link_field) for row in rows if not row.get("pos_package_instance") and row.get(link_field)
 	]
 
 	if link_names:
 		sources = frappe.get_all(
-			"Sales Invoice Item",
+			child_doctype,
 			filters={"name": ["in", link_names], "parent": doc.get("return_against")},
 			fields=[
 				"name",
@@ -589,7 +636,7 @@ def _restore_return_package_metadata(doc):
 		by_name = {source["name"]: source for source in sources}
 
 		for row in rows:
-			source = by_name.get(row.get("sales_invoice_item"))
+			source = by_name.get(row.get(link_field))
 			if not source or not source.get("pos_package_instance"):
 				continue
 
@@ -599,7 +646,7 @@ def _restore_return_package_metadata(doc):
 			row.pos_package_snapshot = source["pos_package_snapshot"]
 
 	for row in rows:
-		if row.get("pos_package_instance") and not row.get("sales_invoice_item"):
+		if row.get("pos_package_instance") and not row.get(link_field):
 			frappe.throw(
 				_(
 					"Package return rows must reference the original invoice row. Create the return from the POS Return screen."
@@ -626,12 +673,16 @@ def _validate_return_packages(doc):
 	if not instances:
 		return
 
-	precision = frappe.get_precision("Sales Invoice Item", "qty") or 3
+	child_doctype = _return_child_doctype(doc)
+	precision = frappe.get_precision(child_doctype, "qty") or 3
+	# Original rows live in the ORIGINAL invoice's child table (cross-mode
+	# returns: sale made under the other invoice type).
+	source_child_doctype = _original_child_doctype(doc.get("return_against"), child_doctype)
 
 	# PERF-15: one fetch for every package instance (was one get_all per instance).
 	original_rows_by_instance = {instance: [] for instance in instances}
 	for row in frappe.get_all(
-		"Sales Invoice Item",
+		source_child_doctype,
 		filters={"parent": doc.return_against, "pos_package_instance": ["in", list(instances)]},
 		fields=["item_code", "qty", "rate", "pos_package_role", "pos_package_instance"],
 	):
@@ -682,7 +733,7 @@ def _validate_return_packages(doc):
 			original_qty[row["item_code"]] = original_qty.get(row["item_code"], 0.0) + flt(row["qty"])
 			expected[row["item_code"]] = expected.get(row["item_code"], 0) + flt(row["qty"])
 
-		rate_precision = _rate_precision()
+		rate_precision = _rate_precision(child_doctype)
 		submitted = {}
 		for row in rows:
 			if row.get("pos_package_role") != COMPONENT_ROLE:
@@ -795,7 +846,30 @@ def validate_invoice_packages(doc, method=None):
 			# The header stays a zero line; revenue rides the components.
 			parent.rate = 0
 			parent.price_list_rate = 0
-			rates_by_item = _allocated_component_rates(result["lines"][1:], _rate_precision())
+			# "On Item Quantity" taxes charge every row's qty, so the zero-rate
+			# package header would be taxed as one extra unit — a silent
+			# overcharge in allocation mode. Fail closed rather than book it;
+			# switch the tax to a value-based charge type or turn allocation off.
+			per_qty_taxes = [
+				tax for tax in doc.get("taxes") or [] if tax.get("charge_type") == "On Item Quantity"
+			]
+			if per_qty_taxes:
+				frappe.throw(
+					_(
+						"Package {0} cannot be priced with allocation while tax {1} is charged On Item Quantity — the package header would be taxed as an extra unit. Use a value-based tax or disable package allocation."
+					).format(
+						frappe.bold(result["package_name"]),
+						frappe.bold(
+							", ".join(
+								cstr(tax.get("account_head") or tax.get("description") or tax.get("idx"))
+								for tax in per_qty_taxes
+							)
+						),
+					)
+				)
+			rates_by_item = _allocated_component_rates(
+				result["lines"][1:], _rate_precision(_return_child_doctype(doc))
+			)
 		else:
 			# Authoritative price on the parent, zero on every component.
 			parent.rate = result["total"]
@@ -831,14 +905,15 @@ def validate_invoice_packages(doc, method=None):
 			)
 
 		if allocation_applied:
-			expected_money = flt(result["total"], _rate_precision()) * flt(parent.qty)
-			if flt(allocated_money, _rate_precision()) != expected_money:
+			row_precision = _rate_precision(_return_child_doctype(doc))
+			expected_money = flt(result["total"], row_precision) * flt(parent.qty)
+			if flt(allocated_money, row_precision) != expected_money:
 				frappe.throw(
 					_(
 						"Package {0}: component rates total {1} but the package price is {2}; the price cannot be split exactly at this site's currency precision."
 					).format(
 						frappe.bold(result["package_name"]),
-						frappe.bold(flt(allocated_money, _rate_precision())),
+						frappe.bold(flt(allocated_money, row_precision)),
 						frappe.bold(expected_money),
 					)
 				)
