@@ -403,6 +403,39 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertGreaterEqual(_item_from(where).count("si.posting_date >= %(start)s"), 3)
 		self.assertGreaterEqual(_invoice_from(where).count("si.posting_date >= %(start)s"), 1)
 
+	def test_cache_key_isolates_user_scope_and_filters(self):
+		"""Security: a cached section may never be served across users or
+		permission scopes, and every filter that changes the numbers must
+		change the key. Pure string-level check, no query executed."""
+		from pos_next.api.hq_monitoring import _monitoring_cache_key
+
+		scope = {"companies": [self.company_a], "profiles": [self.profile_a]}
+		parts = {"from_date": "2026-09-01", "to_date": "2026-09-22", "category": None, "page": 1}
+		frappe.set_user(ADMIN)
+		base = _monitoring_cache_key("range", scope, parts)
+		self.assertEqual(base, _monitoring_cache_key("range", scope, parts))  # stable
+
+		# scope changes move the key even for the same user
+		other = {"companies": [self.company_b], "profiles": [self.profile_b]}
+		self.assertNotEqual(base, _monitoring_cache_key("range", other, parts))
+		self.assertNotEqual(base, _monitoring_cache_key("range", {**scope, "profiles": None}, parts))
+
+		# another user never shares the key
+		frappe.set_user(self.user_all)
+		self.assertNotEqual(base, _monitoring_cache_key("range", scope, parts))
+
+		# date / category / page / sort each change the key (same section, so
+		# only the filter itself can explain the difference)
+		frappe.set_user(ADMIN)
+		pr_parts = {"from_date": "2026-09-01", "to_date": "2026-09-22", "category": None, "page": 1}
+		pr = _monitoring_cache_key("product_ranking", scope, pr_parts)
+		self.assertNotEqual(base, _monitoring_cache_key("range", scope, {**parts, "from_date": "2026-09-02"}))
+		self.assertNotEqual(
+			pr, _monitoring_cache_key("product_ranking", scope, {**pr_parts, "category": "Products"})
+		)
+		self.assertNotEqual(pr, _monitoring_cache_key("product_ranking", scope, {**pr_parts, "page": 2}))
+		self.assertNotEqual(pr, _monitoring_cache_key("product_ranking", scope, {**pr_parts, "sort": "qty"}))
+
 	# ------------------------------------------------------------------
 	# endpoint metrics
 	# ------------------------------------------------------------------
@@ -500,7 +533,7 @@ class TestHQMonitoring(IntegrationTestCase):
 		# recent: newest first (bounded page), sale/return flag + mode resolved
 		recent = data["recent"]["rows"]
 		self.assertTrue(recent)
-		self.assertLessEqual(len(recent), 8)
+		self.assertLessEqual(len(recent), 10)
 		self.assertTrue(all(r["mode_of_payment"] for r in recent))
 		self.assertTrue(any(r["is_return"] for r in recent), "refund fixture visible in the feed")
 		# returns: rate denominator counts every invoice in the same window
@@ -992,6 +1025,50 @@ class TestHQMonitoring(IntegrationTestCase):
 		ranking = data["product_ranking"]
 		self.assertEqual(ranking["page"], 1)
 		self.assertTrue(ranking["rows"])
+
+	def test_product_ranking_sort_qty_asc_desc(self):
+		# fixture nets: pkg 3000, x 1000 (qty 1), y 500 (qty 1)
+		data = self._payload(page_size=10, product_sort="qty", product_dir="asc")
+		pr = data["product_ranking"]
+		self.assertEqual(pr["sort"], "qty")
+		self.assertEqual(pr["dir"], "asc")
+		qtys = [r["qty"] for r in pr["rows"]]
+		self.assertEqual(qtys, sorted(qtys))
+		data = self._payload(page_size=10, product_sort="qty", product_dir="desc")
+		pr = data["product_ranking"]
+		self.assertEqual(pr["dir"], "desc")
+		qtys = [r["qty"] for r in pr["rows"]]
+		self.assertEqual(qtys, sorted(qtys, reverse=True))
+
+	def test_product_ranking_sort_name_and_invalid_key(self):
+		data = self._payload(page_size=10, product_sort="name", product_dir="asc")
+		pr = data["product_ranking"]
+		self.assertEqual(pr["sort"], "name")
+		names = [r["item_name"] for r in pr["rows"]]
+		self.assertEqual(names, sorted(names))
+		# junk key falls back to the default best-sellers order (pkg 3000 first)
+		data = self._payload(page_size=10, product_sort="net_amount; DROP", product_dir="desc")
+		pr = data["product_ranking"]
+		self.assertIsNone(pr["sort"])
+		self.assertEqual(pr["rows"][0]["item_code"], self.pkg_parent)
+
+	def test_product_ranking_page_size_default_and_clamp(self):
+		# the UI pages 10 per card; explicit sizes still clamp, never throw
+		pr = self._payload()["product_ranking"]
+		self.assertEqual(pr["page_size"], 10)
+		self.assertEqual(pr["total"], 3)
+		pr = self._payload(page_size=999)["product_ranking"]
+		self.assertEqual(pr["page_size"], 50)
+		self.assertEqual(pr["total"], 3)
+
+	def test_recent_returns_lists_bounded_at_ten(self):
+		data = self._payload()
+		# cards show at most 10 rows; the pager covers the rest
+		self.assertLessEqual(len(data["recent"]["rows"]), 10)
+		self.assertLessEqual(len(data["returns"]["rows"]), 10)
+		# aggregates still cover the full window, not just the listed rows
+		self.assertEqual(data["returns"]["count"], 1)
+		self.assertAlmostEqual(data["returns"]["rate"], 0.25, places=2)
 
 	def test_turnover_prev_comparable_cut_at_same_time_of_day(self):
 		frappe.set_user(ADMIN)

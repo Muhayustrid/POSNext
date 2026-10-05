@@ -28,8 +28,11 @@ if (typeof format_number === "function" && typeof get_number_format === "functio
 	});
 }
 
-// Outlet table pages client-side: the API payload already carries every row.
-const HQ_OUTLET_PAGE_SIZE = 8;
+// Every table shows at most 10 rows per page with a Prev/Next pager —
+// except Product Ranking, which the server pages (catalogs can be huge).
+// One state shape per table: {page, key, dir}. key=null means the
+// payload's native order.
+const HQ_PAGE_SIZE = 10;
 
 /**
  * frappe-charts 2.0-rc27: a ResizeObserver burst (initial observation + size
@@ -95,7 +98,24 @@ class HQSalesMonitor {
 	constructor(page) {
 		this.page = page;
 		this.product_page = 1;
+		this.product_sort = null;
+		this.product_dir = null;
 		this.outlet_page = 1;
+		this.outlet_sort = null;
+		this.outlet_dir = null;
+		// Outlet Ranking block (the side-by-side one) gets its own pager.
+		this.outletr_page = 1;
+		this.outletr_sort = null;
+		this.outletr_dir = null;
+		this.shift_page = 1;
+		this.shift_sort = null;
+		this.shift_dir = null;
+		this.recent_page = 1;
+		this.recent_sort = null;
+		this.recent_dir = null;
+		this.ret_page = 1;
+		this.ret_sort = null;
+		this.ret_dir = null;
 		this.category = "";
 		this.outlet_query = "";
 		// Outlet-table view toggle: empty outlets (no sales, no TC, no target)
@@ -180,7 +200,7 @@ class HQSalesMonitor {
 						to_date: dates[1] ? frappe.datetime.obj_to_str(dates[1]) : "",
 					};
 					this._update_custom_display();
-					this.product_page = 1;
+					this._reset_table_pages();
 					this._custom_refresh();
 				},
 			})
@@ -203,7 +223,7 @@ class HQSalesMonitor {
 				},
 			}),
 			change: this._later(() => {
-				this.product_page = 1;
+				this._reset_table_pages();
 				this.refresh();
 			}),
 		});
@@ -214,7 +234,7 @@ class HQSalesMonitor {
 			label: __("Include Subsidiaries"),
 			fieldtype: "Check",
 			change: this._later(() => {
-				this.product_page = 1;
+				this._reset_table_pages();
 				this.refresh();
 			}),
 		});
@@ -244,7 +264,7 @@ class HQSalesMonitor {
 	_apply_preset(initial) {
 		const custom = this._preset() === "custom";
 		this.custom_field.$wrapper.toggle(custom);
-		if (initial !== true) this.product_page = 1;
+		if (initial !== true) this._reset_table_pages();
 		if (custom) return;
 		this.range = this._preset_range(this._preset());
 		if (initial !== true) this.refresh();
@@ -272,8 +292,144 @@ class HQSalesMonitor {
 			category_a: this.category_a || "",
 			category_b: this.category_b || "",
 			product_page: this.product_page,
-			page_size: 10,
+			page_size: HQ_PAGE_SIZE,
+			product_sort: this.product_sort || "",
+			product_dir: this.product_dir || "",
 		};
+	}
+
+	// ------------------------------------------------------------------
+	// Shared table pager (Prev/Next, 10 rows) + 3-state sort (normal → asc
+	// → desc → normal). Product Ranking is server-side (sort travels in
+	// _args); every other table sorts/paginates DOM rows in place — no
+	// refetch. Each row carries data-hq-idx (payload order = "normal") and
+	// each sortable cell its raw value in data-sort-value, so formatted
+	// money ("Rp 1,2 jt") and "N/A" never corrupt the comparison. Null
+	// always sinks.
+	// ------------------------------------------------------------------
+
+	_tbl(prefix) {
+		return {
+			page: this[`${prefix}_page`],
+			key: this[`${prefix}_sort`],
+			dir: this[`${prefix}_dir`],
+		};
+	}
+
+	_sort_arrow(key, t) {
+		if (t.key !== key) return "";
+		return t.dir === "asc" ? " ▲" : " ▼";
+	}
+
+	_sort_th(label, key, t, num) {
+		const active = t.key === key;
+		return `<th class="hq-sortable${num ? " hq-num" : ""}${active ? " hq-sort--on" : ""}" data-hq-sort="${key}" data-hq-tbl="${t.tbl}" role="button" tabindex="0" title="${__("Sort")}" aria-sort="${active ? (t.dir === "asc" ? "ascending" : "descending") : "none"}"><span class="hq-sort-label">${label}</span><span class="hq-sort-arrow" aria-hidden="true">${this._sort_arrow(key, t)}</span></th>`;
+	}
+
+	_client_pager(t, total, unit) {
+		if (!total) return "";
+		const pages = Math.max(1, Math.ceil(total / HQ_PAGE_SIZE));
+		const page = Math.min(Math.max(1, t.page), pages);
+		const start = (page - 1) * HQ_PAGE_SIZE + 1;
+		const end = Math.min(page * HQ_PAGE_SIZE, total);
+		return `<div class="hq-pager">
+			<button class="btn btn-xs btn-default" ${page <= 1 ? "disabled" : ""} data-hq-cpage="prev" data-hq-tbl="${t.tbl}">${__("Previous")}</button>
+			<span>${start} - ${end} ${__("of")} ${HQ_UTILS.fmtCount(total)} ${unit}</span>
+			<button class="btn btn-xs btn-default" ${page >= pages ? "disabled" : ""} data-hq-cpage="next" data-hq-tbl="${t.tbl}">${__("Next")}</button>
+		</div>`;
+	}
+
+	// Sort then slice DOM rows in place; called after every render and on
+	// every pager/sort interaction. Returns the visible count for the pager.
+	_apply_client_table(tbl, rowSel, total) {
+		const t = { ...this._tbl(tbl), tbl };
+		const $rows = this.$root.find(rowSel);
+		if (!total) return 0;
+		let order = $rows.toArray();
+		if (t.key) {
+			const col = t.key;
+			const numeric = order.length && order[0].querySelector(`[data-sort-col="${col}"]`)?.dataset.sortNum === "1";
+			order.sort((a, b) => {
+				const va = this._cell_val(a, col);
+				const vb = this._cell_val(b, col);
+				if (va === null && vb === null) return 0;
+				if (va === null) return 1;
+				if (vb === null) return -1;
+				let cmp;
+				if (numeric) cmp = va - vb;
+				else cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
+				return t.dir === "desc" ? -cmp : cmp;
+			});
+		} else {
+			order.sort((a, b) => Number(a.dataset.hqIdx || 0) - Number(b.dataset.hqIdx || 0));
+		}
+		const pages = Math.max(1, Math.ceil(total / HQ_PAGE_SIZE));
+		const page = Math.min(Math.max(1, t.page), pages);
+		this[`${tbl}_page`] = page;
+		const host = $rows.length ? $rows[0].parentNode : null;
+		$rows.detach();
+		order.forEach((el) => host && host.appendChild(el));
+		const vis = new Set(order.slice((page - 1) * HQ_PAGE_SIZE, page * HQ_PAGE_SIZE));
+		order.forEach((el) => el.style.setProperty("display", vis.has(el) ? "" : "none"));
+		return total;
+	}
+
+	// Route a client-side pager/sort interaction to the right table.
+	_apply_client_table_host(tbl) {
+		if (tbl === "outlet") return this._apply_outlet_filter();
+		if (tbl === "outletr") return this._apply_outletr_table();
+		if (tbl === "shift") return this._apply_shift_table();
+		if (tbl === "recent") return this._apply_recent_table();
+		if (tbl === "ret") return this._apply_ret_table();
+		return null;
+	}
+
+	// After a client-side sort, repaint the header indicators (arrow, aria,
+	// active class) without a full re-render.
+	_refresh_sort_heads(tbl) {
+		const key = this[`${tbl}_sort`];
+		const dir = this[`${tbl}_dir`];
+		this.$root.find(`[data-hq-sort][data-hq-tbl="${tbl}"]`).each((_, el) => {
+			const active = el.dataset.hqSort === key;
+			el.classList.toggle("hq-sort--on", active);
+			el.setAttribute("aria-sort", active ? (dir === "asc" ? "ascending" : "descending") : "none");
+			const arrow = el.querySelector(".hq-sort-arrow");
+			if (arrow) arrow.textContent = active ? (dir === "asc" ? " ▲" : " ▼") : "";
+		});
+	}
+
+	_cell_val(row, col) {
+		const cell = row.querySelector(`[data-sort-col="${col}"]`);
+		if (!cell) return null;
+		const raw = cell.dataset.sortValue;
+		if (raw === undefined || raw === "" || raw === "null") return null;
+		if (cell.dataset.sortNum === "1") {
+			const n = Number(raw);
+			return Number.isFinite(n) ? n : null;
+		}
+		return raw;
+	}
+
+	// Click (or Enter) on a sortable header: cycle normal → asc → desc.
+	_cycle_sort(tbl, key) {
+		if (this[`${tbl}_sort`] !== key) {
+			this[`${tbl}_sort`] = key;
+			this[`${tbl}_dir`] = "asc";
+		} else if (this[`${tbl}_dir`] === "asc") {
+			this[`${tbl}_dir`] = "desc";
+		} else {
+			this[`${tbl}_sort`] = null;
+			this[`${tbl}_dir`] = null;
+		}
+		this[`${tbl}_page`] = 1;
+	}
+
+	_product_head(t) {
+		return `<thead><tr><th class="hq-num">${__("No")}</th>
+			${this._sort_th(__("Name"), "name", t, false)}
+			${this._sort_th(__("Sold Quantity"), "qty", t, true)}
+			${this._sort_th(__("Total Sales"), "total", t, true)}
+			${this._sort_th("%", "share", t, true)}</tr></thead>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -308,7 +464,8 @@ class HQSalesMonitor {
 		if (this.preset_field && this._preset() !== "custom") {
 			this.range = this._preset_range(this._preset());
 		}
-		this.outlet_page = 1;
+		if (!this._keep_client_pages) this._reset_table_pages();
+		this._keep_client_pages = false;
 		return new Promise((resolve) => {
 			frappe.call({
 				method: "pos_next.api.hq_monitoring.get_sales_monitoring",
@@ -317,6 +474,8 @@ class HQSalesMonitor {
 			callback: (r) => {
 				if (!r.message) return resolve();
 				this.state = r.message;
+				const pr = r.message.product_ranking || {};
+				if (pr.page) this.product_page = pr.page;
 				this._drop_stale_categories();
 				// First load: default the Top Selling slots to the strongest
 				// categories, then fetch once more with those picks. A saved
@@ -419,6 +578,19 @@ class HQSalesMonitor {
 		this._bind_delegates();
 		this._render_charts(s);
 		this._apply_outlet_filter();
+		this._apply_outletr_table();
+		this._apply_shift_table();
+		this._apply_recent_table();
+		this._apply_ret_table();
+	}
+
+	_reset_table_pages() {
+		this.product_page = 1;
+		this.outlet_page = 1;
+		this.outletr_page = 1;
+		this.shift_page = 1;
+		this.recent_page = 1;
+		this.ret_page = 1;
 	}
 
 	_scope_line(scope) {
@@ -598,6 +770,7 @@ class HQSalesMonitor {
 	// Outlet Performance — the centrepiece table. One row per outlet
 	// (= company): monthly target vs MTD actual with progress, the overall
 	// payback ("balik modal") progress, then the selected-range figures.
+	// Client-side paging + 3-state sort over the full payload rows.
 	// ------------------------------------------------------------------
 
 	_outlet_rows(s) {
@@ -675,18 +848,21 @@ class HQSalesMonitor {
 			? `${money(o.cumulative_value ?? o.cumulative_net_tax_incl)} <b class="hq-ach-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>${this._cell_tip(`${__("of")} ${HQ_UTILS.fmtMoney(o.overall_target, bare)}${o.from_date ? ` · ${__("since")} ${frappe.utils.escape_html(o.from_date)}` : ""}`)}${this._zero_cost_tip("overall", o.zero_cost_rows)}`
 			: this._na();
 
-		return `<tr data-hq-outlet-row${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
-			<td class="hq-outlet-name">${frappe.utils.escape_html(r.company)}</td>
-			<td class="hq-num">${money(r.net_tax_incl)}</td>
-			<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
-			<td class="hq-num">${r.apc === null ? "N/A" : money(r.apc)}</td>
-			<td class="hq-num hq-ach">${progressCell}</td>
-			<td class="hq-num">${overallCell}</td>
+		return `<tr data-hq-outlet-row data-hq-idx="${r._idx ?? ""}"${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
+			<td class="hq-outlet-name" data-sort-col="name" data-sort-value="${frappe.utils.escape_html(r.company)}">${frappe.utils.escape_html(r.company)}</td>
+			<td class="hq-num" data-sort-col="net" data-sort-num="1" data-sort-value="${Number(r.net_tax_incl) || 0}">${money(r.net_tax_incl)}</td>
+			<td class="hq-num" data-sort-col="tc" data-sort-num="1" data-sort-value="${Number(r.orders) || 0}">${HQ_UTILS.fmtCount(r.orders)}</td>
+			<td class="hq-num" data-sort-col="avg" data-sort-num="1" data-sort-value="${r.apc === null || r.apc === undefined ? "" : Number(r.apc)}">${r.apc === null ? "N/A" : money(r.apc)}</td>
+			<td class="hq-num hq-ach" data-sort-col="prog" data-sort-num="1" data-sort-value="${missing ? "" : Number(t.achievement_sales_pct ?? -1)}">${progressCell}</td>
+			<td class="hq-num" data-sort-col="overall" data-sort-num="1" data-sort-value="${o ? Number(o.achievement_pct ?? -1) : ""}">${overallCell}</td>
 		</tr>`;
 	}
 
 	_outlet_performance_card(s) {
-		const rows = this._outlet_rows(s).map((r) => this._outlet_row(r)).join("");
+		const all = this._outlet_rows(s);
+		all.forEach((r, i) => (r._idx = i));
+		const rows = all.map((r) => this._outlet_row(r)).join("");
+		const t = { ...this._tbl("outlet"), tbl: "outlet" };
 		// The two target columns name their basis in a native-title tooltip:
 		// Monthly Progress follows the monthly basis, Balik Modal the
 		// overall (payback) one.
@@ -711,26 +887,23 @@ class HQSalesMonitor {
 			</div>
 			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
 				<thead><tr>
-					<th>${__("Outlet (Company)")}</th>
-					<th class="hq-num">${__("Net Sales")}</th>
-					<th class="hq-num">${__("TC")}</th>
-					<th class="hq-num">${__("Avg Ticket")}</th>
-					<th class="hq-num hq-th--progress">${__("Monthly Progress")} ${monthlyTip}</th>
-					<th class="hq-num">${__("Balik Modal")} ${overallTip}</th>
+					${this._sort_th(__("Outlet (Company)"), "name", t, false)}
+					${this._sort_th(__("Net Sales"), "net", t, true)}
+					${this._sort_th(__("TC"), "tc", t, true)}
+					${this._sort_th(__("Avg Ticket"), "avg", t, true)}
+					${this._sort_th(`${__("Monthly Progress")} ${monthlyTip}`, "prog", t, true)}
+					${this._sort_th(`${__("Balik Modal")} ${overallTip}`, "overall", t, true)}
 				</tr></thead>
 				<tbody>${rows || `<tr><td colspan="6" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
-			<div class="hq-pager">
-				<button class="btn btn-xs btn-default" disabled data-hq-outlet-page="prev">${__("Previous")}</button>
-				<span data-hq-outlet-pager></span>
-				<button class="btn btn-xs btn-default" disabled data-hq-outlet-page="next">${__("Next")}</button>
-			</div>
+			<div data-hq-outlet-pager-host></div>
 		</div>`;
 	}
 
 	// ------------------------------------------------------------------
 	// Outlet table filtering + client-side paging (no refetch: the payload
-	// already carries every row). Search filters, the active page slices.
+	// already carries every row). Search filters, sort orders, the active
+	// page slices.
 	// ------------------------------------------------------------------
 
 	_apply_outlet_filter() {
@@ -739,25 +912,45 @@ class HQSalesMonitor {
 		const $rows = this.$root.find("[data-hq-outlet-row]");
 		const isEmpty = (_, el) => el.getAttribute("data-hq-empty") === "1";
 		const hiddenEmpty = showEmpty ? 0 : $rows.filter(isEmpty).length;
-		const matched = $rows.filter((_, el) => {
+		const $matched = $rows.filter((_, el) => {
 			if (!showEmpty && isEmpty(_, el)) return false;
 			return !q || String($(el).data("hq-company") || "").toLowerCase().includes(q);
 		});
-		const total = matched.length;
-		const pages = Math.max(1, Math.ceil(total / HQ_OUTLET_PAGE_SIZE));
+		// Re-run sort over the matched set, then slice the page.
+		const t = { ...this._tbl("outlet"), tbl: "outlet" };
+		let order = $matched.toArray();
+		if (t.key) {
+			const numeric = order.length && order[0].querySelector(`[data-sort-col="${t.key}"]`)?.dataset.sortNum === "1";
+			order.sort((a, b) => {
+				const va = this._cell_val(a, t.key);
+				const vb = this._cell_val(b, t.key);
+				if (va === null && vb === null) return 0;
+				if (va === null) return 1;
+				if (vb === null) return -1;
+				const cmp = numeric ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true });
+				return t.dir === "desc" ? -cmp : cmp;
+			});
+		} else {
+			order.sort((a, b) => Number(a.dataset.hqIdx || 0) - Number(b.dataset.hqIdx || 0));
+		}
+		const total = order.length;
+		const pages = Math.max(1, Math.ceil(total / HQ_PAGE_SIZE));
 		this.outlet_page = Math.min(Math.max(1, this.outlet_page), pages);
 		$rows.hide();
-		matched
-			.slice((this.outlet_page - 1) * HQ_OUTLET_PAGE_SIZE, this.outlet_page * HQ_OUTLET_PAGE_SIZE)
-			.show();
-		const start = total ? (this.outlet_page - 1) * HQ_OUTLET_PAGE_SIZE + 1 : 0;
-		const end = Math.min(this.outlet_page * HQ_OUTLET_PAGE_SIZE, total);
-		this.$root.find("[data-hq-outlet-pager]").text(
-			`${start} - ${end} ${__("of")} ${total} ${__("outlets")}${hiddenEmpty ? ` · ${HQ_UTILS.fmtCount(hiddenEmpty)} ${__("empty hidden")}` : ""}`
-		);
+		order.forEach((el) => el.parentNode && el.parentNode.appendChild(el));
+		$(order.slice((this.outlet_page - 1) * HQ_PAGE_SIZE, this.outlet_page * HQ_PAGE_SIZE)).show();
+		const start = total ? (this.outlet_page - 1) * HQ_PAGE_SIZE + 1 : 0;
+		const end = Math.min(this.outlet_page * HQ_PAGE_SIZE, total);
+		const pager = `<div class="hq-pager">
+			<button class="btn btn-xs btn-default" ${this.outlet_page <= 1 ? "disabled" : ""} data-hq-outlet-page="prev">${__("Previous")}</button>
+			<span>${start} - ${end} ${__("of")} ${total} ${__("outlets")}${hiddenEmpty ? ` · ${HQ_UTILS.fmtCount(hiddenEmpty)} ${__("empty hidden")}` : ""}</span>
+			<button class="btn btn-xs btn-default" ${this.outlet_page >= pages ? "disabled" : ""} data-hq-outlet-page="next">${__("Next")}</button>
+		</div>`;
+		this.$root.find("[data-hq-outlet-pager-host]").html(pager);
 		// A lone page needs no dead Previous/Next buttons.
 		this.$root.find('[data-hq-outlet-page="prev"]').toggle(pages > 1).prop("disabled", this.outlet_page <= 1);
 		this.$root.find('[data-hq-outlet-page="next"]').toggle(pages > 1).prop("disabled", this.outlet_page >= pages);
+		this._refresh_sort_heads("outlet");
 	}
 
 	// ------------------------------------------------------------------
@@ -933,18 +1126,20 @@ class HQSalesMonitor {
 		const select = `<select class="hq-select" data-hq-category aria-label="${__("Filter by category")}">
 			${options.map((o) => `<option value="${frappe.utils.escape_html(o.value)}"${(o.value || "") === (pr.category || "") ? " selected" : ""}>${frappe.utils.escape_html(o.label)}</option>`).join("")}
 		</select>`;
+		const pt = { page: this.product_page, key: this.product_sort, dir: this.product_dir, tbl: "product" };
 		return `<div class="hq-card hq-card--tables">
 			<div class="hq-rank-grid">
 				<div class="hq-rank-block">
 					<div class="hq-rank-head hq-rank-head--tools">${__("Product Ranking")} ${select}
 						<button class="btn btn-xs btn-default hq-rank-export" data-hq-export-xlsx="products">${__("Export")}</button></div>
-					${this._product_table(pr)}
+					${this._product_table(pr, { ...pt, tbl: "product" })}
 					${this._product_pager(pr)}
 				</div>
 				<div class="hq-rank-block">
 					<div class="hq-rank-head hq-rank-head--tools">${__("Outlet Ranking")}
 						<button class="btn btn-xs btn-default hq-rank-export" data-hq-export-xlsx="outlets">${__("Export")}</button></div>
 					${this._outlet_rank_table(s)}
+					<div data-hq-outletr-pager-host></div>
 				</div>
 			</div>
 		</div>`;
@@ -958,18 +1153,19 @@ class HQSalesMonitor {
 
 	_shifts_card(s) {
 		const scopeCcy = (s.scope || {}).default_currency;
+		const t = { ...this._tbl("shift"), tbl: "shift" };
 		const rows = (s.shifts || [])
-			.map((r) => {
+			.map((r, i) => {
 				const bare = r.currency && r.currency !== scopeCcy ? r.currency : "";
 				const money = (v) => `<span class="hq-money">${HQ_UTILS.fmtMoney(v, bare)}</span>`;
 				const open = r.status === "Open";
-				return `<tr>
-				<td><div class="hq-shift-cashier">${frappe.utils.escape_html(r.cashier_name || r.cashier)}</div>
+				return `<tr data-hq-shift-row data-hq-idx="${i}">
+				<td data-sort-col="name" data-sort-value="${frappe.utils.escape_html(`${r.cashier_name || r.cashier} ${r.outlet}`)}"><div class="hq-shift-cashier">${frappe.utils.escape_html(r.cashier_name || r.cashier)}</div>
 					<div class="hq-item-code">${frappe.utils.escape_html(r.outlet)}</div></td>
-				<td class="hq-num">${money(r.opening)}</td>
-				<td class="hq-num">${money(r.sales)}</td>
-				<td class="hq-num">${money(r.cash)}</td>
-				<td class="hq-num"><b>${money(r.expected_closing)}</b>
+				<td class="hq-num" data-sort-col="opening" data-sort-num="1" data-sort-value="${r.opening === null || r.opening === undefined ? "" : Number(r.opening)}">${money(r.opening)}</td>
+				<td class="hq-num" data-sort-col="sales" data-sort-num="1" data-sort-value="${r.sales === null || r.sales === undefined ? "" : Number(r.sales)}">${money(r.sales)}</td>
+				<td class="hq-num" data-sort-col="cash" data-sort-num="1" data-sort-value="${r.cash === null || r.cash === undefined ? "" : Number(r.cash)}">${money(r.cash)}</td>
+				<td class="hq-num" data-sort-col="expected" data-sort-num="1" data-sort-value="${r.expected_closing === null || r.expected_closing === undefined ? "" : Number(r.expected_closing)}"><b>${money(r.expected_closing)}</b>
 					<div class="hq-item-code hq-status${open ? " hq-status--open" : ""}">${frappe.utils.escape_html(r.status)}</div></td>
 			</tr>`;
 			})
@@ -977,13 +1173,28 @@ class HQSalesMonitor {
 		return `<div class="hq-card hq-card--table hq-card--shifts">
 			<div class="hq-card-title">${__("Shift Summary")}</div>
 			<div class="hq-table-scroll"><table class="hq-table">
-				<thead><tr><th>${__("Cashier / Outlet")}</th><th class="hq-num">${__("Opening Balance")}</th>
-				<th class="hq-num">${__("Sales")}</th><th class="hq-num">${__("Cash")}</th>
-				<th class="hq-num">${__("Expected Closing")}</th></tr></thead>
+				<thead><tr>${this._sort_th(__("Cashier / Outlet"), "name", t, false)}
+				${this._sort_th(__("Opening Balance"), "opening", t, true)}
+				${this._sort_th(__("Sales"), "sales", t, true)}
+				${this._sort_th(__("Cash"), "cash", t, true)}
+				${this._sort_th(__("Expected Closing"), "expected", t, true)}</tr></thead>
 				<tbody>${rows || `<tr><td colspan="5" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
+			<div data-hq-shift-pager-host></div>
 			<div class="hq-kpi-sub hq-muted">${__("Expected closing = opening balance + cash sales - cash returns - change")}</div>
 		</div>`;
+	}
+
+	_apply_shift_table() {
+		const total = this.$root.find("[data-hq-shift-row]").length;
+		if (!total) {
+			this.$root.find("[data-hq-shift-pager-host]").html("");
+			return;
+		}
+		const shown = this._apply_client_table("shift", "[data-hq-shift-row]", total);
+		const t = { ...this._tbl("shift"), tbl: "shift" };
+		this.$root.find("[data-hq-shift-pager-host]").html(this._client_pager(t, shown, __("shifts")));
+		this._refresh_sort_heads("shift");
 	}
 
 	_returns_card(s) {
@@ -999,7 +1210,7 @@ class HQSalesMonitor {
 		</div>`;
 		const rows = (ret.rows || [])
 			.map(
-				(r) => `<div class="hq-ret-row">
+				(r, i) => `<div class="hq-ret-row" data-hq-ret-row data-hq-idx="${i}" data-sort-col="name" data-sort-value="${frappe.utils.escape_html(r.name)}" data-sort-amount="${Number(r.amount) || 0}">
 				<div class="hq-ret-name"><b>${frappe.utils.escape_html(r.name)}</b>
 					<div class="hq-item-code">${frappe.utils.escape_html(r.first_item || "")}</div></div>
 				<span class="hq-money hq-neg">-${HQ_UTILS.fmtMoney(r.amount, r.currency === ccy ? "" : r.currency)}</span>
@@ -1007,47 +1218,125 @@ class HQSalesMonitor {
 			)
 			.join("");
 		return `<div class="hq-card hq-card--returns">
-			<div class="hq-card-title">${__("Returns")}</div>
+			<div class="hq-card-title">${__("Returns")}
+				<span class="hq-ret-sort" role="button" tabindex="0" data-hq-sort="name" data-hq-tbl="ret" title="${__("Sort by invoice")}">${__("Invoice")}<span class="hq-sort-arrow" aria-hidden="true">${this._sort_arrow("name", { key: this.ret_sort, dir: this.ret_dir })}</span></span>
+				<span class="hq-ret-sort" role="button" tabindex="0" data-hq-sort="amount" data-hq-tbl="ret" title="${__("Sort by amount")}">${__("Amount")}<span class="hq-sort-arrow" aria-hidden="true">${this._sort_arrow("amount", { key: this.ret_sort, dir: this.ret_dir })}</span></span></div>
 			${tiles}
 			<div class="hq-ret-rows">${rows || `<p class="hq-empty-line">${__("No data")}</p>`}</div>
+			<div data-hq-ret-pager-host></div>
 		</div>`;
+	}
+
+	_apply_ret_table() {
+		const total = this.$root.find("[data-hq-ret-row]").length;
+		if (!total) {
+			this.$root.find("[data-hq-ret-pager-host]").html("");
+			return;
+		}
+		const t = { ...this._tbl("ret"), tbl: "ret" };
+		let order = this.$root.find("[data-hq-ret-row]").toArray();
+		if (t.key === "amount") {
+			order.sort((a, b) => {
+				const cmp = Number(a.dataset.sortAmount || 0) - Number(b.dataset.sortAmount || 0);
+				return t.dir === "desc" ? -cmp : cmp;
+			});
+		} else if (t.key === "name") {
+			order.sort((a, b) => {
+				const cmp = String(a.dataset.sortValue || "").localeCompare(String(b.dataset.sortValue || ""), undefined, { numeric: true });
+				return t.dir === "desc" ? -cmp : cmp;
+			});
+		} else {
+			order.sort((a, b) => Number(a.dataset.hqIdx || 0) - Number(b.dataset.hqIdx || 0));
+		}
+		const pages = Math.max(1, Math.ceil(total / HQ_PAGE_SIZE));
+		this.ret_page = Math.min(Math.max(1, this.ret_page), pages);
+		const host = order.length ? order[0].parentNode : null;
+		order.forEach((el) => host && host.appendChild(el));
+		const vis = new Set(order.slice((this.ret_page - 1) * HQ_PAGE_SIZE, this.ret_page * HQ_PAGE_SIZE));
+		order.forEach((el) => el.style.setProperty("display", vis.has(el) ? "" : "none"));
+		this.$root.find("[data-hq-ret-pager-host]").html(this._client_pager(t, total, __("returns")));
+		this._refresh_sort_heads("ret");
 	}
 
 	_recent_card(s) {
 		const scopeCcy = (s.scope || {}).default_currency;
+		const t = { ...this._tbl("recent"), tbl: "recent" };
 		const rows = ((s.recent || {}).rows || [])
-			.map((r) => {
+			.map((r, i) => {
 				const bare = r.currency && r.currency !== scopeCcy ? r.currency : "";
+				// Sort key: posting order is newest-first in the payload, so
+				// the raw index stays the honest time sort — no date parsing.
 				const money = `<span class="hq-money${r.is_return ? " hq-neg" : ""}">${
 					r.is_return ? "-" : ""
 				}${HQ_UTILS.fmtMoney(Math.abs(Number(r.grand_total) || 0), bare)}</span>`;
-				return `<tr>
-				<td><b>${frappe.utils.escape_html(r.name)}</b></td>
-				<td class="hq-num">${frappe.utils.escape_html(r.time)}</td>
-				<td>${frappe.utils.escape_html(r.company)}</td>
-				<td>${frappe.utils.escape_html(r.customer)}</td>
-				<td>${frappe.utils.escape_html(r.mode_of_payment || "N/A")}</td>
-				<td class="hq-num">${money}</td>
+				return `<tr data-hq-recent-row data-hq-idx="${i}">
+				<td data-sort-col="invoice" data-sort-value="${frappe.utils.escape_html(r.name)}"><b>${frappe.utils.escape_html(r.name)}</b></td>
+				<td class="hq-num" data-sort-col="time" data-sort-value="${frappe.utils.escape_html(r.time || "")}">${frappe.utils.escape_html(r.time)}</td>
+				<td data-sort-col="outlet" data-sort-value="${frappe.utils.escape_html(r.company)}">${frappe.utils.escape_html(r.company)}</td>
+				<td data-sort-col="customer" data-sort-value="${frappe.utils.escape_html(r.customer || "")}">${frappe.utils.escape_html(r.customer)}</td>
+				<td data-sort-col="payment" data-sort-value="${frappe.utils.escape_html(r.mode_of_payment || "")}">${frappe.utils.escape_html(r.mode_of_payment || "N/A")}</td>
+				<td class="hq-num" data-sort-col="amount" data-sort-num="1" data-sort-value="${r.is_return ? -Math.abs(Number(r.grand_total) || 0) : Math.abs(Number(r.grand_total) || 0)}">${money}</td>
 			</tr>`;
 			})
 			.join("");
 		return `<div class="hq-card hq-card--table hq-card--recent">
 			<div class="hq-card-title">${__("Recent Transactions")}</div>
 			<div class="hq-table-scroll"><table class="hq-table">
-				<thead><tr><th>${__("Invoice")}</th><th class="hq-num">${__("Time")}</th>
-				<th>${__("Outlet")}</th><th>${__("Customer")}</th><th>${__("Payment")}</th>
-				<th class="hq-num">${__("Amount")}</th></tr></thead>
+				<thead><tr>${this._sort_th(__("Invoice"), "invoice", t, false)}
+				${this._sort_th(__("Time"), "time", t, true)}
+				${this._sort_th(__("Outlet"), "outlet", t, false)}
+				${this._sort_th(__("Customer"), "customer", t, false)}
+				${this._sort_th(__("Payment"), "payment", t, false)}
+				${this._sort_th(__("Amount"), "amount", t, true)}</tr></thead>
 				<tbody>${rows || `<tr><td colspan="6" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
+			<div data-hq-recent-pager-host></div>
 		</div>`;
 	}
 
+	_apply_recent_table() {
+		const total = this.$root.find("[data-hq-recent-row]").length;
+		if (!total) {
+			this.$root.find("[data-hq-recent-pager-host]").html("");
+			return;
+		}
+		const shown = this._apply_client_table("recent", "[data-hq-recent-row]", total);
+		const t = { ...this._tbl("recent"), tbl: "recent" };
+		this.$root.find("[data-hq-recent-pager-host]").html(this._client_pager(t, shown, __("transactions")));
+		this._refresh_sort_heads("recent");
+		this._mirror_activity();
+	}
+
+	// Live Activity mirrors the Recent table's visible page — same rows, same
+	// order, no pager of its own. Matched by payload index, so sorting and
+	// paging on the left are reflected on the right for free.
+	_mirror_activity() {
+		const visIdx = this.$root.find("[data-hq-recent-row]").toArray()
+			.filter((el) => el.style.display !== "none")
+			.map((el) => el.dataset.hqIdx);
+		const vis = new Set(visIdx);
+		const $acts = this.$root.find("[data-hq-act-row]");
+		const host = $acts.length ? $acts[0].parentNode : null;
+		const ordered = [];
+		visIdx.forEach((idx) => {
+			const el = $acts.toArray().find((a) => a.dataset.hqIdx === idx);
+			if (el) ordered.push(el);
+		});
+		ordered.forEach((el) => host && host.appendChild(el));
+		$acts.toArray().forEach((el) => el.style.setProperty("display", vis.has(el.dataset.hqIdx) ? "" : "none"));
+		const $empty = this.$root.find("[data-hq-act-empty]");
+		if ($empty.length) $empty.toggle(!ordered.length);
+	}
+
 	_activity_card(s) {
-		const rows = ((s.recent || {}).rows || []).map((r) => {
+		// The live feed mirrors the Recent table's visible page (see
+		// _mirror_activity): every row renders here with the same payload
+		// index, then only the rows visible on the left stay visible.
+		const rows = ((s.recent || {}).rows || []).map((r, i) => {
 			const ret = !!r.is_return;
 			const bare = r.currency && r.currency !== (s.scope || {}).default_currency ? r.currency : "";
 			const money = `<span class="hq-money${ret ? " hq-neg" : ""}">${ret ? "-" : ""}${HQ_UTILS.fmtMoney(Math.abs(Number(r.grand_total) || 0), bare)}</span>`;
-			return `<div class="hq-act-row">
+			return `<div class="hq-act-row" data-hq-act-row data-hq-idx="${i}">
 				<div class="hq-act-body">
 					<div class="hq-act-title">${ret ? __("Return processed") : __("Sale completed")}</div>
 					<div class="hq-item-code">${frappe.utils.escape_html(r.company)} · ${frappe.utils.escape_html(r.time)}</div>
@@ -1060,32 +1349,32 @@ class HQSalesMonitor {
 		return `<div class="hq-card hq-card--activity">
 			<div class="hq-card-title">${__("Live Activity")}
 				${generated ? `<span class="hq-period">${__("per")} ${frappe.utils.escape_html(generated)}</span>` : ""}</div>
-			<div class="hq-act-rows">${rows.join("") || `<p class="hq-empty-line">${__("No data")}</p>`}</div>
+			<div class="hq-act-rows">${rows.join("") || `<p class="hq-empty-line" data-hq-act-empty>${__("No data")}</p>`}</div>
 		</div>`;
 	}
 
-	_product_table(pr) {
+	_product_table(pr, t) {
 		const rows = (pr.rows || [])
 			.map(
 				(r, i) => `<tr>
 				<td class="hq-num">${(pr.page - 1) * pr.page_size + i + 1}</td>
-				<td>${frappe.utils.escape_html(r.item_name)}
+				<td data-sort-col="name" data-sort-value="${frappe.utils.escape_html(r.item_name || "")}">${frappe.utils.escape_html(r.item_name)}
 					${r.item_code ? `<div class="hq-item-code">${frappe.utils.escape_html(r.item_code)}</div>` : ""}</td>
-				<td class="hq-num">${HQ_UTILS.fmtCount(r.qty)}</td>
-				<td class="hq-num"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_amount, "")}</span></td>
-				<td class="hq-num">${HQ_UTILS.fmtPct(r.share_pct)}</td>
+				<td class="hq-num" data-sort-col="qty" data-sort-num="1" data-sort-value="${Number(r.qty) || 0}">${HQ_UTILS.fmtCount(r.qty)}</td>
+				<td class="hq-num" data-sort-col="total" data-sort-num="1" data-sort-value="${Number(r.net_amount) || 0}"><span class="hq-money">${HQ_UTILS.fmtMoney(r.net_amount, "")}</span></td>
+				<td class="hq-num" data-sort-col="share" data-sort-num="1" data-sort-value="${r.share_pct === null || r.share_pct === undefined ? "" : Number(r.share_pct)}">${HQ_UTILS.fmtPct(r.share_pct)}</td>
 			</tr>`
 			)
 			.join("");
 		return `<div class="hq-table-scroll"><table class="hq-table">
-			<thead><tr><th class="hq-num">${__("No")}</th><th>${__("Name")}</th>
-			<th class="hq-num">${__("Sold Quantity")}</th><th class="hq-num">${__("Total Sales")}</th><th class="hq-num">%</th></tr></thead>
+			${this._product_head(t || { key: null, dir: null, tbl: "product" })}
 			<tbody>${rows || `<tr><td colspan="5" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 		</table></div>`;
 	}
 
 	_outlet_rank_table(s) {
 		const ccy = s.scope.default_currency;
+		const t = { ...this._tbl("outletr"), tbl: "outletr" };
 		const rows = (s.outlet_ranking || [])
 			.map((r, i) => {
 				// Base-currency rows show bare numbers; foreign-currency rows
@@ -1096,22 +1385,45 @@ class HQSalesMonitor {
 					v === null || v === undefined
 						? "N/A"
 						: `<span class="hq-money">${HQ_UTILS.fmtMoney(v, bare)}</span>`;
-				return `<tr>
+				return `<tr data-hq-outletr-row data-hq-idx="${i}">
 				<td class="hq-num">${i + 1}</td>
-				<td>${frappe.utils.escape_html(r.company)}</td>
-				<td class="hq-num">${money(r.net_tax_incl)}</td>
-				<td class="hq-num">${HQ_UTILS.fmtCount(r.orders)}</td>
-				<td class="hq-num">${r.apc === null || r.apc === undefined ? "N/A" : money(r.apc)}</td>
-				<td class="hq-num">${HQ_UTILS.fmtPct(r.share_pct)}</td>
+				<td data-sort-col="name" data-sort-value="${frappe.utils.escape_html(r.company)}">${frappe.utils.escape_html(r.company)}</td>
+				<td class="hq-num" data-sort-col="total" data-sort-num="1" data-sort-value="${Number(r.net_tax_incl) || 0}">${money(r.net_tax_incl)}</td>
+				<td class="hq-num" data-sort-col="tc" data-sort-num="1" data-sort-value="${Number(r.orders) || 0}">${HQ_UTILS.fmtCount(r.orders)}</td>
+				<td class="hq-num" data-sort-col="avg" data-sort-num="1" data-sort-value="${r.apc === null || r.apc === undefined ? "" : Number(r.apc)}">${r.apc === null || r.apc === undefined ? "N/A" : money(r.apc)}</td>
+				<td class="hq-num" data-sort-col="share" data-sort-num="1" data-sort-value="${r.share_pct === null || r.share_pct === undefined ? "" : Number(r.share_pct)}">${HQ_UTILS.fmtPct(r.share_pct)}</td>
 			</tr>`;
 			})
 			.join("");
 		return `<div class="hq-table-scroll"><table class="hq-table hq-table--outlet-rank">
-			<thead><tr><th class="hq-num">${__("No")}</th><th>${__("Name")}</th>
-			<th class="hq-num">${__("Total Sales")}</th><th class="hq-num">${__("Transactions")}</th>
-			<th class="hq-num">${__("Average")}</th><th class="hq-num">%</th></tr></thead>
+			<thead><tr><th class="hq-num">${__("No")}</th>
+			${this._sort_th(__("Name"), "name", t, false)}
+			${this._sort_th(__("Total Sales"), "total", t, true)}
+			${this._sort_th(__("Transactions"), "tc", t, true)}
+			${this._sort_th(__("Average"), "avg", t, true)}
+			${this._sort_th("%", "share", t, true)}</tr></thead>
 			<tbody>${rows || `<tr><td colspan="6" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 		</table></div>`;
+	}
+
+	_apply_outletr_table() {
+		const total = this.$root.find("[data-hq-outletr-row]").length;
+		if (!total) {
+			this.$root.find("[data-hq-outletr-pager-host]").html("");
+			return;
+		}
+		const shown = this._apply_client_table("outletr", "[data-hq-outletr-row]", total);
+		const t = { ...this._tbl("outletr"), tbl: "outletr" };
+		// Row numbers follow the visible page (1-based), not the payload rank —
+		// sorting/paging would otherwise show gaps like 129, 124, 91.
+		const start_no = (this.outletr_page - 1) * HQ_PAGE_SIZE;
+		this.$root.find("[data-hq-outletr-row]").toArray()
+			.filter((el) => el.style.display !== "none")
+			.forEach((el, i) => {
+				if (el.children[0]) el.children[0].textContent = start_no + i + 1;
+			});
+		this.$root.find("[data-hq-outletr-pager-host]").html(this._client_pager(t, shown, __("outlets")));
+		this._refresh_sort_heads("outletr");
 	}
 
 	_product_pager(pr) {
@@ -1194,7 +1506,7 @@ class HQSalesMonitor {
 
 	_set_category(slot, value) {
 		this[`category_${slot}`] = value || "";
-		this.product_page = 1;
+		this._reset_table_pages();
 		this._save_prefs();
 		this.refresh();
 	}
@@ -1210,12 +1522,14 @@ class HQSalesMonitor {
 				const dir = $(e.currentTarget).data("hq-page");
 				this.product_page += dir === "next" ? 1 : -1;
 				this.product_page = Math.max(1, this.product_page);
+				this._keep_client_pages = true;
 				this.refresh();
 			})
 			.off("change", "[data-hq-category]")
 			.on("change", "[data-hq-category]", (e) => {
 				this.category = e.currentTarget.value || "";
 				this.product_page = 1;
+				this._keep_client_pages = true;
 				this.refresh();
 			})
 			.off("change", "[data-hq-cat]")
@@ -1239,6 +1553,46 @@ class HQSalesMonitor {
 				this.outlet_page += $(e.currentTarget).data("hq-outlet-page") === "next" ? 1 : -1;
 				this.outlet_page = Math.max(1, this.outlet_page);
 				this._apply_outlet_filter();
+			})
+			.off("click", "[data-hq-cpage]")
+			.on("click", "[data-hq-cpage]", (e) => {
+				const tbl = $(e.currentTarget).data("hq-tbl");
+				if (!tbl || !$(e.currentTarget).data("hq-cpage")) return;
+				this[`${tbl}_page`] += $(e.currentTarget).data("hq-cpage") === "next" ? 1 : -1;
+				this[`${tbl}_page`] = Math.max(1, this[`${tbl}_page`]);
+				this._apply_client_table_host(tbl);
+			})
+			.off("click", "[data-hq-sort]")
+			.on("click", "[data-hq-sort]", (e) => {
+				const el = $(e.currentTarget);
+				const tbl = el.data("hq-tbl");
+				const key = el.data("hq-sort");
+				if (!tbl || !key) return;
+				if (tbl === "product") {
+					if (this.product_sort !== key) {
+						this.product_sort = key;
+						this.product_dir = "asc";
+					} else if (this.product_dir === "asc") {
+						this.product_dir = "desc";
+					} else {
+						this.product_sort = null;
+						this.product_dir = null;
+					}
+					this.product_page = 1;
+					this._keep_client_pages = true;
+					this.refresh();
+					return;
+				}
+				if (tbl === "ret" && key !== "name" && key !== "amount") return;
+				this._cycle_sort(tbl, key);
+				this._apply_client_table_host(tbl);
+			})
+			.off("keydown", "[data-hq-sort]")
+			.on("keydown", "[data-hq-sort]", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					$(e.currentTarget).trigger("click");
+				}
 			})
 			.off("click", "[data-hq-goto-targets]")
 			.on("click", "[data-hq-goto-targets]", () => frappe.set_route("outlet-targets"))

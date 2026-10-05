@@ -55,6 +55,8 @@ Formulas (achievement, linear projection, daily pro-rata) never change with
 the basis — only the numerator does.
 """
 
+import hashlib
+import json
 from datetime import datetime, timedelta
 
 import frappe
@@ -68,12 +70,6 @@ from pos_next.hq_scope import (
 	resolve_company_scope,
 )
 from pos_next.invoice_type import get_pos_invoice_doctype, sales_invoice_item_union, sales_invoice_union
-from pos_next.services.cash_mode import get_cash_mode_of_payment
-from pos_next.services.sales_recap import (
-	_aggregate_payments,
-	_aggregate_totals,
-	shift_scope,
-)
 from pos_next.target_basis import (
 	GROSS_PROFIT,
 	NET_PROFIT,
@@ -88,7 +84,31 @@ MAX_RANGE_DAYS = 366
 MAX_PAGE_SIZE = 50
 COMPONENT_ROLE = "Package Item"
 
+# Whitelisted Product Ranking sort orders (server-side, clickable headers).
+# Anything else falls back to the default best-sellers order. share_pct is
+# derived from net_amount over a single denominator, so it sorts identically.
+PRODUCT_SORT_ORDERS = {
+	"name": {"asc": "item_name ASC, sii.item_code", "desc": "item_name DESC, sii.item_code"},
+	"qty": {"asc": "qty ASC, sii.item_code", "desc": "qty DESC, sii.item_code"},
+	"total": {
+		"asc": "net_amount ASC, qty ASC, sii.item_code",
+		"desc": "net_amount DESC, qty DESC, sii.item_code",
+	},
+	"share": {
+		"asc": "net_amount ASC, qty ASC, sii.item_code",
+		"desc": "net_amount DESC, qty DESC, sii.item_code",
+	},
+}
+
+DEFAULT_PRODUCT_ORDER = "net_amount DESC, qty DESC, sii.item_code"
+
 MONEY_KEYS = ("gross", "refunds", "net_tax_incl", "net_pretax", "taxes")
+
+# Cache-aside TTL for the heavy read-only monitoring aggregates: Redis holds a
+# computed section for at most this long, then the next request recomputes it.
+# 5 minutes: fresh enough for a dashboard, long enough to absorb page reloads.
+HQ_MONITORING_CACHE_PREFIX = "hq_sales_monitoring"
+HQ_MONITORING_CACHE_TTL = 300  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +194,54 @@ def _parse_count(value):
 
 
 # ---------------------------------------------------------------------------
+# Cache-aside for the heavy read-only sections
+# ---------------------------------------------------------------------------
+
+
+def _monitoring_cache_key(section, scope, parts):
+	"""Redis key for one cached section.
+
+	The key material embeds the session user, the RESOLVED company /
+	POS-profile scope and every filter that can change the section's numbers
+	(company, from/to, category, page, sort), so a cached payload can never be
+	served to a different user, permission scope or filter set. The cutoff
+	time of day is deliberately left out — today's window would otherwise
+	miss on every request — and the TTL bounds that staleness instead.
+	"""
+	material = {
+		"user": frappe.session.user,
+		"lang": getattr(frappe.local, "lang", None),
+		"companies": sorted(scope["companies"]),
+		"profiles": sorted(scope["profiles"]) if scope["profiles"] is not None else None,
+		"parts": parts,
+	}
+	digest = hashlib.sha1(json.dumps(material, sort_keys=True, default=str).encode()).hexdigest()
+	return f"{HQ_MONITORING_CACHE_PREFIX}:{frappe.session.user}:{section}:{digest}"
+
+
+def _cached_section(section, scope, generator, **parts):
+	"""Cache-aside read: the Redis value, or compute and store it with the TTL.
+
+	Only pure aggregate reads pass through here — the role gate and the scope
+	resolution in get_sales_monitoring stay uncached and run on every request.
+	"""
+	if frappe.flags.in_test:
+		# Tests mutate invoices/targets between calls and re-read the payload;
+		# serving a Redis-cached aggregate would hide those writes.
+		return generator()
+	cache = frappe.cache()
+	key = _monitoring_cache_key(section, scope, parts)
+	# Manual miss/store: frappe's get_value skips the generator when
+	# expires=True, which is exactly the TTL mode we want (the Redis entry
+	# carries expires_in_sec; the in-process copy dies with the request).
+	value = cache.get_value(key, expires=True)
+	if value is None:
+		value = generator()
+		cache.set_value(key, value, expires_in_sec=HQ_MONITORING_CACHE_TTL)
+	return value
+
+
+# ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
 
@@ -189,6 +257,8 @@ def get_sales_monitoring(
 	category_b=None,
 	product_page=1,
 	page_size=10,
+	product_sort=None,
+	product_dir=None,
 ):
 	"""All HQ Sales Monitoring panel data in a single read-only payload."""
 	_check_hq_access()
@@ -217,13 +287,33 @@ def get_sales_monitoring(
 	mtd_where, mtd_params = _si_window_where(
 		scope["companies"], profiles, window["month_start"], to_date, window["mtd_cutoff"]
 	)
-	mtd_rows = _totals_rows(mtd_where, mtd_params)
-	monthly = _metrics_from_totals(mtd_rows, currency_map, default_ccy)
+	# Raw MTD rows feed monthly/turnover/targets: cache them once so all three
+	# sections share one snapshot and a cold cache runs the union query once.
+	mtd_rows = _cached_section(
+		"mtd_totals", scope, lambda: _totals_rows(mtd_where, mtd_params), to_date=to_date
+	)
+	monthly = _cached_section(
+		"monthly",
+		scope,
+		lambda: _metrics_from_totals(mtd_rows, currency_map, default_ccy),
+		to_date=to_date,
+	)
 
 	# Selected range (hero cards, hours, rankings, donuts) — MTD above stays
 	# fixed to the month even when the user narrows the range.
 	range_where, range_params = _si_window_where(
 		scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"]
+	)
+	# cut_at is request-time clock, not aggregate data: it stays outside the
+	# cached dict so a cache hit never shows another request's cutoff time.
+	range_metrics = _cached_section(
+		"range",
+		scope,
+		lambda: _metrics_for_window(
+			scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"], currency_map, default_ccy
+		),
+		from_date=from_date,
+		to_date=to_date,
 	)
 
 	result = {
@@ -238,15 +328,47 @@ def get_sales_monitoring(
 		"windows": window,
 		"monthly": monthly,
 		"range": {
-			**_metrics_for_window(scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"], currency_map, default_ccy),
+			**range_metrics,
 			"cut_at": window["mtd_cutoff"].strftime("%H:%M") if window["mtd_cutoff"] else None,
 		},
-		"turnover": _turnover_section(scope, currency_map, default_ccy, window, mtd_rows),
-		"daily": _daily_section(scope, currency_map, default_ccy, window),
-		"hours": _hours_section(range_where, range_params),
+		"turnover": _cached_section(
+			"turnover",
+			scope,
+			lambda: _turnover_section(scope, currency_map, default_ccy, window, mtd_rows),
+			to_date=to_date,
+		),
+		"daily": _cached_section(
+			"daily", scope, lambda: _daily_section(scope, currency_map, default_ccy, window), to_date=to_date
+		),
+		"hours": _cached_section(
+			"hours",
+			scope,
+			lambda: _hours_section(range_where, range_params),
+			from_date=from_date,
+			to_date=to_date,
+		),
 		"favorite_product": _favorite_product(range_where, range_params),
-		"product_ranking": _product_ranking(range_where, range_params, category, product_page, page_size),
-		"outlet_ranking": _outlet_ranking(range_where, range_params, currency_map),
+		"product_ranking": _cached_section(
+			"product_ranking",
+			scope,
+			lambda: _product_ranking(
+				range_where, range_params, category, product_page, page_size, product_sort, product_dir
+			),
+			from_date=from_date,
+			to_date=to_date,
+			category=category or None,
+			page=product_page,
+			page_size=page_size,
+			sort=product_sort or None,
+			dir=product_dir or None,
+		),
+		"outlet_ranking": _cached_section(
+			"outlet_ranking",
+			scope,
+			lambda: _outlet_ranking(range_where, range_params, currency_map),
+			from_date=from_date,
+			to_date=to_date,
+		),
 		"item_groups": _item_group_names(),
 		"category_products": _category_products(
 			scope["companies"],
@@ -258,7 +380,15 @@ def get_sales_monitoring(
 			default_ccy,
 			{"a": _clean_category(category_a), "b": _clean_category(category_b)},
 		),
-		"payments": _payments_section(range_where, range_params, default_ccy, currency_map, scope["companies"]),
+		"payments": _cached_section(
+			"payments",
+			scope,
+			lambda: _payments_section(
+				range_where, range_params, default_ccy, currency_map, scope["companies"]
+			),
+			from_date=from_date,
+			to_date=to_date,
+		),
 		"recent": _recent_section(range_where, range_params),
 		"returns": _returns_section(range_where, range_params, default_ccy),
 		"category_top": _category_top(
@@ -283,10 +413,23 @@ def get_sales_monitoring(
 		),
 	}
 	result["target_basis"] = _target_basis_payload()
-	result["targets"] = _targets_section(
-		scope["companies"], currency_map, default_ccy, window, monthly, mtd_rows, profiles=scope["profiles"]
-	)
-	result["targets"]["overall"] = _overall_target_section(scope, currency_map)
+	# The payback (overall) target is all-time, so its key carries no date —
+	# scope + user already pin it. A shallow copy keeps the cached targets dict
+	# itself un-mutated.
+	result["targets"] = {
+		**_cached_section(
+			"targets",
+			scope,
+			lambda: _targets_section(
+				scope["companies"], currency_map, default_ccy, window, monthly, mtd_rows,
+				profiles=scope["profiles"],
+			),
+			to_date=to_date,
+		),
+		"overall": _cached_section(
+			"targets_overall", scope, lambda: _overall_target_section(scope, currency_map)
+		),
+	}
 	result["shifts"] = _shifts_section(scope, currency_map)
 	return result
 
@@ -911,11 +1054,16 @@ def _favorite_product(where, params):
 	}
 
 
-def _product_ranking(where, params, category, page, page_size):
+def _product_ranking(where, params, category, page, page_size, sort_key=None, sort_dir=None):
 	page = _to_int(page, default=1, lo=1)
 	page_size = _to_int(page_size, default=10, lo=1, hi=MAX_PAGE_SIZE)
 	item_from = _item_from(where)
 	bind = dict(params)
+
+	order_by = DEFAULT_PRODUCT_ORDER
+	orders = PRODUCT_SORT_ORDERS.get((sort_key or "").strip().lower()) if sort_key else None
+	if orders:
+		order_by = orders["desc" if (sort_dir or "").strip().lower() == "desc" else "asc"]
 
 	cat_where = ""
 	if category:
@@ -943,7 +1091,7 @@ def _product_ranking(where, params, category, page, page_size):
 			SUM(sii.base_net_amount) AS net_amount
 		{item_from}{cat_where}
 		GROUP BY sii.item_code
-		ORDER BY net_amount DESC, qty DESC, sii.item_code
+		ORDER BY {order_by}
 		LIMIT {page_size} OFFSET {offset}
 		""",
 		bind,
@@ -964,6 +1112,8 @@ def _product_ranking(where, params, category, page, page_size):
 		"total": int(total),
 		"page": page,
 		"page_size": page_size,
+		"sort": (sort_key or "").strip().lower() if orders else None,
+		"dir": "desc" if (sort_dir or "").strip().lower() == "desc" else "asc" if orders else None,
 		"category": category or None,
 		"categories": _category_options(item_from, params),
 		"scope_total_net": flt(total_sales),
@@ -1025,7 +1175,8 @@ def _payments_section(where, params, default_ccy, currency_map, companies):
 
 def _recent_section(where, params, limit=10):
 	"""Latest invoices in the range (sale or return): the raw feed behind
-	the Recent transactions table and, client-side, the Live activity card."""
+	the Recent transactions table and, client-side, the Live activity card.
+	The activity card mirrors the table's visible page."""
 	rows = frappe.db.sql(
 		f"""
 		SELECT name, posting_date, posting_time, company, customer,
@@ -1076,7 +1227,8 @@ def _recent_section(where, params, limit=10):
 def _returns_section(where, params, default_ccy, limit=10):
 	"""Return totals over the range plus the latest return invoices. No
 	return-reason field exists in the data, so rows carry the first item
-	name instead — nothing is fabricated."""
+	name instead — nothing is fabricated. Totals/count/rate always cover
+	the full window, not just the listed rows."""
 	counts = frappe.db.sql(
 		f"""
 		SELECT
@@ -1145,8 +1297,16 @@ def _shifts_section(scope, currency_map, limit=10):
 	"""Latest shifts in company scope (open first, then newest) with the
 	recap service's cash semantics: cash_expected already nets change and
 	cash returns, open and closed shifts share one code path.
-	ponytail: ~10 small shift-scoped queries per shift — batch into one
-	grouped query only if the shift count ever matters."""
+
+	Batched (no per-shift N+1): one grouped query per aggregate for ALL
+	shifts at once, master data once per request. Query budget: shift list
+	(1) + users (1) + explicit cash modes (1, only when the legacy column
+	exists) + payment-method rows (1, same gate) + gross+change (1) +
+	payment rows (1) + Payment Entry shares (1) + opening details (1) +
+	Mode of Payment types over the used-mode union (1) = 9 with the legacy
+	column, 7 without. has_column probes are metadata-cache reads, not DB
+	queries (frappe/database/database.py:1346-1374).
+	"""
 	shifts = frappe.db.sql(
 		"""
 		SELECT os.name, os.user, os.company, os.pos_profile, os.status,
@@ -1175,12 +1335,95 @@ def _shifts_section(scope, currency_map, limit=10):
 			fields=["name", "full_name"],
 		)
 	}
+	shift_names = [s.name for s in shifts]
+
+	# Cash-mode chain, batched (same chain as cash_mode.get_cash_mode…,
+	# pos_next/services/cash_mode.py:17-55): explicit
+	# posa_cash_mode_of_payment, then the profile's own default Cash-type
+	# row, then its first Cash-type row, else generic "Cash". The payment
+	# lookups stay gated on the legacy column — without it the original
+	# never enters the chain at all (cash_mode.py:24 closes before the
+	# get_all calls) and returns "Cash" for every profile.
+	cash_modes = {s.pos_profile: "Cash" for s in shifts}
+	profiles = [s.pos_profile for s in shifts if s.pos_profile]
+	has_cash_field = bool(profiles) and frappe.db.has_column(
+		"POS Profile", "posa_cash_mode_of_payment"
+	)
+	explicit, ordered = _shift_cash_masters(profiles, has_cash_field)
+
+	# One grouped query each for every shift, no per-shift loop.
+	pay_by_shift = _shift_payment_rows(shift_names)
+	pe_by_shift = _shift_pe_rows(shift_names)
+
+	# Gross sales + change for ALL shifts in one grouped query. The original
+	# gross carried the no-drawer-return filter (sales_recap.py:369-372) and
+	# change did not (sales_recap.py:503-509 sums base_change_amount over the
+	# whole scope). That filter only drops is_return = 1 rows, which the gross
+	# CASE maps to 0 either way — so one unfiltered query yields BOTH numbers
+	# exactly.
+	gross_change = {
+		r.shift: r
+		for r in frappe.db.sql(
+			f"""
+			SELECT si.posa_pos_opening_shift AS shift,
+				SUM(CASE WHEN si.is_return = 0 THEN si.base_grand_total ELSE 0 END) AS gross_sales,
+				SUM(si.base_change_amount) AS change_amount
+			FROM {sales_invoice_union(_SHIFT_INVOICE_COLUMNS, where="si.docstatus = 1 AND si.posa_pos_opening_shift IN %(hq_shifts)s")}
+			WHERE si.docstatus = 1 AND si.posa_pos_opening_shift IN %(hq_shifts)s
+			GROUP BY si.posa_pos_opening_shift
+			""",
+			{"hq_shifts": shift_names},
+			as_dict=True,
+		)
+	}
+
+	# Opening floats + the Cash-type map: one read each for all shifts, and
+	# NO profile gate / NO has_column gate (sales_recap.py:556-567 counts
+	# every mode whose Mode of Payment.type == "Cash", on every site). The
+	# map must answer is_cash for every mode the drawer math touches
+	# (sales_recap.py:497-500 reads the whole table): payment rows, PE rows,
+	# opening details, the profile methods behind the mode chain, the
+	# explicit cash-mode values and generic "Cash".
+	method_modes = {mode for methods in ordered.values() for mode, _default in methods}
+	used_modes = set(v for v in (explicit or {}).values() if v) | method_modes | {"Cash"}
+	for per_shift in (pay_by_shift or {}).values():
+		used_modes.update(mode for mode in per_shift if mode)
+	for per_shift in (pe_by_shift or {}).values():
+		used_modes.update(mode for mode in per_shift if mode)
+	opening_by_shift, mode_types = _shift_opening_rows(shift_names, used_modes)
+	chain_cash = {mode for mode, typ in mode_types.items() if typ == "Cash"}
+	for shift in shifts:
+		if not shift.pos_profile or not has_cash_field:
+			continue
+		configured = explicit.get(shift.pos_profile)
+		if configured:
+			cash_modes[shift.pos_profile] = configured
+			continue
+		for mode, is_default in ordered.get(shift.pos_profile, []):
+			if is_default and mode in chain_cash:
+				cash_modes[shift.pos_profile] = mode
+				break
+		else:
+			for mode, _is_default in ordered.get(shift.pos_profile, []):
+				if mode in chain_cash:
+					cash_modes[shift.pos_profile] = mode
+					break
+
+	def _is_cash(mode):
+		return mode_types.get(mode) == "Cash"
+
 	rows = []
 	for shift in shifts:
-		shift_cash_mode = get_cash_mode_of_payment(shift.pos_profile)
-		shift_sc = shift_scope(shift.name)
-		totals = _aggregate_totals(shift_sc)
-		payments = _aggregate_payments(shift_sc, shift_cash_mode, shift.pos_profile)
+		cash_mode = cash_modes[shift.pos_profile]
+		collected = dict(pay_by_shift.get(shift.name, {}))
+		for mode, amount in pe_by_shift.get(shift.name, {}).items():
+			collected[mode] = collected.get(mode, 0.0) + flt(amount)
+		gross_row = gross_change.get(shift.name)
+		change = flt(gross_row.change_amount) if gross_row else 0.0
+		if change or cash_mode in collected:
+			collected[cash_mode] = collected.get(cash_mode, 0.0) - change
+		cash_collected = flt(sum(amount for mode, amount in collected.items() if _is_cash(mode)))
+		opening_cash = flt(opening_by_shift.get(shift.name, 0.0))
 		rows.append(
 			{
 				"name": shift.name,
@@ -1188,14 +1431,160 @@ def _shifts_section(scope, currency_map, limit=10):
 				"cashier_name": users.get(shift.user) or shift.user,
 				"outlet": shift.company,
 				"currency": currency_map.get(shift.company),
-				"opening": payments.get("opening_cash"),
-				"sales": totals.get("gross_sales"),
-				"cash": payments.get("cash_collected"),
-				"expected_closing": payments.get("cash_expected"),
+				"opening": opening_cash,
+				"sales": flt(gross_row.gross_sales) if gross_row else 0.0,
+				"cash": cash_collected,
+				"expected_closing": flt(opening_cash + cash_collected),
 				"status": shift.status,
 			}
 		)
 	return rows
+
+
+_SHIFT_INVOICE_COLUMNS = (
+	"si.name, si.docstatus, si.is_return, si.base_grand_total,"
+	" si.base_change_amount, si.posa_pos_opening_shift"
+)
+
+
+def _shift_cash_masters(profiles, has_cash_field):
+	"""Batched reads for the cash-mode chain (mirrors cash_mode.py:17-55).
+
+	Returns (explicit, ordered):
+
+	- explicit: {profile: explicit cash mode or None} (one grouped query,
+	  only when the legacy ``posa_cash_mode_of_payment`` column exists —
+	  the whole chain sits inside that has_column arm there).
+	- ordered: {profile: [(mode, is_default)] in idx order} (one grouped
+	  query, same gate — the original never reads payment rows without the
+	  column either, cash_mode.py:31-36).
+
+	Cash-type membership for the chain is resolved by the CALLER over the
+	shared mode_types map from _shift_opening_rows (the original checks
+	THAT profile's methods only, cash_mode.py:38-47 — same per-profile
+	lookup, one shared map). No DB when the gate is closed or there are
+	no profiles.
+	"""
+	if not has_cash_field or not profiles:
+		return {}, {}
+	explicit = {}
+	for row in frappe.db.sql(
+		"""SELECT name, posa_cash_mode_of_payment FROM `tabPOS Profile`
+		WHERE name IN %(hq_profiles)s""",
+		{"hq_profiles": list(set(profiles))},
+		as_dict=True,
+	):
+		explicit[row.name] = row.posa_cash_mode_of_payment or None
+	ordered = {}
+	for row in frappe.db.sql(
+		"""SELECT parent, mode_of_payment, `default` FROM `tabPOS Payment Method`
+		WHERE parent IN %(hq_profiles)s AND parenttype = 'POS Profile'
+		ORDER BY idx asc""",
+		{"hq_profiles": list(set(profiles))},
+		as_dict=True,
+	):
+		ordered.setdefault(row.parent, []).append((row.mode_of_payment, bool(row.default)))
+	return explicit, ordered
+
+
+def _shift_payment_rows(shift_names):
+	"""Payment rows grouped by shift (one query for all shifts)."""
+	out = {}
+	for row in frappe.db.sql(
+		f"""
+		SELECT si.posa_pos_opening_shift AS shift, sip.mode_of_payment,
+			SUM(sip.base_amount) AS amount
+		FROM `tabSales Invoice Payment` sip
+		JOIN {sales_invoice_union("si.name, si.posa_pos_opening_shift", where="si.docstatus = 1 AND si.posa_pos_opening_shift IN %(hq_shifts)s")} ON si.name = sip.parent
+		WHERE si.posa_pos_opening_shift IN %(hq_shifts)s
+		GROUP BY si.posa_pos_opening_shift, sip.mode_of_payment
+		""",
+		{"hq_shifts": shift_names},
+		as_dict=True,
+	):
+		out.setdefault(row.shift, {}).setdefault(row.mode_of_payment, 0.0)
+		out[row.shift][row.mode_of_payment] += flt(row.amount)
+	return out
+
+
+def _shift_pe_rows(shift_names):
+	"""Payment Entries grouped by shift (one query for all shifts).
+
+	EXISTS-per-shift semantics, batched: a PE counts in full for every shift
+	whose invoices it references (sales_recap.py:464-493 — EXISTS is
+	boolean per scope, so a PE touching two shifts counts in full under
+	BOTH, while a PE touching two invoices of ONE shift counts ONCE). The
+	inner SELECT DISTINCT collapses the per-reference join rows down to one
+	row per (shift, PE) — a multi-invoice PE is never multiplied — and the
+	outer SUM sums the distinct PEs per shift and mode.
+	"""
+	out = {}
+	branches = [
+		f"SELECT name, posa_pos_opening_shift AS shift FROM `tab{dt}`"
+		f" WHERE docstatus = 1 AND posa_pos_opening_shift IN %(hq_shifts)s"
+		for dt in ("POS Invoice", "Sales Invoice")
+		if frappe.db.has_column(dt, "posa_pos_opening_shift")
+	]
+	if not branches:
+		return out
+	per_pe = frappe.db.sql(
+		f"""
+		SELECT shift, mode_of_payment, SUM(base_paid_amount) AS amount
+		FROM (
+			SELECT DISTINCT link.shift AS shift, pe.name AS pe_name,
+				pe.mode_of_payment AS mode_of_payment,
+				pe.base_paid_amount AS base_paid_amount
+			FROM `tabPayment Entry` pe
+			JOIN `tabPayment Entry Reference` per ON per.parent = pe.name
+			JOIN ({" UNION ALL ".join(branches)}) link ON link.name = per.reference_name
+				AND per.reference_doctype IN ('Sales Invoice', 'POS Invoice')
+			WHERE pe.docstatus = 1 AND pe.payment_type = 'Receive'
+		) per_pe
+		GROUP BY shift, mode_of_payment
+		""",
+		{"hq_shifts": shift_names},
+		as_dict=True,
+	)
+	for row in per_pe:
+		shift_modes = out.setdefault(row.shift, {})
+		shift_modes[row.mode_of_payment] = flt(row.amount)
+	return out
+
+
+def _shift_opening_rows(shift_names, used_modes):
+	"""Opening floats grouped by shift + the shared Cash-type map (2 queries).
+
+	Same rule as sales_recap.py:556-567 with NO profile gate and NO
+	has_column gate: every mode whose Mode of Payment.type == "Cash" counts,
+	including a Cash mode dropped from the profile or never on it. The type
+	map covers every mode that can carry money here — opening details,
+	payment rows, PE rows, the profile methods behind the mode chain, the
+	explicit cash-mode values and generic "Cash" — so is_cash answers like
+	the original's full-table map (sales_recap.py:497-500) on every mode
+	the drawer math touches. Returns (per_shift_floats, mode_types).
+	"""
+	details = frappe.get_all(
+		"POS Opening Shift Detail",
+		filters={"parent": ["in", shift_names]},
+		fields=["parent", "mode_of_payment", "amount"],
+	)
+	modes = {mode for mode in (used_modes or []) if mode}
+	modes.update(row.mode_of_payment for row in details if row.mode_of_payment)
+	type_rows = (
+		frappe.get_all(
+			"Mode of Payment",
+			filters={"name": ["in", sorted(modes)]},
+			fields=["name", "type"],
+		)
+		if modes
+		else []
+	)
+	mode_types = {row.name: row.type for row in type_rows}
+	out = {}
+	for row in details:
+		if mode_types.get(row.mode_of_payment) == "Cash":
+			out[row.parent] = out.get(row.parent, 0.0) + flt(row.amount)
+	return out, mode_types
 
 
 def _item_group_names():
