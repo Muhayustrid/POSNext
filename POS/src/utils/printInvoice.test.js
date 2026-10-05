@@ -369,6 +369,110 @@ describe("printWithSilentFallback (doctype passthrough, POS Invoice mode)", () =
 	})
 })
 
+describe("silentPrintInvoice (doctype self-heal when the caller omits it)", () => {
+	const posInvoiceDoc = { ...doc, doctype: "POS Invoice" }
+	const renderCalls = () =>
+		call.mock.calls.filter(
+			([cmd]) => cmd === "frappe.www.printview.get_html_and_style",
+		)
+
+	it("retries the render once under the doc's own doctype and logs that doctype", async () => {
+		call.mockImplementation((cmd, params) => {
+			if (cmd === "pos_next.api.invoices.get_invoice")
+				return Promise.resolve(posInvoiceDoc)
+			// Checkout sends no doctype, so the first render asks for Sales
+			// Invoice and rejects; the retry under POS Invoice resolves.
+			if (params.doc === "POS Invoice")
+				return Promise.resolve({ html: "<div>pos receipt</div>", style: "" })
+			return Promise.reject(new Error("Sales Invoice SINV-1 not found"))
+		})
+		await silentPrintInvoice("SINV-1", null, "POS Profile juri1")
+		expect(renderCalls()).toHaveLength(2)
+		expect(renderCalls()[1][1].doc).toBe("POS Invoice")
+		// Exactly one transport call, carrying the retried HTML and the doc's
+		// doctype in the log context.
+		expect(transport.printHTML).toHaveBeenCalledTimes(1)
+		const [html, opts] = transport.printHTML.mock.calls[0]
+		expect(html).toContain("pos receipt")
+		expect(opts.logContext.reference_doctype).toBe("POS Invoice")
+		// The crew slip still comes from the same doc fetch.
+		expect(opts.crewHTML).toContain("SINV-1")
+	})
+
+	it("does not retry when the first render succeeds", async () => {
+		call.mockImplementation((cmd) => {
+			if (cmd === "pos_next.api.invoices.get_invoice")
+				return Promise.resolve(posInvoiceDoc)
+			return Promise.resolve({ html: "<div>server receipt</div>", style: "" })
+		})
+		await silentPrintInvoice("SINV-1", null, "POS Profile juri1")
+		expect(renderCalls()).toHaveLength(1)
+		expect(renderCalls()[0][1].doc).toBe("Sales Invoice")
+	})
+
+	it("propagates the retry's error and never prints when the retry also fails", async () => {
+		call.mockImplementation((cmd, params) => {
+			if (cmd === "pos_next.api.invoices.get_invoice")
+				return Promise.resolve(posInvoiceDoc)
+			if (params.doc === "POS Invoice")
+				return Promise.reject(new Error("POS Invoice SINV-1 not found either"))
+			return Promise.reject(new Error("Sales Invoice SINV-1 not found"))
+		})
+		await expect(
+			silentPrintInvoice("SINV-1", null, "POS Profile juri1"),
+		).rejects.toThrow("POS Invoice SINV-1 not found either")
+		expect(transport.printHTML).not.toHaveBeenCalled()
+	})
+
+	it("throws the original render error without retry when the doc fetch also failed", async () => {
+		call.mockImplementation((cmd) => {
+			if (cmd === "pos_next.api.invoices.get_invoice")
+				return Promise.reject(new Error("doc read failed"))
+			return Promise.reject(new Error("render failed"))
+		})
+		await expect(
+			silentPrintInvoice("SINV-1", null, "POS Profile juri1"),
+		).rejects.toThrow("render failed")
+		expect(renderCalls()).toHaveLength(1)
+	})
+})
+
+describe("silentPrintInvoice (pos_profile self-heal when the caller omits it)", () => {
+	it("logs the fetched doc's pos_profile when the caller passes none", async () => {
+		call.mockImplementation((cmd) => {
+			if (cmd === "pos_next.api.invoices.get_invoice")
+				return Promise.resolve({ ...doc, pos_profile: "POS Profile from doc" })
+			return Promise.resolve({ html: "<div>server receipt</div>", style: "" })
+		})
+		await silentPrintInvoice("SINV-1", null, null)
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				logContext: expect.objectContaining({
+					pos_profile: "POS Profile from doc",
+				}),
+			}),
+		)
+	})
+
+	it("keeps the caller's pos_profile when one is given", async () => {
+		call.mockImplementation((cmd) => {
+			if (cmd === "pos_next.api.invoices.get_invoice")
+				return Promise.resolve({ ...doc, pos_profile: "POS Profile from doc" })
+			return Promise.resolve({ html: "<div>server receipt</div>", style: "" })
+		})
+		await silentPrintInvoice("SINV-1", null, "POS Profile caller")
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				logContext: expect.objectContaining({
+					pos_profile: "POS Profile caller",
+				}),
+			}),
+		)
+	})
+})
+
 describe("printWithSilentFallback (post-print failure stops the fallback, COR-FE-10)", () => {
 	it("rethrows for a local receipt instead of opening a duplicate browser copy", async () => {
 		const { PostPrintError } = await import("@/utils/print/transport")

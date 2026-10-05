@@ -644,6 +644,15 @@ export async function silentPrintDoc(
  * The invoice doc it is built from is fetched in PARALLEL with the HTML and a
  * failure there is not the print's problem: the customer copy must still come
  * out exactly as it always did.
+ *
+ * The caller may omit the doctype AND the profile (checkout only knows the
+ * name); the doc itself is then the source of truth: when the first render
+ * fails and the fetched doc names a different doctype, retry the render once
+ * under it — a blind "Sales Invoice" default would otherwise miss POS
+ * Invoices, the exact case where the receipt silently fell back to a
+ * browser/PDF print. The doc's pos_profile then resolves the transport config
+ * and the log row against THIS profile's POS Settings, not whichever row
+ * happens to be the newest on the site.
  */
 export async function silentPrintInvoice(
 	invoiceName,
@@ -663,13 +672,10 @@ export async function silentPrintInvoice(
 	const format = printFormat || DEFAULT_PRINT_FORMAT
 	const resolvedDoctype = doctype || "Sales Invoice"
 
-	await ensureTransportInitialized(posProfile)
-
 	const [htmlResult, docResult] = await Promise.allSettled([
 		fetchServerPrintHTML(resolvedDoctype, invoiceName, format),
 		call("pos_next.api.invoices.get_invoice", { invoice_name: invoiceName }),
 	])
-	if (htmlResult.status === "rejected") throw htmlResult.reason
 	if (docResult.status === "rejected") {
 		log.warn(
 			"Crew slip skipped (invoice doc fetch failed):",
@@ -678,14 +684,25 @@ export async function silentPrintInvoice(
 	}
 	const invoiceDoc = docResult.status === "fulfilled" ? docResult.value : null
 
-	await transportPrint(htmlResult.value, {
+	let effectiveDoctype = resolvedDoctype
+	let html = htmlResult.status === "fulfilled" ? htmlResult.value : null
+	if (!html && invoiceDoc?.doctype && invoiceDoc.doctype !== resolvedDoctype) {
+		effectiveDoctype = invoiceDoc.doctype
+		html = await fetchServerPrintHTML(effectiveDoctype, invoiceName, format)
+	}
+	if (html == null) throw htmlResult.reason
+
+	const effectiveProfile = posProfile || invoiceDoc?.pos_profile || null
+	await ensureTransportInitialized(effectiveProfile)
+
+	await transportPrint(html, {
 		crewHTML: invoiceDoc
 			? buildCrewSlipHTML(invoiceDoc, { dots: effectiveReceiptDots() })
 			: null,
 		logContext: {
-			reference_doctype: resolvedDoctype,
+			reference_doctype: effectiveDoctype,
 			reference_name: invoiceName,
-			pos_profile: posProfile,
+			pos_profile: effectiveProfile,
 		},
 	})
 	log.info(`Silent print sent for ${invoiceName}`)
