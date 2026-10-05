@@ -1662,7 +1662,7 @@ async function onTestPrint() {
 			// Still "TEST": the log row must stay recognisable as a test print
 			// and must not look like a real sale of that invoice.
 			logContext: {
-				reference_doctype: "Sales Invoice",
+				reference_doctype: bundle.invoiceDoc?.doctype || "Sales Invoice",
 				reference_name: "TEST",
 			},
 		})

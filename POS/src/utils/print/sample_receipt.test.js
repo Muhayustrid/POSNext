@@ -31,6 +31,7 @@ beforeEach(() => {
 		if (cmd === "pos_next.api.invoices.get_invoice") {
 			return Promise.resolve({
 				name: "SINV-0009",
+				doctype: "POS Invoice",
 				items: [{ item_name: "Kopi Susu", qty: 1 }],
 			})
 		}
@@ -51,9 +52,10 @@ describe("fetchSampleReceiptBundle (Direct Print sample receipt)", () => {
 		expect(call).toHaveBeenCalledWith("pos_next.api.invoices.get_invoice", {
 			invoice_name: "SINV-0009",
 		})
-		// Same shape silentPrintDoc uses, so the sample IS a real print.
+		// Same shape silentPrintDoc uses, so the sample IS a real print. The
+		// fetch rides the doc's own doctype (POS Invoice mode included).
 		expect(fetchServerPrintHTML).toHaveBeenCalledWith(
-			"Sales Invoice",
+			"POS Invoice",
 			"SINV-0009",
 			"POS Next Receipt",
 		)
@@ -61,6 +63,24 @@ describe("fetchSampleReceiptBundle (Direct Print sample receipt)", () => {
 		expect(bundle.serverHTML).toContain("server")
 		// The doc rides along: the crew slip needs the items, not the HTML.
 		expect(bundle.invoiceDoc.items[0].item_name).toBe("Kopi Susu")
+	})
+
+	it("falls back to Sales Invoice when the doc carries no doctype", async () => {
+		call.mockImplementation((cmd) => {
+			if (cmd === "pos_next.api.invoices.get_invoices") {
+				return Promise.resolve([{ name: "SINV-0009" }])
+			}
+			return Promise.resolve({
+				name: "SINV-0009",
+				items: [{ item_name: "Kopi Susu", qty: 1 }],
+			})
+		})
+		await fetchSampleReceiptBundle("POS Profile juri1", fallbackDoc)
+		expect(fetchServerPrintHTML).toHaveBeenCalledWith(
+			"Sales Invoice",
+			"SINV-0009",
+			"POS Next Receipt",
+		)
 	})
 
 	it("falls back to the local test doc when the profile has no invoices", async () => {

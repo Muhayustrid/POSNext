@@ -249,6 +249,8 @@ export function buildReceiptHTML(invoiceData) {
 							)}</div></div>`
 						: ""
 				}
+				<!-- Brand logo centred above the company header (offline receipt) -->
+				<div style="text-align: center; margin-bottom: 6px;"><img src="/files/ropi-logo.png" style="display: block; margin: 0 auto; position: relative; top: 8px; width: 14mm; height: auto;" alt=""></div>
 				<div class="header">
 					<div class="company-name">${escapeHtml(invoiceData.company || "POS Next")}</div>
 					<div style="font-size: 12px;">${escapeHtml(invoiceData.header || __("TAX INVOICE"))}</div>

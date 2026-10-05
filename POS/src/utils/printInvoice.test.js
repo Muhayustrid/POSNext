@@ -218,6 +218,45 @@ describe("buildReceiptHTML (queue block)", () => {
 		expect(html).toContain(">048<")
 	})
 
+	it("places the brand logo between the queue block and the company header", () => {
+		const html = buildReceiptHTML({ ...doc, pos_queue_number: 48 })
+		const queueStart = html.indexOf('class="queue-number"')
+		const logoStart = html.indexOf("/files/ropi-logo.png")
+		const headerStart = html.indexOf('class="header"')
+		expect(logoStart).toBeGreaterThan(queueStart)
+		expect(logoStart).toBeLessThan(headerStart)
+	})
+
+	it("renders the logo above the header even without a queue number", () => {
+		const html = buildReceiptHTML(doc)
+		const logoStart = html.indexOf("/files/ropi-logo.png")
+		const headerStart = html.indexOf('class="header"')
+		expect(logoStart).toBeGreaterThan(-1)
+		expect(logoStart).toBeLessThan(headerStart)
+	})
+
+	it("sizes the logo physically (mm), so the font-scale knob cannot stretch it", () => {
+		const html = buildReceiptHTML(doc)
+		const i = html.indexOf("/files/ropi-logo.png")
+		const tag = html.slice(i, i + 260)
+		expect(tag).toContain("14mm")
+	})
+
+	it("centers the logo with block + auto margins and nudges it toward the header", () => {
+		// Tailwind preflight sets display:block on images, and html2canvas
+		// clones computed styles — text-align:center alone left the logo
+		// pinned to the frame's left padding on the printed bitmap. The
+		// relative offset closes the visual gap to the company line without
+		// moving the layout (the asset keeps its own transparent padding).
+		const html = buildReceiptHTML(doc)
+		const i = html.indexOf("/files/ropi-logo.png")
+		const tag = html.slice(i, i + 260)
+		expect(tag).toContain("display: block")
+		expect(tag).toContain("margin: 0 auto")
+		expect(tag).toContain("position: relative")
+		expect(tag).toContain("top: 8px")
+	})
+
 	it("renders no queue block without a number", () => {
 		expect(buildReceiptHTML(doc)).not.toContain("queue-number")
 	})
@@ -520,8 +559,10 @@ describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {
 
 	it("escapes item names, customer, company, header/footer, serials and payment labels", () => {
 		const html = buildReceiptHTML(evil)
-		// no injected tag survives anywhere in the receipt
-		expect(html).not.toContain("<img")
+		// No injected tag survives anywhere in the receipt. The only
+		// legitimate <img> is the static brand logo, so the assertion
+		// targets the injection marker itself.
+		expect(html).not.toContain("<img src=x")
 		expect(html).not.toContain("<script")
 		expect(html).not.toContain("<b>")
 		// the raw strings survive as text
@@ -534,7 +575,7 @@ describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {
 
 	it("escapes the popup document title as well", () => {
 		const html = buildReceiptDocumentHTML(evil, { dots: 384 })
-		expect(html).not.toContain("<img")
+		expect(html).not.toContain("<img src=x")
 		expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;")
 	})
 

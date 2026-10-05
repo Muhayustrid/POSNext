@@ -53,9 +53,16 @@ export async function fetchSampleReceiptBundle(posProfile, fallbackDoc) {
 		})
 		if (!invoiceDoc) throw new Error(`could not read ${last.name}`)
 
+		// The doc knows its own doctype (the site-wide invoice mode decides:
+		// POS Invoice vs Sales Invoice); a blind "Sales Invoice" would make
+		// the sample silently fall back to the local test receipt on POS
+		// Invoice sites — the exact case where Test Print must still prove
+		// the real server template.
+		const doctype = invoiceDoc.doctype || last.doctype || "Sales Invoice"
+
 		// Same fetch, wrapper and error contract as a real silent print.
 		const serverHTML = await fetchServerPrintHTML(
-			"Sales Invoice",
+			doctype,
 			last.name,
 			SAMPLE_PRINT_FORMAT,
 		)
