@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger"
 import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
 import { offlineWorker } from "@/utils/offline/workerClient"
+import { isAllocationSnapshot } from "@/utils/packageQuote"
 import {
 	getTransport,
 	initTransportFromServer,
@@ -205,13 +206,29 @@ export function buildReceiptHTML(invoiceData) {
 			const qty = item.quantity || item.qty || 0
 			const displayRate = item.price_list_rate || item.rate || 0
 			const subtotal = qty * displayRate
+			// Allocated packages move the money to the component rows, leaving the
+			// package line at rate 0: print it as a group header without a price
+			// instead of the meaningless "1 × 0". Legacy package lines (no
+			// allocation marker) render exactly as before, a free package included.
+			const isZeroPackageLine =
+				item.pos_package_role === "Package" &&
+				!displayRate &&
+				isAllocationSnapshot(item.pos_package_snapshot)
 			return `
 						<div class="item-row">
-							<div class="item-name">${escapeHtml(item.item_name || item.item_code)} ${isFree ? __("(FREE)") : ""}</div>
-							<div class="item-details">
+							<div class="item-name">${
+								isZeroPackageLine
+									? `<strong>${escapeHtml(item.item_name || item.item_code)}</strong>`
+									: `${escapeHtml(item.item_name || item.item_code)} ${isFree ? __("(FREE)") : ""}`
+							}</div>
+							${
+								isZeroPackageLine
+									? ""
+									: `<div class="item-details">
 								<span>${escapeHtml(qty)} × ${formatCurrency(displayRate)}</span>
 								<span><strong>${formatCurrency(subtotal)}</strong></span>
-							</div>
+							</div>`
+							}
 							${
 								hasDiscount
 									? `<div class="item-discount"><span>${__(

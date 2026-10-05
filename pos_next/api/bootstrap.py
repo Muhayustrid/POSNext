@@ -31,6 +31,7 @@ from frappe.query_builder.functions import Coalesce
 from frappe.utils import cint
 
 from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
+from pos_next.api.packages import _package_allocation_enabled
 from pos_next.api.settings_resolver import get_effective_pos_settings
 from pos_next.invoice_type import get_pos_invoice_doctype
 
@@ -217,6 +218,10 @@ def _get_pos_settings(pos_profile_doc):
 	allow_negative_stock = cint(
 		frappe.db.get_single_value("POS Next Global Settings", "allow_negative_stock") or 0
 	)
+	# Global package-allocation switch (same single) so the offline quote
+	# mirror can split component rates when the toggle is on. Read through the
+	# same schema-guarded helper packages.py uses, so both feeds always agree.
+	package_allocation = cint(_package_allocation_enabled())
 
 	def _resolved_defaults():
 		base = DEFAULT_POS_SETTINGS.copy()
@@ -247,6 +252,7 @@ def _get_pos_settings(pos_profile_doc):
 		settings["queue_enabled"] = bool(settings.get("enable_pos_queue"))
 		settings["invoice_type"] = invoice_type
 		settings["allow_negative_stock"] = allow_negative_stock
+		settings["enable_pos_package_allocation"] = package_allocation
 
 		return settings
 	except Exception:
@@ -254,6 +260,7 @@ def _get_pos_settings(pos_profile_doc):
 		settings = _resolved_defaults()
 		settings["invoice_type"] = invoice_type
 		settings["allow_negative_stock"] = allow_negative_stock
+		settings["enable_pos_package_allocation"] = package_allocation
 		return settings
 
 

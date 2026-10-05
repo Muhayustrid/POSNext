@@ -13,11 +13,12 @@
 
 import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
-import { isOffline } from "@/utils/offline/offlineState";
+import { getCachedItem, isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { quotePackageLocally, selectionsToChoices } from "@/utils/packageQuote";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { usePOSSettingsStore } from "./posSettings";
 
 const log = logger.create("POSPackages");
 
@@ -112,6 +113,51 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 	}
 
 	/**
+	 * Price-list rates for every component the package can place, keyed
+	 * item_code -> { uom: rate } — the offline stand-in for the server's
+	 * `_component_price_list_rates` lookup. Read from IndexedDB, where items
+	 * are cached with their `uom_prices` map. A component missing from the
+	 * cache contributes no price and routes the allocation to its weight
+	 * fallback, exactly like a price list that does not carry it.
+	 *
+	 * @param {Object} pkg - Package definition
+	 * @returns {Promise<Object<string, Object<string, number>>>}
+	 */
+	async function componentPriceListRates(pkg) {
+		const codes = new Set();
+		for (const row of pkg?.items || []) codes.add(row.item_code);
+		for (const row of pkg?.options || []) codes.add(row.item_code);
+
+		const rates = {};
+		await Promise.all(
+			[...codes].map(async (itemCode) => {
+				const item = await getCachedItem(itemCode);
+				if (item?.uom_prices) rates[itemCode] = item.uom_prices;
+			})
+		);
+		return rates;
+	}
+
+	/**
+	 * Price a selection locally, applying the global allocation toggle the
+	 * same way the server does.
+	 *
+	 * @param {Object} pkg - Package definition
+	 * @param {Object<string, Object<string, number>>} selections - group_key -> option_id -> qty
+	 * @returns {Promise<Object>} Local quote
+	 */
+	async function quoteLocally(pkg, selections) {
+		const settingsStore = usePOSSettingsStore();
+		const allocate = settingsStore.packageAllocationEnabled;
+		if (!allocate) return quotePackageLocally(pkg, selections);
+
+		return quotePackageLocally(pkg, selections, {
+			allocate: true,
+			priceListRates: await componentPriceListRates(pkg),
+		});
+	}
+
+	/**
 	 * Price a selection. Uses the server when online so the preview matches what
 	 * the invoice will charge; falls back to the local mirror when offline.
 	 *
@@ -121,7 +167,7 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 	 * @returns {Promise<{valid: boolean, error: string|null, total: number, lines: Array, snapshot: Object}>}
 	 */
 	async function quote(pkg, selections, posProfile) {
-		const local = quotePackageLocally(pkg, selections);
+		const local = await quoteLocally(pkg, selections);
 
 		// Local validation failed — no point asking the server the same question.
 		if (!local.valid || isOffline()) return local;
@@ -135,6 +181,8 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 			const result = response?.message || response;
 			if (!result) return local;
 
+			// Server-authoritative: an allocation-mode quote comes back with the
+			// component rates already split, exactly as the invoice will charge.
 			return {
 				valid: true,
 				error: null,

@@ -1386,13 +1386,19 @@
 									</div>
 
 									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
+									<span
+										v-if="!isZeroPricePackageParent(item)"
+										class="text-[10px] sm:text-xs font-bold text-gray-700"
+									>
 										{{ formatCurrency(item.rate) }}
 									</span>
 								</div>
 
 								<!-- Item Total -->
-								<div class="ms-auto text-end flex-shrink-0">
+								<div
+									v-if="!isZeroPricePackageParent(item)"
+									class="ms-auto text-end flex-shrink-0"
+								>
 									<div
 										class="text-xs sm:text-sm font-bold text-blue-600 leading-none"
 									>
@@ -1431,6 +1437,12 @@
 							<span class="flex-1 truncate">{{
 								component.item_name || component.item_code
 							}}</span>
+							<!-- Allocated component price (0 in legacy mode -> hidden). -->
+							<span
+								v-if="component.rate > 0"
+								class="font-semibold text-gray-500 flex-shrink-0"
+								>{{ formatCurrency(component.rate) }}</span
+							>
 							<span class="font-semibold text-gray-500 flex-shrink-0"
 								>x{{ formatQuantity(component.quantity) }}</span
 							>
@@ -1600,7 +1612,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { PACKAGE_ITEM_ROLE } from "@/utils/packageQuote";
+import { PACKAGE_ITEM_ROLE, PACKAGE_ROLE, isAllocationSnapshot } from "@/utils/packageQuote";
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
@@ -1745,6 +1757,21 @@ const topLevelItems = computed(() =>
 function packageComponents(instance) {
 	return props.items.filter(
 		(item) => item.package_instance === instance && item.package_role === PACKAGE_ITEM_ROLE
+	);
+}
+
+/**
+ * Allocated packages move the price to their component rows, leaving the
+ * package line at 0 — it renders as a group header without money. Legacy
+ * package lines (no allocation marker in the snapshot) are untouched, a free
+ * zero-price legacy package included.
+ */
+function isZeroPricePackageParent(item) {
+	return (
+		item.package_role === PACKAGE_ROLE &&
+		!item.rate &&
+		!(item.amount || 0) &&
+		isAllocationSnapshot(item.package_snapshot)
 	);
 }
 

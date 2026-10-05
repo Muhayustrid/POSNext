@@ -207,6 +207,77 @@ describe("silentPrintInvoiceFromDoc embeds the effective paper width", () => {
 	})
 })
 
+describe("buildReceiptHTML (package allocation rows, Fase 2)", () => {
+	const allocatedParent = {
+		item_code: "PKG-1",
+		item_name: "Paket Hemat",
+		quantity: 1,
+		rate: 0,
+		price_list_rate: 0,
+		pos_package_role: "Package",
+		pos_package_snapshot: JSON.stringify({
+			allocation: { mode: "proportional", precision: 2 },
+		}),
+	}
+	const component = {
+		item_code: "COLA",
+		item_name: "Cola",
+		quantity: 2,
+		rate: 4000,
+		price_list_rate: 4000,
+		pos_package_role: "Package Item",
+	}
+
+	it("prints an allocated parent as a header without the meaningless 1 × 0", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			items: [allocatedParent, component],
+			grand_total: 8000,
+			paid_amount: 8000,
+			payments: [{ mode_of_payment: "Cash", amount: 8000 }],
+		})
+
+		expect(html).toContain("<strong>Paket Hemat</strong>")
+		expect(html).not.toContain("1 × 0")
+		// Components keep their allocated prices.
+		expect(html).toContain("2 × 4.000")
+		expect(html).toContain("8.000")
+	})
+
+	it("keeps a legacy price-carrying package line exactly as before", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			items: [
+				{
+					item_code: "PKG-1",
+					item_name: "Legacy Paket",
+					quantity: 1,
+					rate: 23000,
+					price_list_rate: 23000,
+					pos_package_role: "Package",
+				},
+			],
+			grand_total: 23000,
+			paid_amount: 23000,
+			payments: [{ mode_of_payment: "Cash", amount: 23000 }],
+		})
+
+		expect(html).toContain("1 × 23.000")
+		expect(html).toContain("Legacy Paket")
+	})
+
+	it("keeps a zero-price legacy package row (no marker) as before", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			items: [{ ...allocatedParent, item_name: "Gratis", pos_package_snapshot: null }],
+		})
+
+		// No allocation marker -> legacy rendering, price row included.
+		expect(html).toContain("1 × 0")
+		expect(html).not.toContain("<strong>Gratis</strong>")
+	})
+})
+
 describe("buildReceiptHTML (queue block)", () => {
 	it("renders the queue block first when pos_queue_number is set", () => {
 		const html = buildReceiptHTML({ ...doc, pos_queue_number: 48 })
@@ -537,8 +608,7 @@ describe("printWithSilentFallback (post-print failure stops the fallback, COR-FE
 	})
 })
 
-describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {
-	const evil = {
+describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {	const evil = {
 		...doc,
 		name: 'SINV-1"><img src=x onerror=alert(1)>',
 		company: "<script>alert(1)</script>",

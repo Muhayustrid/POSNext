@@ -220,3 +220,8 @@ export function roundCurrency(value) {
 export function roundFloat(value) {
 	return round(value, settings.float);
 }
+
+/** Round using an explicit precision (mirror of frappe flt(value, precision)) */
+export function roundToPrecision(value, precision) {
+	return round(value, precision);
+}

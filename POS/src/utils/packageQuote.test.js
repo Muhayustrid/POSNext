@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 
 import {
+	isAllocationSnapshot,
 	pickedQty,
 	quotePackageLocally,
 	selectionsToChoices,
@@ -155,5 +156,80 @@ describe("selection helpers", () => {
 				],
 			},
 		])
+	})
+})
+
+describe("quotePackageLocally allocation mode (mirror of allocate_package_rates)", () => {
+	it("splits the total across components by price-list value and marks the snapshot", () => {
+		const selections = {
+			aksesori: { backpack: 1 },
+			voucher: { pulsa: 2, listrik: 1 },
+		}
+		// Rate of each component's catalog row, as the offline mirror looks it up.
+		const priceListRates = {
+			BACKPACK: { Nos: 200_000 },
+			PULSA: { Nos: 100_000 },
+			LISTRIK: { Nos: 100_000 },
+		}
+
+		const quote = quotePackageLocally(pkg, selections, {
+			allocate: true,
+			priceListRates,
+		})
+
+		expect(quote.valid).toBe(true)
+		// Parent drops to zero; components carry the split.
+		expect(quote.lines[0].rate).toBe(0)
+		expect(quote.lines[1].rate).toBeGreaterThan(0)
+
+		// Invariant: sum(rate × qty) == total (the server's exact-sum check).
+		const allocated = quote.lines
+			.slice(1)
+			.reduce((sum, line) => sum + line.rate * line.qty, 0)
+		expect(allocated).toBeCloseTo(quote.total, 6)
+		expect(quote.snapshot.allocation).toEqual({
+			mode: "proportional",
+			precision: 2,
+		})
+	})
+
+	it("falls back to quantity weights when the cache carries no price", () => {
+		const quote = quotePackageLocally(
+			{ ...pkg, base_price: 100, groups: [], options: [], items: pkg.items },
+			{},
+			{ allocate: true, priceListRates: null }
+		)
+
+		expect(quote.valid).toBe(true)
+		// One included line only: it absorbs the whole total.
+		expect(quote.lines[0].rate).toBe(0)
+		expect(quote.lines[1].rate).toBe(100)
+		expect(quote.snapshot.allocation.mode).toBe("proportional")
+	})
+
+	it("stays legacy byte-for-byte when allocation is off (default)", () => {
+		const selections = { aksesori: { headphone: 1 }, voucher: {} }
+
+		const quote = quotePackageLocally(pkg, selections)
+
+		expect(quote.lines[0].rate).toBe(12_350_000)
+		expect(quote.snapshot.allocation).toBeUndefined()
+		expect(quote.lines.slice(1).every((line) => line.rate === 0)).toBe(true)
+	})
+})
+
+describe("isAllocationSnapshot (shared marker check)", () => {
+	it("recognizes the server-written marker in object and JSON-string form", () => {
+		const marker = { allocation: { mode: "proportional", precision: 2 } }
+		expect(isAllocationSnapshot(marker)).toBe(true)
+		expect(isAllocationSnapshot(JSON.stringify(marker))).toBe(true)
+	})
+
+	it("rejects legacy snapshots, malformed JSON and empty values", () => {
+		expect(isAllocationSnapshot({ package: "P" })).toBe(false)
+		expect(isAllocationSnapshot('{"package": "P"}')).toBe(false)
+		expect(isAllocationSnapshot("{not json")).toBe(false)
+		expect(isAllocationSnapshot(null)).toBe(false)
+		expect(isAllocationSnapshot(undefined)).toBe(false)
 	})
 })

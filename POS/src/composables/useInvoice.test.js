@@ -180,3 +180,85 @@ describe("checkout payload apply_discount_on (A1)", () => {
 		expect(invoicePayloads[0].apply_discount_on).toBe("Grand Total")
 	})
 })
+
+// Fase 2: an allocation-mode package keeps its allocated component rates on
+// the submitted rows, with the parent as a zero line. Tax-inclusive must not
+// touch the component backend rate (the gross basis matches the package
+// price), and the linkage fields must survive formatting.
+describe("package allocation rows (Fase 2)", () => {
+	const allocationQuote = {
+		valid: true,
+		error: null,
+		total: 23000,
+		lines: [
+			{
+				item_code: "PKG-1",
+				item_name: "Paket",
+				qty: 1,
+				rate: 0,
+				role: "Package",
+			},
+			{
+				item_code: "COLA",
+				item_name: "Cola",
+				qty: 2,
+				uom: "Nos",
+				rate: 4000,
+				role: "Package Item",
+				is_stock_item: 1,
+			},
+			{
+				item_code: "CHIPS",
+				item_name: "Chips",
+				qty: 1,
+				uom: "Nos",
+				rate: 15000,
+				role: "Package Item",
+				is_stock_item: 1,
+			},
+		],
+		snapshot: {
+			package: "PKG-1",
+			package_name: "Paket",
+			total: 23000,
+			allocation: { mode: "proportional", precision: 2 },
+		},
+	}
+	const pkg = { name: "PKG-1", package_name: "Paket" }
+
+	function setupAllocatedPackage() {
+		const invoice = useInvoice()
+		invoice.addPackage(allocationQuote, pkg)
+		invoice.rebuildIncrementalCache()
+		return invoice
+	}
+
+	it("submits parent at 0 and components at their allocated rates", () => {
+		const invoice = setupAllocatedPackage()
+		const rows = invoice.formatItemsForSubmission(invoice.invoiceItems.value)
+
+		expect(rows.map((r) => [r.item_code, r.rate, r.qty, r.pos_package_role])).toEqual([
+			["PKG-1", 0, 1, "Package"],
+			["COLA", 4000, 2, "Package Item"],
+			["CHIPS", 15000, 1, "Package Item"],
+		])
+		expect(JSON.parse(rows[0].pos_package_snapshot).allocation).toEqual({
+			mode: "proportional",
+			precision: 2,
+		})
+		// Component rows carry the linkage; only the parent carries the snapshot.
+		expect(rows[1].pos_package_instance).toBe(rows[0].pos_package_instance)
+		expect(rows[1].pos_package_snapshot).toBeNull()
+	})
+
+	it("keeps the allocated gross rate in tax-inclusive mode", () => {
+		const invoice = setupAllocatedPackage()
+		invoice.setTaxInclusive(true)
+
+		const rows = invoice.formatItemsForSubmission(invoice.invoiceItems.value)
+
+		expect(rows[0].rate).toBe(0)
+		expect(rows[1].rate).toBe(4000)
+		expect(rows[2].rate).toBe(15000)
+	})
+})

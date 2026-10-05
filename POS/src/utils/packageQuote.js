@@ -6,15 +6,40 @@
  * validate, so this result is a preview — never the authority.
  *
  * Keep this file and `packages.py` in lockstep: same validation order, same
- * price formula `base_price + Σ(price_adjustment × qty)`.
+ * price formula `base_price + Σ(price_adjustment × qty)`, and — when the
+ * caller passes `allocate` — the same proportional split of the total across
+ * the component lines with the `allocation` snapshot marker.
  *
  * @module packageQuote
  */
 
-import { roundCurrency } from "@/utils/currency";
+import {
+	ALLOCATION_MODE,
+	allocatePackageRates,
+	componentPriceListRate,
+} from "@/utils/packageAllocation";
+import { getPrecision, roundCurrency } from "@/utils/currency";
 
 export const PACKAGE_ROLE = "Package";
 export const PACKAGE_ITEM_ROLE = "Package Item";
+
+/**
+ * True when a package snapshot records an allocation-mode quote — the same
+ * marker `packages.py:quote()` writes. Accepts both shapes a snapshot travels
+ * in: the object on a fresh quote, the JSON string on a cart/draft/server row.
+ *
+ * @param {Object|string|null} snapshot
+ * @returns {boolean}
+ */
+export function isAllocationSnapshot(snapshot) {
+	if (!snapshot) return false;
+	if (typeof snapshot === "object") return snapshot.allocation?.mode === ALLOCATION_MODE;
+	try {
+		return JSON.parse(snapshot)?.allocation?.mode === ALLOCATION_MODE;
+	} catch {
+		return false;
+	}
+}
 
 /**
  * Total units picked in a group.
@@ -65,11 +90,27 @@ export function validateGroup(group, options, picks) {
 /**
  * Price a package selection locally.
  *
+ * With `allocate` on, the total is split across the component lines exactly
+ * like the server (`allocate_package_rates`): weights come from each
+ * component's price-list rate — supplied by the caller as
+ * `priceListRates[item_code] = { [uom]: rate }`, mirroring the server's
+ * price-list lookup — falling back to quantity weights when the cache carries
+ * no price, and the snapshot gets the same `allocation` marker. Off (the
+ * default) the result stays the legacy shape: full price on the parent,
+ * components at 0, no marker.
+ *
  * @param {Object} pkg - Package definition from `pos_next.api.packages.get_packages`
  * @param {Object<string, Object<string, number>>} selections - group_key -> option_id -> qty
+ * @param {Object} [options]
+ * @param {boolean} [options.allocate=false] - Apply proportional allocation
+ * @param {Object} [options.priceListRates=null] - item_code -> uom -> price-list rate
  * @returns {{valid: boolean, error: string|null, total: number, lines: Array<Object>, snapshot: Object}}
  */
-export function quotePackageLocally(pkg, selections = {}) {
+export function quotePackageLocally(
+	pkg,
+	selections = {},
+	{ allocate = false, priceListRates = null } = {}
+) {
 	const invalid = (error) => ({ valid: false, error, total: 0, lines: [], snapshot: null });
 
 	if (!pkg) return invalid(__("Package not found."));
@@ -129,31 +170,60 @@ export function quotePackageLocally(pkg, selections = {}) {
 
 	total = roundCurrency(total);
 
+	// With no component rows there is nowhere to move the money; the parent
+	// keeps it and the snapshot stays legacy-shaped (no allocation marker).
+	const allocationApplied = Boolean(allocate && componentLines.length);
+	const allocationPrecision = getPrecision().currency;
+	let parentRate = total;
+	if (allocationApplied) {
+		const rates = allocatePackageRates(
+			total,
+			componentLines.map((line) => ({
+				qty_per_package: line.qty,
+				price_list_rate: componentPriceListRate(
+					priceListRates ? priceListRates[line.item_code] : null,
+					line.uom
+				),
+			})),
+			1,
+			allocationPrecision
+		);
+		componentLines.forEach((line, index) => {
+			line.rate = rates[index];
+		});
+		parentRate = 0;
+	}
+
 	const parentLine = {
 		item_code: pkg.parent_item,
 		item_name: pkg.package_name,
 		qty: 1,
-		rate: total,
+		rate: parentRate,
 		role: PACKAGE_ROLE,
 	};
+
+	const snapshot = {
+		package: pkg.name,
+		package_name: pkg.package_name,
+		base_price: Number(pkg.base_price) || 0,
+		total,
+		selections: snapshotSelections,
+		included_items: (pkg.items || []).map((row) => ({
+			item_code: row.item_code,
+			item_name: row.item_name,
+			qty: Number(row.qty) || 0,
+		})),
+	};
+	if (allocationApplied) {
+		snapshot.allocation = { mode: ALLOCATION_MODE, precision: allocationPrecision };
+	}
 
 	return {
 		valid: true,
 		error: null,
 		total,
 		lines: [parentLine, ...componentLines],
-		snapshot: {
-			package: pkg.name,
-			package_name: pkg.package_name,
-			base_price: Number(pkg.base_price) || 0,
-			total,
-			selections: snapshotSelections,
-			included_items: (pkg.items || []).map((row) => ({
-				item_code: row.item_code,
-				item_name: row.item_name,
-				qty: Number(row.qty) || 0,
-			})),
-		},
+		snapshot,
 	};
 }
 
