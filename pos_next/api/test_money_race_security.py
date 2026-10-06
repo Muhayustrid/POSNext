@@ -95,9 +95,20 @@ class TestWalletDoubleSpend(IntegrationTestCase):
 		cls.mop = _make_wallet_mop(cls.company)
 		cls.item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1},
+			filters={
+				"disabled": 0,
+				"is_sales_item": 1,
+				# batch/serial items need a bundle on every stock transaction
+				# and a leftover fixture with an Item Price would make the
+				# invoice's rate=10 read as a discount (discount-code gate).
+				# Deterministic oldest pick, same rationale as the other
+				# shared-site pickers.
+				"has_batch_no": 0,
+				"has_serial_no": 0,
+			},
 			pluck="name",
 			limit=1,
+			order_by="creation asc",
 		)
 		if not cls.item:
 			raise unittest.SkipTest("no sales item on site")
@@ -133,7 +144,7 @@ class TestWalletDoubleSpend(IntegrationTestCase):
 				"is_pos": 1,
 				"posting_date": today(),
 				"selling_price_list": price_list,
-				"items": [{"item_code": self.item[0], "qty": 1, "rate": 10}],
+				"items": [{"item_code": self.item[0], "qty": 1, "rate": 10, "price_list_rate": 10}],
 				"payments": [{"mode_of_payment": self.mop, "amount": amount}],
 			}
 		)

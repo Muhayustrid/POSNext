@@ -14,6 +14,9 @@ from pos_next.api.shifts import (
 	get_session_summary,
 	get_shift_dashboard,
 )
+from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
+	make_closing_shift_from_opening,
+)
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
 	get_default_customer,
@@ -54,11 +57,18 @@ def _make_item(code, rate):
 		return item_code
 	name = make_test_item(code, "Nos", is_stock_item=0)
 	item_code = frappe.db.get_value("Item", name, "item_code")
-	price_list = frappe.db.get_value("Price List", {"selling": 1}, "name")
-	# make_test_item may return an existing (renamed) item — never re-price it
-	if not frappe.db.exists(
-		"Item Price", {"item_code": item_code, "price_list": price_list, "price_list_rate": rate}
-	):
+	# deterministic price-list choice: an unordered first row depends on
+	# whatever Price Lists other runs left on this shared site (e.g. the
+	# switched fixture "_SESSUM USD Selling"). Creation order anchors the
+	# fixture to the site's original list.
+	price_list = frappe.db.get_value(
+		"Price List", {"selling": 1}, "name", order_by="creation asc"
+	)
+	# make_test_item may return an existing (renamed) item — never re-price it.
+	# ERPNext treats any second Item Price on the same (item, price list,
+	# UOM, dates) as a duplicate regardless of rate, so only skip when the
+	# list already carries ANY price for this item.
+	if not frappe.db.exists("Item Price", {"item_code": item_code, "price_list": price_list}):
 		manual_item_price(item_code, price_list, price_list_rate=rate)
 	return item_code
 
@@ -214,7 +224,7 @@ class TestSessionSummary(IntegrationTestCase):
 		frappe.db.set_value("Item", cls.item_b, "item_group", cls.other_group)
 		cls.shift_group = cls._make_shift_group()
 		frappe.db.set_value("POS Profile", cls.pos_profile, "pos_profile_group", cls.shift_group)
-		cls.opening_shift = cls._make_opening_shift(opening_cash=100000)
+		cls.opening_shift = cls._make_fixture_shift(opening_cash=100000)
 		cls._make_invoice([{"item": cls.item_a, "qty": 2, "rate": 1000}], paid=2000)
 		cls._make_invoice([{"item": cls.item_b, "qty": 2, "rate": 250}], paid=500)
 		cls._make_invoice(
@@ -229,33 +239,123 @@ class TestSessionSummary(IntegrationTestCase):
 			],
 			paid=50000,
 		)
+		# the fixture drawer must be free again: the guard admits one OPEN
+		# shift per profile and every per-test shift opens on this profile.
+		# The recap reads closed shifts the same way, so the fixture's
+		# numbers are unaffected.
+		cls._close_shift(cls.opening_shift)
 		frappe.db.commit()
 
 	@classmethod
 	def tearDownClass(cls):
 		frappe.set_user("Administrator")
+		# the fixture shift was committed (unlike everything tests create): a
+		# leftover OPEN shift here would trip the single-open-shift guard on
+		# the next run of this or any other shift module
+		if getattr(cls, "opening_shift", None) and frappe.db.exists(
+			"POS Opening Shift", cls.opening_shift
+		):
+			try:
+				cls._purge_opening_shift(cls.opening_shift)
+				frappe.db.commit()
+			except Exception:
+				frappe.db.rollback()
 		super().tearDownClass()
 
 	@classmethod
+	def _make_fixture_shift(cls, opening_cash=0):
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"company": cls.company,
+				"pos_profile": cls.pos_profile,
+				"user": cls.user,
+				"period_start_date": frappe.utils.now_datetime(),
+				"balance_details": [{"mode_of_payment": cls.cash_mode, "amount": opening_cash}],
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		doc.submit()
+		return doc.name
+
+	@classmethod
+	def _close_shift(cls, shift):
+		# a real closing: the single-open-shift guard admits one OPEN shift per
+		# profile, and the period recap counts closed shifts just the same
+		# (its shift filter is docstatus-only)
+		opening = frappe.get_doc("POS Opening Shift", shift).as_dict()
+		closing = make_closing_shift_from_opening(json.dumps(opening, default=str))
+		doc = frappe.get_doc(closing)
+		doc.insert(ignore_permissions=True)
+		doc.submit()
+
 	def _make_opening_shift(
-		cls, opening_cash=0, pos_profile=None, extra_cash=None, extra_cash_amount=0, user=None
+		self, opening_cash=0, pos_profile=None, extra_cash=None, extra_cash_amount=0, user=None
 	):
-		details = [{"mode_of_payment": cls.cash_mode, "amount": opening_cash}]
+		details = [{"mode_of_payment": self.cash_mode, "amount": opening_cash}]
 		if extra_cash:
 			details.append({"mode_of_payment": extra_cash, "amount": extra_cash_amount})
 		doc = frappe.get_doc(
 			{
 				"doctype": "POS Opening Shift",
-				"company": cls.company,
-				"pos_profile": pos_profile or cls.pos_profile,
-				"user": user or cls.user,
+				"company": self.company,
+				"pos_profile": pos_profile or self.pos_profile,
+				"user": user or self.user,
 				"period_start_date": frappe.utils.now_datetime(),
 				"balance_details": details,
 			}
 		)
 		doc.insert(ignore_permissions=True)
 		doc.submit()
+		# per-method cleanup: only one open shift per profile is allowed now,
+		# leftovers from an earlier method would trip the doctype guard
+		self.addCleanup(self._purge_opening_shift, doc.name)
 		return doc.name
+
+	@staticmethod
+	def _purge_opening_shift(name):
+		# cleanup may run while a test left a restricted user active: cancel
+		# needs the cancel perm, so purge as Administrator (terminal action).
+		# The closing↔invoice↔shift link triangle must be broken at the DB
+		# level first — the submitted links otherwise block every cancel
+		# (clears the same fields POSClosingShift.on_cancel clears).
+		frappe.set_user("Administrator")
+
+		def _purge_doc(doctype, docname):
+			if not docname or not frappe.db.exists(doctype, docname):
+				return
+			doc = frappe.get_doc(doctype, docname)
+			if doc.docstatus == 1:
+				doc.cancel()
+			frappe.delete_doc(doctype, docname, force=1, ignore_permissions=True)
+
+		if not frappe.db.exists("POS Opening Shift", name):
+			return
+		invoices = [("Sales Invoice", inv) for inv in frappe.get_all(
+			"Sales Invoice", filters={"posa_pos_opening_shift": name, "docstatus": 1}, pluck="name"
+		)] + [("POS Invoice", inv) for inv in frappe.get_all(
+			"POS Invoice", filters={"posa_pos_opening_shift": name, "docstatus": 1}, pluck="name"
+		)]
+		closings = frappe.get_all(
+			"POS Closing Shift", filters={"pos_opening_shift": name, "docstatus": 1}, pluck="name"
+		)
+		for doctype, inv in invoices:
+			if frappe.db.has_column(doctype, "pos_closing_entry"):
+				frappe.db.set_value(doctype, inv, "pos_closing_entry", None)
+		frappe.db.set_value("POS Opening Shift", name, "pos_closing_shift", None)
+		# closing first: its pos_transactions child rows link the invoices and
+		# would block every invoice cancel below
+		for closing in closings:
+			_purge_doc("POS Closing Shift", closing)
+		for doctype, inv in invoices:
+			for pe in frappe.get_all(
+				"Payment Entry Reference",
+				filters={"reference_name": inv, "docstatus": 1},
+				pluck="parent",
+			):
+				_purge_doc("Payment Entry", pe)
+			_purge_doc(doctype, inv)
+		_purge_doc("POS Opening Shift", name)
 
 	@classmethod
 	def _ensure_profile_user(cls, profile, user):
@@ -653,8 +753,11 @@ class TestSessionSummary(IntegrationTestCase):
 		debtors_parent = frappe.db.get_value(
 			"Account", cls.debtors_account, "parent_account"
 		)
-		# a customer with prior IDR entries cannot be invoiced in USD
-		usd_customer = "_SESSUM USD Customer"
+		# a customer with prior IDR entries cannot be invoiced in USD — and a
+		# fixed-name shared customer accumulates entries from other modules'
+		# runs on this shared site (medium-gates posted INR invoices on it).
+		# Fresh per run (same uuid pattern as the test profiles below).
+		usd_customer = f"_SESSUM USD Customer {uuid.uuid4().hex[:6]}"
 		if not frappe.db.exists("Customer", usd_customer):
 			frappe.get_doc(
 				{"doctype": "Customer", "customer_name": usd_customer, "customer_type": "Individual"}
@@ -778,7 +881,11 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(summary["packages"], [])
 
 	def test_shift_info_group_cashier_and_open_closing(self):
-		summary = get_session_summary(self.opening_shift)
+		# a dedicated OPEN shift: the fixture shift is closed (the guard allows
+		# one open shift per profile) and the open-shift semantics asserted
+		# here — group claimed, no closing source — need a live drawer
+		shift = self._make_opening_shift(opening_cash=0)
+		summary = get_session_summary(shift)
 		self.assertEqual(
 			summary["cashier"], frappe.db.get_value("User", self.user, "full_name")
 		)
@@ -1003,8 +1110,11 @@ class TestSessionSummary(IntegrationTestCase):
 	def test_period_sums_every_cashiers_shift(self):
 		before = self._today_period()
 		shift_a = self._make_opening_shift(opening_cash=3000)
-		shift_b = self._make_opening_shift(opening_cash=4000, user=self.second_cashier)
 		self._make_invoice_on(shift_a, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=1000)
+		# sequential handover: one OPEN shift per profile is the guard, and the
+		# period recap counts the closed shift just the same
+		self._close_shift(shift_a)
+		shift_b = self._make_opening_shift(opening_cash=4000, user=self.second_cashier)
 		self._make_invoice_on(shift_b, [{"item": self.item_b, "qty": 2, "rate": 250}], paid=500)
 
 		after = self._today_period()
@@ -1325,6 +1435,10 @@ class TestPartialPaymentDrawerMatching(IntegrationTestCase):
 
 	@staticmethod
 	def _purge_opening_shift(name):
+		# double-guarded: both the helper's addCleanup and tearDown may purge
+		# the same shift, and one of the two runs after it is already gone
+		if not frappe.db.exists("POS Opening Shift", name):
+			return
 		doc = frappe.get_doc("POS Opening Shift", name)
 		if doc.docstatus == 1:
 			doc.cancel()
@@ -1343,6 +1457,9 @@ class TestPartialPaymentDrawerMatching(IntegrationTestCase):
 		)
 		doc.insert(ignore_permissions=True)
 		doc.submit()
+		# per-method cleanup: only one open shift per profile is allowed now,
+		# leftovers from an earlier method would trip the doctype guard
+		self.addCleanup(self._purge_opening_shift, doc.name)
 		return doc.name
 
 	def _make_zero_paid_invoice(self, shift, rate):

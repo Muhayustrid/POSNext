@@ -87,7 +87,7 @@ class TestMediumGatesSecurity(FrappeTestCase):
 		)
 		cls.item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1, "has_batch_no": 0, "has_serial_no": 0},
 			pluck="name",
 			limit=1,
 		)
@@ -243,6 +243,9 @@ class TestMediumGatesSecurity(FrappeTestCase):
 		).insert(ignore_permissions=True)
 		shift.reload()
 		shift.submit()
+		# per-method cleanup: only one open shift per profile is allowed now,
+		# leftovers from an earlier method would trip the doctype guard
+		self.addCleanup(self._remove_shift, shift)
 
 		frappe.set_user(user)
 		draft = update_invoice(self._payload(payment_amount=payment_amount))
@@ -258,6 +261,16 @@ class TestMediumGatesSecurity(FrappeTestCase):
 			data=json.dumps({}),
 		)
 		return draft["name"]
+
+	def _remove_shift(self, shift):
+		# tolerant cleanup: one leftover must never abort the remaining cleanup
+		try:
+			doc = frappe.get_doc("POS Opening Shift", shift.name)
+			if doc.docstatus == 1:
+				doc.cancel()
+			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
+		except Exception:
+			pass
 
 	# ---------------------------------------------------------------- SEC-16
 

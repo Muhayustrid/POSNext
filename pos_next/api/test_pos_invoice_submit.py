@@ -95,7 +95,7 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 			self.skipTest("no schedule-safe POS Profile")
 		item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1, "has_batch_no": 0, "has_serial_no": 0},
 			pluck="name",
 			limit=1,
 		)
@@ -480,7 +480,7 @@ class TestDiscountRowRateGateInteraction(FrappeTestCase):
 		cls.profile = probe
 		cls.item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1, "has_batch_no": 0, "has_serial_no": 0},
 			pluck="name",
 			limit=1,
 		)[0]

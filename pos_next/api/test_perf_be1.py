@@ -37,6 +37,7 @@ from pos_next.api.wallet import (
 	get_pending_wallet_payments,
 	validate_wallet_payment,
 )
+from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import submit_closing_shift
 from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import create_wallet_credit
 from pos_next.tests.price_group_helpers import get_default_company
 
@@ -453,6 +454,11 @@ class TestShiftMasterDocs(FrappeTestCase):
 		self.assertFalse([args for args in seen if args[0] in ("POS Profile", "Company")])
 
 	def test_create_opening_shift_flow_without_master_get_doc(self):
+		# the checker's fixture shift still holds the profile; only one open
+		# shift per profile is allowed, so close it first (its reader test
+		# above already ran — alphabetical order)
+		if frappe.db.get_value("POS Opening Shift", self.shift_name, "status") == "Open":
+			submit_closing_shift(json.dumps({"pos_opening_shift": self.shift_name}))
 		frappe.set_user(self.cashier)
 		seen, patcher = self._spy_get_doc()
 		data = None

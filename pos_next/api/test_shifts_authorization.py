@@ -11,7 +11,11 @@ Four gates under test:
   with POS Opening Shift read may query another user;
 - create_opening_shift: POS Profile membership required (PATTERN A) and the
   open-shift duplicate check is serialized (PATTERN C) so two calls for the
-  same (profile, user) cannot both open a shift.
+  same (profile, user) cannot both open a shift;
+- single open shift per POS Profile: the doctype before_submit guard refuses
+  a second opening while another shift (any user) holds the profile — one
+  profile is one cash drawer. Exempt by design: a user who may cancel a POS
+  Closing Shift (manager) may deliberately open over an in-use profile.
 
 Run via pos_next/_pn_run_tests.py pos_next.api.test_shifts_authorization
 """
@@ -22,7 +26,7 @@ import uuid
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import now_datetime, nowdate
+from frappe.utils import add_to_date, now_datetime, nowdate
 
 from pos_next.api.shifts import (
 	check_opening_shift,
@@ -31,6 +35,7 @@ from pos_next.api.shifts import (
 )
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
+	submit_closing_shift,
 )
 
 ADMIN = "Administrator"
@@ -72,22 +77,26 @@ class TestShiftsAuthorization(FrappeTestCase):
 		cls.intruder = f"shift-auth.{uuid.uuid4().hex[:8]}@example.com"
 		cls.manager = f"shift-auth.{uuid.uuid4().hex[:8]}@example.com"
 		cls.cashier = f"shift-auth.{uuid.uuid4().hex[:8]}@example.com"
-		for email in (cls.intruder, cls.manager, cls.cashier):
+		# second profile member: needed to prove the single-open-shift guard
+		# fires for a DIFFERENT user on the same profile
+		cls.cashier2 = f"shift-auth.{uuid.uuid4().hex[:8]}@example.com"
+		for email in (cls.intruder, cls.manager, cls.cashier, cls.cashier2):
 			frappe.get_doc(
 				{"doctype": "User", "email": email, "first_name": "Shift Auth Tester"}
 			).insert()
-		# the cashier may open shifts on the profile (POS Profile User row;
+		# the cashiers may open shifts on the profile (POS Profile User rows;
 		# removed again in teardown — shared dev profile)
-		frappe.get_doc(
-			{
-				"doctype": "POS Profile User",
-				"parent": cls.profile.name,
-				"parenttype": "POS Profile",
-				"parentfield": "applicable_for_users",
-				"user": cls.cashier,
-				"default": 1,
-			}
-		).insert(ignore_permissions=True)
+		for member, default in ((cls.cashier, 1), (cls.cashier2, 0)):
+			frappe.get_doc(
+				{
+					"doctype": "POS Profile User",
+					"parent": cls.profile.name,
+					"parenttype": "POS Profile",
+					"parentfield": "applicable_for_users",
+					"user": member,
+					"default": default,
+				}
+			).insert(ignore_permissions=True)
 
 	@classmethod
 	def tearDownClass(cls):
@@ -101,7 +110,7 @@ class TestShiftsAuthorization(FrappeTestCase):
 			except Exception:
 				pass
 
-		for email in (cls.intruder, cls.manager, cls.cashier):
+		for email in (cls.intruder, cls.manager, cls.cashier, cls.cashier2):
 			_safe(lambda e=email: frappe.db.delete("Error Log", {"owner": e}))
 			_safe(lambda e=email: frappe.db.delete("POS Profile User", {"user": e}))
 			_safe(lambda e=email: frappe.delete_doc("User", e, force=1))
@@ -121,6 +130,10 @@ class TestShiftsAuthorization(FrappeTestCase):
 			}
 		).insert(ignore_permissions=True)
 		shift.submit()
+		# per-method cleanup: only ONE open shift may exist per profile now
+		# (single-open-shift guard), so shifts left open by an earlier test
+		# method would make every later _open_shift in this class throw
+		self.addCleanup(self._remove_shift, shift)
 		return shift
 
 	def _balance_details(self):
@@ -234,9 +247,25 @@ class TestShiftsAuthorization(FrappeTestCase):
 
 	def test_check_opening_shift_prefers_older_valid_shift(self):
 		older = self._open_shift(user=self.cashier)
-		newer = self._open_shift(user=self.cashier)
-		# the NEWER one dangles → the older valid shift must win
-		frappe.db.set_value("POS Opening Shift", newer.name, "pos_profile", "_Deleted Profile XYZ")
+		# a LIVE second open shift on this profile is blocked by the single-
+		# open-shift guard; simulate the legacy leftover it stands in for by
+		# promoting a draft at DB level (exactly what a bad teardown leaves)
+		newer = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": self.profile.name,
+				"company": self.profile.company,
+				"user": self.cashier,
+				"posting_date": nowdate(),
+				"period_start_date": add_to_date(now_datetime(), minutes=1),
+				"balance_details": [{"mode_of_payment": self.mode[0], "amount": OPENING_CASH}],
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value(
+			"POS Opening Shift",
+			newer.name,
+			{"pos_profile": "_Deleted Profile XYZ", "docstatus": 1, "status": "Open"},
+		)
 		frappe.set_user(self.cashier)
 		try:
 			data = check_opening_shift()
@@ -261,6 +290,74 @@ class TestShiftsAuthorization(FrappeTestCase):
 			frappe.db.count("POS Opening Shift", {"user": self.intruder, "docstatus": 1}), 0
 		)
 
+	# ── single open shift per profile (doctype before_submit guard) ──────────
+
+	def test_create_opening_shift_blocked_while_profile_in_use(self):
+		# one POS Profile = one cash drawer: a second member must be refused
+		# while another shift holds the profile (regression: two openings on
+		# one drawer, each counting the same physical cash)
+		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
+		frappe.set_user(self.cashier2)
+		try:
+			with self.assertRaises(frappe.ValidationError):
+				create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(
+			frappe.db.count(
+				"POS Opening Shift",
+				{"pos_profile": self.profile.name, "docstatus": 1, "status": "Open"},
+			),
+			1,
+		)
+
+	def test_create_opening_shift_allowed_after_previous_closed(self):
+		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
+		submit_closing_shift(json.dumps({"pos_opening_shift": first["pos_opening_shift"].name}))
+		# the drawer is free again: a second member may open it
+		frappe.set_user(self.cashier2)
+		try:
+			second = create_opening_shift(
+				self.profile.name, self.profile.company, self._balance_details()
+			)
+			self.addCleanup(self._remove_shift, second["pos_opening_shift"])
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(second["pos_opening_shift"].get("user"), self.cashier2)
+
+	def test_create_opening_shift_manager_bypasses_profile_guard(self):
+		# deliberate exemption: whoever may cancel a POS Closing Shift (the
+		# manager-only right; cashiers hold submit, never cancel) may open a
+		# second shift over an in-use profile — a manager taking the register
+		# while the previous shift waits for its close
+		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
+		frappe.get_doc("User", self.cashier2).add_roles("POSNext Manager")
+		self.addCleanup(self._revoke_role, self.cashier2, "POSNext Manager")
+		frappe.set_user(self.cashier2)
+		try:
+			second = create_opening_shift(
+				self.profile.name, self.profile.company, self._balance_details()
+			)
+			self.addCleanup(self._remove_shift, second["pos_opening_shift"])
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(second["pos_opening_shift"].get("user"), self.cashier2)
+		self.assertEqual(
+			frappe.db.count(
+				"POS Opening Shift",
+				{"pos_profile": self.profile.name, "docstatus": 1, "status": "Open"},
+			),
+			2,
+		)
+
+	@staticmethod
+	def _revoke_role(user, role):
+		frappe.db.delete("Has Role", {"parent": user, "parenttype": "User", "role": role})
+		frappe.clear_cache(user=user)
+
 	def test_create_opening_shift_duplicate_is_serialized(self):
 		# sequential race (same lock path as concurrent calls): the second
 		# create must hit the open-shift check and be rejected — never two
@@ -268,6 +365,9 @@ class TestShiftsAuthorization(FrappeTestCase):
 		frappe.set_user(self.cashier)
 		try:
 			first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+			# per-method cleanup (same reason as _open_shift): the leftover
+			# open shift would trip the single-open-shift guard in later tests
+			self.addCleanup(self._remove_shift, first["pos_opening_shift"])
 			self.assertEqual(first["pos_opening_shift"].get("user"), self.cashier)
 			with self.assertRaises(frappe.ValidationError):
 				create_opening_shift(self.profile.name, self.profile.company, self._balance_details())

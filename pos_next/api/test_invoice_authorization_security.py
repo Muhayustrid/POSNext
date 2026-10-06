@@ -77,7 +77,7 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		)
 		cls.item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1, "has_batch_no": 0, "has_serial_no": 0},
 			pluck="name",
 			limit=1,
 		)
@@ -260,14 +260,29 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		).insert(ignore_permissions=True)
 		shift.reload()
 		shift.submit()
+		# per-method cleanup: only one open shift per profile is allowed now,
+		# leftovers from an earlier method would trip the doctype guard
+		self.addCleanup(self._remove_shift, shift)
 		return shift
 
-	def _submit(self, user, draft_name, doctype=None):
+	def _remove_shift(self, shift):
+		# tolerant cleanup: one leftover must never abort the remaining cleanup
+		try:
+			doc = frappe.get_doc("POS Opening Shift", shift.name)
+			if doc.docstatus == 1:
+				doc.cancel()
+			frappe.delete_doc("POS Opening Shift", shift.name, force=1)
+		except Exception:
+			pass
+
+	def _submit(self, user, draft_name, doctype=None, shift=None):
 		"""Full legit submit as `user`: opening shift first (same recipe as
-		api/test_pos_invoice_submit.py)."""
+		api/test_pos_invoice_submit.py). Pass `shift` to reuse an already-open
+		one — the guard admits only one open shift per profile."""
 		doctype = doctype or self.doctype
 		self._make_stock_receipt()
-		shift = self._open_shift(user)
+		if shift is None:
+			shift = self._open_shift(user)
 		frappe.set_user(user)
 		return submit_invoice(
 			invoice=json.dumps(
@@ -535,7 +550,7 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		try:
 			shift = self._open_shift(self.cashier)
 			draft = self._make_draft(self.cashier, posa_pos_opening_shift=shift.name)
-			name = self._submit(self.cashier, draft["name"], doctype=POS_INVOICE)["name"]
+			name = self._submit(self.cashier, draft["name"], doctype=POS_INVOICE, shift=shift)["name"]
 		finally:
 			_set_invoice_type(SALES_INVOICE)
 		self.assertEqual(frappe.db.get_value(POS_INVOICE, name, "docstatus"), 1)
