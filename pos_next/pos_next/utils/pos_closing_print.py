@@ -80,6 +80,15 @@ def _get_pos_invoice_parent_targets(pos_invoices: set[str]) -> set[tuple[str, st
 	return targets
 
 
+def _money_row_condition(child):
+	"""Package rows enter by their money side only (same rule as
+	pos_next.services.sales_recap._MONEY_ROW_FILTER): keep unroled rows and
+	any package row whose amount is non-zero, drop the zero side of each
+	package group (the allocation-mode parent, or the legacy-mode
+	components) so bundle revenue is neither doubled nor lost."""
+	return (child.pos_package_role.isnull()) | (child.pos_package_role == "") | (child.amount != 0)
+
+
 def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]:
 	"""Items sold, read from each target's OWN child table.
 
@@ -113,7 +122,7 @@ def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]
 				qty_sum.as_("qty"),
 				amount_sum.as_("amount"),
 			)
-			.where(condition)
+			.where(condition & _money_row_condition(child))
 			.groupby(child.item_code, child.item_name)
 			.run(as_dict=True)
 		)
@@ -219,7 +228,7 @@ def _fetch_grouped_items_for_targets(parent_targets: set[tuple[str, str]]) -> li
 				Sum(child.qty).as_("qty"),
 				Sum(child.amount).as_("amount"),
 			)
-			.where(_build_condition(child, targets))
+			.where(_build_condition(child, targets) & _money_row_condition(child))
 			.groupby(child.item_group, child.item_code, child.item_name)
 			.run(as_dict=True)
 		)
