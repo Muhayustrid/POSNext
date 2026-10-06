@@ -61,6 +61,7 @@
   "section_break_pricing",
   "decimal_precision",
   "tax_inclusive",
+  "enable_pos_package_allocation",
   "section_break_customer",
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
@@ -497,6 +498,13 @@
    "fieldname": "tax_inclusive",
    "fieldtype": "Check",
    "label": "Tax Inclusive"
+  },
+  {
+   "default": "0",
+   "description": "Split a POS Package price across its component lines, proportionally to each component's POS price-list value, so item-level sales reporting sees the revenue (the package header line drops to zero). Disabled keeps the legacy behaviour: the whole price sits on the header line and components are free.",
+   "fieldname": "enable_pos_package_allocation",
+   "fieldtype": "Check",
+   "label": "Allocate Package Price to Components"
   },
   {
    "collapsible": 1,

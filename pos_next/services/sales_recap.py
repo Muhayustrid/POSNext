@@ -22,9 +22,12 @@ from frappe.utils import cint, flt, get_datetime, getdate
 
 from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
 
-# Package component rows carry zero revenue and belong to their parent package;
-# counting them would double both qty and line counts.
-PACKAGE_COMPONENT_ROLE = "Package Item"
+# Package rows carry their money on exactly one side of the group: the parent
+# in legacy mode (components rate 0), the components in allocation mode (parent
+# rate 0). Keep the money-carrying rows and drop the zero side by amount —
+# never by role, which would discard the allocation-mode revenue. Returns ride
+# along as negative amounts and must survive the filter.
+_MONEY_ROW_FILTER = "ifnull(sii.pos_package_role, '') = '' OR sii.base_net_amount <> 0"
 PACKAGE_PARENT_ROLE = "Package"
 
 # Item rows printed under each category, matching the EOD sheet's shape. A
@@ -586,10 +589,13 @@ def _aggregate_payments(scope, cash_mode, pos_profile=None):
 
 
 def _aggregate_items(scope, limit=100):
+	"""Per item/role ranking. Package rows enter by their money side only (see
+	_MONEY_ROW_FILTER): the priced parent in legacy mode, the priced components
+	in allocation mode — never both, and never the mode's zero side."""
 	where = f"""
 		FROM {_item_from(scope)}
 		JOIN {_invoice_from(scope)} ON si.name = sii.parent
-		WHERE ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
+		WHERE {_MONEY_ROW_FILTER}
 		GROUP BY sii.item_code, sii.pos_package_role
 	"""
 
@@ -689,8 +695,10 @@ def _aggregate_charges(scope):
 
 def _aggregate_categories(scope, limit=20):
 	"""Group by the invoice item's item_group snapshot (Item fallback for
-	legacy rows). Bundle revenue sits on the parent row; components are
-	excluded. Returns show up negative; amounts are net (pre-tax)."""
+	legacy rows). Package rows count by their money side (see _MONEY_ROW_FILTER):
+	the priced parent in legacy mode, the priced components in allocation mode —
+	so category revenue always reconciles with the header. Returns show up
+	negative; amounts are net (pre-tax)."""
 	category_expr = (
 		"COALESCE(NULLIF(sii.item_group, ''),"
 		" (SELECT item.item_group FROM `tabItem` item WHERE item.name = sii.item_code))"
@@ -698,7 +706,7 @@ def _aggregate_categories(scope, limit=20):
 	where = f"""
 		FROM {_item_from(scope)}
 		JOIN {_invoice_from(scope)} ON si.name = sii.parent
-		WHERE ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
+		WHERE {_MONEY_ROW_FILTER}
 	"""
 
 	total_groups = cint(
@@ -742,7 +750,7 @@ def _aggregate_categories(scope, limit=20):
 		item_where = f"""
 			FROM {_item_from(scope)}
 			JOIN {_invoice_from(scope)} ON si.name = sii.parent
-			WHERE ifnull(sii.pos_package_role, '') <> '{PACKAGE_COMPONENT_ROLE}'
+			WHERE {_MONEY_ROW_FILTER}
 		"""
 		item_rows = frappe.db.sql(
 			f"""

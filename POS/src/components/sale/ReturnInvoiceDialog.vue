@@ -1301,6 +1301,12 @@ const isPartiallyPaid = ref(false);
 const originalPaidAmount = ref(0);
 const originalOutstandingAmount = ref(0);
 
+// Row-link field used by the original invoice's child doctype. ERPNext's
+// return mapper writes a doctype-specific pointer: Sales Invoice Item uses
+// sales_invoice_item, POS Invoice Item uses pos_invoice_item. Sending the
+// wrong one leaves package metadata unrecoverable server-side.
+const returnRowLinkField = ref("sales_invoice_item");
+
 // UI state
 const errorDialog = reactive({
 	visible: false,
@@ -1432,11 +1438,14 @@ const fetchInvoiceResource = createResource({
 			};
 
 			// Map items for UI display and selection.
-			// - sales_invoice_item: links to original item row for accurate return tracking
+			// - <link field>: links to the original row for accurate return tracking
+			//   (pos_invoice_item for POS Invoice, sales_invoice_item for Sales Invoice)
 			// - remaining_qty: maximum quantity user can return for this item
+			returnRowLinkField.value =
+				data.doctype === "POS Invoice" ? "pos_invoice_item" : "sales_invoice_item";
 			returnItems.value = availableItems.map((item) => ({
 				...item,
-				name: item.sales_invoice_item,
+				name: item[returnRowLinkField.value],
 				quantity: item.remaining_qty,
 				selected: false,
 				return_qty: item.remaining_qty,
@@ -1520,8 +1529,10 @@ const createReturnResource = createResource({
 				warehouse: item.warehouse,
 				uom: item.uom,
 				conversion_factor: item.conversion_factor || 1,
-				// Link to original invoice item row for accurate return tracking in ERPNext
-				sales_invoice_item: item.name,
+				// Link to the original invoice item row (server-side return
+				// tracking re-derives package membership from this pointer);
+				// the field name follows the ORIGINAL invoice's doctype.
+				[returnRowLinkField.value]: item.name,
 			})),
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,

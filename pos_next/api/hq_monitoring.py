@@ -19,8 +19,10 @@ All metrics come from the same POS sales dataset:
 - Pre-tax net = SUM(base_net_total); taxes = SUM(base_total_taxes_and_charges),
   both signed. Category/product figures are pre-tax item net amounts and
   therefore do not reconcile to the tax-incl totals — by design.
-- Package components (``Sales Invoice Item.pos_package_role = 'Package Item'``)
-  are excluded from item qty/amount so bundle revenue is not double counted.
+- Package rows (``pos_package_role``) enter item qty/amount by their money side
+  only: the priced parent in legacy mode (components at 0) or the priced
+  components in allocation mode (parent at 0). The zero side of each package
+  group is excluded, so bundle revenue is neither double counted nor lost.
 - Quantities are signed: returns contribute negative qty.
 - Two optional "top items within category" cards (``category_a``/``category_b``):
   one grouped query each over the full Item Group tree (sub-groups included),
@@ -82,7 +84,6 @@ HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "POSNext Mana
 
 MAX_RANGE_DAYS = 366
 MAX_PAGE_SIZE = 50
-COMPONENT_ROLE = "Package Item"
 
 # Whitelisted Product Ranking sort orders (server-side, clickable headers).
 # Anything else falls back to the default best-sellers order. share_pct is
@@ -1013,6 +1014,10 @@ def _item_from(where):
 	# docstatus/is_pos, so it is forwarded as-is: re-wrapping them here (and
 	# feeding the wrapped form back into _invoice_from, which adds its own)
 	# only nested the same predicates redundantly.
+	# Package rows enter by their money side only: keep unroled rows and any
+	# package row carrying money, drop the zero side of each group (the
+	# allocation-mode parent, or the legacy-mode components). Filtering by role
+	# would discard allocation-mode revenue entirely.
 	return f"""
 	FROM {sales_invoice_item_union(
 		"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
@@ -1021,7 +1026,7 @@ def _item_from(where):
 	)}
 	INNER JOIN {_invoice_from(where)} ON si.name = sii.parent
 	WHERE {where}
-	  AND (sii.pos_package_role IS NULL OR sii.pos_package_role <> '{COMPONENT_ROLE}')
+	  AND (ifnull(sii.pos_package_role, '') = '' OR sii.base_net_amount <> 0)
 """
 
 

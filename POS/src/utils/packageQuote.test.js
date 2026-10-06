@@ -1,9 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest"
 
 import {
+	collectSubmissionPackageGroups,
+	isAllocationSnapshot,
 	pickedQty,
 	quotePackageLocally,
 	selectionsToChoices,
+	snapshotSelectionsToMap,
+	splitOfferEligibleRows,
 	validateGroup,
 } from "./packageQuote"
 
@@ -155,5 +159,186 @@ describe("selection helpers", () => {
 				],
 			},
 		])
+	})
+})
+
+describe("quotePackageLocally allocation mode (mirror of allocate_package_rates)", () => {
+	it("splits the total across components by price-list value and marks the snapshot", () => {
+		const selections = {
+			aksesori: { backpack: 1 },
+			voucher: { pulsa: 2, listrik: 1 },
+		}
+		// Rate of each component's catalog row, as the offline mirror looks it up.
+		const priceListRates = {
+			BACKPACK: { Nos: 200_000 },
+			PULSA: { Nos: 100_000 },
+			LISTRIK: { Nos: 100_000 },
+		}
+
+		const quote = quotePackageLocally(pkg, selections, {
+			allocate: true,
+			priceListRates,
+		})
+
+		expect(quote.valid).toBe(true)
+		// Parent drops to zero; components carry the split.
+		expect(quote.lines[0].rate).toBe(0)
+		expect(quote.lines[1].rate).toBeGreaterThan(0)
+
+		// Invariant: sum(rate × qty) == total (the server's exact-sum check).
+		const allocated = quote.lines
+			.slice(1)
+			.reduce((sum, line) => sum + line.rate * line.qty, 0)
+		expect(allocated).toBeCloseTo(quote.total, 6)
+		expect(quote.snapshot.allocation).toEqual({
+			mode: "proportional",
+			precision: 2,
+		})
+	})
+
+	it("falls back to quantity weights when the cache carries no price", () => {
+		const quote = quotePackageLocally(
+			{ ...pkg, base_price: 100, groups: [], options: [], items: pkg.items },
+			{},
+			{ allocate: true, priceListRates: null }
+		)
+
+		expect(quote.valid).toBe(true)
+		// One included line only: it absorbs the whole total.
+		expect(quote.lines[0].rate).toBe(0)
+		expect(quote.lines[1].rate).toBe(100)
+		expect(quote.snapshot.allocation.mode).toBe("proportional")
+	})
+
+	it("stays legacy byte-for-byte when allocation is off (default)", () => {
+		const selections = { aksesori: { headphone: 1 }, voucher: {} }
+
+		const quote = quotePackageLocally(pkg, selections)
+
+		expect(quote.lines[0].rate).toBe(12_350_000)
+		expect(quote.snapshot.allocation).toBeUndefined()
+		expect(quote.lines.slice(1).every((line) => line.rate === 0)).toBe(true)
+	})
+})
+
+describe("isAllocationSnapshot (shared marker check)", () => {
+	it("recognizes the server-written marker in object and JSON-string form", () => {
+		const marker = { allocation: { mode: "proportional", precision: 2 } }
+		expect(isAllocationSnapshot(marker)).toBe(true)
+		expect(isAllocationSnapshot(JSON.stringify(marker))).toBe(true)
+	})
+
+	it("rejects legacy snapshots, malformed JSON and empty values", () => {
+		expect(isAllocationSnapshot({ package: "P" })).toBe(false)
+		expect(isAllocationSnapshot('{"package": "P"}')).toBe(false)
+		expect(isAllocationSnapshot("{not json")).toBe(false)
+		expect(isAllocationSnapshot(null)).toBe(false)
+		expect(isAllocationSnapshot(undefined)).toBe(false)
+	})
+})
+
+describe("collectSubmissionPackageGroups (offline-edit requote detection)", () => {
+	const parent = {
+		item_code: "PKG-PARENT",
+		qty: 1,
+		rate: 0,
+		pos_package: "PKG-1",
+		pos_package_instance: "pkg-a",
+		pos_package_role: "Package",
+		pos_package_snapshot: JSON.stringify({
+			selections: [{ group_key: "aksesori", option_id: "backpack", qty: 1 }],
+		}),
+	}
+	const component = {
+		item_code: "BACKPACK",
+		qty: 1,
+		rate: 0,
+		pos_package: "PKG-1",
+		pos_package_instance: "pkg-a",
+		pos_package_role: "Package Item",
+	}
+
+	it("groups a well-formed queued package and keeps standalone rows apart", () => {
+		const standalone = { item_code: "KOPI", qty: 2, rate: 100 }
+
+		const empty = collectSubmissionPackageGroups([])
+		expect(empty.groups).toHaveLength(0)
+		expect(empty.standalone).toHaveLength(0)
+		expect(empty.malformed).toHaveLength(0)
+
+		const result = collectSubmissionPackageGroups([parent, component, standalone])
+		expect(result.groups).toHaveLength(1)
+		expect(result.groups[0].instance).toBe("pkg-a")
+		expect(result.groups[0].parent).toBe(parent)
+		expect(result.groups[0].components).toEqual([component])
+		expect(result.standalone).toEqual([standalone])
+		expect(result.malformed).toHaveLength(0)
+	})
+
+	it("flags a package marker without linkage as malformed (fail closed)", () => {
+		const orphan = { item_code: "BACKPACK", qty: 1, pos_package: "PKG-1" }
+		const { groups, malformed } = collectSubmissionPackageGroups([orphan])
+		expect(groups).toHaveLength(0)
+		expect(malformed).toEqual([orphan])
+	})
+
+	it("flags a group missing its parent or components as malformed", () => {
+		expect(collectSubmissionPackageGroups([component]).malformed).toHaveLength(1)
+		expect(collectSubmissionPackageGroups([parent]).malformed).toHaveLength(1)
+	})
+
+	it("accepts cart-format linkage names too", () => {
+		const cartParent = { item_code: "PKG-PARENT", package_instance: "pkg-b", package_role: "Package" }
+		const cartComponent = { item_code: "LAPTOP", package_instance: "pkg-b", package_role: "Package Item" }
+		const { groups, malformed } = collectSubmissionPackageGroups([cartParent, cartComponent])
+		expect(malformed).toHaveLength(0)
+		expect(groups).toHaveLength(1)
+	})
+})
+
+describe("snapshotSelectionsToMap (requote input)", () => {
+	it("rebuilds the selection map from object and JSON-string snapshots", () => {
+		const snapshot = {
+			selections: [
+				{ group_key: "aksesori", option_id: "backpack", qty: 1 },
+				{ group_key: "voucher", option_id: "pulsa", qty: 2 },
+				{ group_key: "voucher", option_id: "listrik", qty: 1 },
+			],
+		}
+		const expected = { aksesori: { backpack: 1 }, voucher: { pulsa: 2, listrik: 1 } }
+		expect(snapshotSelectionsToMap(snapshot)).toEqual(expected)
+		expect(snapshotSelectionsToMap(JSON.stringify(snapshot))).toEqual(expected)
+	})
+
+	it("returns null for unusable snapshots so the caller blocks", () => {
+		expect(snapshotSelectionsToMap(null)).toBeNull()
+		expect(snapshotSelectionsToMap("{not json")).toBeNull()
+		expect(snapshotSelectionsToMap({ package: "P" })).toBeNull()
+		expect(snapshotSelectionsToMap({ selections: [] })).toEqual({})
+	})
+})
+
+describe("splitOfferEligibleRows (stage-1 offer exclusion)", () => {
+	it("pulls package rows out of the offer candidate list and reports them", () => {
+		const loose = { item_code: "KOPI", quantity: 1 }
+		const parent = { item_code: "PKG-PARENT", package_instance: "pkg-a" }
+		const component = { item_code: "BACKPACK", package_instance: "pkg-a" }
+
+		const { eligible, excluded, excludedItemCodes } = splitOfferEligibleRows([
+			loose,
+			parent,
+			component,
+		])
+
+		expect(eligible).toEqual([loose])
+		expect(excluded).toEqual([parent, component])
+		expect(excludedItemCodes).toEqual(["PKG-PARENT", "BACKPACK"])
+	})
+
+	it("is a no-op for carts without packages", () => {
+		const items = [{ item_code: "KOPI" }]
+		const { eligible, excludedItemCodes } = splitOfferEligibleRows(items)
+		expect(eligible).toEqual(items)
+		expect(excludedItemCodes).toEqual([])
 	})
 })

@@ -29,6 +29,7 @@ class POSPackage(Document):
 		self.validate_options()
 		self.validate_parent_item()
 		self.validate_component_items()
+		self.validate_allocation_carrier()
 		self.validate_outlets()
 
 	def assign_group_keys(self):
@@ -219,6 +220,38 @@ class POSPackage(Document):
 
 			if table == "items" and flt(row.qty) <= 0:
 				frappe.throw(_("Row {0}: Qty must be greater than zero.").format(row.idx))
+
+	def validate_allocation_carrier(self):
+		"""Allocation mode needs a component line of quantity 1.
+
+		``allocate_package_rates`` carries the rounding remainder on the qty-1
+		line with the largest weight above 0, so the component rates always sum
+		to the package price exactly. A qty-1 line with no price-list rate
+		cannot carry (its share is 0, so the leftover would book negative) —
+		this static check cannot see prices, so it requires at least a qty-1
+		line and the checkout guard still covers the rest. Without one the
+		split can leave a remainder that does not divide any line quantity,
+		and the invoice would fail closed at checkout with a message for the
+		cashier that belongs on the package definition instead. An
+		included item is fixed at qty 1 when it says so; an option counts as a
+		possible carrier only when it can be picked exactly once (qty_per_unit
+		1) — the checkout guard still covers picks that skip it.
+		"""
+		from pos_next.api.packages import _package_allocation_enabled
+
+		if not _package_allocation_enabled():
+			return
+
+		if any(flt(row.qty) == 1 for row in self.items or []):
+			return
+		if any(flt(option.qty_per_unit) == 1 for option in self.options or []):
+			return
+
+		frappe.throw(
+			_(
+				"Package allocation splits the package price across the component lines and needs a line of quantity 1 to carry the rounding remainder. Set an included item's Qty to 1, or give a choice option Qty Per Unit 1."
+			)
+		)
 
 	def validate_outlets(self):
 		seen = set()

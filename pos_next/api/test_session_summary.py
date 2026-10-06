@@ -493,6 +493,42 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(item_a["qty"], 0)  # 2 sold - 2 returned
 		self.assertEqual(item_a["base_net_amount"], 0)
 
+	def test_allocation_mode_revenue_reaches_items_and_returns_survive(self):
+		"""B2: in allocation mode the components carry the money and the package
+		header is 0. The item aggregation must keep the money side by amount,
+		never filter components by role, and a negative (return) component row
+		must survive so the money nets instead of being dropped."""
+		shift = self._make_opening_shift(opening_cash=0)
+		self._make_invoice_on(
+			shift,
+			[
+				{"item": self.pkg_parent, "qty": 1, "rate": 0, "role": "Package"},
+				{"item": self.item_a, "qty": 1, "rate": 30000, "role": "Package Item"},
+				{"item": self.pkg_component, "qty": 2, "rate": 10000, "role": "Package Item"},
+			],
+			paid=50000,
+		)
+		self._make_invoice_on(
+			shift,
+			[
+				{"item": self.pkg_parent, "qty": -1, "rate": 0, "role": "Package"},
+				{"item": self.item_a, "qty": -1, "rate": 30000, "role": "Package Item"},
+			],
+			paid=-30000,
+			is_return=True,
+		)
+
+		summary = get_session_summary(shift)
+
+		# the zero header is gone; the priced components are the breakdown and
+		# the return row nets item_a down to 0 instead of being filtered out
+		self.assertEqual(summary["packages"], [])
+		items = {i["item_code"]: i for i in summary["items"]}
+		self.assertEqual(items[self.item_a]["base_net_amount"], 0)
+		self.assertEqual(items[self.pkg_component]["base_net_amount"], 20000)
+		self.assertEqual(sum(i["base_net_amount"] for i in summary["items"]), 20000)
+		self.assertEqual(summary["net_sales"], 20000)
+
 	def test_credit_return_without_payments_excluded(self):
 		"""Mirror closing: a return with no payment rows moved no money."""
 		# dedicated shift so the shared-fixture numbers stay untouched

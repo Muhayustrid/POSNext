@@ -37,6 +37,10 @@ const draftManagerMock = vi.hoisted(() => ({
 // each test plants the draft it wants to load before clicking.
 const draftEmits = vi.hoisted(() => ({ loadDraft: null }))
 
+// Invoice handed to the page by the OfflineInvoicesDialog stub on edit-invoice;
+// each test plants the queued invoice it wants to edit before clicking.
+const offlineEditEmits = vi.hoisted(() => ({ invoice: null }))
+
 vi.hoisted(() => {
 	// jsdom has no matchMedia; usePWAInstall reads it in an onMounted hook.
 	if (typeof window !== "undefined" && !window.matchMedia) {
@@ -189,6 +193,7 @@ vi.mock("frappe-ui", async () => {
 
 import { shiftState } from "@/composables/useShift"
 import { usePOSCartStore } from "@/stores/posCart"
+import { usePOSPackagesStore } from "@/stores/posPackages"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { usePOSSyncStore } from "@/stores/posSync"
 import { usePOSUIStore } from "@/stores/posUI"
@@ -265,6 +270,16 @@ const DraftInvoicesDialogStub = defineComponent({
 	template: `<button data-test="load-draft" @click="$emit('load-draft', draftEmits.loadDraft)"></button>`,
 	setup() {
 		return { draftEmits }
+	},
+})
+
+const OfflineInvoicesDialogStub = defineComponent({
+	name: "OfflineInvoicesDialog",
+	props: { modelValue: { type: Boolean, default: false } },
+	emits: ["edit-invoice"],
+	template: `<button data-test="edit-offline" @click="$emit('edit-invoice', offlineEditEmits.invoice)"></button>`,
+	setup() {
+		return { offlineEditEmits }
 	},
 })
 
@@ -652,5 +667,174 @@ describe("offer reapply timer cleanup on unmount (COR-FE-15)", () => {
 		await new Promise((resolve) => setTimeout(resolve, 450))
 		expect(reapplySpy).not.toHaveBeenCalled()
 		expect(clearSpy).toHaveBeenCalled()
+	})
+})
+
+// Fase 3: queued package invoices must be REQUOTED on edit — loading the
+// submission-format rows verbatim (pos_package_*) loses the cart linkage the
+// re-submit needs. Broken linkage fails closed: no silent package drop.
+describe("offline-edit package requote (Fase 3)", () => {
+	const PKG = {
+		name: "PKG-1",
+		package_name: "Paket Laptop",
+		parent_item: "PKG-PARENT",
+		base_price: 100_000,
+		items: [{ item_code: "LAPTOP", qty: 1, uom: "Nos", is_stock_item: 1 }],
+		groups: [{ group_key: "aksesori", label: "Aksesori", min_qty: 1, max_qty: 1 }],
+		options: [
+			{
+				option_id: "backpack",
+				group_key: "aksesori",
+				item_code: "BACKPACK",
+				item_name: "Backpack",
+				qty_per_unit: 1,
+				uom: "Nos",
+				price_adjustment: 0,
+				max_qty: 1,
+				is_stock_item: 1,
+			},
+		],
+	}
+	const SNAPSHOT = {
+		package: "PKG-1",
+		package_name: "Paket Laptop",
+		total: 100_000,
+		selections: [{ group_key: "aksesori", option_id: "backpack", qty: 1 }],
+	}
+	const QUEUED_ITEMS = [
+		{
+			item_code: "PKG-PARENT",
+			qty: 1,
+			rate: 0,
+			pos_package: "PKG-1",
+			pos_package_instance: "pkg-q1",
+			pos_package_role: "Package",
+			pos_package_snapshot: JSON.stringify(SNAPSHOT),
+		},
+		{
+			item_code: "BACKPACK",
+			qty: 1,
+			rate: 50_000,
+			pos_package: "PKG-1",
+			pos_package_instance: "pkg-q1",
+			pos_package_role: "Package Item",
+		},
+		{
+			item_code: "LAPTOP",
+			qty: 1,
+			rate: 50_000,
+			pos_package: "PKG-1",
+			pos_package_instance: "pkg-q1",
+			pos_package_role: "Package Item",
+		},
+	]
+
+	function queuedInvoice(items) {
+		return {
+			id: 7,
+			offline_id: "pos_offline_edit_1",
+			data: { customer: "CUST-1", items },
+		}
+	}
+
+	async function clickEdit() {
+		await wrapper.find('[data-test="edit-offline"]').trigger("click")
+		await flushPromises()
+	}
+
+	it("requotes a queued package and links the fresh quote to the cart", async () => {
+		await mountPOS({ OfflineInvoicesDialog: OfflineInvoicesDialogStub })
+		const packagesStore = usePOSPackagesStore()
+		packagesStore.packages = [PKG]
+		const quoteResult = {
+			valid: true,
+			error: null,
+			total: 100_000,
+			lines: [
+				{ item_code: "PKG-PARENT", qty: 1, rate: 0, role: "Package" },
+				{ item_code: "BACKPACK", qty: 1, rate: 50_000, role: "Package Item" },
+				{ item_code: "LAPTOP", qty: 1, rate: 50_000, role: "Package Item" },
+			],
+			snapshot: SNAPSHOT,
+		}
+		const quoteSpy = vi.spyOn(packagesStore, "quote").mockResolvedValue(quoteResult)
+
+		offlineEditEmits.invoice = queuedInvoice(QUEUED_ITEMS)
+		await clickEdit()
+
+		expect(quoteSpy).toHaveBeenCalledTimes(1)
+		const rows = cartStore.invoiceItems
+		expect(rows).toHaveLength(3)
+		expect(rows.every((row) => row.package_instance === rows[0].package_instance)).toBe(true)
+		expect(rows[0].package_role).toBe("Package")
+		expect(rows[0].package_snapshot).toEqual(SNAPSHOT)
+		expect(uiStore.showErrorDialog).toBe(false)
+	})
+
+	it("blocks the edit (fail closed) when a package row has no linkage", async () => {
+		await mountPOS({ OfflineInvoicesDialog: OfflineInvoicesDialogStub })
+		const packagesStore = usePOSPackagesStore()
+		packagesStore.packages = [PKG]
+
+		offlineEditEmits.invoice = queuedInvoice([
+			{ item_code: "BACKPACK", qty: 1, rate: 50_000, pos_package: "PKG-1" },
+		])
+		await clickEdit()
+
+		expect(uiStore.showErrorDialog).toBe(true)
+		expect(cartStore.invoiceItems).toHaveLength(0)
+	})
+
+	it("blocks the edit when the package definition is not cached (requote impossible)", async () => {
+		await mountPOS({ OfflineInvoicesDialog: OfflineInvoicesDialogStub })
+		const packagesStore = usePOSPackagesStore()
+		packagesStore.packages = [] // catalog missing (offline, never fetched)
+		const quoteSpy = vi
+			.spyOn(packagesStore, "quote")
+			.mockResolvedValue({ valid: false, error: "unavailable" })
+
+		offlineEditEmits.invoice = queuedInvoice(QUEUED_ITEMS)
+		await clickEdit()
+
+		expect(quoteSpy).not.toHaveBeenCalled()
+		expect(uiStore.showErrorDialog).toBe(true)
+		expect(cartStore.invoiceItems).toHaveLength(0)
+	})
+
+	it("blocks the edit when the requote no longer matches the sold rows", async () => {
+		await mountPOS({ OfflineInvoicesDialog: OfflineInvoicesDialogStub })
+		const packagesStore = usePOSPackagesStore()
+		packagesStore.packages = [PKG]
+		// Definition edited since the sale: the requote yields another component.
+		vi.spyOn(packagesStore, "quote").mockResolvedValue({
+			valid: true,
+			error: null,
+			total: 100_000,
+			lines: [
+				{ item_code: "PKG-PARENT", qty: 1, rate: 0, role: "Package" },
+				{ item_code: "HEADPHONE", qty: 1, rate: 100_000, role: "Package Item" },
+			],
+			snapshot: SNAPSHOT,
+		})
+
+		offlineEditEmits.invoice = queuedInvoice(QUEUED_ITEMS)
+		await clickEdit()
+
+		expect(uiStore.showErrorDialog).toBe(true)
+		expect(cartStore.invoiceItems).toHaveLength(0)
+	})
+
+	it("loads standalone items of the queued invoice unchanged", async () => {
+		await mountPOS({ OfflineInvoicesDialog: OfflineInvoicesDialogStub })
+
+		offlineEditEmits.invoice = queuedInvoice([
+			{ item_code: "KOPI", item_name: "Kopi", qty: 2, rate: 25_000, uom: "Nos" },
+		])
+		await clickEdit()
+
+		expect(uiStore.showErrorDialog).toBe(false)
+		expect(cartStore.invoiceItems).toHaveLength(1)
+		expect(cartStore.invoiceItems[0].item_code).toBe("KOPI")
+		expect(cartStore.invoiceItems[0].quantity).toBe(2)
 	})
 })

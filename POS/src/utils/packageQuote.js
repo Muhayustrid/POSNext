@@ -6,15 +6,40 @@
  * validate, so this result is a preview — never the authority.
  *
  * Keep this file and `packages.py` in lockstep: same validation order, same
- * price formula `base_price + Σ(price_adjustment × qty)`.
+ * price formula `base_price + Σ(price_adjustment × qty)`, and — when the
+ * caller passes `allocate` — the same proportional split of the total across
+ * the component lines with the `allocation` snapshot marker.
  *
  * @module packageQuote
  */
 
-import { roundCurrency } from "@/utils/currency";
+import {
+	ALLOCATION_MODE,
+	allocatePackageRates,
+	componentPriceListRate,
+} from "@/utils/packageAllocation";
+import { getPrecision, roundCurrency } from "@/utils/currency";
 
 export const PACKAGE_ROLE = "Package";
 export const PACKAGE_ITEM_ROLE = "Package Item";
+
+/**
+ * True when a package snapshot records an allocation-mode quote — the same
+ * marker `packages.py:quote()` writes. Accepts both shapes a snapshot travels
+ * in: the object on a fresh quote, the JSON string on a cart/draft/server row.
+ *
+ * @param {Object|string|null} snapshot
+ * @returns {boolean}
+ */
+export function isAllocationSnapshot(snapshot) {
+	if (!snapshot) return false;
+	if (typeof snapshot === "object") return snapshot.allocation?.mode === ALLOCATION_MODE;
+	try {
+		return JSON.parse(snapshot)?.allocation?.mode === ALLOCATION_MODE;
+	} catch {
+		return false;
+	}
+}
 
 /**
  * Total units picked in a group.
@@ -65,11 +90,27 @@ export function validateGroup(group, options, picks) {
 /**
  * Price a package selection locally.
  *
+ * With `allocate` on, the total is split across the component lines exactly
+ * like the server (`allocate_package_rates`): weights come from each
+ * component's price-list rate — supplied by the caller as
+ * `priceListRates[item_code] = { [uom]: rate }`, mirroring the server's
+ * price-list lookup — falling back to quantity weights when the cache carries
+ * no price, and the snapshot gets the same `allocation` marker. Off (the
+ * default) the result stays the legacy shape: full price on the parent,
+ * components at 0, no marker.
+ *
  * @param {Object} pkg - Package definition from `pos_next.api.packages.get_packages`
  * @param {Object<string, Object<string, number>>} selections - group_key -> option_id -> qty
+ * @param {Object} [options]
+ * @param {boolean} [options.allocate=false] - Apply proportional allocation
+ * @param {Object} [options.priceListRates=null] - item_code -> uom -> price-list rate
  * @returns {{valid: boolean, error: string|null, total: number, lines: Array<Object>, snapshot: Object}}
  */
-export function quotePackageLocally(pkg, selections = {}) {
+export function quotePackageLocally(
+	pkg,
+	selections = {},
+	{ allocate = false, priceListRates = null } = {}
+) {
 	const invalid = (error) => ({ valid: false, error, total: 0, lines: [], snapshot: null });
 
 	if (!pkg) return invalid(__("Package not found."));
@@ -129,31 +170,62 @@ export function quotePackageLocally(pkg, selections = {}) {
 
 	total = roundCurrency(total);
 
+	// With no component rows there is nowhere to move the money; the parent
+	// keeps it and the snapshot stays legacy-shaped (no allocation marker).
+	const allocationApplied = Boolean(allocate && componentLines.length);
+	// Preview-only: server re-quotes with get_precision("Sales Invoice Item",
+	// "rate"); getPrecision().currency is the closest mirror, normally identical.
+	const allocationPrecision = getPrecision().currency;
+	let parentRate = total;
+	if (allocationApplied) {
+		const rates = allocatePackageRates(
+			total,
+			componentLines.map((line) => ({
+				qty_per_package: line.qty,
+				price_list_rate: componentPriceListRate(
+					priceListRates ? priceListRates[line.item_code] : null,
+					line.uom
+				),
+			})),
+			1,
+			allocationPrecision
+		);
+		componentLines.forEach((line, index) => {
+			line.rate = rates[index];
+		});
+		parentRate = 0;
+	}
+
 	const parentLine = {
 		item_code: pkg.parent_item,
 		item_name: pkg.package_name,
 		qty: 1,
-		rate: total,
+		rate: parentRate,
 		role: PACKAGE_ROLE,
 	};
+
+	const snapshot = {
+		package: pkg.name,
+		package_name: pkg.package_name,
+		base_price: Number(pkg.base_price) || 0,
+		total,
+		selections: snapshotSelections,
+		included_items: (pkg.items || []).map((row) => ({
+			item_code: row.item_code,
+			item_name: row.item_name,
+			qty: Number(row.qty) || 0,
+		})),
+	};
+	if (allocationApplied) {
+		snapshot.allocation = { mode: ALLOCATION_MODE, precision: allocationPrecision };
+	}
 
 	return {
 		valid: true,
 		error: null,
 		total,
 		lines: [parentLine, ...componentLines],
-		snapshot: {
-			package: pkg.name,
-			package_name: pkg.package_name,
-			base_price: Number(pkg.base_price) || 0,
-			total,
-			selections: snapshotSelections,
-			included_items: (pkg.items || []).map((row) => ({
-				item_code: row.item_code,
-				item_name: row.item_name,
-				qty: Number(row.qty) || 0,
-			})),
-		},
+		snapshot,
 	};
 }
 
@@ -169,4 +241,108 @@ export function selectionsToChoices(selections = {}) {
 			.filter(([, qty]) => Number(qty) > 0)
 			.map(([optionId, qty]) => ({ option_id: optionId, qty: Number(qty) })),
 	}));
+}
+
+/**
+ * Split cart rows into offer-eligible rows and package rows. Stage-1 rule:
+ * offers never apply to package lines, so every caller that evaluates an
+ * offer against cart items must route its candidate list through this and
+ * report the excluded codes to the cashier (never a silent skip).
+ *
+ * @param {Array<Object>} items - Cart rows
+ * @returns {{eligible: Array<Object>, excluded: Array<Object>, excludedItemCodes: Array<string>}}
+ */
+export function splitOfferEligibleRows(items = []) {
+	const eligible = [];
+	const excluded = [];
+	for (const item of items || []) {
+		if (item?.package_instance) excluded.push(item);
+		else eligible.push(item);
+	}
+	return {
+		eligible,
+		excluded,
+		excludedItemCodes: [...new Set(excluded.map((item) => item.item_code).filter(Boolean))],
+	};
+}
+
+/**
+ * Split queued/submitted item rows into package groups and standalone rows.
+ *
+ * Offline-edit rows arrive in submission format (``pos_package_instance`` etc.
+ * — the names `formatItemsForSubmission` writes), while cart rows use the
+ * short names (``package_instance``). A row carrying one of the submission
+ * markers but no usable linkage would silently lose its package when loaded
+ * through ``cartStore.addItem`` — those land in ``malformed`` so the caller
+ * can fail closed and requote instead.
+ *
+ * @param {Array<Object>} items - Submission-format item rows
+ * @returns {{groups: Array<{instance: string, parent: Object, components: Array<Object>}>, standalone: Array<Object>, malformed: Array<Object>}}
+ */
+export function collectSubmissionPackageGroups(items = []) {
+	const byInstance = new Map();
+	const standalone = [];
+	const malformed = [];
+
+	for (const item of items || []) {
+		const instance = item?.pos_package_instance || item?.package_instance || null;
+		if (!instance) {
+			if (item?.pos_package || item?.pos_package_role) malformed.push(item);
+			else standalone.push(item);
+			continue;
+		}
+
+		let group = byInstance.get(instance);
+		if (!group) {
+			group = { instance, parent: null, components: [] };
+			byInstance.set(instance, group);
+		}
+		const role = item.pos_package_role || item.package_role;
+		if (role === PACKAGE_ROLE) {
+			if (group.parent) malformed.push(item);
+			else group.parent = item;
+		} else {
+			group.components.push(item);
+		}
+	}
+
+	const groups = [];
+	for (const group of byInstance.values()) {
+		if (!group.parent || !group.components.length) malformed.push(group.parent || group.components[0]);
+		else groups.push(group);
+	}
+
+	return { groups, standalone, malformed };
+}
+
+/**
+ * Selection map ({group_key: {option_id: qty}}) from a package snapshot —
+ * object or JSON string. Returns null when the snapshot carries no usable
+ * selections, so the caller can block instead of quoting an empty package.
+ *
+ * @param {Object|string|null} snapshot
+ * @returns {Object<string, Object<string, number>>|null}
+ */
+export function snapshotSelectionsToMap(snapshot) {
+	let data = snapshot;
+	if (typeof snapshot === "string") {
+		try {
+			data = JSON.parse(snapshot);
+		} catch {
+			return null;
+		}
+	}
+	if (!data || typeof data !== "object" || !Array.isArray(data.selections)) return null;
+
+	const selections = {};
+	for (const selection of data.selections) {
+		const groupKey = selection?.group_key;
+		const optionId = selection?.option_id;
+		const qty = Number(selection?.qty) || 0;
+		if (!groupKey || !optionId || qty <= 0) continue;
+		if (!selections[groupKey]) selections[groupKey] = {};
+		const picks = selections[groupKey];
+		picks[optionId] = (picks[optionId] || 0) + qty;
+	}
+	return selections;
 }

@@ -71,6 +71,13 @@ def get_pos_settings(pos_profile):
 		frappe.db.get_single_value("POS Next Global Settings", "allow_negative_stock") or 0
 	)
 
+	# Global package-allocation switch (same single), read through the same
+	# schema-guarded helper packages.py uses so both feeds agree. The POS
+	# mirror defaults to OFF until this key arrives.
+	from pos_next.api.packages import _package_allocation_enabled
+
+	settings["enable_pos_package_allocation"] = cint(_package_allocation_enabled())
+
 	# Legacy global columns: the DB columns survive the doctype migration
 	# (inert), so drop them instead of leaking stale per-row copies.
 	settings.pop("monthly_target_basis", None)

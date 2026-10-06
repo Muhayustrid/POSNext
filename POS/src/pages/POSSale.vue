@@ -1093,6 +1093,11 @@ import { useStockStore } from "@/stores/stock";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
 import { usePOSPackagesStore } from "@/stores/posPackages";
+import {
+	PACKAGE_ROLE,
+	collectSubmissionPackageGroups,
+	snapshotSelectionsToMap,
+} from "@/utils/packageQuote";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
@@ -2970,7 +2975,28 @@ async function handleEditOfflineInvoice(invoice) {
 		}
 
 		if (invoiceData.items && invoiceData.items.length > 0) {
-			for (const item of invoiceData.items) {
+			// The queued rows are in submission format (pos_package_*), while
+			// cartStore.addItem reads the cart-format names (package_*). Loading
+			// them verbatim would silently drop the package linkage and the
+			// re-submitted payload would lose its packages — so package groups
+			// are detected first and REQUOTED from their snapshots below.
+			const { groups, standalone, malformed } = collectSubmissionPackageGroups(invoiceData.items);
+
+			if (malformed.length) {
+				// Fail closed: a package row without a valid group can never be
+				// re-submitted as a package; block the edit instead of silently
+				// dropping it or letting a broken replay through.
+				cartStore.clearCart();
+				uiStore.showError(
+					__("Cannot edit this invoice"),
+					__(
+						"This invoice contains a package with incomplete linkage and cannot be edited. Delete it and create a new sale."
+					)
+				);
+				return;
+			}
+
+			for (const item of standalone) {
 				// Use autoAdd=true to skip stock validation when loading saved invoices
 				// Check both quantity and qty fields since items are stored with 'quantity'
 				cartStore.addItem(
@@ -2979,6 +3005,68 @@ async function handleEditOfflineInvoice(invoice) {
 					true,
 					shiftStore.currentProfile
 				);
+			}
+
+			for (const group of groups) {
+				const packageName = group.parent.pos_package || group.parent.package_name;
+				const selections = snapshotSelectionsToMap(group.parent.pos_package_snapshot);
+				const pkg = packagesStore.packages.find((p) => p.name === packageName);
+
+				if (!pkg || !selections) {
+					cartStore.clearCart();
+					uiStore.showError(
+						__("Cannot edit this invoice"),
+						__(
+							"Package {0} is not available on this device. Reconnect (or re-open the package catalog), then edit the invoice again.",
+							[packageName || group.instance]
+						)
+					);
+					return;
+				}
+
+				// Mandatory requote: the edit may resume online or offline, and
+				// the re-submitted payload must carry the server's current
+				// package pricing — never the stale submission-format rates.
+				const quote = await packagesStore.quote(pkg, selections, cartStore.posProfile);
+				if (!quote?.valid) {
+					cartStore.clearCart();
+					uiStore.showError(
+						__("Cannot edit this invoice"),
+						quote?.error ||
+							__("Package {0} can no longer be quoted. Please reconnect and retry.", [
+								pkg.package_name,
+							])
+					);
+					return;
+				}
+
+				// A definition edited since the sale (renamed/removed option)
+				// makes the requote irreconcilable with the sold rows; block
+				// rather than queue a payload the server will reject. Compare
+				// as multisets so duplicate same-item rows cannot mask a change.
+				const soldRows = group.components
+					.map((c) => `${c.item_code}|${Number(c.qty)}`)
+					.sort();
+				const quotedRows = quote.lines
+					.filter((line) => line.role !== PACKAGE_ROLE)
+					.map((line) => `${line.item_code}|${Number(line.qty)}`)
+					.sort();
+				const unchanged =
+					soldRows.length === quotedRows.length &&
+					soldRows.every((row, index) => row === quotedRows[index]);
+				if (!unchanged) {
+					cartStore.clearCart();
+					uiStore.showError(
+						__("Cannot edit this invoice"),
+						__(
+							"Package {0} has changed since this sale and can no longer be edited. Delete this invoice and create a new sale.",
+							[pkg.package_name]
+						)
+					);
+					return;
+				}
+
+				cartStore.addPackage(quote, pkg, shiftStore.currentProfile);
 			}
 		}
 
@@ -2995,6 +3083,11 @@ async function handleEditOfflineInvoice(invoice) {
 		showSuccess(__("Invoice loaded to cart for editing"));
 	} catch (error) {
 		log.error("Error editing offline invoice:", error);
+		cartStore.clearCart();
+		uiStore.showError(
+			__("Cannot edit this invoice"),
+			error?.message || __("The invoice could not be loaded for editing.")
+		);
 	}
 }
 

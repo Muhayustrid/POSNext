@@ -81,6 +81,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Security
 		enable_session_lock: 0,
 		session_lock_timeout: 5,
+		// POS Packages — global switch on POS Next Global Settings: split the
+		// package price across its component lines. The server injects it into
+		// the settings feeds (bootstrap preload + get_pos_settings); 0 until
+		// loaded, so an offline-first boot quotes the legacy shape.
+		enable_pos_package_allocation: 0,
 	});
 
 	const isLoading = ref(false);
@@ -209,6 +214,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		() => Number.parseInt(settings.value.session_lock_timeout) || 5
 	);
 
+	// Computed - POS Packages
+	const packageAllocationEnabled = computed(() =>
+		Boolean(settings.value.enable_pos_package_allocation)
+	);
+
 	// Resource
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
@@ -319,6 +329,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			// Security
 			enable_session_lock: 0,
 			session_lock_timeout: 5,
+			enable_pos_package_allocation: 0,
 		};
 		isLoaded.value = false;
 	}
@@ -465,6 +476,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Security
 		enableSessionLock,
 		sessionLockTimeout,
+
+		// Computed - POS Packages
+		packageAllocationEnabled,
 
 		// Actions
 		loadSettings,

@@ -11,10 +11,18 @@ under one price. On the invoice it materialises as:
 
 Stock therefore moves on the components while revenue sits on the parent line.
 
+With ``enable_pos_package_allocation`` on POS Next Global Settings the price is
+instead split across the component rows — proportionally to each component's
+current POS price-list value — and the parent row drops to zero. The snapshot
+then carries an ``allocation`` marker so re-validation can tell the modes
+apart; snapshots without the marker are always repriced the legacy way.
+
 Pricing is ``base_price + sum(option.price_adjustment * qty)``.
 
 The quote is computed here on the server and mirrored byte-for-byte by
-``POS/src/utils/packageQuote.js`` so the POS can price packages while offline.
+``POS/src/utils/packageQuote.js`` (allocation off) so the POS can price
+packages while offline; the offline mirror still quotes the legacy shape, so
+an allocation-mode invoice is always repriced by the server.
 ``validate_invoice_packages`` re-quotes every package on the Sales Invoice, so a
 tampered or stale client payload can never set its own price.
 """
@@ -24,10 +32,13 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate, nowdate
+from frappe.utils import cint, cstr, flt, getdate, nowdate
+
+from pos_next.api.items import _fetch_uom_prices_map
 
 PARENT_ROLE = "Package"
 COMPONENT_ROLE = "Package Item"
+ALLOCATION_MODE = "proportional"
 
 INSTANCE_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,140}$")
 
@@ -152,9 +163,7 @@ def _eligible_package_names(pos_profile, on_date=None):
 	company; otherwise it is scoped by outlet Company + Warehouse — an outlet
 	applies to every POS Profile sharing that pair.
 	"""
-	profile = frappe.db.get_value(
-		"POS Profile", pos_profile, ["name", "company", "warehouse"], as_dict=True
-	)
+	profile = frappe.db.get_value("POS Profile", pos_profile, ["name", "company", "warehouse"], as_dict=True)
 	if not profile:
 		frappe.throw(_("POS Profile {0} not found.").format(frappe.bold(pos_profile)))
 
@@ -229,12 +238,205 @@ def _index_choices(choices):
 	return indexed
 
 
-def quote(package_name, choices, pos_profile, warehouse=None):
+def _rate_precision(child_doctype="Sales Invoice Item"):
+	"""Currency precision for invoice rates (System Settings; IDR = 0).
+
+	``child_doctype`` selects the child table whose meta carries the precision —
+	the two invoice item doctypes can be configured apart, tiny as the odds are.
+	"""
+	return cint(frappe.get_precision(child_doctype, "rate"))
+
+
+def _return_row_link_field(doc):
+	"""Child-row back-link field for a return document.
+
+	ERPNext maps returns through a doctype-specific pointer: Sales Invoice Item
+	uses ``sales_invoice_item``, POS Invoice Item uses ``pos_invoice_item``
+	(controllers/sales_and_purchase_return.py:make_return_doc). Restoring
+	package metadata must read the same column the mapper wrote.
+	"""
+	return "pos_invoice_item" if doc.get("doctype") == "POS Invoice" else "sales_invoice_item"
+
+
+def _return_child_doctype(doc):
+	"""Child table of the return document itself ("{doctype} Item")."""
+	return f"{doc.get('doctype')} Item" if doc.get("doctype") else "Sales Invoice Item"
+
+
+def _package_allocation_enabled():
+	"""Global package-allocation toggle (POS Next Global Settings single).
+
+	cache=False so a toggle flipped mid-process (tests, scripts) is seen on the
+	next read. A site whose schema predates the field (code deployed, migrate
+	not yet run) keeps the legacy default instead of raising "field does not
+	exist".
+	"""
+	if not frappe.get_meta("POS Next Global Settings").has_field("enable_pos_package_allocation"):
+		return False
+	return bool(
+		cint(
+			frappe.db.get_single_value(
+				"POS Next Global Settings", "enable_pos_package_allocation", cache=False
+			)
+		)
+	)
+
+
+def _allocation_mode(snapshot):
+	"""Mode recorded in a quote snapshot; None for legacy snapshots."""
+	allocation = snapshot.get("allocation") if isinstance(snapshot, dict) else None
+	return allocation.get("mode") if isinstance(allocation, dict) else None
+
+
+def allocate_package_rates(package_price, children, package_qty=1, precision=0):
+	"""Split a package price across its component lines, proportionally.
+
+	``children`` is a list of ``{qty_per_package, price_list_rate}``: each
+	component's quantity in one package and its current POS price-list rate.
+	A component's weight is ``price_list_rate * qty_per_package``, so the
+	package price is distributed by value; when *no* component carries a price
+	the split falls back to quantity weights, then to an even split, logging a
+	warning instead of failing. Returns one per-unit rate per child, in input
+	order. The rounding remainder is carried by the qty-1 line with the
+	largest weight above 0 (the last such line on ties), so that
+
+	    sum(rate_i * qty_per_package_i * package_qty) == package_price * package_qty
+
+	holds whenever such a line exists. A qty-1 line with no weight must never
+	carry the remainder — its proportional share is 0, so absorbing the
+	leftover would price it negative (e.g. [6667, -1]). Without an eligible
+	line the remainder lands on the last child instead (the old no-carrier
+	behaviour) and the sum can differ; a negative carrier result is clamped
+	to 0 rather than booked, so callers validate the sum and fail closed (see
+	``validate_invoice_packages`` and ``POSPackage.validate_allocation_carrier``,
+	which rejects all-multiples package definitions).
+
+	Pure (no database access): price-list lookups stay with the caller.
+	"""
+	children = list(children or [])
+	if not children:
+		return []
+
+	package_price = flt(package_price)
+	package_qty = flt(package_qty) or 1.0
+	quantities = [flt(child.get("qty_per_package")) for child in children]
+
+	weights = [
+		flt(child.get("price_list_rate")) * qty for child, qty in zip(children, quantities, strict=False)
+	]
+	if not any(weights):
+		weights = list(quantities)
+		if any(weights):
+			frappe.logger("pos_next").warning(
+				"POS package allocation: no component has a price-list rate; using quantity weights."
+			)
+	if not any(weights):
+		weights = [1.0] * len(children)
+		frappe.logger("pos_next").warning(
+			"POS package allocation: no component has a price-list rate or quantity; splitting evenly."
+		)
+
+	total_weight = sum(weights)
+	total_money = package_price * package_qty
+
+	# Remainder carrier: the last qty-1 line whose weight is above 0 — a single
+	# unit absorbs any leftover, and a positive weight means its own share
+	# dominates the remainder (a zero-weight qty-1 line would book the
+	# leftover as a negative rate). With no eligible line, keep the previous
+	# behaviour and let the last child try; a non-positive result is clamped
+	# to 0 below so the sum check fails closed instead of booking a negative.
+	carrier = len(children) - 1
+	carrier_weight = 0.0
+	for index in range(len(children) - 1, -1, -1):
+		if quantities[index] * package_qty == 1 and weights[index] > carrier_weight:
+			carrier = index
+			carrier_weight = weights[index]
+
+	rates = []
+	allocated = 0.0
+	for index, (weight, qty) in enumerate(zip(weights, quantities, strict=False)):
+		line_qty = qty * package_qty
+		if index == carrier:
+			rate = 0.0  # filled in below, once every other line is rounded
+		elif not line_qty:
+			rate = 0.0
+		else:
+			rate = weight / total_weight * total_money / line_qty if total_weight else 0.0
+		rate = flt(rate, precision)
+		rates.append(rate)
+		if index != carrier:
+			allocated += rate * line_qty
+
+	carrier_line_qty = quantities[carrier] * package_qty
+	if carrier_line_qty:
+		carrier_rate = flt((total_money - allocated) / carrier_line_qty, precision)
+		# Never book a negative component rate: a stale/zero-weight carrier (or
+		# a non-dividing last line) lands here, and the sum check below fails
+		# closed instead of selling a negative line.
+		rates[carrier] = max(carrier_rate, 0.0)
+
+	return rates
+
+
+def _component_price_list_rates(component_lines, pos_profile, transaction_date=None):
+	"""POS price-list rate for each component line, used as allocation weight.
+
+	One bulk Item Price lookup on the profile's selling price list — the same
+	source POS carts price from — optionally as of ``transaction_date`` (the
+	invoice's posting date) so backdated invoices and delayed offline syncs
+	split by the prices that were valid when the sale happened. A component the
+	price list does not carry gets rate 0, routing the whole quote to the
+	weight fallback.
+	"""
+	price_list = frappe.db.get_value("POS Profile", pos_profile, "selling_price_list")
+	if not price_list:
+		return [0.0] * len(component_lines)
+
+	prices = _fetch_uom_prices_map(
+		sorted({line["item_code"] for line in component_lines}), price_list, transaction_date
+	)
+	rates = []
+	for line in component_lines:
+		uom_prices = prices.get(line["item_code"]) or {}
+		rate = None
+		if line.get("uom"):
+			rate = uom_prices.get(line["uom"])
+		if rate is None:
+			rate = uom_prices.get("")
+		if rate is None and len(uom_prices) == 1:
+			# Single-UOM item priced under its named UOM while the package row
+			# carries none: the only price is unambiguous.
+			rate = next(iter(uom_prices.values()))
+		rates.append(flt(rate))
+	return rates
+
+
+def _allocated_component_rates(component_lines, precision):
+	"""Per-item queues of per-unit rates from the server's allocated quote lines.
+
+	Kept as one rate per line, in line order: a component listed twice carries a
+	different rate per line (each was rounded independently), and collapsing
+	them into one merged rate could not satisfy the exact-sum invariant.
+	"""
+	rates = {}
+	for line in component_lines:
+		rates.setdefault(line["item_code"], []).append(flt(line["rate"], precision))
+	return rates
+
+
+def quote(package_name, choices, pos_profile, warehouse=None, allocate=None, posting_date=None):
 	"""Validate a selection and return the priced package (non-whitelisted core).
 
 	Returns ``{package, package_name, total, currency, lines, snapshot}`` where
-	``lines[0]`` is the parent row and the rest are components at rate 0.
+	``lines[0]`` is the parent row and the rest are components at rate 0. When
+	``allocate`` is on (default: the global toggle), the components carry the
+	price split proportionally and the parent row is zero, with the mode marked
+	in the snapshot. ``posting_date`` prices the allocation weights on that
+	date (the invoice being validated); None = today, for a live quote.
 	"""
+	if allocate is None:
+		allocate = _package_allocation_enabled()
+
 	if package_name not in _eligible_package_names(pos_profile):
 		frappe.throw(_("Package {0} is not available on this POS Profile.").format(frappe.bold(package_name)))
 
@@ -324,13 +526,33 @@ def quote(package_name, choices, pos_profile, warehouse=None):
 	if total < 0:
 		frappe.throw(_("Package price cannot be negative."))
 
-	total = flt(total, frappe.get_precision("Sales Invoice Item", "rate"))
+	precision = _rate_precision()
+	total = flt(total, precision)
+
+	# With no component rows there is nowhere to move the money; the parent
+	# keeps it and the snapshot stays legacy-shaped (no allocation marker).
+	allocation_applied = bool(allocate and component_lines)
+	parent_rate = total
+	if allocation_applied:
+		# posting_date None = the caller is quoting a live sale (today's prices).
+		list_rates = _component_price_list_rates(component_lines, pos_profile, posting_date)
+		rates = allocate_package_rates(
+			total,
+			[
+				{"qty_per_package": flt(line["qty"]), "price_list_rate": plr}
+				for line, plr in zip(component_lines, list_rates, strict=False)
+			],
+			precision=precision,
+		)
+		for line, rate in zip(component_lines, rates, strict=False):
+			line["rate"] = rate
+		parent_rate = 0.0
 
 	parent_line = {
 		"item_code": doc.parent_item,
 		"item_name": doc.package_name,
 		"qty": 1,
-		"rate": total,
+		"rate": parent_rate,
 		"role": PARENT_ROLE,
 	}
 
@@ -345,6 +567,8 @@ def quote(package_name, choices, pos_profile, warehouse=None):
 			for row in doc.items or []
 		],
 	}
+	if allocation_applied:
+		snapshot["allocation"] = {"mode": ALLOCATION_MODE, "precision": precision}
 
 	return {
 		"package": doc.name,
@@ -397,21 +621,27 @@ def _restore_return_package_metadata(doc):
 	restoring them a credit note looks package-free and skips every guard below —
 	letting the priced parent be refunded while its components are dropped.
 
-	Membership is re-derived from the original invoice through
-	``sales_invoice_item`` (the link ERPNext itself uses for return tracking), so
-	the client never gets to declare which rows belong to a package.
+	Membership is re-derived from the original invoice through the doctype's
+	row link (``sales_invoice_item`` for Sales Invoice, ``pos_invoice_item``
+	for POS Invoice — the same link ERPNext itself uses for return tracking),
+	so the client never gets to declare which rows belong to a package.
 	"""
 	rows = doc.get("items") or []
+	link_field = _return_row_link_field(doc)
+
+	# ``return_against`` is a same-doctype Link (Sales Invoice → Sales Invoice,
+	# POS Invoice → POS Invoice; ERPNext's validate_return_against loads the
+	# original from doc.doctype), so the original's child table is always the
+	# return's own.
+	child_doctype = _return_child_doctype(doc)
 
 	link_names = [
-		row.sales_invoice_item
-		for row in rows
-		if not row.get("pos_package_instance") and row.get("sales_invoice_item")
+		row.get(link_field) for row in rows if not row.get("pos_package_instance") and row.get(link_field)
 	]
 
 	if link_names:
 		sources = frappe.get_all(
-			"Sales Invoice Item",
+			child_doctype,
 			filters={"name": ["in", link_names], "parent": doc.get("return_against")},
 			fields=[
 				"name",
@@ -424,7 +654,7 @@ def _restore_return_package_metadata(doc):
 		by_name = {source["name"]: source for source in sources}
 
 		for row in rows:
-			source = by_name.get(row.get("sales_invoice_item"))
+			source = by_name.get(row.get(link_field))
 			if not source or not source.get("pos_package_instance"):
 				continue
 
@@ -434,7 +664,7 @@ def _restore_return_package_metadata(doc):
 			row.pos_package_snapshot = source["pos_package_snapshot"]
 
 	for row in rows:
-		if row.get("pos_package_instance") and not row.get("sales_invoice_item"):
+		if row.get("pos_package_instance") and not row.get(link_field):
 			frappe.throw(
 				_(
 					"Package return rows must reference the original invoice row. Create the return from the POS Return screen."
@@ -461,14 +691,15 @@ def _validate_return_packages(doc):
 	if not instances:
 		return
 
-	precision = frappe.get_precision("Sales Invoice Item", "qty") or 3
+	child_doctype = _return_child_doctype(doc)
+	precision = frappe.get_precision(child_doctype, "qty") or 3
 
 	# PERF-15: one fetch for every package instance (was one get_all per instance).
 	original_rows_by_instance = {instance: [] for instance in instances}
 	for row in frappe.get_all(
-		"Sales Invoice Item",
+		child_doctype,
 		filters={"parent": doc.return_against, "pos_package_instance": ["in", list(instances)]},
-		fields=["item_code", "qty", "rate", "pos_package_role", "pos_package_instance"],
+		fields=["item_code", "qty", "rate", "pos_package_role", "pos_package_instance", "name"],
 	):
 		original_rows_by_instance[row["pos_package_instance"]].append(row)
 
@@ -505,18 +736,49 @@ def _validate_return_packages(doc):
 		parent.discount_amount = 0
 		parent.discount_percentage = 0
 
+		original_money = {}
+		original_qty = {}
 		expected = {}
 		for row in original_rows:
 			if row.get("pos_package_role") != COMPONENT_ROLE:
 				continue
+			original_money[row["item_code"]] = original_money.get(row["item_code"], 0.0) + flt(
+				row["rate"]
+			) * flt(row["qty"])
+			original_qty[row["item_code"]] = original_qty.get(row["item_code"], 0.0) + flt(row["qty"])
 			expected[row["item_code"]] = expected.get(row["item_code"], 0) + flt(row["qty"])
 
+		# Per-origin-line rates: allocation-mode invoices carry a different rate
+		# on each component row — duplicate item_codes are rounded independently
+		# (3333 vs 3334), and averaging per item_code would over-refund. Keyed
+		# by row name (the return row's doctype-specific link) and guarded by
+		# item_code so a cross-linked row cannot borrow another item's rate.
+		origin_rate_by_row = {
+			r["name"]: (r["item_code"], flt(r["rate"]))
+			for r in original_rows
+			if r.get("pos_package_role") == COMPONENT_ROLE
+		}
+		link_field = _return_row_link_field(doc)
+		rate_precision = _rate_precision(child_doctype)
 		submitted = {}
 		for row in rows:
 			if row.get("pos_package_role") != COMPONENT_ROLE:
 				continue
-			row.rate = 0
-			row.price_list_rate = 0
+			# Mirror the original component rate: allocation-mode invoices carry
+			# revenue on the components, so zeroing here would refund nothing.
+			# Legacy component rates are already 0, keeping this a no-op there.
+			origin = origin_rate_by_row.get(row.get(link_field)) if row.get(link_field) else None
+			if origin and origin[0] == row.item_code:
+				row.rate = flt(origin[1], rate_precision)
+			else:
+				# Legacy payload without a usable row link: fall back to the
+				# per-item average for this row only (pre-link behaviour).
+				row.rate = (
+					flt(original_money[row.item_code] / original_qty[row.item_code], rate_precision)
+					if original_qty.get(row.item_code)
+					else 0
+				)
+			row.price_list_rate = row.rate
 			row.discount_amount = 0
 			row.discount_percentage = 0
 			submitted[row.item_code] = submitted.get(row.item_code, 0) + abs(flt(row.qty))
@@ -550,6 +812,14 @@ def validate_invoice_packages(doc, method=None):
 	Hooked on Sales Invoice ``validate``. The client sends the chosen options; the
 	rates come from here, never from the payload — so an edited offline queue or a
 	crafted request cannot change what a package costs.
+
+	Allocation-mode groups additionally require ``sum(component rate x qty)`` to
+	equal the package price exactly. The split carries its rounding remainder
+	on the qty-1 line with the largest weight above 0 when one exists (a
+	zero-weight qty-1 line would book the leftover as a negative rate, so it
+	cannot carry); if no line qualifies the remainder may not divide, and this
+	fails closed (POS Package's own validate already rejects definitions that
+	can never offer such a line).
 	"""
 	if doc.get("is_consolidated"):
 		return
@@ -563,6 +833,10 @@ def validate_invoice_packages(doc, method=None):
 
 	if not doc.get("pos_profile"):
 		frappe.throw(_("Packages can only be sold from a POS Profile."))
+
+	# M2: one toggle read per validate — every group below shares the answer
+	# instead of re-querying the single per instance.
+	allocation_enabled = _package_allocation_enabled()
 
 	for instance, rows in instances.items():
 		if not INSTANCE_PATTERN.match(instance):
@@ -583,40 +857,100 @@ def validate_invoice_packages(doc, method=None):
 				_("Package line {0} is missing its package reference.").format(frappe.bold(instance))
 			)
 
-		selections = _parse_json(parent.get("pos_package_snapshot"), {}).get("selections") or []
+		# H3: an item-level Pricing Rule (e.g. the Min/Max lane
+		# apply_min_max_price_discounts, which hooks validate AFTER this
+		# function) must never re-price a package row — the split rates
+		# computed here are authoritative. Clearing the attribution makes the
+		# pricing engine and every later hook skip these rows.
+		for row in rows:
+			row.pricing_rules = ""
+
+		snapshot = _parse_json(parent.get("pos_package_snapshot"), {})
+		selections = snapshot.get("selections") or []
 		choices = {}
 		for selection in selections:
 			choices.setdefault(selection.get("group_key"), []).append(
 				{"option_id": selection.get("option_id"), "qty": cint(selection.get("qty"))}
 			)
 
+		# Allocation applies only when the global toggle is on AND the stored
+		# snapshot records that the quote was made that way; snapshots without
+		# the marker keep the legacy single-price-on-parent repricing.
+		allocate = _allocation_mode(snapshot) == ALLOCATION_MODE and allocation_enabled
+
 		result = quote(
 			package_name,
 			[{"group_key": key, "options": options} for key, options in choices.items()],
 			doc.pos_profile,
+			allocate=allocate,
+			# M3: weights follow the invoice's own posting date, so a backdated
+			# or delayed-offline invoice splits by the prices in force then.
+			posting_date=doc.get("posting_date"),
 		)
 
-		# Authoritative price on the parent, zero on every component.
-		parent.rate = result["total"]
-		parent.price_list_rate = result["total"]
+		# Trust what the quote actually applied (a forged marker on a package
+		# with no component rows must not zero the price).
+		allocation_applied = _allocation_mode(result["snapshot"]) == ALLOCATION_MODE
+
 		parent.discount_amount = 0
 		parent.discount_percentage = 0
 		parent.qty = 1
 		parent.pos_package_snapshot = json.dumps(result["snapshot"])
+
+		if allocation_applied:
+			# The header stays a zero line; revenue rides the components.
+			parent.rate = 0
+			parent.price_list_rate = 0
+			# "On Item Quantity" taxes charge every row's qty, so the zero-rate
+			# package header would be taxed as one extra unit — a silent
+			# overcharge in allocation mode. Fail closed rather than book it;
+			# switch the tax to a value-based charge type or turn allocation off.
+			per_qty_taxes = [
+				tax for tax in doc.get("taxes") or [] if tax.get("charge_type") == "On Item Quantity"
+			]
+			if per_qty_taxes:
+				frappe.throw(
+					_(
+						"Package {0} cannot be priced with allocation while tax {1} is charged On Item Quantity — the package header would be taxed as an extra unit. Use a value-based tax or disable package allocation."
+					).format(
+						frappe.bold(result["package_name"]),
+						frappe.bold(
+							", ".join(
+								cstr(tax.get("account_head") or tax.get("description") or tax.get("idx"))
+								for tax in per_qty_taxes
+							)
+						),
+					)
+				)
+			rates_by_item = _allocated_component_rates(
+				result["lines"][1:], _rate_precision(_return_child_doctype(doc))
+			)
+		else:
+			# Authoritative price on the parent, zero on every component.
+			parent.rate = result["total"]
+			parent.price_list_rate = result["total"]
+			rates_by_item = {}
 
 		expected = {}
 		for line in result["lines"][1:]:
 			expected[line["item_code"]] = expected.get(line["item_code"], 0) + flt(line["qty"])
 
 		submitted = {}
+		rate_cursor = {}
+		allocated_money = 0.0
 		for row in rows:
 			if row.get("pos_package_role") != COMPONENT_ROLE:
 				continue
-			row.rate = 0
-			row.price_list_rate = 0
+			item_rates = rates_by_item.get(row.item_code) or []
+			position = rate_cursor.get(row.item_code, 0)
+			rate = item_rates[position] if position < len(item_rates) else 0.0
+			rate_cursor[row.item_code] = position + 1
+			row.rate = rate
+			row.price_list_rate = rate
 			row.discount_amount = 0
 			row.discount_percentage = 0
 			submitted[row.item_code] = submitted.get(row.item_code, 0) + flt(row.qty)
+			allocated_money += rate * flt(row.qty)
 
 		if expected != submitted:
 			frappe.throw(
@@ -624,5 +958,19 @@ def validate_invoice_packages(doc, method=None):
 					frappe.bold(result["package_name"])
 				)
 			)
+
+		if allocation_applied:
+			row_precision = _rate_precision(_return_child_doctype(doc))
+			expected_money = flt(result["total"], row_precision) * flt(parent.qty)
+			if flt(allocated_money, row_precision) != expected_money:
+				frappe.throw(
+					_(
+							"Package {0}: component rates total {1} but the package price is {2}; the price cannot be split exactly at this site's currency precision. The package needs a component line of quantity 1 that carries a price-list rate (zero-priced and priceless lines cannot carry the remainder)."
+					).format(
+						frappe.bold(result["package_name"]),
+						frappe.bold(flt(allocated_money, row_precision)),
+						frappe.bold(expected_money),
+					)
+				)
 
 	_recalculate_totals(doc)

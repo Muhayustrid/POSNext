@@ -6,7 +6,7 @@ import { usePOSShiftStore } from "@/stores/posShift";
 import { useStockStore } from "@/stores/stock";
 import { parseError } from "@/utils/errorHandler";
 import { hasDiscountRelevantChange, resolveOfferUnitDiscount } from "@/utils/offerDiscount";
-import { PACKAGE_ROLE } from "@/utils/packageQuote";
+import { PACKAGE_ROLE, splitOfferEligibleRows } from "@/utils/packageQuote";
 import {
 	shouldValidateItemStock,
 	checkStockAvailability,
@@ -465,6 +465,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				price_list_rate: item.price_list_rate || item.rate,
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
+				// Package linkage: stage-1 rule says offers never apply to
+				// package lines. The server needs the marker to exclude them
+				// explicitly (and list them back in package_rows_excluded).
+				pos_package: item.package_name || null,
+				pos_package_instance: item.package_instance || null,
+				pos_package_role: item.package_role || null,
 			})),
 		};
 	}
@@ -488,6 +494,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let hasDiscounts = false;
 
 		invoiceItems.value.forEach((item, index) => {
+			if (item.package_instance) {
+				// Stage 1: offers never apply to package lines. Any discount
+				// the engine returns for a package row is dropped (and the
+				// server lists the row in package_rows_excluded so the caller
+				// can tell the cashier).
+				recalculateItem(item);
+				return;
+			}
 			const serverItem = serverItems[index] || {};
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
@@ -598,6 +612,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			appliedRules: Array.isArray(payload.applied_pricing_rules)
 				? payload.applied_pricing_rules
 				: [],
+			// Package rows the server excluded from the engine (stage-1 rule).
+			// Reported loudly so the cashier learns why an offer did not touch
+			// the package instead of seeing a silent no-op.
+			packageRowsExcluded: Array.isArray(payload.package_rows_excluded)
+				? payload.package_rows_excluded
+				: [],
 			// Header-level (transaction-scope) discount surfaced by the server when an
 			// apply_on=Transaction Price rule fires. discountAmount is the resolved
 			// SAR amount (already computed from % if the rule is percentage-based).
@@ -702,12 +722,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					freeItems,
 					appliedRules,
 					headerDiscount,
+					packageRowsExcluded,
 				} = parseOfferResponse(response);
 
 				applyDiscountsFromServer(responseItems);
 				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
+
+				if (packageRowsExcluded.length) {
+					showWarning(
+						__(
+							"Offers don't apply to package lines: {0}. Package prices stay as quoted.",
+							[packageRowsExcluded.join(", ")]
+						)
+					);
+				}
 
 				const offerApplied = appliedRules.includes(offerCode);
 
@@ -1038,6 +1068,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			const newlyAppliedOffers = [];
+			const excludedPackageCodes = [];
 
 			for (const offer of newOffers) {
 				// Determine offer type: "Item Price" (discount) or "Give Product" (free item)
@@ -1066,6 +1097,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				} else if (offer.apply_on === "Transaction") {
 					// Transaction-level discount applies to all items
 					eligibleItems = invoiceItems.value;
+				}
+
+				// Stage 1: offers never apply to package lines — excluded here,
+				// not silently: the cashier gets the same explicit warning the
+				// online path shows for the server's package_rows_excluded.
+				const { eligible: offerEligibleItems, excludedItemCodes } =
+					splitOfferEligibleRows(eligibleItems);
+				eligibleItems = offerEligibleItems;
+				if (excludedItemCodes.length) {
+					excludedPackageCodes.push(...excludedItemCodes);
 				}
 
 				if (eligibleItems.length === 0) continue;
@@ -1103,6 +1144,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (newlyAppliedOffers.length > 0) {
 				rebuildIncrementalCache();
 				showSuccess(__("Offline: {0} applied", [newlyAppliedOffers.join(", ")]));
+			}
+
+			if (excludedPackageCodes.length) {
+				showWarning(
+					__(
+						"Offers don't apply to package lines: {0}. Package prices stay as quoted.",
+						[...new Set(excludedPackageCodes)].join(", ")
+					)
+				);
 			}
 		} catch (error) {
 			console.error("Error applying offers offline:", error);
@@ -1253,9 +1303,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		} else if (freeItemCode) {
 			// Free item is a specific different item
-			// Find if the free item is already in the cart
+			// Find if the free item is already in the cart — never a package
+			// row: stage 1 keeps package lines out of the offer engine, a
+			// gratis component inside a package would break its pricing.
 			const freeItemInCart = invoiceItems.value.find(
-				(item) => item.item_code === freeItemCode
+				(item) => item.item_code === freeItemCode && !item.package_instance
 			);
 
 			if (freeItemInCart) {
@@ -1747,6 +1799,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					freeItems,
 					appliedRules,
 					headerDiscount,
+					packageRowsExcluded,
 				} = parseOfferResponse(response);
 
 				// 4. Update cart items with new discounts
@@ -1754,6 +1807,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				applyDiscountsFromServer(responseItems);
 				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
+
+				if (packageRowsExcluded.length) {
+					showWarning(
+						__(
+							"Offers don't apply to package lines: {0}. Package prices stay as quoted.",
+							[packageRowsExcluded.join(", ")]
+						)
+					);
+				}
 
 				// 5. Update appliedOffers list based on server confirmation
 				const actuallyApplied = new Set(appliedRules);
