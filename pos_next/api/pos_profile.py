@@ -7,22 +7,13 @@ from frappe import _
 from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
-
-# Role manajemen POS (SEC-NEW-10): management-level endpoints and profile
-# settings are for these roles, or for the profile's own users.
-_MANAGEMENT_ROLES = {"System Manager", "POSNext Manager"}
-
-
-def _is_management_user():
-	if frappe.session.user == "Administrator":
-		return True
-	return bool(_MANAGEMENT_ROLES.intersection(frappe.get_roles()))
+from pos_next.utils.authz import is_management_user
 
 
 def _assert_management_role():
 	"""Gate for endpoints that expose app-wide master data (User list, Mode of
 	Payment list). Not for cashiers."""
-	if not _is_management_user():
+	if not is_management_user():
 		frappe.throw(_("You don't have permission to access this resource"), frappe.PermissionError)
 
 
@@ -33,7 +24,7 @@ def _assert_profile_or_manager(pos_profile):
 		return
 	if frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user}):
 		return
-	if _is_management_user():
+	if is_management_user():
 		return
 	frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
 
@@ -163,6 +154,9 @@ def get_pos_settings(pos_profile):
 @frappe.whitelist()
 def get_payment_methods(pos_profile):
 	"""Get available payment methods from POS Profile with optimized queries"""
+	# SEC A5: profile-scoped read — members or management only.
+	_assert_profile_or_manager(pos_profile)
+
 	try:
 		# Validate pos_profile parameter
 		if not pos_profile:
@@ -218,6 +212,8 @@ def get_receivable_accounts(pos_profile):
 	"Pay on Account" button). Returns an empty list when credit sales are not enabled
 	for the profile, so the feature stays hidden behind the same gate.
 	"""
+	_assert_profile_or_manager(pos_profile)
+
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -251,6 +247,9 @@ def get_receivable_accounts(pos_profile):
 @frappe.whitelist()
 def get_taxes(pos_profile):
 	"""Get tax configuration from POS Profile"""
+	# SEC A5: profile-scoped read — members or management only.
+	_assert_profile_or_manager(pos_profile)
+
 	try:
 		if not pos_profile:
 			return []
@@ -289,6 +288,9 @@ def get_taxes(pos_profile):
 @frappe.whitelist()
 def get_warehouses(pos_profile):
 	"""Get all warehouses for the company in POS Profile"""
+	# SEC A5: profile-scoped read — members or management only.
+	_assert_profile_or_manager(pos_profile)
+
 	try:
 		if not pos_profile:
 			return []
@@ -318,6 +320,9 @@ def get_warehouses(pos_profile):
 @frappe.whitelist()
 def get_default_customer(pos_profile):
 	"""Get the default customer configured in POS Profile"""
+	# SEC A5: profile-scoped read — members or management only.
+	_assert_profile_or_manager(pos_profile)
+
 	try:
 		if not pos_profile:
 			return {"customer": None}
@@ -428,7 +433,14 @@ def get_wallet_payment_flags(methods):
 
 @frappe.whitelist()
 def get_sales_persons(pos_profile=None):
-	"""Get all active individual sales persons (not groups) for POS"""
+	"""Get all active individual sales persons (not groups) for POS.
+
+	SEC A5 decision: the checkout dropdown needs this list for cashiers, so it
+	stays membership-gated rather than management-only. `commission_rate` is
+	the sensitive column (payroll data) and is only returned to management.
+	"""
+	_assert_profile_or_manager(pos_profile)
+
 	try:
 		filters = {
 			"enabled": 1,
@@ -442,10 +454,15 @@ def get_sales_persons(pos_profile=None):
 			if frappe.db.has_column("Sales Person", "company") and company:
 				filters["company"] = company
 
+		# commission_rate is payroll data: managers get it, cashiers do not.
+		fields = ["name", "sales_person_name", "employee"]
+		if is_management_user():
+			fields.append("commission_rate")
+
 		sales_persons = frappe.get_list(
 			"Sales Person",
 			filters=filters,
-			fields=["name", "sales_person_name", "commission_rate", "employee"],
+			fields=fields,
 			order_by="sales_person_name",
 			limit_page_length=0,
 			ignore_permissions=True,

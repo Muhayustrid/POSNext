@@ -58,6 +58,16 @@ vi.mock("reka-ui", () => ({
 	DialogTitle: { name: "DialogTitle", template: "<h2><slot /></h2>" },
 }))
 
+// Manager flag source; the period bar is manager-only. Reactive so the
+// visibility test can flip it, defaulting to manager for the period-lens
+// tests below.
+const bootstrapMock = vi.hoisted(() => ({ store: null }))
+vi.mock("@/stores/bootstrap", async () => {
+	const { reactive } = await import("vue")
+	bootstrapMock.store = reactive({ data: { is_management: true } })
+	return { useBootstrapStore: () => bootstrapMock.store }
+})
+
 // Real period math, stubbed printer: the print stack needs a device.
 const printMock = vi.hoisted(() => ({ printSalesRecap: vi.fn() }))
 vi.mock("@/utils/salesRecap", async (importOriginal) => ({
@@ -189,6 +199,7 @@ async function mountWithSummary(overrides = {}) {
 
 beforeEach(() => {
 	resources.instances.length = 0
+	bootstrapMock.store.data.is_management = true
 })
 
 describe("SessionSummary", () => {
@@ -553,6 +564,32 @@ describe("InvoiceHistoryDialog", () => {
 			"Close",
 		)
 	})
+
+	it("names the cashier on the date line, and only when the API provides one", async () => {
+		resources.instances.length = 0
+		const wrapper = mountDialog()
+		await flushPromises()
+		const entry = resources.instances.find(
+			(i) => i.url === "pos_next.api.invoices.get_invoices",
+		)
+
+		const invoice = {
+			name: "INV-0001",
+			posting_date: "2026-09-20",
+			posting_time: "10:00:00",
+			buyer_name: "Budi",
+			status: "Paid",
+			grand_total: 25000,
+			payments: [],
+		}
+		entry.opts.onSuccess([{ ...invoice, cashier_name: "Siti" }])
+		await flushPromises()
+		expect(wrapper.text()).toContain("Siti")
+
+		entry.opts.onSuccess([invoice])
+		await flushPromises()
+		expect(wrapper.text()).not.toContain("Siti")
+	})
 })
 
 describe("SessionSummary period lens", () => {
@@ -690,5 +727,18 @@ describe("SessionSummary period lens", () => {
 		expect(printMock.printSalesRecap).toHaveBeenCalledWith(SUMMARY, {
 			posProfile: "Kasir 1",
 		})
+	})
+
+	it("shows the period selector to managers only", () => {
+		const asManager = mountPeriod()
+		expect(asManager.find('[data-test="period-select"]').exists()).toBe(true)
+		asManager.unmount()
+
+		bootstrapMock.store.data.is_management = false
+		const asCashier = mountPeriod()
+		expect(asCashier.find('[data-test="period-select"]').exists()).toBe(false)
+		// data logic untouched: the shift lens still loads
+		expect(summaryResource().resource.reload).toHaveBeenCalledTimes(1)
+		asCashier.unmount()
 	})
 })

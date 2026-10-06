@@ -7,6 +7,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
+from pos_next.utils.authz import is_management_user
+
 
 class POSOpeningShift(Document):
 	def before_insert(self):
@@ -49,12 +51,11 @@ class POSOpeningShift(Document):
 		# row lock before insert+submit, so this locking read is serialized
 		# against concurrent SPA opens; being on the doctype it also covers
 		# Desk submits and imports.
-		# Managers are exempt by design: the right to cancel a POS Closing
-		# Shift is the role-agnostic "is a manager" test (cashiers hold
-		# submit but never cancel), and a manager may deliberately open over
+		# Managers are exempt by design: "is a manager" is the shared
+		# is_management_user() test, and a manager may deliberately open over
 		# an in-use profile — e.g. to take the register while the previous
 		# shift waits for its close.
-		if frappe.has_permission("POS Closing Shift", "cancel"):
+		if is_management_user():
 			return
 		other = frappe.db.get_value(
 			"POS Opening Shift",

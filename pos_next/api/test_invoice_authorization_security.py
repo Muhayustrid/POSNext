@@ -25,6 +25,7 @@ from pos_next.api.invoices import (
 	cleanup_old_drafts,
 	check_invoice_return_validity,
 	get_invoice_for_return,
+	get_invoices,
 	get_returnable_invoices,
 	prepare_return_invoice,
 	search_invoice_by_number,
@@ -608,3 +609,304 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		self.assertFalse(frappe.db.exists(self.doctype, old_draft["name"]))
 		self.assertTrue(frappe.db.exists(self.doctype, fresh_draft["name"]))
 		self.assertTrue(frappe.db.exists(self.doctype, foreign_old["name"]))
+
+
+class TestInvoiceProfileGates(FrappeTestCase):
+	"""SEC-03 follow-up: the doctype-permission fallbacks are gone.
+
+	The cashier persona here is the REAL daily one — a POS Profile member
+	holding POSNext Cashier (which grants Sales Invoice/POS Invoice
+	read+write). That doctype permission must no longer let the cashier cross
+	outlets (get_invoices / update_invoice profile gate) or touch a same-
+	profile colleague's draft (owner gate). Management (POSNext Manager)
+	and the draft owner keep passing.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		if not frappe.db.exists("Role", "POSNext Manager"):
+			raise unittest.SkipTest("POSNext Manager role does not exist on this site")
+		# invoices are created through the Sales Invoice lane (no opening-shift
+		# fixture); pin the site switch so an ambient POS Invoice mode cannot
+		# force a shift onto every draft, restore the baseline in teardown
+		cls._invoice_type_baseline = frappe.db.get_single_value(
+			"POS Next Global Settings", "invoice_type"
+		)
+		_set_invoice_type(SALES_INVOICE)
+
+		profiles = frappe.get_all(
+			"POS Profile",
+			filters=_PROFILE_FILTER,
+			fields=["name", "company", "warehouse"],
+			order_by="creation asc",
+			limit=2,
+		)
+		cls.profile = profiles[0] if profiles else None
+		cls.mode = (
+			frappe.get_all(
+				"POS Payment Method",
+				{"parent": cls.profile.name, "parenttype": "POS Profile"},
+				pluck="mode_of_payment",
+				limit=1,
+			)
+			if cls.profile
+			else None
+		)
+		cls.customer = get_default_customer()
+		if not (cls.profile and cls.mode and cls.customer):
+			raise unittest.SkipTest("no usable POS Profile / customer")
+		cls.doctype = get_pos_invoice_doctype()
+
+		# a plain non-stock item: drafts never enter the stock pre-check, so no
+		# Material Receipt fixture is needed (deleted again in teardown)
+		from pos_next.tests.price_group_helpers import make_test_item
+
+		cls.item = make_test_item(f"InvGate{uuid.uuid4().hex[:6]}", is_stock_item=0)
+
+		# second outlet: an existing schedule-safe profile when the site has
+		# one, else a second profile on the SAME company (same-company keeps
+		# customer/currency/account semantics identical; profile + warehouse
+		# are swept in teardown)
+		cls._created_outlet = None
+		if len(profiles) > 1:
+			cls.other_profile = profiles[1]
+		else:
+			from pos_next.tests.price_group_helpers import (
+				make_test_pos_profile,
+				make_test_warehouse,
+			)
+
+			suffix = f"InvGate{uuid.uuid4().hex[:6]}"
+			warehouse = make_test_warehouse(suffix, cls.profile.company)
+			profile_name = make_test_pos_profile(suffix, cls.profile.company, warehouse)
+			cls._created_outlet = (profile_name, warehouse)
+			cls.other_profile = frappe.db.get_value(
+				"POS Profile", profile_name, ["name", "company", "warehouse"], as_dict=True
+			)
+
+		cls.cashier = f"inv-gate.{uuid.uuid4().hex[:8]}@example.com"
+		cls.cashier2 = f"inv-gate.{uuid.uuid4().hex[:8]}@example.com"
+		cls.manager = f"inv-gate.{uuid.uuid4().hex[:8]}@example.com"
+		for email in (cls.cashier, cls.cashier2, cls.manager):
+			frappe.get_doc(
+				{"doctype": "User", "email": email, "first_name": "Invoice Gate Tester"}
+			).insert(ignore_permissions=True)
+		frappe.get_doc("User", cls.manager).add_roles("POSNext Manager")
+		for email in (cls.cashier, cls.cashier2):
+			# the daily persona: role grants invoice read+write, which is
+			# exactly what used to slip past the gates
+			frappe.get_doc(
+				{
+					"doctype": "Has Role",
+					"parent": email,
+					"parenttype": "User",
+					"parentfield": "roles",
+					"role": "POSNext Cashier",
+				}
+			).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "POS Profile User",
+					"parent": cls.profile.name,
+					"parenttype": "POS Profile",
+					"parentfield": "applicable_for_users",
+					"user": email,
+				}
+			).insert(ignore_permissions=True)
+		for email in (cls.cashier, cls.cashier2, cls.manager):
+			frappe.clear_cache(user=email)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user(ADMIN)
+		_set_invoice_type(cls._invoice_type_baseline or SALES_INVOICE)
+
+		def _safe(step):
+			# tolerant teardown (see test_closing_shift_security): one leftover
+			# must never abort the remaining cleanup on this shared dev site
+			try:
+				step()
+			except Exception:
+				pass
+
+		# invoices first: the teardown commit below would otherwise persist
+		# every draft the tests created (owners are the run's throwaway users)
+		for email in (cls.cashier, cls.cashier2, cls.manager):
+			for doctype in ("Sales Invoice", "POS Invoice"):
+				for name in frappe.get_all(doctype, {"owner": email, "docstatus": 0}, pluck="name"):
+					_safe(
+						lambda d=doctype, n=name: frappe.delete_doc(
+							d, n, force=1, ignore_permissions=True
+						)
+					)
+		_safe(lambda: frappe.delete_doc("Item", cls.item, force=1, ignore_permissions=True))
+		if cls._created_outlet:
+			profile, warehouse = cls._created_outlet
+			_safe(lambda: frappe.db.delete("POS Settings", {"pos_profile": profile}))
+			_safe(
+				lambda: frappe.delete_doc("POS Profile", profile, force=1, ignore_permissions=True)
+			)
+			_safe(lambda: frappe.delete_doc("Warehouse", warehouse, force=1, ignore_permissions=True))
+		for email in (cls.cashier, cls.cashier2, cls.manager):
+			_safe(lambda e=email: frappe.db.delete("Error Log", {"owner": e}))
+			_safe(lambda e=email: frappe.db.delete("POS Profile User", {"user": e}))
+			_safe(lambda e=email: frappe.delete_doc("User", e, force=1, ignore_permissions=True))
+		frappe.db.commit()
+		super().tearDownClass()
+
+	def setUp(self):
+		frappe.set_user(ADMIN)
+
+	def tearDown(self):
+		frappe.set_user(ADMIN)
+
+	# ---------------------------------------------------------------- helpers
+
+	def _payload(self, item_warehouse=None, **overrides):
+		payload = {
+			"pos_profile": self.profile.name,
+			"customer": self.customer,
+			"items": [
+				{
+					"item_code": self.item,
+					"qty": 1,
+					"rate": 100,
+					"warehouse": item_warehouse or self.profile.warehouse,
+				}
+			],
+			"payments": [{"mode_of_payment": self.mode[0], "amount": 100}],
+		}
+		payload.update(overrides)
+		return payload
+
+	def _insert_draft(self, user, **overrides):
+		frappe.set_user(user)
+		try:
+			return update_invoice(self._payload(**overrides))
+		finally:
+			frappe.set_user(ADMIN)
+
+	# ---------------------------------------------------------------- get_invoices
+
+	def test_cross_profile_cashier_cannot_list_invoices(self):
+		frappe.set_user(self.cashier)
+		try:
+			# premise of the regression: this persona DOES hold doctype read,
+			# which the removed fallback (`has_permission(doctype, "read")`)
+			# accepted as profile access
+			self.assertTrue(frappe.has_permission(self.doctype, "read"))
+			self.assertFalse(
+				frappe.db.exists(
+					"POS Profile User",
+					{"parent": self.other_profile.name, "user": self.cashier},
+				)
+			)
+			with self.assertRaises(frappe.PermissionError):
+				get_invoices(pos_profile=self.other_profile.name)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_cross_profile_manager_can_list_invoices(self):
+		frappe.set_user(self.manager)
+		try:
+			rows = get_invoices(pos_profile=self.other_profile.name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertIsInstance(rows, list)
+
+	def test_own_profile_cashier_can_list_invoices(self):
+		frappe.set_user(self.cashier)
+		try:
+			rows = get_invoices(pos_profile=self.profile.name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertIsInstance(rows, list)
+
+	# ---------------------------------------------------------------- update_invoice
+
+	def test_same_profile_cross_owner_update_rejected_manager_allowed(self):
+		draft = self._insert_draft(self.cashier2)
+		name = draft["name"]
+
+		frappe.set_user(self.cashier)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				update_invoice(self._payload(name=name, customer="Hacked"))
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(frappe.db.get_value(self.doctype, name, "customer"), self.customer)
+
+		# management is the only non-owner path now
+		frappe.set_user(self.manager)
+		try:
+			update_invoice(self._payload(name=name, remarks="manager-touch"))
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(frappe.db.get_value(self.doctype, name, "remarks"), "manager-touch")
+
+	def test_cross_profile_insert_rejected_for_cashier(self):
+		# the profile gate itself: a cashier with invoice write may not create
+		# a draft under an outlet they are not a user of (the removed
+		# `doctype` fallback used to admit exactly this)
+		frappe.set_user(self.cashier)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				update_invoice(
+					self._payload(
+						item_warehouse=self.other_profile.warehouse,
+						pos_profile=self.other_profile.name,
+					)
+				)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(
+			frappe.db.count(
+				self.doctype,
+				{"owner": self.cashier, "pos_profile": self.other_profile.name},
+			),
+			0,
+		)
+
+	def test_cross_profile_update_rejected_for_cashier_manager_allowed(self):
+		# manager seeds a fully-valid draft in the OTHER outlet through the API
+		# (management bypasses the profile gate on insert)...
+		draft = self._insert_draft(
+			self.manager,
+			item_warehouse=self.other_profile.warehouse,
+			pos_profile=self.other_profile.name,
+		)
+		name = draft["name"]
+		# ...then the owner is pinned to the cashier at DB level: the owner
+		# gate passes for them, so the refusal below pins the PROFILE gate for
+		# a caller holding invoice write.
+		frappe.db.set_value(self.doctype, name, "owner", self.cashier, update_modified=False)
+
+		frappe.set_user(self.cashier)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				update_invoice(
+					self._payload(
+						name=name,
+						item_warehouse=self.other_profile.warehouse,
+						pos_profile=self.other_profile.name,
+					)
+				)
+		finally:
+			frappe.set_user(ADMIN)
+
+		# management is the one non-owner path that accepts the foreign outlet
+		frappe.set_user(self.manager)
+		try:
+			update_invoice(
+				self._payload(
+					name=name,
+					item_warehouse=self.other_profile.warehouse,
+					pos_profile=self.other_profile.name,
+					remarks="manager-cross",
+				)
+			)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(frappe.db.get_value(self.doctype, name, "remarks"), "manager-cross")

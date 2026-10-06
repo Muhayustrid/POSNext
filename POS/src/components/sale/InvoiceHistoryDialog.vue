@@ -105,6 +105,7 @@
 									{{
 										formatDateTime(invoice.posting_date, invoice.posting_time)
 									}}
+									<span v-if="invoice.cashier_name">· {{ invoice.cashier_name }}</span>
 								</p>
 								<p class="text-xs text-gray-500 text-start">
 									{{ formatPaymentModes(invoice) }}

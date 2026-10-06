@@ -34,6 +34,7 @@ from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 from pos_next.api.packages import _package_allocation_enabled
 from pos_next.api.settings_resolver import get_effective_pos_settings
 from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.utils.authz import is_management_user
 
 
 @frappe.whitelist()
@@ -69,6 +70,7 @@ def get_initial_data():
 		"locale": _get_user_language(),
 		"precision": _get_precision_settings(),
 		"can_switch_to_desk": "POSNext Manager" in frappe.get_roles(),
+		"is_management": is_management_user(),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,

@@ -119,6 +119,11 @@ class TestSessionSummary(IntegrationTestCase):
 			udoc = frappe.get_doc("User", cls.user)
 			udoc.append("roles", {"role": "POSNext Cashier"})
 			udoc.save(ignore_permissions=True)
+		# period recaps are manager-only now: the class's caller (all test body
+		# invocations run as cls.user) keeps the management role so the
+		# test_period_* suite exercises them as their intended audience
+		frappe.get_doc("User", cls.user).add_roles("POSNext Manager")
+		cls.addClassCleanup(cls._revoke_role, cls.user, "POSNext Manager")
 		# A fresh profile per run: the recap scope is "every shift of the
 		# profile", so a shared fixed-name profile accumulates leftover
 		# shifts/invoices from earlier runs and demos, breaking exact-value
@@ -356,6 +361,13 @@ class TestSessionSummary(IntegrationTestCase):
 				_purge_doc("Payment Entry", pe)
 			_purge_doc(doctype, inv)
 		_purge_doc("POS Opening Shift", name)
+
+	@staticmethod
+	def _revoke_role(user, role):
+		# role grants on shared fixture users must not leak across modules/runs
+		# (same cleanup pattern as test_shifts_authorization.py)
+		frappe.db.delete("Has Role", {"parent": user, "parenttype": "User", "role": role})
+		frappe.clear_cache(user=user)
 
 	@classmethod
 	def _ensure_profile_user(cls, profile, user):
@@ -809,15 +821,26 @@ class TestSessionSummary(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			get_session_summary(self.opening_shift)
 
-	def test_nonowner_with_doctype_read_allowed(self):
-		"""Documented fallback: a user with POS Opening Shift read access may
-		view a shift they do not own (e.g. supervisor)."""
-		from unittest.mock import patch
-
-		frappe.set_user(self.other_user)
-		with patch("frappe.has_permission", return_value=True):
-			summary = get_session_summary(self.opening_shift)
+	def test_nonowner_manager_allowed(self):
+		"""New design: the doctype-read fallback is gone; a non-owner reaches
+		the summary only through the POSNext Manager role."""
+		# grant the role as Administrator: the test session is the shift-owner
+		# cashier, who may not write another user's User doc
+		frappe.set_user("Administrator")
+		try:
+			frappe.get_doc("User", self.other_user).add_roles("POSNext Manager")
+			self.addCleanup(self._revoke_role, self.other_user, "POSNext Manager")
+		finally:
+			frappe.set_user(self.other_user)
+		summary = get_session_summary(self.opening_shift)
 		self.assertEqual(summary["net_sales"], self.NET)
+
+	def test_nonowner_cashier_rejected(self):
+		"""A non-owner without a management role is refused — the generic
+		doctype-read fallback no longer admits them."""
+		frappe.set_user(self.other_user)
+		with self.assertRaises(frappe.PermissionError):
+			get_session_summary(self.opening_shift)
 
 	def test_missing_shift_throws(self):
 		with self.assertRaises(frappe.DoesNotExistError):

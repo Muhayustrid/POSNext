@@ -13,11 +13,16 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate
 
+from pos_next.api.packages import _assert_profile_access
 from pos_next.api.settings_resolver import get_effective_pos_setting
 
 
 @frappe.whitelist()
 def get_next_queue_number(pos_profile: str) -> dict:
+	# SEC A5: allocating a queue number writes a row for the profile's
+	# company — membership (or management) only.
+	_assert_profile_access(pos_profile)
+
 	company = frappe.db.get_value("POS Profile", pos_profile, "company")
 	if not company:
 		frappe.throw(_("POS Profile {0} not found").format(pos_profile))

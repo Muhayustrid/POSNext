@@ -32,6 +32,10 @@ from pos_next.api.shifts import (
 	check_opening_shift,
 	create_opening_shift,
 	get_closing_shift_data,
+	get_period_dashboard,
+	get_period_summary,
+	get_session_summary,
+	get_shift_dashboard,
 )
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
@@ -376,3 +380,326 @@ class TestShiftsAuthorization(FrappeTestCase):
 		self.assertEqual(
 			frappe.db.count("POS Opening Shift", {"user": self.cashier, "docstatus": 1}), 1
 		)
+
+
+class TestShiftManagerGates(FrappeTestCase):
+	"""Management-only gates added after the doctype-permission fallbacks.
+
+	- get_closing_shift_data / get_session_summary / get_shift_dashboard:
+	  owner-or-management. A same-profile colleague (holding the cashier's
+	  POS Opening/Closing Shift read) used to pass the removed
+	  `frappe.has_permission(..., doc=...)` fallback; now only the owner and
+	  management do.
+	- get_period_summary / get_period_dashboard: management-only, on top of
+	  the membership gate. The manager fixture is deliberately NOT a POS
+	  Profile User: `shifts._check_profile_access` carries its own management
+	  bypass, so a manager outside the profile passes both gates.
+
+	Each test opens its own shift through create_opening_shift (the real API
+	path) and registers a per-test cleanup — only one open shift may hold a
+	profile, so leftovers would break the next test.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		for role in ("POSNext Manager", "POSNext Cashier"):
+			if not frappe.db.exists("Role", role):
+				raise unittest.SkipTest(f"{role} role does not exist on this site")
+		cls.profile = frappe.db.get_value(
+			"POS Profile",
+			_PROFILE_FILTER,
+			["name", "company"],
+			as_dict=True,
+			order_by="creation asc",
+		)
+		cls.mode = (
+			frappe.get_all(
+				"POS Payment Method",
+				{"parent": cls.profile.name, "parenttype": "POS Profile"},
+				pluck="mode_of_payment",
+				limit=1,
+			)
+			if cls.profile
+			else None
+		)
+		if not (cls.profile and cls.mode):
+			raise unittest.SkipTest("no schedule-safe POS Profile with a payment method")
+
+		cls.cashier_a = f"shift-gate.{uuid.uuid4().hex[:8]}@example.com"
+		cls.cashier_b = f"shift-gate.{uuid.uuid4().hex[:8]}@example.com"
+		cls.manager = f"shift-gate.{uuid.uuid4().hex[:8]}@example.com"
+		for email in (cls.cashier_a, cls.cashier_b, cls.manager):
+			frappe.get_doc(
+				{"doctype": "User", "email": email, "first_name": "Shift Gate Tester"}
+			).insert(ignore_permissions=True)
+		frappe.get_doc("User", cls.manager).add_roles("POSNext Manager")
+		cls.addClassCleanup(cls._revoke_role, cls.manager, "POSNext Manager")
+		# the cashiers hold the daily persona role, which DOES grant POS
+		# Opening/Closing Shift read: that doctype permission used to be the
+		# removed fallback, so its presence is the whole point of the probe
+		for email in (cls.cashier_a, cls.cashier_b):
+			frappe.get_doc("User", email).add_roles("POSNext Cashier")
+			cls.addClassCleanup(cls._revoke_role, email, "POSNext Cashier")
+		# only the cashiers are profile members; the manager stays OUT of the
+		# profile — shifts._check_profile_access has its own management
+		# bypass, and the period tests prove a non-member manager still gets
+		# through both gates
+		for email in (cls.cashier_a, cls.cashier_b):
+			frappe.get_doc(
+				{
+					"doctype": "POS Profile User",
+					"parent": cls.profile.name,
+					"parenttype": "POS Profile",
+					"parentfield": "applicable_for_users",
+					"user": email,
+				}
+			).insert(ignore_permissions=True)
+			frappe.clear_cache(user=email)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user(ADMIN)
+
+		def _safe(step):
+			# tolerant teardown (see test_closing_shift_security): one leftover
+			# must never abort the remaining cleanup on this shared dev site
+			try:
+				step()
+			except Exception:
+				pass
+
+		for email in (cls.cashier_a, cls.cashier_b, cls.manager):
+			# sweep any open shift a failed test left behind (invoice → closing
+			# → opening → profile users → users)
+			for name in frappe.get_all(
+				"POS Opening Shift", {"user": email, "docstatus": ["<", 2]}, pluck="name"
+			):
+				_safe(
+					lambda n=name: frappe.db.set_value(
+						"POS Opening Shift", n, "pos_profile", cls.profile.name
+					)
+				)
+
+				def _purge(n):
+					doc = frappe.get_doc("POS Opening Shift", n)
+					doc.flags.ignore_permissions = True
+					if doc.docstatus == 1:
+						doc.cancel()
+					frappe.delete_doc("POS Opening Shift", n, force=1, ignore_permissions=True)
+
+				_safe(lambda n=name: _purge(n))
+			_safe(lambda e=email: frappe.db.delete("Error Log", {"owner": e}))
+			_safe(lambda e=email: frappe.db.delete("POS Profile User", {"user": e}))
+			_safe(lambda e=email: frappe.delete_doc("User", e, force=1, ignore_permissions=True))
+		frappe.db.commit()
+		super().tearDownClass()
+
+	@staticmethod
+	def _revoke_role(user, role):
+		frappe.db.delete("Has Role", {"parent": user, "parenttype": "User", "role": role})
+		frappe.clear_cache(user=user)
+
+	def _balance_details(self):
+		return json.dumps([{"mode_of_payment": self.mode[0], "opening_amount": OPENING_CASH}])
+
+	def _open_shift_as(self, user):
+		"""Open a shift through the API as `user` (owner = session user)."""
+		frappe.set_user(user)
+		try:
+			data = create_opening_shift(
+				self.profile.name, self.profile.company, self._balance_details()
+			)
+		finally:
+			frappe.set_user(ADMIN)
+		shift = data["pos_opening_shift"]
+		self.addCleanup(self._remove_shift, shift)
+		return shift
+
+	def _remove_shift(self, shift):
+		# tolerant cleanup: one leftover must never abort the remaining cleanup;
+		# the profile link may be db-spoofed by a test, restore before cancel
+		name = shift.get("name")
+		try:
+			frappe.db.set_value("POS Opening Shift", name, "pos_profile", self.profile.name)
+			doc = frappe.get_doc("POS Opening Shift", name)
+			doc.flags.ignore_permissions = True
+			if doc.docstatus == 1:
+				doc.cancel()
+			frappe.delete_doc("POS Opening Shift", name, force=1, ignore_permissions=True)
+		except Exception:
+			pass
+
+	# ── period reports: membership AND management ────────────────────────────
+
+	def test_period_summary_rejects_profile_cashier_allows_manager(self):
+		from_date = to_date = nowdate()
+
+		frappe.set_user(self.cashier_a)
+		try:
+			# premise: membership alone passed the pre-existing profile gate —
+			# the refusal comes from the new management gate
+			self.assertTrue(
+				frappe.db.exists(
+					"POS Profile User",
+					{"parent": self.profile.name, "user": self.cashier_a},
+				)
+			)
+			with self.assertRaises(frappe.PermissionError):
+				get_period_summary(self.profile.name, from_date, to_date)
+		finally:
+			frappe.set_user(ADMIN)
+
+		# ...and management is a pure bypass: the manager is NOT a member of
+		# the profile (see setUpClass), yet passes both gates
+		self.assertFalse(
+			frappe.db.exists(
+				"POS Profile User",
+				{"parent": self.profile.name, "user": self.manager},
+			)
+		)
+		frappe.set_user(self.manager)
+		try:
+			summary = get_period_summary(self.profile.name, from_date, to_date)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(summary["pos_profile"], self.profile.name)
+
+	def test_period_dashboard_rejects_profile_cashier_allows_manager(self):
+		from_date = to_date = nowdate()
+
+		frappe.set_user(self.cashier_a)
+		try:
+			self.assertTrue(
+				frappe.db.exists(
+					"POS Profile User",
+					{"parent": self.profile.name, "user": self.cashier_a},
+				)
+			)
+			with self.assertRaises(frappe.PermissionError):
+				get_period_dashboard(self.profile.name, from_date, to_date)
+		finally:
+			frappe.set_user(ADMIN)
+
+		self.assertFalse(
+			frappe.db.exists(
+				"POS Profile User",
+				{"parent": self.profile.name, "user": self.manager},
+			)
+		)
+		frappe.set_user(self.manager)
+		try:
+			dashboard = get_period_dashboard(self.profile.name, from_date, to_date)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(dashboard["pos_profile"], self.profile.name)
+
+	def test_non_member_manager_passes_period_reports(self):
+		# dedicated probe for the shifts._check_profile_access management
+		# bypass: a manager with no POS Profile User row at all
+		self.assertFalse(
+			frappe.db.exists(
+				"POS Profile User",
+				{"parent": self.profile.name, "user": self.manager},
+			)
+		)
+		frappe.set_user(self.manager)
+		try:
+			summary = get_period_summary(self.profile.name, nowdate(), nowdate())
+			dashboard = get_period_dashboard(self.profile.name, nowdate(), nowdate())
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(summary["pos_profile"], self.profile.name)
+		self.assertEqual(dashboard["pos_profile"], self.profile.name)
+
+	# ── owner-or-management read gates ───────────────────────────────────────
+
+	def test_closing_shift_data_rejects_non_owner_allows_manager(self):
+		shift = self._open_shift_as(self.cashier_a)
+		name = shift.get("name")
+
+		frappe.set_user(self.cashier_b)
+		try:
+			# premise: the removed doc-level fallback accepted exactly this
+			# doctype read (a same-profile cashier colleague)
+			self.assertTrue(frappe.has_permission("POS Opening Shift", "read"))
+			with self.assertRaises(frappe.PermissionError):
+				get_closing_shift_data(name)
+		finally:
+			frappe.set_user(ADMIN)
+
+		frappe.set_user(self.manager)
+		try:
+			data = get_closing_shift_data(name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(data["pos_opening_shift"], name)
+
+	def test_session_summary_rejects_non_owner_allows_manager(self):
+		shift = self._open_shift_as(self.cashier_a)
+		name = shift.get("name")
+
+		frappe.set_user(self.cashier_b)
+		try:
+			self.assertTrue(frappe.has_permission("POS Opening Shift", "read"))
+			with self.assertRaises(frappe.PermissionError):
+				get_session_summary(name)
+		finally:
+			frappe.set_user(ADMIN)
+
+		frappe.set_user(self.manager)
+		try:
+			summary = get_session_summary(name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(summary["opening_shift"], name)
+
+	def test_shift_dashboard_rejects_non_owner_allows_manager(self):
+		shift = self._open_shift_as(self.cashier_a)
+		name = shift.get("name")
+
+		frappe.set_user(self.cashier_b)
+		try:
+			self.assertTrue(frappe.has_permission("POS Opening Shift", "read"))
+			with self.assertRaises(frappe.PermissionError):
+				get_shift_dashboard(name)
+		finally:
+			frappe.set_user(ADMIN)
+
+		frappe.set_user(self.manager)
+		try:
+			dashboard = get_shift_dashboard(name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(dashboard["opening_shift"], name)
+
+	def test_owner_can_view_own_session_summary_and_dashboard(self):
+		shift = self._open_shift_as(self.cashier_a)
+		name = shift.get("name")
+
+		frappe.set_user(self.cashier_a)
+		try:
+			summary = get_session_summary(name)
+			dashboard = get_shift_dashboard(name)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(summary["opening_shift"], name)
+		self.assertEqual(dashboard["opening_shift"], name)
+
+	# ── double-shift guard: manager bypass via is_management_user ────────────
+
+	def test_manager_bypasses_double_shift_guard(self):
+		# cashier_a holds the profile; a second member would be refused by the
+		# doctype guard, but a manager may deliberately open over an in-use
+		# profile (the refactored is_management_user() bypass)
+		first = self._open_shift_as(self.cashier_a)
+		second = self._open_shift_as(self.manager)
+
+		self.assertEqual(second.get("user"), self.manager)
+		for shift in (first, second):
+			meta = frappe.db.get_value(
+				"POS Opening Shift", shift.get("name"), ["docstatus", "status"], as_dict=True
+			)
+			self.assertEqual(meta.docstatus, 1)
+			self.assertEqual(meta.status, "Open")
