@@ -43,6 +43,8 @@ const HQ_PAGE_SIZE = 10;
  * rendering is untouched. # ponytail: drop when frappe-charts is pinned to a
  * release with this fixed
  */
+const HQ_DONUT_COLORS = ["#2490ef", "#29cd42", "#ffa00a", "#7575ff", "#ff5858"];
+
 function _harden_chart(chart, after) {
 	if (!chart || !chart.boundDrawFn) return;
 	const raw = chart.boundDrawFn;
@@ -113,9 +115,6 @@ class HQSalesMonitor {
 		this.recent_page = 1;
 		this.recent_sort = null;
 		this.recent_dir = null;
-		this.ret_page = 1;
-		this.ret_sort = null;
-		this.ret_dir = null;
 		this.category = "";
 		this.outlet_query = "";
 		// Outlet-table view toggle: empty outlets (no sales, no TC, no target)
@@ -380,7 +379,6 @@ class HQSalesMonitor {
 		if (tbl === "outletr") return this._apply_outletr_table();
 		if (tbl === "shift") return this._apply_shift_table();
 		if (tbl === "recent") return this._apply_recent_table();
-		if (tbl === "ret") return this._apply_ret_table();
 		return null;
 	}
 
@@ -562,6 +560,10 @@ class HQSalesMonitor {
 			this._hero_card(s),
 			this._outlet_performance_card(s),
 			this._ranking_card(s),
+			'<div class="hq-duo hq-duo--even">',
+			this._donut_card(s, "payments"),
+			this._donut_card(s, "outlets"),
+			"</div>",
 			this._hours_card(s),
 			this._ranking_tables_card(s),
 			'<div class="hq-duo">',
@@ -581,7 +583,6 @@ class HQSalesMonitor {
 		this._apply_outletr_table();
 		this._apply_shift_table();
 		this._apply_recent_table();
-		this._apply_ret_table();
 	}
 
 	_reset_table_pages() {
@@ -590,7 +591,6 @@ class HQSalesMonitor {
 		this.outletr_page = 1;
 		this.shift_page = 1;
 		this.recent_page = 1;
-		this.ret_page = 1;
 	}
 
 	_scope_line(scope) {
@@ -984,20 +984,13 @@ class HQSalesMonitor {
 	}
 
 	// ------------------------------------------------------------------
-	// Rankings — ONE card, four ranked bar-lists in a 2x2 internal grid:
-	// the two independent "Top Selling <category>" slots (a / b), the top
-	// categories and the top outlets. Bars beat rings for 1-5 entries (a
-	// lone leader is a full bar, never a "100%" donut) and drop four
-	// frappe.Chart instances from the page.
+	// Rankings — the two independent "Top Selling <category>" slots (a / b)
+	// as bar-lists in one card; payment methods and top outlets get a card
+	// each with a donut (see _donut_card).
 	// ------------------------------------------------------------------
 
 	_ranking_card(s) {
-		const blocks = [
-			this._rank_category_block(s, "a"),
-			this._rank_category_block(s, "b"),
-			this._rank_payments_block(s),
-			this._rank_outlets_block(s),
-		];
+		const blocks = [this._rank_category_block(s, "a"), this._rank_category_block(s, "b")];
 		return `<div class="hq-card hq-card--rankings">
 			<div class="hq-card-title">${__("Rankings")}</div>
 			<div class="hq-rank-grid">${blocks.join("")}</div>
@@ -1069,38 +1062,54 @@ class HQSalesMonitor {
 		</div>`;
 	}
 
-	_rank_payments_block(s) {
+	_payment_entries(s) {
 		const pm = s.payments || {};
-		const ccy = pm.currency || s.scope.default_currency;
-		const entries = (pm.rows || []).map((r) => ({
+		return (pm.rows || []).map((r) => ({
 			label: r.mode_of_payment,
 			value: Number(r.amount),
 			share_pct: r.share_pct,
 		}));
-		const foot =
-			entries.length && entries.length < (pm.modes_with_sales || entries.length)
-				? `<div class="hq-rank-foot hq-muted">${__("top 5 of")} ${pm.modes_with_sales} ${__("payment methods")}</div>`
-				: "";
-		const body = entries.length
-			? `${this._rank_list_html(entries, ccy)}${foot}`
-			: this._empty_line(__("No positive sales in this period"));
-		return `<div class="hq-rank-block">
-			<div class="hq-rank-head">${__("Payment Methods")}</div>
-			${body}
-		</div>`;
 	}
 
-	_rank_outlets_block(s) {
+	_outlet_entries(s) {
 		const ccy = s.scope.default_currency;
-		const entries = (s.outlet_ranking || [])
+		return (s.outlet_ranking || [])
 			.filter((r) => r.currency === ccy && Number(r.net_tax_incl) > 0)
 			.slice(0, 5)
 			.map((r) => ({ label: r.company, value: Number(r.net_tax_incl), share_pct: r.share_pct }));
+	}
+
+	// Payment Methods / Top Outlets: a donut (drawn in _render_donuts) beside
+	// a legend carrying the exact value and share of each slice.
+	_donut_card(s, kind) {
+		const pm = s.payments || {};
+		const payments = kind === "payments";
+		const entries = payments ? this._payment_entries(s) : this._outlet_entries(s);
+		const ccy = payments ? pm.currency || s.scope.default_currency : s.scope.default_currency;
+		const title = payments
+			? __("Payment Methods")
+			: `${__("Top Outlets")} <span class="hq-rank-head-sub">${__("net incl. tax")} · ${frappe.utils.escape_html(ccy || "")}</span>`;
+		const foot =
+			payments && entries.length && entries.length < (pm.modes_with_sales || entries.length)
+				? `<div class="hq-rank-foot hq-muted">${__("top 5 of")} ${pm.modes_with_sales} ${__("payment methods")}</div>`
+				: "";
 		const body = entries.length
-			? this._rank_list_html(entries, ccy)
+			? `<div class="hq-donut-wrap">
+					<div class="hq-donut" data-hq-donut="${kind}"></div>
+					<ol class="hq-rank-list hq-donut-legend">${entries
+						.map(
+							(e, i) => `<li class="hq-rank-item"><div class="hq-rank-row">
+								<span class="hq-donut-dot" style="background:${HQ_DONUT_COLORS[i % HQ_DONUT_COLORS.length]}"></span>
+								<span class="hq-rank-label" title="${frappe.utils.escape_html(e.label)}">${frappe.utils.escape_html(e.label)}</span>
+								<span class="hq-rank-value hq-money">${HQ_UTILS.fmtMoney(e.value, ccy)}</span>
+								<span class="hq-rank-pct">${HQ_UTILS.fmtPct(e.share_pct)}</span>
+							</div></li>`
+						)
+						.join("")}</ol>
+				</div>${foot}`
 			: this._empty_line(__("No positive sales in this period"));
-		return `<div class="hq-rank-block">
-			<div class="hq-rank-head">${__("Top Outlets")} <span class="hq-rank-head-sub">${__("net incl. tax")} · ${frappe.utils.escape_html(ccy || "")}</span></div>
+		return `<div class="hq-card">
+			<div class="hq-card-title">${title}</div>
 			${body}
 		</div>`;
 	}
@@ -1208,54 +1217,24 @@ class HQSalesMonitor {
 			${tile(__("Return Qty"), HQ_UTILS.fmtCount(ret.count || 0))}
 			${tile(__("Return Rate"), HQ_UTILS.fmtPct(ret.rate == null ? null : ret.rate * 100, 1))}
 		</div>`;
-		const rows = (ret.rows || [])
-			.map(
-				(r, i) => `<div class="hq-ret-row" data-hq-ret-row data-hq-idx="${i}" data-sort-col="name" data-sort-value="${frappe.utils.escape_html(r.name)}" data-sort-amount="${Number(r.amount) || 0}">
-				<div class="hq-ret-name"><b>${frappe.utils.escape_html(r.name)}</b>
-					<div class="hq-item-code">${frappe.utils.escape_html(r.first_item || "")}</div></div>
-				<span class="hq-money hq-neg">-${HQ_UTILS.fmtMoney(r.amount, r.currency === ccy ? "" : r.currency)}</span>
-			</div>`
-			)
-			.join("");
+		// Detail list lives in the POS Return Report; carry the same scope over
+		// (route options from the query string prefill the report filters).
+		const sc = s.scope || {};
+		const params = { from_date: sc.from_date || "", to_date: sc.to_date || "" };
+		const company = this.company_field.get_value();
+		if (company) {
+			params.company = company;
+			if (this.descendants_field.get_value()) params.include_descendants = 1;
+		}
+		const href = `/app/query-report/${encodeURIComponent("POS Return Report")}?${$.param(params)}`;
 		return `<div class="hq-card hq-card--returns">
-			<div class="hq-card-title">${__("Returns")}
-				<span class="hq-ret-sort" role="button" tabindex="0" data-hq-sort="name" data-hq-tbl="ret" title="${__("Sort by invoice")}">${__("Invoice")}<span class="hq-sort-arrow" aria-hidden="true">${this._sort_arrow("name", { key: this.ret_sort, dir: this.ret_dir })}</span></span>
-				<span class="hq-ret-sort" role="button" tabindex="0" data-hq-sort="amount" data-hq-tbl="ret" title="${__("Sort by amount")}">${__("Amount")}<span class="hq-sort-arrow" aria-hidden="true">${this._sort_arrow("amount", { key: this.ret_sort, dir: this.ret_dir })}</span></span></div>
+			<div class="hq-card-title">${__("Returns")}</div>
 			${tiles}
-			<div class="hq-ret-rows">${rows || `<p class="hq-empty-line">${__("No data")}</p>`}</div>
-			<div data-hq-ret-pager-host></div>
+			<div class="hq-ret-foot">
+				<span class="text-muted">${__("{0} returns of {1} invoices", [HQ_UTILS.fmtCount(ret.count || 0), HQ_UTILS.fmtCount(ret.invoice_count || 0)])}</span>
+				<a class="btn btn-xs btn-default" href="${href}">${__("View details")} →</a>
+			</div>
 		</div>`;
-	}
-
-	_apply_ret_table() {
-		const total = this.$root.find("[data-hq-ret-row]").length;
-		if (!total) {
-			this.$root.find("[data-hq-ret-pager-host]").html("");
-			return;
-		}
-		const t = { ...this._tbl("ret"), tbl: "ret" };
-		let order = this.$root.find("[data-hq-ret-row]").toArray();
-		if (t.key === "amount") {
-			order.sort((a, b) => {
-				const cmp = Number(a.dataset.sortAmount || 0) - Number(b.dataset.sortAmount || 0);
-				return t.dir === "desc" ? -cmp : cmp;
-			});
-		} else if (t.key === "name") {
-			order.sort((a, b) => {
-				const cmp = String(a.dataset.sortValue || "").localeCompare(String(b.dataset.sortValue || ""), undefined, { numeric: true });
-				return t.dir === "desc" ? -cmp : cmp;
-			});
-		} else {
-			order.sort((a, b) => Number(a.dataset.hqIdx || 0) - Number(b.dataset.hqIdx || 0));
-		}
-		const pages = Math.max(1, Math.ceil(total / HQ_PAGE_SIZE));
-		this.ret_page = Math.min(Math.max(1, this.ret_page), pages);
-		const host = order.length ? order[0].parentNode : null;
-		order.forEach((el) => host && host.appendChild(el));
-		const vis = new Set(order.slice((this.ret_page - 1) * HQ_PAGE_SIZE, this.ret_page * HQ_PAGE_SIZE));
-		order.forEach((el) => el.style.setProperty("display", vis.has(el) ? "" : "none"));
-		this.$root.find("[data-hq-ret-pager-host]").html(this._client_pager(t, total, __("returns")));
-		this._refresh_sort_heads("ret");
 	}
 
 	_recent_card(s) {
@@ -1462,9 +1441,35 @@ class HQSalesMonitor {
 	}
 
 	_render_charts(s) {
-		// The rankings are DOM bar-lists now; the peak-hour chart is the
-		// page's only frappe.Chart instance left.
 		this._render_hour_chart(s);
+		this._render_donuts(s);
+	}
+
+	_render_donuts(s) {
+		if (!frappe.Chart) return;
+		const sets = { payments: this._payment_entries(s), outlets: this._outlet_entries(s) };
+		const ccy = (s.payments || {}).currency || s.scope.default_currency;
+		for (const [kind, entries] of Object.entries(sets)) {
+			const el = this.$root.find(`[data-hq-donut="${kind}"]`).get(0);
+			if (!el || !entries.length) continue;
+			const chart = new frappe.Chart(el, {
+				data: {
+					labels: entries.map((e) => e.label),
+					datasets: [{ values: entries.map((e) => e.value) }],
+				},
+				type: "donut",
+				colors: HQ_DONUT_COLORS.slice(0, entries.length),
+				height: 200,
+				// the legend beside the donut already names every slice
+				showLegend: false,
+				tooltipOptions: {
+					formatTooltipY: (value) =>
+						HQ_UTILS.fmtMoney(value, kind === "payments" ? ccy : s.scope.default_currency),
+				},
+			});
+			_harden_chart(chart);
+			this._charts.push(chart);
+		}
 	}
 
 	// Every remaining chart routes through the hardened draw wrapper; the
@@ -1583,7 +1588,6 @@ class HQSalesMonitor {
 					this.refresh();
 					return;
 				}
-				if (tbl === "ret" && key !== "name" && key !== "amount") return;
 				this._cycle_sort(tbl, key);
 				this._apply_client_table_host(tbl);
 			})

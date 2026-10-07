@@ -470,6 +470,37 @@ class TestHQMonitoring(IntegrationTestCase):
 		x_row = next(r for r in data["product_ranking"]["rows"] if r["item_code"] == self.item_x)
 		self.assertEqual(x_row["qty"], 1)  # 2 sold - 1 returned
 
+	def test_allocation_package_ranks_with_instance_money(self):
+		"""Allocation mode: the package line is 0 and the components carry the
+		money. The package must still rank (qty 1, the instance's money, under
+		its own item group) and the components must not count as item sales."""
+		inv = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[
+				{"item": self.pkg_parent, "qty": 1, "rate": 0, "role": "Package"},
+				{"item": self.item_y, "qty": 1, "rate": 2000, "role": "Package Item"},
+				{"item": self.pkg_component, "qty": 2, "rate": 500, "role": "Package Item"},
+			],
+			paid=3000,
+		)
+		# stamped after submit so the package validate hook does not re-price
+		# these hand-built rows
+		frappe.db.sql(
+			"UPDATE `tabSales Invoice Item` SET pos_package_instance = 'PKG-HQ' WHERE parent = %s",
+			inv,
+		)
+		try:
+			rows = {r["item_code"]: r for r in self._payload()["product_ranking"]["rows"]}
+			self.assertEqual(rows[self.pkg_parent]["qty"], 2)  # fixture legacy pkg + this one
+			self.assertEqual(rows[self.pkg_parent]["net_amount"], 6000)
+			self.assertEqual(rows[self.item_y]["net_amount"], 500)  # standalone sale only
+			self.assertNotIn(self.pkg_component, rows)
+		finally:
+			frappe.set_user(ADMIN)
+			frappe.get_doc("Sales Invoice", inv).cancel()
+
 	def test_ranking_sort_tie_and_pagination(self):
 		data = self._payload(page_size=2)
 		pr = data["product_ranking"]
@@ -541,8 +572,8 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(ret["count"], 1)
 		self.assertGreater(ret["value"], 0)
 		self.assertAlmostEqual(ret["rate"], 0.25, places=2)  # 1 return of 4 invoices
-		self.assertTrue(ret["rows"])
-		self.assertTrue(ret["rows"][0]["first_item"])
+		self.assertEqual(ret["invoice_count"], 4)
+		self.assertNotIn("rows", ret)  # the list lives in POS Return Report
 		# no opening-shift fixture in this class: the section is present but quiet
 		self.assertEqual(data["shifts"], [])
 
@@ -1061,14 +1092,39 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(pr["page_size"], 50)
 		self.assertEqual(pr["total"], 3)
 
-	def test_recent_returns_lists_bounded_at_ten(self):
+	def test_recent_list_bounded_at_ten(self):
 		data = self._payload()
-		# cards show at most 10 rows; the pager covers the rest
+		# the card shows at most 10 rows; the pager covers the rest
 		self.assertLessEqual(len(data["recent"]["rows"]), 10)
-		self.assertLessEqual(len(data["returns"]["rows"]), 10)
-		# aggregates still cover the full window, not just the listed rows
-		self.assertEqual(data["returns"]["count"], 1)
-		self.assertAlmostEqual(data["returns"]["rate"], 0.25, places=2)
+
+	def test_pos_return_report_matches_returns_card(self):
+		from pos_next.pos_next.report.pos_return_report.pos_return_report import execute
+
+		frappe.set_user(ADMIN)
+		today = frappe.utils.nowdate()
+		base = {"company": self.company_a, "from_date": today, "to_date": today}
+		_, rows = execute(base)
+		self.assertEqual(len(rows), 1)  # one return invoice, sales excluded
+		row = rows[0]
+		self.assertEqual(row.amount, self._payload()["returns"]["value"])
+		self.assertEqual(row.qty, 1)
+		self.assertEqual(row.company, self.company_a)
+		self.assertIn(row.doctype, ("POS Invoice", "Sales Invoice"))
+		self.assertEqual(len(row.posting_time), 5)
+
+		columns, items = execute({**base, "group_by": "Item"})
+		self.assertIn("item_code", [c["fieldname"] for c in columns])
+		self.assertEqual([(r.item_code, r.qty, r.amount) for r in items], [(self.item_x, 1, 1000)])
+
+		# company B has no returns; a foreign company is refused, not widened
+		self.assertEqual(execute({**base, "company": self.company_b})[1], [])
+		frappe.set_user(self.user_co_a)
+		with self.assertRaises(frappe.PermissionError):
+			execute({**base, "company": self.company_b})
+		frappe.set_user(self.user_no_role)
+		with self.assertRaises(frappe.PermissionError):
+			execute(base)
+		frappe.set_user(ADMIN)
 
 	def test_turnover_prev_comparable_cut_at_same_time_of_day(self):
 		frappe.set_user(ADMIN)
