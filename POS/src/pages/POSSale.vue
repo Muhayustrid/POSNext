@@ -23,7 +23,7 @@
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
-				:qz-connected="qzConnected"
+				:qz-connected="posSettingsStore.printDriver === 'imin' ? iminReady : qzConnected"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
 				@printer-click="openHistoryDialog"
@@ -1077,6 +1077,7 @@ import {
 	printWithSilentFallback,
 } from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+import { ensureIminSdk, getTransport } from "@/utils/print/transport";
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
@@ -1180,6 +1181,7 @@ const editCustomer = ref(null); // Customer being edited (null for create mode)
 const selectedPackage = ref(null); // POS Package awaiting option selection
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
+const iminReady = ref(false);
 
 // Debounce timer for offer reapplication
 const offerReapplyTimer = ref(null);
@@ -1441,8 +1443,48 @@ onMounted(async () => {
 		{ immediate: true }
 	);
 
+	let iminWarmupTimer = null;
+	function stopIminWarmup() {
+		if (iminWarmupTimer) {
+			clearTimeout(iminWarmupTimer);
+			iminWarmupTimer = null;
+		}
+	}
+
+	// iMin warm-up — lazy connect & prompt origin permission; retry every 5s until ok
+	watch(
+		() => posSettingsStore.printDriver,
+		(driver) => {
+			stopIminWarmup();
+			if (driver !== "imin") {
+				iminReady.value = false;
+				return;
+			}
+			const probe = async () => {
+				if (posSettingsStore.printDriver !== "imin") return;
+				try {
+					await ensureIminSdk();
+					const status = await getTransport().getDriver("imin").getStatus();
+					if (status?.ok) {
+						iminReady.value = true;
+						return;
+					}
+				} catch (err) {
+					log.warn("iMin warm-up failed:", err?.message || err);
+				}
+				iminReady.value = false;
+				if (posSettingsStore.printDriver === "imin") {
+					iminWarmupTimer = setTimeout(probe, 5000);
+				}
+			};
+			probe();
+		},
+		{ immediate: true }
+	);
+
 	// Store cleanup function for unmount
 	onUnmounted(() => {
+		stopIminWarmup();
 		cleanup();
 		stopActivityTracking();
 		qzDisconnect();

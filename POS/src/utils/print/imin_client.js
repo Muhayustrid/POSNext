@@ -39,6 +39,7 @@ export { loadDeviceConfig, saveDeviceConfig, stripDeviceLayoutKeys }
 const log = logger.create("IminClient")
 const STATUS_POLL_MS = 500
 const STATUS_TIMEOUT_MS = 15000
+const STATUS_REPLY_TIMEOUT_MS = 5000
 // The bitmap command resolves once queued; give the head a moment to commit it
 // to the print buffer before feeding, or the feed can overtake the raster.
 const SETTLE_MS = 200
@@ -92,57 +93,111 @@ function bitmapPrintMs(heightDots) {
  *   config passed per print). Injected by tests to exercise precedence.
  * @param {number} [deps.statusTimeoutMs] - injectable timeout for tests (default 15000)
  * @param {number} [deps.statusPollMs] - injectable poll interval for tests (default 500)
+ * @param {number} [deps.statusReplyMs] - injectable reply timeout for tests (default 5000)
  */
 export function createIminDriver(deps = {}) {
 	const loadConfig = deps.loadConfig || (() => ({}))
 	const statusTimeoutMs = deps.statusTimeoutMs ?? STATUS_TIMEOUT_MS
 	const statusPollMs = deps.statusPollMs ?? STATUS_POLL_MS
+	const statusReplyMs = deps.statusReplyMs ?? STATUS_REPLY_TIMEOUT_MS
 	let printer = null
+	let connecting = null
+	let statusChain = Promise.resolve()
 
+	// The SDK auto-reconnects every 4s by replacing this.ws without re-sending
+	// initPrinter, and close() sets ws=null so send() throws in the gap.
+	// The driver is the single owner of reconnects: reuse the cached printer
+	// only while its WebSocket is OPEN, otherwise drop it and create a fresh one.
+	// In-flight connects are deduped so concurrent calls don't orphan sockets.
 	async function ensurePrinter() {
-		if (printer) return printer
-		if (!deps.factory) {
-			throw new Error(__("iMin SDK not loaded (window.IminPrinter missing)"))
+		if (printer?.ws?.readyState === 1) {
+			return printer
 		}
-		const p = deps.factory()
-		const host = loadPrinterHost()
-		if (host) p.address = host
-		const connected = await p.connect()
-		if (!connected) throw new Error(__("Could not connect to iMin print service"))
-		p.initPrinter("SPI")
-		printer = p
-		return p
+		if (connecting) {
+			return connecting
+		}
+		connecting = (async () => {
+			try {
+				if (printer) {
+					try {
+						printer.close?.()
+					} catch {
+						// Guarded
+					}
+					printer = null
+				}
+				if (!deps.factory) {
+					throw new Error(__("iMin SDK not loaded (window.IminPrinter missing)"))
+				}
+				const p = deps.factory()
+				// Disable SDK auto-reconnect: driver owns reconnects
+				p.reconnect = () => {}
+				const host = loadPrinterHost()
+				if (host) p.address = host
+				let connected = false
+				try {
+					connected = await p.connect()
+				} catch (err) {
+					try {
+						p.close?.()
+					} catch {
+						// Guarded
+					}
+					throw err
+				}
+				if (!connected) {
+					try {
+						p.close?.()
+					} catch {
+						// Guarded
+					}
+					throw new Error(__("Could not connect to iMin print service"))
+				}
+				p.initPrinter("SPI")
+				printer = p
+				return p
+			} finally {
+				connecting = null
+			}
+		})()
+		return connecting
 	}
 
 	// The SDK's getPrinterStatus() only resolves when a type===2 reply
 	// arrives; there is no internal timeout. If the service drops the query
 	// under load (seen on-device: a reply arrives ~2 s later or not at all
 	// during repeated Test Prints), `await p.getPrinterStatus()` would hang
-	// forever and freeze the cashier. The per-call race below keeps the
-	// status gate bounded by the driver's own statusTimeoutMs.
+	// forever and freeze the cashier. Also the SDK only has ONE callback slot,
+	// so concurrent calls overwrite each other. We serialize calls with a
+	// promise chain and bound each query by statusReplyMs.
 	function callStatus(p) {
-		return new Promise((resolve) => {
-			let settled = false
-			const timer = setTimeout(() => {
-				if (settled) return
-				settled = true
-				resolve({ value: -1, timedOut: true })
-			}, statusPollMs * 4)
-			p.getPrinterStatus().then(
-				(s) => {
+		const doCall = () =>
+			new Promise((resolve) => {
+				let settled = false
+				const timer = setTimeout(() => {
 					if (settled) return
 					settled = true
-					clearTimeout(timer)
-					resolve(s)
-				},
-				() => {
-					if (settled) return
-					settled = true
-					clearTimeout(timer)
 					resolve({ value: -1, timedOut: true })
-				},
-			)
-		})
+				}, statusReplyMs)
+				p.getPrinterStatus().then(
+					(s) => {
+						if (settled) return
+						settled = true
+						clearTimeout(timer)
+						resolve(s)
+					},
+					() => {
+						if (settled) return
+						settled = true
+						clearTimeout(timer)
+						resolve({ value: -1, timedOut: true })
+					},
+				)
+			})
+
+		const run = statusChain.then(doCall, doCall)
+		statusChain = run.catch(() => {})
+		return run
 	}
 
 	async function waitIdle(p) {
