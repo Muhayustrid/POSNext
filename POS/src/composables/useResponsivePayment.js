@@ -46,21 +46,11 @@ export function useResponsivePayment() {
 		if (width < 1024) {
 			return "none";
 		}
-		// Desktop: use fixed pixel calculation
-		const availableHeight = height - 100;
-		return `${Math.min(Math.max(500, availableHeight), height - 80)}px`;
-	});
-
-	// Dynamic column heights based on viewport
-	const dynamicLeftColumnHeight = computed(() => {
-		const height = viewportHeight.value;
-		if (viewportWidth.value < 1024) {
-			// Mobile/tablet: auto height, will stack
-			return "auto";
-		}
-		// Desktop: calculate based on available space
-		const availableHeight = height - 160; // Header + padding + action buttons
-		return `${Math.max(400, Math.min(availableHeight, height - 120))}px`;
+		// Desktop/tablet: the dialog chrome (overlay py-4 + DialogContent my-8
+		// + header row) measures ~190px. The old `height - 100` left the
+		// dialog taller than the viewport, so the overlay itself scrolled and
+		// the pinned action buttons sat below the fold.
+		return `${Math.max(360, height - 190)}px`;
 	});
 
 	// Check if we're in compact mode (small screens)
@@ -163,9 +153,12 @@ export function useResponsivePayment() {
 
 	// Dynamic numpad key size — cashiers stab at these all day, keep every
 	// key a comfortable touch target (48px floor, 64px on normal screens).
+	// Heights are rem-based, so the in-app text scale inflates them; the
+	// <800 threshold keeps keys shorter on 720–800px viewports where the
+	// full dialog otherwise needs inner scrolling.
 	const dynamicNumpadSize = computed(() => {
 		if (viewportHeight.value < 600) return { key: "h-12", addBtn: "h-[6.5rem]" };
-		if (viewportHeight.value < 700) return { key: "h-14", addBtn: "h-[7.5rem]" };
+		if (viewportHeight.value < 800) return { key: "h-14", addBtn: "h-[7.5rem]" };
 		return { key: "h-16", addBtn: "h-[8.5rem]" };
 	});
 
@@ -178,7 +171,6 @@ export function useResponsivePayment() {
 		dynamicDialogSize,
 		isMobileView,
 		dialogContentMaxHeight,
-		dynamicLeftColumnHeight,
 		isCompactMode,
 		isSmallMobile,
 		dynamicGap,

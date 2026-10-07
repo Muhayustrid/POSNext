@@ -7,10 +7,13 @@
 		}"
 	>
 		<template #body-content>
-			<!-- Two Column Layout - auto-sized on mobile, constrained on desktop -->
+			<!-- Two Column Layout - auto-sized on mobile, constrained on desktop.
+			     lg:grid-rows-1 pins the row to the constrained height so each
+			     column scrolls internally instead of growing past the dialog
+			     (the submit button stays reachable without page scrolling). -->
 			<div
 				:class="[
-					'grid grid-cols-1 lg:grid-cols-5 items-stretch',
+					'grid grid-cols-1 lg:grid-cols-5 lg:grid-rows-1 items-stretch',
 					dynamicGap,
 					isMobileView ? '' : 'overflow-hidden',
 				]"
@@ -23,7 +26,6 @@
 						isSmallMobile ? 'gap-1' : 'gap-1.5',
 						isMobileView ? 'overflow-visible' : 'overflow-hidden',
 					]"
-					:style="{ maxHeight: isMobileView ? 'none' : dynamicLeftColumnHeight }"
 				>
 					<!-- Delivery Date for Sales Orders -->
 					<div
@@ -1085,15 +1087,21 @@
 				</div>
 				<!-- End Left Column -->
 
-				<!-- Right Column (3/5): Payment Methods + Quick Amounts + Numpad -->
+				<!-- Right Column (3/5): Payment Methods + Quick Amounts + Numpad.
+				     The scrollable block is an inner wrapper so the action buttons
+				     below stay pinned — reachable without scrolling the dialog. -->
 				<div
-					ref="rightColumnRef"
 					:class="[
-						'lg:col-span-3 bg-gray-50 rounded-lg border border-gray-200 flex flex-col',
+						'lg:col-span-3 bg-gray-50 rounded-lg border border-gray-200 flex flex-col min-h-0',
 						isSmallMobile ? 'p-1.5' : 'p-2 lg:p-3',
 					]"
-					:style="isMobileView ? {} : { minHeight: rightColumnMinHeight }"
 				>
+					<div
+						:class="[
+							'flex-1 min-h-0',
+							isMobileView ? '' : 'overflow-y-auto',
+						]"
+					>
 					<!-- Payment Methods -->
 					<div :class="isSmallMobile ? 'mb-1' : 'mb-1.5 lg:mb-3'">
 						<div
@@ -1149,7 +1157,7 @@
 						</div>
 						<div
 							v-else-if="filteredPaymentMethods.length > 0"
-							class="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-1.5 lg:gap-2"
+							class="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1.5"
 						>
 							<button
 								v-for="method in filteredPaymentMethods"
@@ -1164,7 +1172,7 @@
 									getMethodTotal(method.mode_of_payment) === 0
 								"
 								:class="[
-									'flex items-center justify-center rounded-lg border-2 transition-all font-semibold select-none touch-none min-h-11 lg:min-h-14 gap-1 lg:gap-1.5 px-2 lg:px-3 text-xs lg:text-sm',
+									'flex items-center justify-center rounded-lg border-2 transition-all font-semibold select-none touch-none min-h-12 gap-1 px-1.5 text-xs leading-tight',
 									lastSelectedMethod?.mode_of_payment === method.mode_of_payment
 										? isWalletPaymentMethod(method.mode_of_payment)
 											? 'border-amber-500 bg-amber-50 text-amber-700'
@@ -1176,7 +1184,7 @@
 										: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-base' : 'text-base lg:text-lg'">{{
+								<span class="text-sm flex-shrink-0">{{
 									isWalletPaymentMethod(method.mode_of_payment)
 										? "🎁"
 										: getPaymentIcon(method.type)
@@ -1893,11 +1901,13 @@
 							</button>
 						</div>
 					</div>
+					</div>
+					<!-- End scrollable block (methods + quick amounts + numpad) -->
 
 					<!-- Action Buttons - Below Keypad (Tablet/Desktop) -->
 					<div
 						:class="[
-							'hidden md:flex items-center gap-2',
+							'hidden md:flex items-center gap-2 shrink-0',
 							isCompactMode ? 'mt-2' : 'mt-4',
 						]"
 					>
@@ -2211,16 +2221,11 @@ const deliveryDate = ref("");
 const today = new Date().toISOString().split("T")[0];
 const isSalesOrder = computed(() => props.targetDoctype === "Sales Order");
 
-// Column refs for height matching
-const rightColumnRef = ref(null);
-const rightColumnMinHeight = ref("auto");
-
 // Use responsive payment composable for viewport tracking and dynamic sizing
 const {
 	dynamicDialogSize,
 	isMobileView,
 	dialogContentMaxHeight,
-	dynamicLeftColumnHeight,
 	isCompactMode,
 	isSmallMobile,
 	dynamicGap,
@@ -2229,30 +2234,6 @@ const {
 	mobileButtonSize,
 	dynamicNumpadSize,
 } = useResponsivePayment();
-
-// Calculate and sync column heights when dialog opens
-function syncColumnHeights() {
-	nextTick(() => {
-		if (rightColumnRef.value) {
-			const rightHeight = rightColumnRef.value.offsetHeight;
-			// Preserve initial height to prevent shrinking when Quick Amounts is hidden
-			rightColumnMinHeight.value = `${rightHeight}px`;
-		}
-	});
-}
-
-// Watch for dialog open to sync heights
-watch(
-	() => props.modelValue,
-	(isOpen) => {
-		if (isOpen) {
-			// Reset min height when dialog opens so we can measure fresh
-			rightColumnMinHeight.value = "auto";
-			// Small delay to ensure DOM is rendered
-			setTimeout(syncColumnHeights, 100);
-		}
-	}
-);
 
 // Handle Enter key from numpad keyboard input
 function handleNumpadEnter(value) {
