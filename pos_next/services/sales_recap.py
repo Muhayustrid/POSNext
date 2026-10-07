@@ -20,14 +20,17 @@ from datetime import datetime, time, timedelta
 import frappe
 from frappe.utils import cint, flt, get_datetime, getdate
 
-from pos_next.invoice_type import sales_invoice_item_union, sales_invoice_union
+from pos_next.invoice_type import (
+	package_sold_amount,
+	package_sold_row_filter,
+	sales_invoice_item_union,
+	sales_invoice_union,
+)
 
-# Package rows carry their money on exactly one side of the group: the parent
-# in legacy mode (components rate 0), the components in allocation mode (parent
-# rate 0). Keep the money-carrying rows and drop the zero side by amount —
-# never by role, which would discard the allocation-mode revenue. Returns ride
-# along as negative amounts and must survive the filter.
-_MONEY_ROW_FILTER = "ifnull(sii.pos_package_role, '') = '' OR sii.base_net_amount <> 0"
+# Packages count as their own line (qty sold + the instance's money) and their
+# components are skipped — see invoice_type.package_sold_amount. Returns ride
+# along as negative amounts.
+_MONEY_ROW_FILTER = package_sold_row_filter()
 PACKAGE_PARENT_ROLE = "Package"
 
 # Item rows printed under each category, matching the EOD sheet's shape. A
@@ -348,7 +351,8 @@ _INVOICE_COLUMNS = (
 )
 _ITEM_COLUMNS = (
 	"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
-	" sii.base_net_amount, sii.price_list_rate, sii.rate, sii.pos_package_role"
+	f" {package_sold_amount()} AS base_net_amount, sii.price_list_rate, sii.rate,"
+	" sii.pos_package_role, sii.pos_package_instance"
 )
 
 # Dashboard rollups read the posting timestamp the shared projection doesn't
@@ -589,9 +593,8 @@ def _aggregate_payments(scope, cash_mode, pos_profile=None):
 
 
 def _aggregate_items(scope, limit=100):
-	"""Per item/role ranking. Package rows enter by their money side only (see
-	_MONEY_ROW_FILTER): the priced parent in legacy mode, the priced components
-	in allocation mode — never both, and never the mode's zero side."""
+	"""Per item/role ranking. Packages are listed under ``packages`` with their
+	instance money; their components are not counted (see _MONEY_ROW_FILTER)."""
 	where = f"""
 		FROM {_item_from(scope)}
 		JOIN {_invoice_from(scope)} ON si.name = sii.parent
@@ -695,9 +698,8 @@ def _aggregate_charges(scope):
 
 def _aggregate_categories(scope, limit=20):
 	"""Group by the invoice item's item_group snapshot (Item fallback for
-	legacy rows). Package rows count by their money side (see _MONEY_ROW_FILTER):
-	the priced parent in legacy mode, the priced components in allocation mode —
-	so category revenue always reconciles with the header. Returns show up
+	legacy rows). A package counts under its own item group with its instance
+	money (see _MONEY_ROW_FILTER), so category revenue reconciles with the header. Returns show up
 	negative; amounts are net (pre-tax)."""
 	category_expr = (
 		"COALESCE(NULLIF(sii.item_group, ''),"

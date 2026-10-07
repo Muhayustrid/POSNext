@@ -8,6 +8,8 @@ from frappe.query_builder import DocType
 from frappe.utils import flt
 from pypika.functions import Sum
 
+from pos_next.invoice_type import package_sold_amount, package_sold_row_filter
+
 _TAX_KEYWORDS = ("PPN", "TAX", "VAT", "PAJAK")
 _SERVICE_KEYWORDS = ("SERVICE", "JASA", "CHARGE")
 
@@ -80,13 +82,22 @@ def _get_pos_invoice_parent_targets(pos_invoices: set[str]) -> set[tuple[str, st
 	return targets
 
 
-def _money_row_condition(child):
-	"""Package rows enter by their money side only (same rule as
-	pos_next.services.sales_recap._MONEY_ROW_FILTER): keep unroled rows and
-	any package row whose amount is non-zero, drop the zero side of each
-	package group (the allocation-mode parent, or the legacy-mode
-	components) so bundle revenue is neither doubled nor lost."""
-	return (child.pos_package_role.isnull()) | (child.pos_package_role == "") | (child.amount != 0)
+def _sold_item_rows(doctype: str, parents: list[str], group_by: str) -> list[dict]:
+	"""Sold qty/amount from ``doctype``'s own item table, grouped by
+	``group_by``. Packages count as one line with their instance's money and
+	their components are skipped (same rule as HQ and the sales recap, see
+	pos_next.invoice_type.package_sold_amount)."""
+	return frappe.db.sql(
+		f"""
+		SELECT {group_by}, SUM(sii.qty) AS qty,
+			SUM({package_sold_amount("amount", dt=doctype)}) AS amount
+		FROM `tab{doctype} Item` sii
+		WHERE sii.parent IN %(parents)s AND {package_sold_row_filter("amount")}
+		GROUP BY {group_by}
+		""",
+		{"parents": parents},
+		as_dict=True,
+	)
 
 
 def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]:
@@ -101,32 +112,9 @@ def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]
 
 	items: list[dict] = []
 	for doctype in ("Sales Invoice", "POS Invoice"):
-		targets = sorted(t for t in parent_targets if t[1] == doctype)
-		if not targets:
-			continue
-
-		child = DocType(f"{doctype} Item")
-		amount_sum = Sum(child.amount)
-		qty_sum = Sum(child.qty)
-
-		condition = None
-		for parent, _parenttype in targets:
-			current = child.parent == parent
-			condition = current if condition is None else (condition | current)
-
-		rows = (
-			frappe.qb.from_(child)
-			.select(
-				child.item_code,
-				child.item_name,
-				qty_sum.as_("qty"),
-				amount_sum.as_("amount"),
-			)
-			.where(condition & _money_row_condition(child))
-			.groupby(child.item_code, child.item_name)
-			.run(as_dict=True)
-		)
-		items.extend(rows)
+		parents = sorted(parent for parent, parenttype in parent_targets if parenttype == doctype)
+		if parents:
+			items.extend(_sold_item_rows(doctype, parents, "sii.item_code, sii.item_name"))
 
 	# one row per item across both doctypes
 	merged: dict[tuple[str, str], dict] = {}
@@ -215,23 +203,9 @@ def _fetch_grouped_items_for_targets(parent_targets: set[tuple[str, str]]) -> li
 
 	rows: list[dict] = []
 	for doctype in ("Sales Invoice", "POS Invoice"):
-		targets = {t for t in parent_targets if t[1] == doctype}
-		if not targets:
-			continue
-		child = DocType(f"{doctype} Item")
-		rows.extend(
-			frappe.qb.from_(child)
-			.select(
-				child.item_group,
-				child.item_code,
-				child.item_name,
-				Sum(child.qty).as_("qty"),
-				Sum(child.amount).as_("amount"),
-			)
-			.where(_build_condition(child, targets) & _money_row_condition(child))
-			.groupby(child.item_group, child.item_code, child.item_name)
-			.run(as_dict=True)
-		)
+		parents = sorted(parent for parent, parenttype in parent_targets if parenttype == doctype)
+		if parents:
+			rows.extend(_sold_item_rows(doctype, parents, "sii.item_group, sii.item_code, sii.item_name"))
 
 	return rows
 

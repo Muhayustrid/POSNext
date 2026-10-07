@@ -19,10 +19,10 @@ All metrics come from the same POS sales dataset:
 - Pre-tax net = SUM(base_net_total); taxes = SUM(base_total_taxes_and_charges),
   both signed. Category/product figures are pre-tax item net amounts and
   therefore do not reconcile to the tax-incl totals — by design.
-- Package rows (``pos_package_role``) enter item qty/amount by their money side
-  only: the priced parent in legacy mode (components at 0) or the priced
-  components in allocation mode (parent at 0). The zero side of each package
-  group is excluded, so bundle revenue is neither double counted nor lost.
+- Packages rank as their own item: the package line's qty plus the money of
+  its whole instance (header + components), so legacy (money on the header)
+  and allocation mode (money on the components) give the same figure.
+  Component rows are not counted as standalone sales.
 - Quantities are signed: returns contribute negative qty.
 - Two optional "top items within category" cards (``category_a``/``category_b``):
   one grouped query each over the full Item Group tree (sub-groups included),
@@ -71,7 +71,13 @@ from pos_next.hq_scope import (
 	get_permitted_pos_profiles,
 	resolve_company_scope,
 )
-from pos_next.invoice_type import get_pos_invoice_doctype, sales_invoice_item_union, sales_invoice_union
+from pos_next.invoice_type import (
+	get_pos_invoice_doctype,
+	package_sold_amount,
+	package_sold_row_filter,
+	sales_invoice_item_union,
+	sales_invoice_union,
+)
 from pos_next.target_basis import (
 	GROSS_PROFIT,
 	NET_PROFIT,
@@ -1014,19 +1020,17 @@ def _item_from(where):
 	# docstatus/is_pos, so it is forwarded as-is: re-wrapping them here (and
 	# feeding the wrapped form back into _invoice_from, which adds its own)
 	# only nested the same predicates redundantly.
-	# Package rows enter by their money side only: keep unroled rows and any
-	# package row carrying money, drop the zero side of each group (the
-	# allocation-mode parent, or the legacy-mode components). Filtering by role
-	# would discard allocation-mode revenue entirely.
-	return f"""
-	FROM {sales_invoice_item_union(
+	# Packages count as their own line (qty sold + the instance's money) and
+	# their components are skipped — see invoice_type.package_sold_amount.
+	columns = (
 		"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
-		" sii.base_net_amount, sii.pos_package_role",
-		where=where,
-	)}
+		f" {package_sold_amount()} AS base_net_amount, sii.pos_package_role, sii.pos_package_instance"
+	)
+	return f"""
+	FROM {sales_invoice_item_union(columns, where=where)}
 	INNER JOIN {_invoice_from(where)} ON si.name = sii.parent
 	WHERE {where}
-	  AND (ifnull(sii.pos_package_role, '') = '' OR sii.base_net_amount <> 0)
+	  AND {package_sold_row_filter()}
 """
 
 
@@ -1229,11 +1233,9 @@ def _recent_section(where, params, limit=10):
 	}
 
 
-def _returns_section(where, params, default_ccy, limit=10):
-	"""Return totals over the range plus the latest return invoices. No
-	return-reason field exists in the data, so rows carry the first item
-	name instead — nothing is fabricated. Totals/count/rate always cover
-	the full window, not just the listed rows."""
+def _returns_section(where, params, default_ccy):
+	"""Return summary over the range; the per-invoice list lives in the
+	POS Return Report (the card links there with the same filters)."""
 	counts = frappe.db.sql(
 		f"""
 		SELECT
@@ -1246,55 +1248,13 @@ def _returns_section(where, params, default_ccy, limit=10):
 		as_dict=True,
 	)[0]
 	returns_count = cint(counts.returns_count)
-	sales_count = cint(counts.sales_count)
-	rows = frappe.db.sql(
-		f"""
-		SELECT name, posting_date, posting_time, ABS(base_grand_total) AS amount, currency
-		FROM {sales_invoice_union(
-			"si.name, si.posting_date, si.posting_time, si.base_grand_total, si.currency",
-			where + " AND si.is_return = 1",
-		)}
-		ORDER BY posting_date DESC, posting_time DESC
-		LIMIT {cint(limit)}
-		""",
-		params,
-		as_dict=True,
-	)
-	# First item label per return: POS and legacy invoices keep items in two
-	# child tables, so one lookup per table beats a branch-specific subquery.
-	names = [r.name for r in rows]
-	first_items = {}
-	for child_table, parenttype in (
-		("tabPOS Invoice Item", "POS Invoice"),
-		("tabSales Invoice Item", "Sales Invoice"),
-	):
-		if not names:
-			break
-		for r in frappe.db.sql(
-			f"SELECT parent, MIN(item_name) AS item FROM `{child_table}`"
-			" WHERE parent IN %(hq_names)s AND parenttype = %(hq_type)s"
-			" GROUP BY parent",
-			{"hq_names": list(names), "hq_type": parenttype},
-			as_dict=True,
-		):
-			first_items.setdefault(r.parent, r.item)
+	invoice_count = returns_count + cint(counts.sales_count)
 	return {
 		"value": flt(counts.returns_value),
 		"count": returns_count,
-		"rate": flt(returns_count) / (returns_count + sales_count)
-		if (returns_count + sales_count)
-		else None,
+		"invoice_count": invoice_count,
+		"rate": flt(returns_count) / invoice_count if invoice_count else None,
 		"currency": default_ccy,
-		"rows": [
-			{
-				"name": r.name,
-				"time": str(r.posting_time or "")[:5],
-				"amount": flt(r.amount),
-				"currency": r.currency,
-				"first_item": first_items.get(r.name),
-			}
-			for r in rows
-		],
 	}
 
 

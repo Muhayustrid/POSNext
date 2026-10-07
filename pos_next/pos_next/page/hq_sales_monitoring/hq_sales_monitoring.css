@@ -594,6 +594,31 @@
 	margin-bottom: 0;
 }
 
+.hq-duo--even {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Donut cards: chart left, legend (value + share per slice) right. */
+.hq-donut-wrap {
+	display: grid;
+	grid-template-columns: 200px minmax(0, 1fr);
+	gap: 16px;
+	align-items: center;
+}
+
+.hq-donut {
+	min-width: 0;
+}
+
+.hq-donut-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	align-self: center;
+	-webkit-print-color-adjust: exact;
+	print-color-adjust: exact;
+}
+
 .hq-neg {
 	color: var(--danger, #d63939);
 }
@@ -606,7 +631,7 @@
 	font-weight: 600;
 }
 
-/* Returns card: three quiet KPI tiles + the latest return rows. */
+/* Returns card: three quiet KPI tiles + a link to the POS Return Report. */
 .hq-ret-kpis {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -616,20 +641,14 @@
 	border-bottom: 1px solid var(--border-color, #f1f3f5);
 }
 
-.hq-ret-row {
+.hq-ret-foot {
 	display: flex;
 	justify-content: space-between;
-	align-items: baseline;
+	align-items: center;
 	gap: 10px;
-	padding: 6px 0;
-}
-
-.hq-ret-row + .hq-ret-row {
-	border-top: 1px solid var(--border-color, #f1f3f5);
-}
-
-.hq-ret-name {
-	min-width: 0;
+	flex-wrap: wrap;
+	padding-top: 6px;
+	font-size: 12px;
 }
 
 /* Activity feed rows mirror the recent table's data, read as events. */
@@ -649,8 +668,7 @@
 	font-weight: 600;
 }
 
-.hq-act-row .hq-money,
-.hq-ret-row .hq-money {
+.hq-act-row .hq-money {
 	white-space: nowrap;
 }
 
@@ -773,22 +791,6 @@
 	white-space: nowrap;
 }
 
-/* Returns card title tools: same quiet treatment as table headers. */
-.hq-card-title .hq-ret-sort {
-	font-size: 11px;
-	font-weight: 400;
-	color: var(--text-muted);
-	cursor: pointer;
-	margin-left: 10px;
-	user-select: none;
-	text-transform: none;
-	letter-spacing: normal;
-}
-
-.hq-card-title .hq-ret-sort:hover {
-	color: var(--text-color);
-}
-
 .hq-footer {
 	margin-top: 8px;
 	font-size: 11px;
@@ -844,9 +846,14 @@
 		border-top: 1px solid var(--border-color, #f1f3f5);
 	}
 
-	.hq-duo {
+	.hq-duo,
+	.hq-duo--even {
 		grid-template-columns: 1fr;
 		gap: 12px;
+	}
+
+	.hq-donut-wrap {
+		grid-template-columns: 1fr;
 	}
 
 	.hq-duo .hq-card {
