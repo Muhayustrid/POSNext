@@ -985,8 +985,8 @@ class HQSalesMonitor {
 
 	// ------------------------------------------------------------------
 	// Rankings — the two independent "Top Selling <category>" slots (a / b)
-	// as bar-lists in one card; payment methods and top outlets get a card
-	// each with a donut (see _donut_card).
+	// in one card; payment methods and top outlets get a card each. Every
+	// ranking is a donut beside its legend (see _donut_body).
 	// ------------------------------------------------------------------
 
 	_ranking_card(s) {
@@ -995,25 +995,6 @@ class HQSalesMonitor {
 			<div class="hq-card-title">${__("Rankings")}</div>
 			<div class="hq-rank-grid">${blocks.join("")}</div>
 		</div>`;
-	}
-
-	// One ranked bar-list: rank number, label (full text in the title
-	// tooltip), value, share %, and a thin bar proportional to the list max.
-	_rank_list_html(entries, ccy) {
-		const max = Math.max(...entries.map((e) => e.value), 0);
-		return `<ol class="hq-rank-list">${entries
-			.map(
-				(e, i) => `<li class="hq-rank-item">
-				<div class="hq-rank-row">
-					<span class="hq-rank-no">${i + 1}</span>
-					<span class="hq-rank-label" title="${frappe.utils.escape_html(e.label)}">${frappe.utils.escape_html(e.label)}</span>
-					<span class="hq-rank-value hq-money">${HQ_UTILS.fmtMoney(e.value, ccy)}</span>
-					<span class="hq-rank-pct">${HQ_UTILS.fmtPct(e.share_pct)}</span>
-				</div>
-				<div class="hq-rank-track"><div class="hq-rank-bar" style="width:${max > 0 ? Math.max(2, (e.value / max) * 100) : 0}%"></div></div>
-			</li>`
-			)
-			.join("")}</ol>`;
 	}
 
 	// The two independent category slots (a / b). Slots are never shown to
@@ -1042,9 +1023,7 @@ class HQSalesMonitor {
 		} else if (!sel) {
 			body = this._empty_line(__("Choose a category to see its top selling items"));
 		} else {
-			const entries = (cp.items || [])
-				.filter((r) => Number(r.net_amount) > 0)
-				.map((r) => ({ label: r.item_name || r.item_code || "", value: Number(r.net_amount), share_pct: r.share_pct }));
+			const entries = this._category_entries(s, slot);
 			if (!entries.length) {
 				body = this._empty_line(__("No positive sales in this category in this period"));
 			} else {
@@ -1052,7 +1031,7 @@ class HQSalesMonitor {
 					entries.length < cp.items_with_sales
 						? ` · ${__("top 5 of")} ${cp.items_with_sales} ${__("items")}`
 						: "";
-				body = `${this._rank_list_html(entries, ccy)}
+				body = `${this._donut_body(`cat-${slot}`, entries, ccy)}
 					<div class="hq-rank-foot hq-muted">${__("Share of category net revenue")} <span class="hq-money">${HQ_UTILS.fmtMoney(cp.category_total, ccy)}</span>${of}</div>`;
 			}
 		}
@@ -1060,6 +1039,14 @@ class HQSalesMonitor {
 			<div class="hq-rank-head">${__("Top Selling Items")} ${select}</div>
 			${body}
 		</div>`;
+	}
+
+	_category_entries(s, slot) {
+		const cp = (s.category_products || {})[slot] || {};
+		if (cp.invalid || !cp.category) return [];
+		return (cp.items || [])
+			.filter((r) => Number(r.net_amount) > 0)
+			.map((r) => ({ label: r.item_name || r.item_code || "", value: Number(r.net_amount), share_pct: r.share_pct }));
 	}
 
 	_payment_entries(s) {
@@ -1079,8 +1066,25 @@ class HQSalesMonitor {
 			.map((r) => ({ label: r.company, value: Number(r.net_tax_incl), share_pct: r.share_pct }));
 	}
 
-	// Payment Methods / Top Outlets: a donut (drawn in _render_donuts) beside
-	// a legend carrying the exact value and share of each slice.
+	// A donut (drawn in _render_donuts) beside a legend carrying the exact
+	// value and share of each slice.
+	_donut_body(kind, entries, ccy) {
+		return `<div class="hq-donut-wrap">
+			<div class="hq-donut" data-hq-donut="${kind}"></div>
+			<ol class="hq-rank-list hq-donut-legend">${entries
+				.map(
+					(e, i) => `<li class="hq-rank-item"><div class="hq-rank-row">
+						<span class="hq-donut-dot" style="background:${HQ_DONUT_COLORS[i % HQ_DONUT_COLORS.length]}"></span>
+						<span class="hq-rank-label" title="${frappe.utils.escape_html(e.label)}">${frappe.utils.escape_html(e.label)}</span>
+						<span class="hq-rank-value hq-money">${HQ_UTILS.fmtMoney(e.value, ccy)}</span>
+						<span class="hq-rank-pct">${HQ_UTILS.fmtPct(e.share_pct)}</span>
+					</div></li>`
+				)
+				.join("")}</ol>
+		</div>`;
+	}
+
+	// Payment Methods / Top Outlets card.
 	_donut_card(s, kind) {
 		const pm = s.payments || {};
 		const payments = kind === "payments";
@@ -1094,19 +1098,7 @@ class HQSalesMonitor {
 				? `<div class="hq-rank-foot hq-muted">${__("top 5 of")} ${pm.modes_with_sales} ${__("payment methods")}</div>`
 				: "";
 		const body = entries.length
-			? `<div class="hq-donut-wrap">
-					<div class="hq-donut" data-hq-donut="${kind}"></div>
-					<ol class="hq-rank-list hq-donut-legend">${entries
-						.map(
-							(e, i) => `<li class="hq-rank-item"><div class="hq-rank-row">
-								<span class="hq-donut-dot" style="background:${HQ_DONUT_COLORS[i % HQ_DONUT_COLORS.length]}"></span>
-								<span class="hq-rank-label" title="${frappe.utils.escape_html(e.label)}">${frappe.utils.escape_html(e.label)}</span>
-								<span class="hq-rank-value hq-money">${HQ_UTILS.fmtMoney(e.value, ccy)}</span>
-								<span class="hq-rank-pct">${HQ_UTILS.fmtPct(e.share_pct)}</span>
-							</div></li>`
-						)
-						.join("")}</ol>
-				</div>${foot}`
+			? `${this._donut_body(kind, entries, ccy)}${foot}`
 			: this._empty_line(__("No positive sales in this period"));
 		return `<div class="hq-card">
 			<div class="hq-card-title">${title}</div>
@@ -1447,9 +1439,16 @@ class HQSalesMonitor {
 
 	_render_donuts(s) {
 		if (!frappe.Chart) return;
-		const sets = { payments: this._payment_entries(s), outlets: this._outlet_entries(s) };
-		const ccy = (s.payments || {}).currency || s.scope.default_currency;
-		for (const [kind, entries] of Object.entries(sets)) {
+		const ccy = s.scope.default_currency;
+		const cat = (slot) => ({ entries: this._category_entries(s, slot), ccy: ((s.category_products || {})[slot] || {}).currency || ccy });
+		const sets = {
+			payments: { entries: this._payment_entries(s), ccy: (s.payments || {}).currency || ccy },
+			outlets: { entries: this._outlet_entries(s), ccy },
+			"cat-a": cat("a"),
+			"cat-b": cat("b"),
+		};
+		for (const [kind, set] of Object.entries(sets)) {
+			const entries = set.entries;
 			const el = this.$root.find(`[data-hq-donut="${kind}"]`).get(0);
 			if (!el || !entries.length) continue;
 			const chart = new frappe.Chart(el, {
@@ -1463,8 +1462,7 @@ class HQSalesMonitor {
 				// the legend beside the donut already names every slice
 				showLegend: false,
 				tooltipOptions: {
-					formatTooltipY: (value) =>
-						HQ_UTILS.fmtMoney(value, kind === "payments" ? ccy : s.scope.default_currency),
+					formatTooltipY: (value) => HQ_UTILS.fmtMoney(value, set.ccy),
 				},
 			});
 			_harden_chart(chart);
@@ -1472,8 +1470,7 @@ class HQSalesMonitor {
 		}
 	}
 
-	// Every remaining chart routes through the hardened draw wrapper; the
-	// bar-list rankings need no chart instance at all.
+	// Every chart routes through the hardened draw wrapper.
 	_render_hour_chart(s) {
 		const el = this.$root.find(".hq-hour-chart").get(0);
 		if (!el || !frappe.Chart) return;
