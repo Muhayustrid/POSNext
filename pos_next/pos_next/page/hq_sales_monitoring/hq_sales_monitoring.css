@@ -1,10 +1,10 @@
-/* HQ Sales Monitoring — desk page styles (layout v7).
+/* HQ Sales Monitoring — desk page styles (layout v8, summary only).
    Surfaces, text and the accent follow Frappe's theme variables so the page
    tracks light/dark and custom themes. Structure: scope strip, ONE hero
-   metric block (Total Sales dominant, three companions in a hairline row,
-   daily rhythm as footnote), Outlet Performance table (6 columns, targets
-   folded into one stacked progress cell), ONE Rankings card with four
-   ranked bar-lists, full-width peak hour and product ranking. */
+   metric block, Outlet Performance table (targets folded into one stacked
+   progress cell), category top-selling donuts, payment/outlet donuts,
+   full-width peak hour, open shifts | returns, live activity. Detail lists
+   live in the POS Product Sales / POS Return reports. */
 
 #page-hq-sales-monitoring .page-form,
 .hq-monitor {
@@ -49,22 +49,6 @@
 	color: var(--text-muted);
 }
 
-.hq-section-title {
-	font-size: 15px;
-	font-weight: 600;
-	letter-spacing: -0.01em;
-	margin: 18px 0 8px;
-	display: flex;
-	align-items: baseline;
-	gap: 10px;
-	flex-wrap: wrap;
-	color: var(--heading-color, var(--text-color));
-}
-
-.hq-section-title:first-of-type {
-	margin-top: 4px;
-}
-
 .hq-period {
 	font-size: 11.5px;
 	font-weight: 400;
@@ -89,6 +73,13 @@
 
 .hq-hero-head .hq-card-title {
 	margin-bottom: 0;
+}
+
+/* Card-title shortcut to the full list, pinned to the right edge. */
+.hq-title-link {
+	margin-left: auto;
+	align-self: center;
+	font-weight: 400;
 }
 
 .hq-hero-value {
@@ -512,12 +503,6 @@
 	align-items: baseline;
 }
 
-.hq-rank-no {
-	color: var(--text-muted);
-	font-size: 11px;
-	font-variant-numeric: tabular-nums;
-}
-
 .hq-rank-label {
 	min-width: 0;
 	overflow: hidden;
@@ -537,56 +522,13 @@
 	font-variant-numeric: tabular-nums;
 }
 
-.hq-rank-track {
-	height: 4px;
-	border-radius: 2px;
-	background: var(--control-bg, #edf0f3);
-	margin: 5px 0 0 26px;
-	overflow: hidden;
-}
-
-.hq-rank-bar {
-	display: block;
-	height: 100%;
-	border-radius: inherit;
-	background: var(--primary, #2490ef);
-	-webkit-print-color-adjust: exact;
-	print-color-adjust: exact;
-}
-
-/* Product + Outlet Ranking: two tables share one card; denser cells keep
-   both comfortable in half the width. */
-.hq-card--tables .hq-table th,
-.hq-card--tables .hq-table td {
-	padding: 6px 8px;
-}
-
-/* Both block heads are one row tall (title left, tool right) so the two
-   tables start at exactly the same height; the export buttons share the
-   right edge. */
-.hq-rank-head--tools {
-	min-height: 36px;
-	align-items: center;
-}
-
-.hq-rank-head--tools .hq-select {
-	flex: 0 1 190px;
-	min-width: 150px;
-}
-
-.hq-rank-head--tools .hq-rank-export {
-	margin-left: auto;
-	white-space: nowrap;
-}
-
-/* Bottom monitors: two two-card rows (shifts | returns, recent | activity).
-   The table card gets the wider lane; both fold to one column on phones. */
+/* Bottom monitors: shifts | returns side by side (the table card gets the
+   wider lane); folds to one column on phones. */
 .hq-duo {
 	display: grid;
 	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 	gap: 12px;
 	margin-bottom: 12px;
-	/* equal-height cards per row: both sides carry up to 10 rows */
 	align-items: stretch;
 }
 
@@ -623,10 +565,6 @@
 	color: var(--danger, #d63939);
 }
 
-.hq-status--open {
-	color: #2e7d54;
-}
-
 .hq-shift-cashier {
 	font-weight: 600;
 }
@@ -651,17 +589,27 @@
 	font-size: 12px;
 }
 
-/* Activity feed rows mirror the recent table's data, read as events. */
+/* Activity feed: the latest invoices, read as events. */
 .hq-act-row {
 	display: flex;
 	justify-content: space-between;
 	align-items: baseline;
 	gap: 10px;
 	padding: 7px 0;
+	border-top: 1px solid var(--border-color, #f1f3f5);
 }
 
-.hq-act-row + .hq-act-row {
-	border-top: 1px solid var(--border-color, #f1f3f5);
+/* Full-width feed: two columns of rows, one on narrow screens. */
+.hq-act-rows {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	column-gap: 32px;
+}
+
+@media (max-width: 768px) {
+	.hq-act-rows {
+		grid-template-columns: minmax(0, 1fr);
+	}
 }
 
 .hq-act-title {

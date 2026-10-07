@@ -40,16 +40,28 @@ test('isEmptyOutlet hides only zero-sales, zero-TC, no-target outlets', () => {
 	assert.equal(utils.isEmptyOutlet({ orders: 0, net_tax_incl: 3, target: null }), false);
 });
 
-test('donut keeps its ring at any segment count', () => {
-	const add = source.slice(source.indexOf('_add_donut(selector'), source.indexOf('_render_hour_chart(s) {'));
-	assert.match(add, /if \(!data\.length\) return;/);
-	// a lone segment is a full circle with its share labeled in the hole
-	assert.match(source, /hq-donut-center/);
-	assert.match(source, /100%/);
+test('donuts skip empty sets and empty states stay one line', () => {
+	const render = source.slice(source.indexOf('_render_donuts(s) {'), source.indexOf('_render_hour_chart(s) {'));
+	assert.match(render, /if \(!el \|\| !entries\.length\) continue;/);
+	assert.match(render, /type: "donut"/);
 	assert.doesNotMatch(source, /hq-stat-group/);
 	// compact one-line empty states replace the old 190px dashed ring
 	assert.match(source, /hq-empty-line/);
 	assert.doesNotMatch(source, /_donut_placeholder/);
+});
+
+test('page stays a summary: detail lists live in reports', () => {
+	for (const gone of ['product_ranking', 'favorite_product', '_recent_card', '_outlet_rank_table', 'data-hq-page']) {
+		assert.ok(!source.includes(gone), `${gone} must not come back`);
+	}
+	assert.match(source, /_report_href\("POS Product Sales Report"\)/);
+	assert.match(source, /_report_href\("POS Return Report"\)/);
+});
+
+test('every drill-down link sits in its card title, same style', () => {
+	const links = source.match(/<a class="[^"]*"[^>]*>\$\{__\("[^"]+"\)\} →<\/a>/g) || [];
+	assert.equal(links.length, 4);
+	for (const a of links) assert.ok(a.startsWith('<a class="btn btn-xs btn-default hq-title-link"'), a);
 });
 
 test('hero styling keeps Total Sales visibly dominant over companions', () => {

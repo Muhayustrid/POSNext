@@ -26,11 +26,10 @@ All metrics come from the same POS sales dataset:
 - Quantities are signed: returns contribute negative qty.
 - Two optional "top items within category" cards (``category_a``/``category_b``):
   one grouped query each over the full Item Group tree (sub-groups included),
-  positive net revenue only, share % against the whole category. They are
-  independent of the Product Ranking ``category`` filter and of each other.
-- Sales channel: Sales Invoice has no real channel field, so the section is
-  reported as unavailable rather than invented (no fake "Take Away", no
-  orders == pax claim; no pax source exists either).
+  positive net revenue only, share % against the whole category, independent
+  of each other.
+- Summary only: the full product list is the POS Product Sales Report and the
+  return list the POS Return Report; both reuse this module's scope helpers.
 
 Permissions:
 - Role gate (System Manager / Accounts Manager / Sales Manager / POSNext
@@ -42,7 +41,7 @@ Time: server timezone. Today's windows are cut at the current server time;
 historical days are full days.
 
 Period semantics (labeled explicitly in the UI):
-- Monthly monitoring / turnover / targets: month-to-date of ``to_date``
+- Monthly monitoring / targets: month-to-date of ``to_date``
   (``from_date`` is deliberately ignored there — MTD never shifts).
 - Daily monitoring: ``to_date`` vs its prior weekday (same elapsed cutoff).
 - Hero cards, peak hours, rankings and donuts: the selected range
@@ -89,25 +88,6 @@ from pos_next.target_basis import (
 HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "POSNext Manager")
 
 MAX_RANGE_DAYS = 366
-MAX_PAGE_SIZE = 50
-
-# Whitelisted Product Ranking sort orders (server-side, clickable headers).
-# Anything else falls back to the default best-sellers order. share_pct is
-# derived from net_amount over a single denominator, so it sorts identically.
-PRODUCT_SORT_ORDERS = {
-	"name": {"asc": "item_name ASC, sii.item_code", "desc": "item_name DESC, sii.item_code"},
-	"qty": {"asc": "qty ASC, sii.item_code", "desc": "qty DESC, sii.item_code"},
-	"total": {
-		"asc": "net_amount ASC, qty ASC, sii.item_code",
-		"desc": "net_amount DESC, qty DESC, sii.item_code",
-	},
-	"share": {
-		"asc": "net_amount ASC, qty ASC, sii.item_code",
-		"desc": "net_amount DESC, qty DESC, sii.item_code",
-	},
-}
-
-DEFAULT_PRODUCT_ORDER = "net_amount DESC, qty DESC, sii.item_code"
 
 MONEY_KEYS = ("gross", "refunds", "net_tax_incl", "net_pretax", "taxes")
 
@@ -116,6 +96,10 @@ MONEY_KEYS = ("gross", "refunds", "net_tax_incl", "net_pretax", "taxes")
 # 5 minutes: fresh enough for a dashboard, long enough to absorb page reloads.
 HQ_MONITORING_CACHE_PREFIX = "hq_sales_monitoring"
 HQ_MONITORING_CACHE_TTL = 300  # seconds
+
+# Live Activity shows the latest few invoices; the full list is the invoice
+# list view.
+HQ_RECENT_LIMIT = 8
 
 
 # ---------------------------------------------------------------------------
@@ -259,15 +243,12 @@ def get_sales_monitoring(
 	from_date=None,
 	to_date=None,
 	include_descendants=0,
-	category=None,
 	category_a=None,
 	category_b=None,
-	product_page=1,
-	page_size=10,
-	product_sort=None,
-	product_dir=None,
 ):
-	"""All HQ Sales Monitoring panel data in a single read-only payload."""
+	"""HQ Sales Monitoring summary in a single read-only payload. Detail
+	lists live in their own reports (POS Product Sales Report, POS Return
+	Report) so this stays a fixed, small set of aggregates."""
 	_check_hq_access()
 
 	today = getdate(nowdate())
@@ -294,8 +275,8 @@ def get_sales_monitoring(
 	mtd_where, mtd_params = _si_window_where(
 		scope["companies"], profiles, window["month_start"], to_date, window["mtd_cutoff"]
 	)
-	# Raw MTD rows feed monthly/turnover/targets: cache them once so all three
-	# sections share one snapshot and a cold cache runs the union query once.
+	# Raw MTD rows feed monthly/targets: cache them once so both sections
+	# share one snapshot and a cold cache runs the union query once.
 	mtd_rows = _cached_section(
 		"mtd_totals", scope, lambda: _totals_rows(mtd_where, mtd_params), to_date=to_date
 	)
@@ -338,12 +319,6 @@ def get_sales_monitoring(
 			**range_metrics,
 			"cut_at": window["mtd_cutoff"].strftime("%H:%M") if window["mtd_cutoff"] else None,
 		},
-		"turnover": _cached_section(
-			"turnover",
-			scope,
-			lambda: _turnover_section(scope, currency_map, default_ccy, window, mtd_rows),
-			to_date=to_date,
-		),
 		"daily": _cached_section(
 			"daily", scope, lambda: _daily_section(scope, currency_map, default_ccy, window), to_date=to_date
 		),
@@ -353,21 +328,6 @@ def get_sales_monitoring(
 			lambda: _hours_section(range_where, range_params),
 			from_date=from_date,
 			to_date=to_date,
-		),
-		"favorite_product": _favorite_product(range_where, range_params),
-		"product_ranking": _cached_section(
-			"product_ranking",
-			scope,
-			lambda: _product_ranking(
-				range_where, range_params, category, product_page, page_size, product_sort, product_dir
-			),
-			from_date=from_date,
-			to_date=to_date,
-			category=category or None,
-			page=product_page,
-			page_size=page_size,
-			sort=product_sort or None,
-			dir=product_dir or None,
 		),
 		"outlet_ranking": _cached_section(
 			"outlet_ranking",
@@ -396,28 +356,12 @@ def get_sales_monitoring(
 			from_date=from_date,
 			to_date=to_date,
 		),
-		"recent": _recent_section(range_where, range_params),
+		"recent": _recent_section(range_where, range_params, limit=HQ_RECENT_LIMIT),
 		"returns": _returns_section(range_where, range_params, default_ccy),
 		"category_top": _category_top(
 			scope["companies"], profiles, from_date, to_date, window["mtd_cutoff"], currency_map, default_ccy
 		),
-		"channels": {
-			"available": False,
-			"notice": _(
-				"Sales Invoice has no sales-channel field, so channel totals cannot be reported. Use the Outlet Ranking for per-outlet totals."
-			),
-		},
-		"pax": {
-			"available": False,
-			"notice": _("No guest/pax source field exists on POS invoices; pax is not estimated."),
-		},
 		"generated_at": now_datetime().strftime("%Y-%m-%d %H:%M:%S"),
-	}
-	result["highlights"] = {
-		"biggest_outlet": result["outlet_ranking"][0] if result["outlet_ranking"] else None,
-		"most_transactions_outlet": (
-			max(result["outlet_ranking"], key=lambda r: r["orders"]) if result["outlet_ranking"] else None
-		),
 	}
 	result["target_basis"] = _target_basis_payload()
 	# The payback (overall) target is all-time, so its key carries no date —
@@ -442,13 +386,10 @@ def get_sales_monitoring(
 
 
 @frappe.whitelist()
-def export_rankings_xlsx(
-	products=None, outlets=None, outlet_performance=None, from_date=None, to_date=None
-):
-	"""Excel export of the monitoring tables: the client sends the rows of
-	each section it wants (product ranking page, outlet ranking, and/or the
-	full outlet-performance schema); each non-empty section becomes a
-	header + rows block in one sheet."""
+def export_rankings_xlsx(outlet_performance=None, from_date=None, to_date=None):
+	"""Excel export of the Outlet Performance table: the client sends the
+	full outlet-performance schema rows (targets included). Product detail
+	exports from the POS Product Sales Report."""
 	_check_hq_access()
 	import json
 
@@ -465,14 +406,6 @@ def export_rankings_xlsx(
 	mlabel = tb.get("monthly_label") or _("Net Sales")
 	olabel = tb.get("overall_label") or _("Net Sales")
 	sections = [
-		(
-			[_("No"), _("Name"), _("Sold Quantity"), _("Total Sales"), _("Share %")],
-			products,
-		),
-		(
-			[_("No"), _("Name"), _("Total Sales"), _("Transactions"), _("Average"), _("Share %")],
-			outlets,
-		),
 		(
 			[
 				_("Outlet (Company)"),
@@ -888,48 +821,6 @@ def _metrics_for_window(scope_companies, profiles, start, end, cutoff, currency_
 # ---------------------------------------------------------------------------
 
 
-def _turnover_section(scope, currency_map, default_ccy, window, mtd_rows):
-	# The comparable window must be cut at the same time of day as the MTD
-	# cutoff — without it, "same elapsed days last month" compares this
-	# month's partial today against last month's full day and growth sags.
-	mtd_cutoff = window.get("mtd_cutoff")
-	prev_cutoff = None
-	if mtd_cutoff:
-		prev_cutoff = datetime.combine(
-			getdate(window["prev_comparable_end"]), mtd_cutoff.time()
-		)
-	prev = _metrics_for_window(
-		scope["companies"],
-		scope["profiles"],
-		window["prev_comparable_start"],
-		window["prev_comparable_end"],
-		prev_cutoff,
-		currency_map,
-		default_ccy,
-	)
-
-	change = {}
-	net_by_ccy = split_by_currency(mtd_rows, "net_tax_incl", currency_map)
-	for ccy, current in net_by_ccy.items():
-		prior = prev["net_tax_incl"]["by_currency"].get(ccy)
-		if prior:
-			change[ccy] = growth_pct(current, prior)
-
-	return {
-		"this_month_net": metric_from_rows(mtd_rows, "net_tax_incl", currency_map, default_ccy),
-		"prev_comparable_net": prev["net_tax_incl"],
-		"change_pct_vs_prev_comparable": change,
-		"taxes": metric_from_rows(mtd_rows, "taxes", currency_map, default_ccy),
-		"net_pretax": metric_from_rows(mtd_rows, "net_pretax", currency_map, default_ccy),
-		"refunds": metric_from_rows(mtd_rows, "refunds", currency_map, default_ccy),
-		"orders": int(sum(r.orders for r in mtd_rows)),
-		"refund_orders": int(sum(r.refund_orders for r in mtd_rows)),
-		"note": _(
-			"Net (tax-incl) = gross minus refunds; pre-tax and taxes are net figures and do not reconcile to tax-incl totals."
-		),
-	}
-
-
 def _daily_section(scope, currency_map, default_ccy, window):
 	profiles = scope["profiles"]
 	day_metric = _metrics_for_window(
@@ -1034,108 +925,6 @@ def _item_from(where):
 """
 
 
-def _favorite_product(where, params):
-	row = frappe.db.sql(
-		f"""
-		SELECT
-			sii.item_code,
-			MAX(sii.item_name) AS item_name,
-			MAX(sii.item_group) AS item_group,
-			SUM(sii.qty) AS qty,
-			SUM(sii.base_net_amount) AS net_amount
-		{_item_from(where)}
-		GROUP BY sii.item_code
-		ORDER BY qty DESC, net_amount DESC, sii.item_code
-		LIMIT 1
-		""",
-		params,
-		as_dict=True,
-	)
-	if not row:
-		return None
-	r = row[0]
-	return {
-		"item_code": r.item_code,
-		"item_name": r.item_name,
-		"item_group": r.item_group,
-		"qty": flt(r.qty),
-		"net_amount": flt(r.net_amount),
-	}
-
-
-def _product_ranking(where, params, category, page, page_size, sort_key=None, sort_dir=None):
-	page = _to_int(page, default=1, lo=1)
-	page_size = _to_int(page_size, default=10, lo=1, hi=MAX_PAGE_SIZE)
-	item_from = _item_from(where)
-	bind = dict(params)
-
-	order_by = DEFAULT_PRODUCT_ORDER
-	orders = PRODUCT_SORT_ORDERS.get((sort_key or "").strip().lower()) if sort_key else None
-	if orders:
-		order_by = orders["desc" if (sort_dir or "").strip().lower() == "desc" else "asc"]
-
-	cat_where = ""
-	if category:
-		bind["item_groups"] = _item_group_and_descendants(category)
-		cat_where = " AND sii.item_group IN %(item_groups)s"
-
-	total = frappe.db.sql(f"SELECT COUNT(DISTINCT sii.item_code) AS total {item_from}{cat_where}", bind)[0][0]
-	total_sales = (
-		frappe.db.sql(f"SELECT SUM(sii.base_net_amount) AS total {item_from}{cat_where}", bind)[0][0] or 0
-	)
-
-	# Clamp to the last page that still has rows: a stale page number (e.g.
-	# kept from a wider range) would otherwise fetch OFFSET past the end and
-	# render an empty ranking under a pager like "4 / 1".
-	page = min(page, max(1, -(-int(total) // page_size)))
-
-	offset = (page - 1) * page_size
-	rows = frappe.db.sql(
-		f"""
-		SELECT
-			sii.item_code,
-			MAX(sii.item_name) AS item_name,
-			MAX(sii.item_group) AS item_group,
-			SUM(sii.qty) AS qty,
-			SUM(sii.base_net_amount) AS net_amount
-		{item_from}{cat_where}
-		GROUP BY sii.item_code
-		ORDER BY {order_by}
-		LIMIT {page_size} OFFSET {offset}
-		""",
-		bind,
-		as_dict=True,
-	)
-	return {
-		"rows": [
-			{
-				"item_code": r.item_code,
-				"item_name": r.item_name,
-				"item_group": r.item_group,
-				"qty": flt(r.qty),
-				"net_amount": flt(r.net_amount),
-				"share_pct": ratio(r.net_amount, total_sales),
-			}
-			for r in rows
-		],
-		"total": int(total),
-		"page": page,
-		"page_size": page_size,
-		"sort": (sort_key or "").strip().lower() if orders else None,
-		"dir": "desc" if (sort_dir or "").strip().lower() == "desc" else "asc" if orders else None,
-		"category": category or None,
-		"categories": _category_options(item_from, params),
-		"scope_total_net": flt(total_sales),
-	}
-
-
-def _category_options(item_from, params):
-	rows = frappe.db.sql(
-		f"SELECT DISTINCT sii.item_group {item_from} ORDER BY sii.item_group", params, as_dict=True
-	)
-	return [r.item_group for r in rows if r.item_group]
-
-
 def _item_group_and_descendants(group):
 	row = frappe.db.get_value("Item Group", group, ["lft", "rgt"], as_dict=True)
 	if not row:
@@ -1182,10 +971,9 @@ def _payments_section(where, params, default_ccy, currency_map, companies):
 	}
 
 
-def _recent_section(where, params, limit=10):
-	"""Latest invoices in the range (sale or return): the raw feed behind
-	the Recent transactions table and, client-side, the Live activity card.
-	The activity card mirrors the table's visible page."""
+def _recent_section(where, params, limit=HQ_RECENT_LIMIT):
+	"""Latest invoices in the range (sale or return) for the Live Activity
+	card; the full list is the invoice list view the card links to."""
 	rows = frappe.db.sql(
 		f"""
 		SELECT name, posting_date, posting_time, company, customer,
@@ -1217,6 +1005,8 @@ def _recent_section(where, params, limit=10):
 		):
 			modes.setdefault(m.parent, m.mode_of_payment)
 	return {
+		# the "View all" target: the doctype new POS sales are created in
+		"list_doctype": get_pos_invoice_doctype(),
 		"rows": [
 			{
 				"name": r.name,
@@ -1259,9 +1049,9 @@ def _returns_section(where, params, default_ccy):
 
 
 def _shifts_section(scope, currency_map, limit=10):
-	"""Latest shifts in company scope (open first, then newest) with the
+	"""Open shifts in company scope (newest first) with the
 	recap service's cash semantics: cash_expected already nets change and
-	cash returns, open and closed shifts share one code path.
+	cash returns.
 
 	Batched (no per-shift N+1): one grouped query per aggregate for ALL
 	shifts at once, master data once per request. Query budget: shift list
@@ -1278,14 +1068,13 @@ def _shifts_section(scope, currency_map, limit=10):
 			os.period_start_date
 		FROM `tabPOS Opening Shift` os
 		WHERE os.docstatus = 1 AND os.company IN %(hq_companies)s
-			AND (os.status = 'Open' OR os.posting_date >= %(hq_from)s)
-		ORDER BY os.status = 'Open' DESC, os.period_start_date DESC,
+			AND os.status = 'Open'
+		ORDER BY os.period_start_date DESC,
 			os.creation DESC
 		LIMIT %(hq_limit)s
 		""",
 		{
 			"hq_companies": list(scope["companies"]),
-			"hq_from": scope.get("from_date"),
 			"hq_limit": cint(limit),
 		},
 		as_dict=True,
@@ -1584,7 +1373,7 @@ def _category_products(companies, profiles, start, end, cutoff, currency_map, de
 	"""Datasets for the two independent "top items within a category" cards.
 
 	Each card is one grouped query over the FULL category (incl. sub-groups) —
-	never the paginated Product Ranking — and slots "a"/"b" stay independent:
+	never a paginated list — and slots "a"/"b" stay independent:
 	choosing one never influences the other or the global ranking filter.
 	Exactly one query per chosen category (max two, no N+1). Same currency rule
 	as ``_category_top``: only companies whose base currency is the scope
@@ -2217,11 +2006,8 @@ def _empty_payload(scope, notice):
 		"windows": {},
 		"monthly": {},
 		"range": {},
-		"turnover": {},
 		"daily": {},
 		"hours": {"rows": [], "peak": None, "top": [], "lowest": []},
-		"favorite_product": None,
-		"product_ranking": {"rows": [], "total": 0, "page": 1, "page_size": 10, "categories": []},
 		"outlet_ranking": [],
 		"item_groups": [],
 		"category_products": {"a": {}, "b": {}},
@@ -2230,9 +2016,6 @@ def _empty_payload(scope, notice):
 		"recent": {"rows": []},
 		"returns": {"value": 0, "count": 0, "rate": None, "rows": [], "currency": None},
 		"shifts": [],
-		"highlights": {},
-		"channels": {"available": False},
-		"pax": {"available": False},
 		"target_basis": _target_basis_payload(),
 		"targets": {"available": False, "by_company": [], "overall": {"available": False, "by_company": {}}},
 	}
