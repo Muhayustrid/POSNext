@@ -160,17 +160,50 @@ def sales_invoice_item_union(columns, where=""):
 		if not _branch_queryable(dt, columns, where):
 			continue
 		cond = _branch_where(dt, where, exclude)
+		cols = columns.format(dt=dt) if "{dt}" in columns else columns
 		parts.append(
-			f"(SELECT {columns} FROM `tab{dt} Item` sii "
+			f"(SELECT {cols} FROM `tab{dt} Item` sii "
 			f"INNER JOIN `tab{dt}` si ON si.name = sii.parent{cond})"
 		)
 	if not parts:
 		dt = doctypes[0]
+		cols = columns.format(dt=dt) if "{dt}" in columns else columns
 		parts.append(
-			f"(SELECT {columns} FROM `tab{dt} Item` sii "
+			f"(SELECT {cols} FROM `tab{dt} Item` sii "
 			f"INNER JOIN `tab{dt}` si ON si.name = sii.parent WHERE 1 = 0)"
 		)
 	return f"({' UNION ALL '.join(parts)}) sii"
+
+
+# Package sales are reported on the package line: its qty is the packages sold
+# and its money is the whole instance's (header + components), so the result
+# is the same whether the money sits on the header (legacy) or was allocated to
+# the components. Component rows are then skipped — they are the contents, not
+# separate sales. Rows without an instance id (pre-instance data) cannot be
+# linked and keep the old money-side rule: drop the zero side of the group.
+
+
+def package_sold_amount(amount="base_net_amount", dt="{dt}"):
+	"""SQL expression (``sii`` alias) for a row's sold amount: the package line
+	carries its instance's total, every other row its own ``amount``. ``dt``
+	names the invoice doctype whose item table holds the components; the
+	default ``{dt}`` is filled in per branch by sales_invoice_item_union."""
+	return (
+		"CASE WHEN sii.pos_package_role = 'Package' AND ifnull(sii.pos_package_instance, '') <> ''"
+		f" THEN sii.{amount} + ifnull((SELECT SUM(pkg.{amount}) FROM `tab{dt} Item` pkg"
+		" WHERE pkg.parent = sii.parent AND pkg.pos_package_instance = sii.pos_package_instance"
+		" AND pkg.pos_package_role = 'Package Item'), 0)"
+		f" ELSE sii.{amount} END"
+	)
+
+
+def package_sold_row_filter(amount="base_net_amount"):
+	"""SQL condition (``sii`` alias) keeping the rows that count as sales."""
+	return (
+		"(ifnull(sii.pos_package_role, '') = ''"
+		" OR (ifnull(sii.pos_package_instance, '') <> '' AND sii.pos_package_role = 'Package')"
+		f" OR (ifnull(sii.pos_package_instance, '') = '' AND sii.{amount} <> 0))"
+	)
 
 
 def is_pos_next_owned(doc):

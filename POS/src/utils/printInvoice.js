@@ -196,8 +196,37 @@ export function buildReceiptHTML(invoiceData) {
 	const partyLabel = buyerName ? __("Buyer:") : __("Customer:")
 	const partyValue =
 		buyerName || invoiceData.customer_name || invoiceData.customer || ""
+	// A package prints as one priced line (its whole instance's money, wherever
+	// it sits: the header in legacy mode, the components when allocated) with
+	// its components listed under it, indented and unpriced.
+	const packageTotals = {}
+	for (const item of items) {
+		if (!item.pos_package_instance) continue
+		packageTotals[item.pos_package_instance] =
+			(packageTotals[item.pos_package_instance] || 0) +
+			(item.quantity || item.qty || 0) * (item.price_list_rate || item.rate || 0)
+	}
 	const itemsHtml = items
 		.map((item) => {
+			const instance = item.pos_package_instance
+			if (instance && item.pos_package_role === "Package Item") {
+				return `
+						<div class="item-row" style="padding-left: 12px;">
+							<div class="item-name">- ${escapeHtml(item.item_name || item.item_code)} x${escapeHtml(item.quantity || item.qty || 0)}</div>
+						</div>`
+			}
+			if (instance && item.pos_package_role === "Package") {
+				const qty = item.quantity || item.qty || 0
+				const total = packageTotals[instance]
+				return `
+						<div class="item-row">
+							<div class="item-name">${escapeHtml(item.item_name || item.item_code)}</div>
+							<div class="item-details">
+								<span>${escapeHtml(qty)} × ${formatCurrency(qty ? total / qty : 0)}</span>
+								<span><strong>${formatCurrency(total)}</strong></span>
+							</div>
+						</div>`
+			}
 			const hasDiscount =
 				(item.discount_percentage &&
 					Number.parseFloat(item.discount_percentage) > 0) ||

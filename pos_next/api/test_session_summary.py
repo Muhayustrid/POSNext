@@ -605,13 +605,15 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(item_a["qty"], 0)  # 2 sold - 2 returned
 		self.assertEqual(item_a["base_net_amount"], 0)
 
-	def test_allocation_mode_revenue_reaches_items_and_returns_survive(self):
-		"""B2: in allocation mode the components carry the money and the package
-		header is 0. The item aggregation must keep the money side by amount,
-		never filter components by role, and a negative (return) component row
-		must survive so the money nets instead of being dropped."""
+	def test_allocation_mode_package_reported_on_its_own_line(self):
+		"""Allocation mode: the components carry the money and the package line
+		is 0. The package is reported with its instance's money, the components
+		are not counted as item sales, and a return nets the package down — the
+		same figures in the session summary and the EOD print."""
+		from pos_next.pos_next.utils.pos_closing_print import _fetch_grouped_items_for_targets
+
 		shift = self._make_opening_shift(opening_cash=0)
-		self._make_invoice_on(
+		sale = self._make_invoice_on(
 			shift,
 			[
 				{"item": self.pkg_parent, "qty": 1, "rate": 0, "role": "Package"},
@@ -620,7 +622,7 @@ class TestSessionSummary(IntegrationTestCase):
 			],
 			paid=50000,
 		)
-		self._make_invoice_on(
+		ret = self._make_invoice_on(
 			shift,
 			[
 				{"item": self.pkg_parent, "qty": -1, "rate": 0, "role": "Package"},
@@ -629,17 +631,50 @@ class TestSessionSummary(IntegrationTestCase):
 			paid=-30000,
 			is_return=True,
 		)
+		# stamped after submit: the package validate hook would otherwise
+		# re-price these hand-built rows from a POS Package definition
+		for name in (sale, ret):
+			frappe.db.sql(
+				"UPDATE `tabSales Invoice Item` SET pos_package_instance = %s"
+				" WHERE parent = %s AND pos_package_role IS NOT NULL",
+				(f"PKG-{name}", name),
+			)
 
 		summary = get_session_summary(shift)
 
-		# the zero header is gone; the priced components are the breakdown and
-		# the return row nets item_a down to 0 instead of being filtered out
-		self.assertEqual(summary["packages"], [])
-		items = {i["item_code"]: i for i in summary["items"]}
-		self.assertEqual(items[self.item_a]["base_net_amount"], 0)
-		self.assertEqual(items[self.pkg_component]["base_net_amount"], 20000)
-		self.assertEqual(sum(i["base_net_amount"] for i in summary["items"]), 20000)
+		self.assertEqual(
+			[(p["item_code"], p["qty"], p["base_net_amount"]) for p in summary["packages"]],
+			[(self.pkg_parent, 0, 20000)],
+		)
+		self.assertEqual(summary["items"], [])
 		self.assertEqual(summary["net_sales"], 20000)
+
+		eod = {r.item_code: r for r in _fetch_grouped_items_for_targets({(sale, "Sales Invoice"), (ret, "Sales Invoice")})}
+		self.assertEqual(set(eod), {self.pkg_parent})
+		self.assertEqual(eod[self.pkg_parent].amount, 20000)
+
+	def test_legacy_mode_package_with_instance_keeps_its_price(self):
+		shift = self._make_opening_shift(opening_cash=0)
+		sale = self._make_invoice_on(
+			shift,
+			[
+				{"item": self.pkg_parent, "qty": 1, "rate": 50000, "role": "Package"},
+				{"item": self.pkg_component, "qty": 2, "rate": 0, "role": "Package Item"},
+			],
+			paid=50000,
+		)
+		frappe.db.sql(
+			"UPDATE `tabSales Invoice Item` SET pos_package_instance = 'PKG-LEGACY' WHERE parent = %s",
+			sale,
+		)
+
+		summary = get_session_summary(shift)
+
+		self.assertEqual(
+			[(p["item_code"], p["qty"], p["base_net_amount"]) for p in summary["packages"]],
+			[(self.pkg_parent, 1, 50000)],
+		)
+		self.assertEqual(summary["items"], [])
 
 	def test_credit_return_without_payments_excluded(self):
 		"""Mirror closing: a return with no payment rows moved no money."""

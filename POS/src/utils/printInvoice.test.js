@@ -279,6 +279,48 @@ describe("buildReceiptHTML (package allocation rows, Fase 2)", () => {
 	})
 })
 
+describe("buildReceiptHTML (package grouped under its title)", () => {
+	const pay = (amount) => ({
+		grand_total: amount,
+		paid_amount: amount,
+		payments: [{ mode_of_payment: "Cash", amount }],
+	})
+
+	it("prices an allocated package on its title and lists components unpriced", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			...pay(25000),
+			items: [
+				{ item_code: "PKG", item_name: "Paket Hemat", quantity: 1, rate: 0, pos_package_role: "Package", pos_package_instance: "I1" },
+				{ item_code: "C1", item_name: "Ropi Coklat", quantity: 1, rate: 15000, price_list_rate: 15000, pos_package_role: "Package Item", pos_package_instance: "I1" },
+				{ item_code: "C2", item_name: "Ropi Keju", quantity: 1, rate: 10000, price_list_rate: 10000, pos_package_role: "Package Item", pos_package_instance: "I1" },
+			],
+		})
+
+		expect(html).toContain("1 × 25.000")
+		expect(html).toContain("- Ropi Coklat x1")
+		expect(html).toContain("- Ropi Keju x1")
+		expect(html).not.toContain("15.000")
+		expect(html).not.toContain("10.000")
+	})
+
+	it("keeps the legacy header price and hides the zero components", () => {
+		const html = buildReceiptHTML({
+			...doc,
+			...pay(46000),
+			items: [
+				{ item_code: "PKG", item_name: "Paket Hemat", quantity: 2, rate: 23000, price_list_rate: 23000, pos_package_role: "Package", pos_package_instance: "I2" },
+				{ item_code: "C1", item_name: "Ropi Coklat", quantity: 2, rate: 0, pos_package_role: "Package Item", pos_package_instance: "I2" },
+			],
+		})
+
+		expect(html).toContain("2 × 23.000")
+		expect(html).toContain("46.000")
+		expect(html).toContain("- Ropi Coklat x2")
+		expect(html).not.toContain("2 × 0")
+	})
+})
+
 describe("buildReceiptHTML (queue block)", () => {
 	it("renders the queue block first when pos_queue_number is set", () => {
 		const html = buildReceiptHTML({ ...doc, pos_queue_number: 48 })
