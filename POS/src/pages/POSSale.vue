@@ -1443,6 +1443,10 @@ onMounted(async () => {
 		{ immediate: true }
 	);
 
+	// Keeps the socket warm so the first print after idle doesn't pay ~3 s reconnect
+	const IMIN_PROBE_RETRY_MS = 5000;
+	const IMIN_PROBE_KEEPALIVE_MS = 30000;
+
 	let iminWarmupTimer = null;
 	function stopIminWarmup() {
 		if (iminWarmupTimer) {
@@ -1451,7 +1455,38 @@ onMounted(async () => {
 		}
 	}
 
-	// iMin warm-up — lazy connect & prompt origin permission; retry every 5s until ok
+	const probeImin = async () => {
+		stopIminWarmup();
+		if (posSettingsStore.printDriver !== "imin") return;
+		let ok = false;
+		try {
+			await ensureIminSdk();
+			const status = await getTransport().getDriver("imin").getStatus();
+			ok = Boolean(status?.ok);
+		} catch (err) {
+			log.warn("iMin warm-up failed:", err?.message || err);
+		}
+		iminReady.value = ok;
+		// A visibility probe may overlap a timer probe; never leave two loops.
+		stopIminWarmup();
+		if (posSettingsStore.printDriver === "imin") {
+			iminWarmupTimer = setTimeout(
+				probeImin,
+				ok ? IMIN_PROBE_KEEPALIVE_MS : IMIN_PROBE_RETRY_MS
+			);
+		}
+	};
+
+	const handleIminVisibility = () => {
+		if (document.visibilityState === "visible" && posSettingsStore.printDriver === "imin") {
+			probeImin();
+		}
+	};
+	if (typeof document !== "undefined") {
+		document.addEventListener("visibilitychange", handleIminVisibility);
+	}
+
+	// iMin warm-up — lazy connect & prompt origin permission; keep socket warm
 	watch(
 		() => posSettingsStore.printDriver,
 		(driver) => {
@@ -1460,30 +1495,16 @@ onMounted(async () => {
 				iminReady.value = false;
 				return;
 			}
-			const probe = async () => {
-				if (posSettingsStore.printDriver !== "imin") return;
-				try {
-					await ensureIminSdk();
-					const status = await getTransport().getDriver("imin").getStatus();
-					if (status?.ok) {
-						iminReady.value = true;
-						return;
-					}
-				} catch (err) {
-					log.warn("iMin warm-up failed:", err?.message || err);
-				}
-				iminReady.value = false;
-				if (posSettingsStore.printDriver === "imin") {
-					iminWarmupTimer = setTimeout(probe, 5000);
-				}
-			};
-			probe();
+			probeImin();
 		},
 		{ immediate: true }
 	);
 
 	// Store cleanup function for unmount
 	onUnmounted(() => {
+		if (typeof document !== "undefined") {
+			document.removeEventListener("visibilitychange", handleIminVisibility);
+		}
 		stopIminWarmup();
 		cleanup();
 		stopActivityTracking();
