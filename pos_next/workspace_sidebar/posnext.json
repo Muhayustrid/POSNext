@@ -249,6 +249,18 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
+   "label": "POS Product Sales Report",
+   "link_to": "POS Product Sales Report",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
    "label": "POS Return Report",
    "link_to": "POS Return Report",
    "link_type": "Report",
@@ -480,7 +492,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-07 23:00:00.000000",
+ "modified": "2026-10-08 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",

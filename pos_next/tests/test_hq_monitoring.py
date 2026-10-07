@@ -22,6 +22,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from pos_next.api.hq_monitoring import (
+	HQ_RECENT_LIMIT,
 	get_outlet_targets,
 	get_sales_monitoring,
 	growth_pct,
@@ -424,17 +425,12 @@ class TestHQMonitoring(IntegrationTestCase):
 		frappe.set_user(self.user_all)
 		self.assertNotEqual(base, _monitoring_cache_key("range", scope, parts))
 
-		# date / category / page / sort each change the key (same section, so
-		# only the filter itself can explain the difference)
+		# date / category / page each change the key (same section, so only
+		# the filter itself can explain the difference)
 		frappe.set_user(ADMIN)
-		pr_parts = {"from_date": "2026-09-01", "to_date": "2026-09-22", "category": None, "page": 1}
-		pr = _monitoring_cache_key("product_ranking", scope, pr_parts)
 		self.assertNotEqual(base, _monitoring_cache_key("range", scope, {**parts, "from_date": "2026-09-02"}))
-		self.assertNotEqual(
-			pr, _monitoring_cache_key("product_ranking", scope, {**pr_parts, "category": "Products"})
-		)
-		self.assertNotEqual(pr, _monitoring_cache_key("product_ranking", scope, {**pr_parts, "page": 2}))
-		self.assertNotEqual(pr, _monitoring_cache_key("product_ranking", scope, {**pr_parts, "sort": "qty"}))
+		self.assertNotEqual(base, _monitoring_cache_key("range", scope, {**parts, "category": "Products"}))
+		self.assertNotEqual(base, _monitoring_cache_key("range", scope, {**parts, "page": 2}))
 
 	# ------------------------------------------------------------------
 	# endpoint metrics
@@ -442,7 +438,7 @@ class TestHQMonitoring(IntegrationTestCase):
 
 	def _payload(self, user=ADMIN, **overrides):
 		frappe.set_user(user)
-		args = {"company": self.company_a, "page_size": 10}
+		args = {"company": self.company_a}
 		args.update(overrides)
 		return get_sales_monitoring(**args)
 
@@ -457,18 +453,40 @@ class TestHQMonitoring(IntegrationTestCase):
 		# default currency labeled explicitly, never a raw mixed sum
 		self.assertEqual(m["net_tax_incl"]["default_currency"], self.currency_a)
 
-	def test_refunds_negative_qty_and_package_component_excluded(self):
-		data = self._payload()
-		fav = data["favorite_product"]
-		# qty ranking: parent pkg (qty1, 3000) wins the qty/net tie-break;
-		# the component (qty 5 @ 0) must never appear anywhere.
-		self.assertEqual(fav["item_code"], self.pkg_parent)
-		codes = {r["item_code"] for r in data["product_ranking"]["rows"]}
-		self.assertNotIn(self.pkg_component, codes)
-		self.assertEqual(data["product_ranking"]["total"], 3)  # x, y, pkg
+	# ------------------------------------------------------------------
+	# POS Product Sales Report (the full product ranking behind the page)
+	# ------------------------------------------------------------------
 
-		x_row = next(r for r in data["product_ranking"]["rows"] if r["item_code"] == self.item_x)
-		self.assertEqual(x_row["qty"], 1)  # 2 sold - 1 returned
+	def _products(self, user=ADMIN, **filters):
+		from pos_next.pos_next.report.pos_product_sales_report.pos_product_sales_report import execute
+
+		frappe.set_user(user)
+		today = frappe.utils.nowdate()
+		return execute({"company": self.company_a, "from_date": today, "to_date": today, **filters})[1]
+
+	def test_product_report_refunds_netted_and_package_component_excluded(self):
+		rows = self._products()
+		# the component (qty 5 @ 0) must never appear anywhere
+		self.assertEqual([r.item_code for r in rows], [self.pkg_parent, self.item_x, self.item_y])
+		x_row = next(r for r in rows if r.item_code == self.item_x)
+		self.assertEqual(x_row.qty, 1)  # 2 sold - 1 returned
+		self.assertEqual(x_row.net_amount, 1000)
+		self.assertEqual(x_row.share_pct, round(1000 / 4500 * 100, 2))
+		self.assertEqual(x_row.currency, self.currency_a)
+
+	def test_product_report_item_group_filter_and_access(self):
+		group_y = frappe.db.get_value("Item", self.item_y, "item_group")
+		self.assertEqual([r.item_code for r in self._products(item_group=group_y)], [self.item_y])
+		# currencies never merge: company B's item_x is its own row
+		rows = self._products(company=None)
+		x_rows = {r.currency: r for r in rows if r.item_code == self.item_x}
+		self.assertEqual(x_rows[self.currency_b].net_amount, 100)
+		self.assertEqual(x_rows[self.currency_b].share_pct, 100.0)
+		with self.assertRaises(frappe.PermissionError):
+			self._products(user=self.user_co_a, company=self.company_b)
+		with self.assertRaises(frappe.PermissionError):
+			self._products(user=self.user_no_role)
+		frappe.set_user(ADMIN)
 
 	def test_allocation_package_ranks_with_instance_money(self):
 		"""Allocation mode: the package line is 0 and the components carry the
@@ -492,37 +510,14 @@ class TestHQMonitoring(IntegrationTestCase):
 			inv,
 		)
 		try:
-			rows = {r["item_code"]: r for r in self._payload()["product_ranking"]["rows"]}
-			self.assertEqual(rows[self.pkg_parent]["qty"], 2)  # fixture legacy pkg + this one
-			self.assertEqual(rows[self.pkg_parent]["net_amount"], 6000)
-			self.assertEqual(rows[self.item_y]["net_amount"], 500)  # standalone sale only
+			rows = {r.item_code: r for r in self._products()}
+			self.assertEqual(rows[self.pkg_parent].qty, 2)  # fixture legacy pkg + this one
+			self.assertEqual(rows[self.pkg_parent].net_amount, 6000)
+			self.assertEqual(rows[self.item_y].net_amount, 500)  # standalone sale only
 			self.assertNotIn(self.pkg_component, rows)
 		finally:
 			frappe.set_user(ADMIN)
 			frappe.get_doc("Sales Invoice", inv).cancel()
-
-	def test_ranking_sort_tie_and_pagination(self):
-		data = self._payload(page_size=2)
-		pr = data["product_ranking"]
-		self.assertEqual(pr["page"], 1)
-		self.assertEqual(pr["page_size"], 2)
-		self.assertEqual(pr["total"], 3)
-		# tie on net_amount (1000): qty 2... x net=1000 qty1, y net=500 -> order by net desc
-		nets = [r["net_amount"] for r in pr["rows"]]
-		self.assertEqual(nets, sorted(nets, reverse=True))
-		self.assertEqual(pr["rows"][0]["item_code"], self.pkg_parent)  # 3000
-		# stable tie-break: same net -> higher qty first
-		data2 = self._payload(page_size=10)
-		rows = data2["product_ranking"]["rows"]
-		x = next(r for r in rows if r["item_code"] == self.item_x)
-		y = next(r for r in rows if r["item_code"] == self.item_y)
-		self.assertLess(rows.index(x), rows.index(y))  # 1000 > 500 sorts first
-		self.assertEqual(x["share_pct"], round(1000 / 4500 * 100, 2))
-
-	def test_category_filter_scope(self):
-		data = self._payload(category=frappe.db.get_value("Item", self.item_y, "item_group"))
-		pr = data["product_ranking"]
-		self.assertEqual({r["item_code"] for r in pr["rows"]}, {self.item_y})
 
 	def test_mixed_currency_never_raw_summed(self):
 		data = self._payload(company=None)  # all companies (admin unrestricted)
@@ -561,10 +556,11 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertTrue(all(r["share_pct"] > 0 for r in pm["rows"]))
 		amounts = [r["amount"] for r in pm["rows"]]
 		self.assertEqual(amounts, sorted(amounts, reverse=True))
-		# recent: newest first (bounded page), sale/return flag + mode resolved
+		# recent: newest first (live feed, server-bounded), sale/return flag +
+		# mode resolved
 		recent = data["recent"]["rows"]
 		self.assertTrue(recent)
-		self.assertLessEqual(len(recent), 10)
+		self.assertLessEqual(len(recent), HQ_RECENT_LIMIT)
 		self.assertTrue(all(r["mode_of_payment"] for r in recent))
 		self.assertTrue(any(r["is_return"] for r in recent), "refund fixture visible in the feed")
 		# returns: rate denominator counts every invoice in the same window
@@ -689,14 +685,12 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(a["category_total"], 0.0)
 		self.assertIsNone(a["other_share_pct"])
 
-	def test_category_cards_independent_of_global_ranking_filter(self):
+	def test_category_cards_return_item_groups(self):
 		group_x, group_y = self._groups()
-		# the Product Ranking category filter must not touch the cards...
-		data = self._payload(category=group_y, category_a=group_x, category_b=group_y)
-		self.assertEqual({r["item_code"] for r in data["product_ranking"]["rows"]}, {self.item_y})
+		data = self._payload(category_a=group_x, category_b=group_y)
 		a = data["category_products"]["a"]
 		self.assertEqual({r["item_code"] for r in a["items"]}, {self.pkg_parent, self.item_x})
-		# ...and item_groups for the card selects always come back
+		# item_groups for the card selects always come back
 		self.assertIn(group_x, data["item_groups"])
 		self.assertIn(group_y, data["item_groups"])
 
@@ -1050,53 +1044,6 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(by_company[self.company_b]["cumulative_value"], 100)
 		self.assertEqual(by_company[self.company_a]["cumulative_value"], 4500)
 
-	def test_product_ranking_stale_page_clamped(self):
-		frappe.set_user(ADMIN)
-		data = get_sales_monitoring(company=self.company_a, product_page=99, page_size=10)
-		ranking = data["product_ranking"]
-		self.assertEqual(ranking["page"], 1)
-		self.assertTrue(ranking["rows"])
-
-	def test_product_ranking_sort_qty_asc_desc(self):
-		# fixture nets: pkg 3000, x 1000 (qty 1), y 500 (qty 1)
-		data = self._payload(page_size=10, product_sort="qty", product_dir="asc")
-		pr = data["product_ranking"]
-		self.assertEqual(pr["sort"], "qty")
-		self.assertEqual(pr["dir"], "asc")
-		qtys = [r["qty"] for r in pr["rows"]]
-		self.assertEqual(qtys, sorted(qtys))
-		data = self._payload(page_size=10, product_sort="qty", product_dir="desc")
-		pr = data["product_ranking"]
-		self.assertEqual(pr["dir"], "desc")
-		qtys = [r["qty"] for r in pr["rows"]]
-		self.assertEqual(qtys, sorted(qtys, reverse=True))
-
-	def test_product_ranking_sort_name_and_invalid_key(self):
-		data = self._payload(page_size=10, product_sort="name", product_dir="asc")
-		pr = data["product_ranking"]
-		self.assertEqual(pr["sort"], "name")
-		names = [r["item_name"] for r in pr["rows"]]
-		self.assertEqual(names, sorted(names))
-		# junk key falls back to the default best-sellers order (pkg 3000 first)
-		data = self._payload(page_size=10, product_sort="net_amount; DROP", product_dir="desc")
-		pr = data["product_ranking"]
-		self.assertIsNone(pr["sort"])
-		self.assertEqual(pr["rows"][0]["item_code"], self.pkg_parent)
-
-	def test_product_ranking_page_size_default_and_clamp(self):
-		# the UI pages 10 per card; explicit sizes still clamp, never throw
-		pr = self._payload()["product_ranking"]
-		self.assertEqual(pr["page_size"], 10)
-		self.assertEqual(pr["total"], 3)
-		pr = self._payload(page_size=999)["product_ranking"]
-		self.assertEqual(pr["page_size"], 50)
-		self.assertEqual(pr["total"], 3)
-
-	def test_recent_list_bounded_at_ten(self):
-		data = self._payload()
-		# the card shows at most 10 rows; the pager covers the rest
-		self.assertLessEqual(len(data["recent"]["rows"]), 10)
-
 	def test_pos_return_report_matches_returns_card(self):
 		from pos_next.pos_next.report.pos_return_report.pos_return_report import execute
 
@@ -1125,31 +1072,6 @@ class TestHQMonitoring(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			execute(base)
 		frappe.set_user(ADMIN)
-
-	def test_turnover_prev_comparable_cut_at_same_time_of_day(self):
-		frappe.set_user(ADMIN)
-		today = frappe.utils.getdate(frappe.utils.nowdate())
-		month_start = frappe.utils.get_first_day(today)
-		days_elapsed = (today - month_start).days + 1
-		prev_month_start = frappe.utils.get_first_day(month_start - timedelta(days=1))
-		prev_end = prev_month_start + timedelta(days=days_elapsed - 1)
-
-		early = self._make_invoice(
-			self.company_a, self.profile_a, self.cash_a,
-			[{"item": self.item_x, "qty": 1, "rate": 100}], paid=100, posting_date=prev_end,
-		)
-		late = self._make_invoice(
-			self.company_a, self.profile_a, self.cash_a,
-			[{"item": self.item_x, "qty": 1, "rate": 200}], paid=200, posting_date=prev_end,
-		)
-		frappe.db.set_value("Sales Invoice", early, "posting_time", "00:00:01")
-		frappe.db.set_value("Sales Invoice", late, "posting_time", "23:59:59")
-
-		data = get_sales_monitoring(company=self.company_a)
-		prev = data["turnover"]["prev_comparable_net"]["by_currency"][self.currency_a]
-		# the comparable window is cut at the same time of day as "now":
-		# the 00:00:01 invoice counts, the 23:59:59 one does not (yet)
-		self.assertEqual(prev, 100)
 
 	def test_outlet_ranking_apc_uses_net(self):
 		frappe.set_user(ADMIN)
@@ -1559,7 +1481,7 @@ class TestTargetBasis(IntegrationTestCase):
 
 	def _dashboard(self, company):
 		frappe.set_user(ADMIN)
-		return get_sales_monitoring(company=company, page_size=10)
+		return get_sales_monitoring(company=company)
 
 	def _targets_row(self, company):
 		rows = self._dashboard(company)["targets"]["by_company"]
