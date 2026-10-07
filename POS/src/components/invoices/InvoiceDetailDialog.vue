@@ -49,6 +49,12 @@
 									{{ formatTime(invoiceData.posting_time) }}</span
 								>
 							</div>
+							<div v-if="invoiceData.cashier_name" class="text-start">
+								<span class="text-gray-600">{{ __("Cashier") }}</span>
+								<span class="ms-2 font-medium text-gray-900">{{
+									invoiceData.cashier_name
+								}}</span>
+							</div>
 							<div v-if="invoiceData.pos_queue_number" class="text-start">
 								<span class="text-gray-600">{{ __("No. Antrian:") }}</span>
 								<span class="ms-2 font-mono font-semibold text-indigo-600"

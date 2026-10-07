@@ -29,6 +29,8 @@ const SLOW_TEST_TIMEOUT_MS = 15000
 
 function makeFakePrinter(overrides = {}) {
 	return {
+		ws: { readyState: 1 },
+		close: vi.fn(),
 		connect: vi.fn().mockResolvedValue(true),
 		initPrinter: vi.fn(),
 		getPrinterStatus: vi.fn().mockResolvedValue({ value: 0 }),
@@ -698,6 +700,96 @@ describe("createIminDriver", () => {
 			const urls = printer.printSingleBitmap.mock.calls.map((call) => call[0])
 			expect(urls).toEqual(["data:receipt", "data:receipt", "data:crew"])
 			expect(res.copies).toBe(3)
+		})
+	})
+
+	describe("connection and status resilience", () => {
+		it("reconnects when cached ws is not open", async () => {
+			let instanceCount = 0
+			const p1 = makeFakePrinter({ ws: { readyState: 1 } })
+			const p2 = makeFakePrinter({ ws: { readyState: 1 } })
+			const d = createIminDriver({
+				factory: () => {
+					instanceCount++
+					return instanceCount === 1 ? p1 : p2
+				},
+				loadConfig: () => ({ paper: "58mm" }),
+			})
+
+			await d.getStatus()
+			expect(instanceCount).toBe(1)
+			expect(p1.initPrinter).toHaveBeenCalledWith("SPI")
+
+			// Simulate socket disconnection
+			p1.ws.readyState = 3 // CLOSED
+			await d.getStatus()
+			expect(p1.close).toHaveBeenCalled()
+			expect(instanceCount).toBe(2)
+			expect(p2.initPrinter).toHaveBeenCalledWith("SPI")
+		})
+
+		it("failed connect closes instance", async () => {
+			const badPrinter = makeFakePrinter({
+				connect: vi.fn().mockResolvedValue(false),
+			})
+			const d = createIminDriver({
+				factory: () => badPrinter,
+				loadConfig: () => ({ paper: "58mm" }),
+			})
+
+			await expect(
+				d.printHTML("<div/>", {
+					render: async () => ({ dataURL: "x", width: 384 }),
+				}),
+			).rejects.toThrow(/Could not connect/)
+			expect(badPrinter.close).toHaveBeenCalled()
+		})
+
+		it("status reply arriving after old 2s but before new timeout is ok", async () => {
+			printer.getPrinterStatus = vi.fn(
+				() =>
+					new Promise((resolve) => {
+						setTimeout(() => resolve({ value: 0 }), 2200)
+					}),
+			)
+			const res = await driver.getStatus()
+			expect(res).toEqual({ ok: true, code: 0 })
+		}, 10000)
+
+		it("concurrent getStatus both resolve", async () => {
+			let currentCallback = null
+			const p = makeFakePrinter({
+				getPrinterStatus: vi.fn(() => {
+					return new Promise((resolve) => {
+						currentCallback = resolve
+						setTimeout(() => {
+							if (currentCallback) {
+								currentCallback({ value: 0 })
+							}
+						}, 50)
+					})
+				}),
+			})
+			const d = createIminDriver({
+				factory: () => p,
+				statusReplyMs: 1000,
+			})
+			const [s1, s2] = await Promise.all([d.getStatus(), d.getStatus()])
+			expect(s1).toEqual({ ok: true, code: 0 })
+			expect(s2).toEqual({ ok: true, code: 0 })
+		})
+
+		it("deduplicates concurrent ensurePrinter calls so factory is called once", async () => {
+			const factory = vi.fn(() => makeFakePrinter())
+			const d = createIminDriver({
+				factory,
+				loadConfig: () => ({ paper: "58mm" }),
+			})
+
+			const [avail, status] = await Promise.all([d.isAvailable(), d.getStatus()])
+			expect(avail).toBe(true)
+			expect(status.ok).toBe(true)
+			expect(factory).toHaveBeenCalledTimes(1)
 		})
 	})
 })

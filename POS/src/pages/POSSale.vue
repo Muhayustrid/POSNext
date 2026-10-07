@@ -23,7 +23,7 @@
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
-				:qz-connected="qzConnected"
+				:qz-connected="posSettingsStore.printDriver === 'imin' ? iminReady : qzConnected"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
 				@printer-click="openHistoryDialog"
@@ -1077,6 +1077,7 @@ import {
 	printWithSilentFallback,
 } from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+import { ensureIminSdk, getTransport } from "@/utils/print/transport";
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
@@ -1180,6 +1181,7 @@ const editCustomer = ref(null); // Customer being edited (null for create mode)
 const selectedPackage = ref(null); // POS Package awaiting option selection
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
+const iminReady = ref(false);
 
 // Debounce timer for offer reapplication
 const offerReapplyTimer = ref(null);
@@ -1441,8 +1443,69 @@ onMounted(async () => {
 		{ immediate: true }
 	);
 
+	// Keeps the socket warm so the first print after idle doesn't pay ~3 s reconnect
+	const IMIN_PROBE_RETRY_MS = 5000;
+	const IMIN_PROBE_KEEPALIVE_MS = 30000;
+
+	let iminWarmupTimer = null;
+	function stopIminWarmup() {
+		if (iminWarmupTimer) {
+			clearTimeout(iminWarmupTimer);
+			iminWarmupTimer = null;
+		}
+	}
+
+	const probeImin = async () => {
+		stopIminWarmup();
+		if (posSettingsStore.printDriver !== "imin") return;
+		let ok = false;
+		try {
+			await ensureIminSdk();
+			const status = await getTransport().getDriver("imin").getStatus();
+			ok = Boolean(status?.ok);
+		} catch (err) {
+			log.warn("iMin warm-up failed:", err?.message || err);
+		}
+		iminReady.value = ok;
+		// A visibility probe may overlap a timer probe; never leave two loops.
+		stopIminWarmup();
+		if (posSettingsStore.printDriver === "imin") {
+			iminWarmupTimer = setTimeout(
+				probeImin,
+				ok ? IMIN_PROBE_KEEPALIVE_MS : IMIN_PROBE_RETRY_MS
+			);
+		}
+	};
+
+	const handleIminVisibility = () => {
+		if (document.visibilityState === "visible" && posSettingsStore.printDriver === "imin") {
+			probeImin();
+		}
+	};
+	if (typeof document !== "undefined") {
+		document.addEventListener("visibilitychange", handleIminVisibility);
+	}
+
+	// iMin warm-up — lazy connect & prompt origin permission; keep socket warm
+	watch(
+		() => posSettingsStore.printDriver,
+		(driver) => {
+			stopIminWarmup();
+			if (driver !== "imin") {
+				iminReady.value = false;
+				return;
+			}
+			probeImin();
+		},
+		{ immediate: true }
+	);
+
 	// Store cleanup function for unmount
 	onUnmounted(() => {
+		if (typeof document !== "undefined") {
+			document.removeEventListener("visibilitychange", handleIminVisibility);
+		}
+		stopIminWarmup();
 		cleanup();
 		stopActivityTracking();
 		qzDisconnect();

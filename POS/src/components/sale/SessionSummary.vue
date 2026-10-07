@@ -1,8 +1,9 @@
 <template>
 	<div class="flex flex-col gap-4">
-		<!-- Period selector: always rendered so a window that failed to load can be changed -->
+		<!-- Period selector: managers only — cashiers get the shift lens without
+		     the profile-wide windows. -->
 		<div
-			v-if="openingShift || posProfile"
+			v-if="(openingShift || posProfile) && isManagement"
 			class="flex flex-wrap items-center gap-2"
 			data-test="period-bar"
 		>
@@ -428,6 +429,7 @@
 <script setup>
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
+import { useBootstrapStore } from "@/stores/bootstrap"
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
@@ -438,6 +440,11 @@ import { computed, ref, watch } from "vue"
 
 const { formatDate, formatTime } = useFormatters()
 const { showSuccess, showError } = useToast()
+
+// The period lens is a manager view; bootstrap flag sits beside
+// can_switch_to_desk (read via the same store POSSale uses).
+const bootstrapStore = useBootstrapStore()
+const isManagement = computed(() => Boolean(bootstrapStore.data?.is_management))
 
 const props = defineProps({
 	openingShift: { type: String, default: "" },

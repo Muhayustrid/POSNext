@@ -18,6 +18,8 @@ from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull, Sum
 from frappe.utils import flt, getdate, nowdate
 
+from pos_next.utils.authz import is_management_user
+
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
 	"item_name",
@@ -35,6 +37,53 @@ ITEM_RESULT_FIELDS = [
 ]
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
+
+
+def _assert_profile_access(pos_profile):
+	"""SEC A5 membership gate for a client-supplied pos_profile.
+
+	Delegates to pos_next.api.packages._assert_profile_access (POS Profile
+	User membership, or POS Profile write for back office/management). The
+	import is lazy because packages imports this module at load time.
+	"""
+	from pos_next.api.packages import _assert_profile_access as assert_profile_access
+
+	assert_profile_access(pos_profile)
+
+
+def _user_pos_scope():
+	"""(warehouses, companies) of every POS Profile the session user belongs to."""
+	profiles = frappe.get_all(
+		"POS Profile User", filters={"user": frappe.session.user}, pluck="parent"
+	)
+	if not profiles:
+		return set(), set()
+	rows = frappe.get_all(
+		"POS Profile", filters={"name": ["in", profiles]}, fields=["warehouse", "company"]
+	)
+	return {r.warehouse for r in rows if r.warehouse}, {r.company for r in rows if r.company}
+
+
+def _assert_warehouse_in_user_scope(warehouse=None, company=None):
+	"""SEC A5: raw warehouse/company parameters arrive from the client. A
+	non-manager may only touch warehouses/companies of the POS Profiles they
+	belong to; management roles pass (cross-outlet monitoring/backdate).
+	Only requested values are validated — a call with neither keeps its
+	legacy shape and its own scoping (see get_item_warehouse_availability).
+	"""
+	if is_management_user():
+		return
+	warehouses, companies = _user_pos_scope()
+	if warehouse and warehouse not in warehouses:
+		frappe.throw(
+			_("Warehouse {0} is not part of your POS Profiles").format(warehouse),
+			frappe.PermissionError,
+		)
+	if company and company not in companies:
+		frappe.throw(
+			_("Company {0} is not part of your POS Profiles").format(company),
+			frappe.PermissionError,
+		)
 
 
 def _get_item_price_transaction_date(transaction_date=None):
@@ -408,6 +457,8 @@ def search_by_barcode(barcode, pos_profile):
 		if not pos_profile:
 			frappe.throw(_("POS Profile is required"))
 
+		_assert_profile_access(pos_profile)
+
 		# Try to resolve weighted/priced barcodes if barcode_resolver is available
 		resolved_barcode_data = None
 		effective_barcode = barcode
@@ -500,6 +551,8 @@ def search_by_barcode(barcode, pos_profile):
 				item_details.update(resolved_item_data)
 
 		return item_details
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Search by Barcode Error")
 		frappe.throw(_("Error searching by barcode: {0}").format(str(e)))
@@ -508,6 +561,7 @@ def search_by_barcode(barcode, pos_profile):
 @frappe.whitelist()
 def get_batch_serial_details(item_code, warehouse):
 	"""Get batch/serial number details"""
+	_assert_warehouse_in_user_scope(warehouse=warehouse)
 	try:
 		# Get both flags in a single query (performance optimization)
 		item_flags = (
@@ -562,6 +616,7 @@ def get_batch_serial_details(item_code, warehouse):
 @frappe.whitelist()
 def get_item_variants(template_item, pos_profile):
 	"""Get all variants for a template item with prices and stock"""
+	_assert_profile_access(pos_profile)
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1270,6 +1325,8 @@ def get_items(
 			_("You can filter by either Item Group or Brand, not both at the same time."),
 		)
 
+	_assert_profile_access(pos_profile)
+
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1654,6 +1711,8 @@ def get_items_bulk(
 		include_variants: If 1, include variant items (for offline caching)
 		show_variants_as_items: If 1, show variants directly and exclude templates
 	"""
+	_assert_profile_access(pos_profile)
+
 	try:
 		if isinstance(item_groups, str):
 			item_groups = json.loads(item_groups) if item_groups else []
@@ -1841,6 +1900,8 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 	Returns:
 		int: Total count of distinct matching items
 	"""
+	_assert_profile_access(pos_profile)
+
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 		show_variants_mode = int(show_variants_as_items)
@@ -1893,6 +1954,8 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 		if not pos_profile:
 			frappe.throw(_("POS Profile is required"))
 
+		_assert_profile_access(pos_profile)
+
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 		item_doc = frappe.get_cached_doc("Item", item_code)
 
@@ -1920,6 +1983,8 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 			price_list=pos_profile_doc.selling_price_list,
 			company=pos_profile_doc.company,
 		)
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Details Error")
 		frappe.throw(_("Error fetching item details: {0}").format(str(e)))
@@ -1928,6 +1993,8 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 @frappe.whitelist()
 def get_item_groups(pos_profile):
 	"""Get item groups configured in POS Profile with hierarchy info for filtering."""
+	_assert_profile_access(pos_profile)
+
 	cache_key = f"pos_item_groups:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
 	if cached:
@@ -1980,6 +2047,8 @@ def get_item_groups(pos_profile):
 @frappe.whitelist()
 def get_brands(pos_profile):
 	"""Get brands configured in POS Profile for filtering."""
+	_assert_profile_access(pos_profile)
+
 	cache_key = f"pos_brands:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
 	if cached:
@@ -2022,6 +2091,8 @@ def get_stock_quantities(item_codes, warehouse):
 	Returns:
 		List of dicts with item_code, warehouse, and actual_qty
 	"""
+	_assert_warehouse_in_user_scope(warehouse=warehouse)
+
 	try:
 		# Parse item_codes if it's a JSON string
 		if isinstance(item_codes, str):
@@ -2210,6 +2281,10 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 			"company": str
 		}]
 	"""
+	# SEC A5: `company` (or an empty company = site-wide listing) selects which
+	# warehouses' stock is disclosed; non-managers only see their own outlets.
+	_assert_warehouse_in_user_scope(company=company)
+
 	try:
 		# ---------------------------------------------------------------------
 		# STEP 1: Determine which items to check
@@ -2235,6 +2310,12 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 		wh_filters = {"disabled": 0, "is_group": 0}
 		if company:
 			wh_filters["company"] = company
+		elif not is_management_user():
+			# no company given: a cashier's listing stays inside their outlet
+			scoped_warehouses, _companies = _user_pos_scope()
+			if not scoped_warehouses:
+				return []
+			wh_filters["name"] = ["in", list(scoped_warehouses)]
 
 		warehouses = frappe.get_list(
 			"Warehouse",
@@ -2482,6 +2563,8 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 				...
 			}
 	"""
+	_assert_warehouse_in_user_scope(warehouse=warehouse)
+
 	try:
 		if isinstance(item_codes, str):
 			item_codes = json.loads(item_codes)

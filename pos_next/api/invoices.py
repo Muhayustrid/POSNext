@@ -31,6 +31,7 @@ from pos_next.invoice_type import (
 )
 from pos_next.overrides.discount_code import verify_transaction_rule_names
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import expected_coupon_discount
+from pos_next.utils.authz import is_management_user
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -1630,6 +1631,10 @@ def validate_cart_items(items, pos_profile=None):
 	if isinstance(items, str):
 		items = json.loads(items)
 
+	# SEC A5: profile-scoped stock check — members or management only.
+	if pos_profile:
+		_check_profile_access(pos_profile)
+
 	if pos_profile and not frappe.db.exists("POS Profile", pos_profile):
 		pos_profile = None
 
@@ -1667,6 +1672,18 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 		return {"valid": False, "message": _("Invoice {0} not found").format(original_invoice_name)}
 
 	invoice_info = invoice_data[0]
+
+	# SEC A5: return-item quantities are outlet data — a caller who belongs
+	# to other POS Profiles must not read this invoice's returnable lines.
+	# Management passes; callers with no POS Profile membership at all keep
+	# the legacy answer (the HO backdate lane's direct precondition calls run
+	# as such users and there is no outlet scope to enforce for them).
+	if invoice_info.pos_profile and not is_management_user():
+		caller_profiles = frappe.get_all(
+			"POS Profile User", filters={"user": frappe.session.user}, pluck="parent"
+		)
+		if caller_profiles and _return_access_denied(invoice_info.pos_profile):
+			frappe.throw(_("You don't have permission to view this invoice"), frappe.PermissionError)
 
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
@@ -1810,12 +1827,12 @@ def _backdate_entry_active(pos_profile=None):
 _DRAFT_UNSETTABLE_FIELDS = ("owner", "docstatus", "amended_from", "modified_by")
 
 
-def _check_profile_access(pos_profile, doctype=None):
+def _check_profile_access(pos_profile):
 	"""SEC-03 gate (PATTERN A, api/shifts.py): only POS Profile users may save
-	drafts under a profile. Administrator and users holding write permission on
-	the invoice doctype (back office) pass too — same convention as
-	get_invoices below. The HO backdate lane defers to its own role+setting
-	gate via _backdate_entry_active at the call sites."""
+	drafts under a profile. Administrator and management users (back office)
+	pass too — same convention as get_invoices below. The HO backdate lane
+	defers to its own role+setting gate via _backdate_entry_active at the call
+	sites."""
 	if frappe.session.user == "Administrator":
 		return
 	if frappe.db.exists(
@@ -1823,7 +1840,7 @@ def _check_profile_access(pos_profile, doctype=None):
 		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
 	):
 		return
-	if doctype and frappe.has_permission(doctype, "write"):
+	if is_management_user():
 		return
 	frappe.throw(
 		_("You are not a user of POS Profile {0}").format(pos_profile),
@@ -1833,11 +1850,11 @@ def _check_profile_access(pos_profile, doctype=None):
 
 def _check_draft_owner_access(doc, doctype):
 	"""SEC-03 gate (PATTERN B, api/shifts.py get_session_summary): a draft may
-	only be modified by its owner or a user with document-level write
-	permission — no cross-cashier overwrite or submit."""
+	only be modified by its owner or a management user — no cross-cashier
+	overwrite or submit."""
 	if doc.owner == frappe.session.user:
 		return
-	if frappe.has_permission(doctype, "write", doc=doc):
+	if is_management_user():
 		return
 	frappe.throw(_("You can only modify your own drafts"), frappe.PermissionError)
 
@@ -1949,7 +1966,7 @@ def update_invoice(data):
 		# detail lookup or write. The HO backdate lane keeps its own role+
 		# setting authorization (_backdate_entry_active is server-side only).
 		if pos_profile and not _backdate_entry_active(pos_profile):
-			_check_profile_access(pos_profile, doctype)
+			_check_profile_access(pos_profile)
 
 		pos_profile_doc = None
 		if pos_profile:
@@ -2494,6 +2511,23 @@ def _cleanup_failed_sync(sync_record_name):
 		)
 
 
+def _offline_sync_visible(doctype, name):
+	"""SEC A5: an offline_id may only resolve to an invoice for its owner, a
+	member of the invoice's POS Profile, or management."""
+	if frappe.session.user == "Administrator":
+		return True
+	info = frappe.db.get_value(doctype, name, ["owner", "pos_profile"], as_dict=True)
+	if not info:
+		return False
+	if info.owner == frappe.session.user:
+		return True
+	if info.pos_profile and frappe.db.exists(
+		"POS Profile User", {"parent": info.pos_profile, "user": frappe.session.user}
+	):
+		return True
+	return is_management_user()
+
+
 @frappe.whitelist()
 def check_offline_invoice_synced(offline_id):
 	"""
@@ -2521,6 +2555,11 @@ def check_offline_invoice_synced(offline_id):
 	# Verify the invoice still exists and is submitted, whichever column holds it
 	resolved = _sync_existing_invoice(result)
 	if result.get("synced") and resolved:
+		# SEC A5: don't hand the invoice name to anyone but the owner, the
+		# invoice's outlet members or management. Denied callers get the same
+		# neutral answer as an unknown offline_id — no membership oracle.
+		if not _offline_sync_visible(*resolved):
+			return {"synced": False, "sales_invoice": None}
 		# 'sales_invoice' is the long-standing response key the frontend reads;
 		# it carries whichever invoice exists (Sales Invoice or POS Invoice)
 		result["sales_invoice"] = resolved[1]
@@ -2717,7 +2756,7 @@ def submit_invoice(invoice=None, data=None):
 		# backdate suite pins) but before any profile resolution or write. The
 		# HO backdate lane keeps its own role+setting authorization.
 		if pos_profile and not _backdate_entry_active(pos_profile):
-			_check_profile_access(pos_profile, doctype)
+			_check_profile_access(pos_profile)
 
 		# Ensure update_stock is set (POS Invoice and Sales Invoice)
 		if doctype != "Sales Order":
@@ -3067,13 +3106,13 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	union = sales_invoice_union(
 		"""name, customer, customer_name, buyer_name, posting_date, posting_time,
 		grand_total, paid_amount, outstanding_amount, status, docstatus, is_return,
-		return_against, pos_queue_number, pos_profile, is_pos, '{dt}' AS doctype"""
+		return_against, pos_queue_number, pos_profile, is_pos, owner, '{dt}' AS doctype"""
 	)
 
 	# Permission check
 	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-	if not has_access and not frappe.has_permission(doctype, "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	if not has_access and not is_management_user():
+		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
 
 	# Clamp page size securely: minimum 1, maximum 100
 	limit = max(1, min(cint(limit) or 20, 100))
@@ -3131,6 +3170,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			is_return,
 			return_against,
 			pos_queue_number,
+			owner,
 			doctype
 		FROM
 			{union}
@@ -3145,6 +3185,20 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 		params,
 		as_dict=True,
 	)
+
+	# Cashier attribution: owner is the login email, the history/receipt shows
+	# the display name. One bulk lookup for all distinct owners on the page.
+	cashier_names = {}
+	owner_ids = {invoice.owner for invoice in invoices if invoice.get("owner")}
+	if owner_ids:
+		for user in frappe.get_all(
+			"User",
+			filters={"name": ["in", list(owner_ids)]},
+			fields=["name", "full_name"],
+		):
+			cashier_names[user.name] = user.full_name or user.name
+	for invoice in invoices:
+		invoice["cashier_name"] = cashier_names.get(invoice.get("owner")) or invoice.get("owner")
 
 	invoice_names = [invoice.name for invoice in invoices]
 	payments_by_invoice = {}
@@ -3246,8 +3300,8 @@ def delete_invoice(invoice):
 		frappe.throw(_("Cannot delete submitted invoice {0}").format(invoice))
 
 	# E1: same gates as the draft update path (SEC-03) — profile membership
-	# plus owner-or-write — and no force delete past doctype permissions.
-	_check_profile_access(doc.get("pos_profile"), doctype)
+	# plus owner-or-manager — and no force delete past doctype permissions.
+	_check_profile_access(doc.get("pos_profile"))
 	_check_draft_owner_access(doc, doctype)
 
 	frappe.delete_doc(doctype, invoice)
@@ -4534,6 +4588,11 @@ def apply_offers(invoice_data, selected_offers=None):
 		invoice = frappe._dict(invoice_data or {})
 		items = invoice.get("items") or []
 
+		# SEC A5: offer evaluation exposes outlet pricing — members or
+		# management only, before any profile/pricing query.
+		if invoice.get("pos_profile"):
+			_check_profile_access(invoice.get("pos_profile"))
+
 		if isinstance(selected_offers, str):
 			try:
 				selected_offers = json.loads(selected_offers)
@@ -4988,6 +5047,8 @@ def apply_offers(invoice_data, selected_offers=None):
 			"discount_amount": flt(txn_result.get("discount_amount") or 0),
 			"apply_discount_on": txn_result.get("apply_discount_on"),
 		}
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Apply Offers Error")
 		frappe.throw(_("Error applying offers: {0}").format(str(e)))

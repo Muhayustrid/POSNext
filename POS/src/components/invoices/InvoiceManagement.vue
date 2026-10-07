@@ -729,6 +729,12 @@
 														{{ formatDate(invoice.posting_date) }}
 														{{ formatTime(invoice.posting_time) }}
 													</div>
+													<div
+														v-if="invoice.cashier_name"
+														class="mt-0.5 text-xs text-gray-500"
+													>
+														{{ invoice.cashier_name }}
+													</div>
 												</div>
 											</div>
 

@@ -7,9 +7,9 @@
 
 		<template v-else>
 			<!-- Mode selector: shift lens or a posting-date window over the whole
-			     profile. Always rendered so a window that failed to load can be
-			     changed. Same dropdown pattern as the sales recap (SessionSummary). -->
-			<div class="flex flex-wrap items-center gap-2" data-test="mode-chips">
+			     profile. Managers only — cashiers get the shift lens without the
+			     profile-wide windows. -->
+			<div v-if="isManagement" class="flex flex-wrap items-center gap-2" data-test="mode-chips">
 				<label class="text-xs text-gray-500" for="dash-period">{{ __("Period") }}</label>
 				<select
 					id="dash-period"
@@ -355,6 +355,7 @@
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import StatusBadge from "@/components/common/StatusBadge.vue"
 import { useFormatters } from "@/composables/useFormatters"
+import { useBootstrapStore } from "@/stores/bootstrap"
 import { usePOSShiftStore } from "@/stores/posShift"
 import {
 	DEFAULT_CURRENCY,
@@ -369,6 +370,11 @@ const { formatDate, formatTime } = useFormatters()
 // Read-only: live strings from the shell's 1s tick (duration chip + the
 // clock that keeps the "updated N min ago" label aging).
 const shiftStore = usePOSShiftStore()
+
+// Period lens is a manager view; the bootstrap flag lives next to
+// can_switch_to_desk (see POSSale).
+const bootstrapStore = useBootstrapStore()
+const isManagement = computed(() => Boolean(bootstrapStore.data?.is_management))
 
 const props = defineProps({
 	embedded: { type: Boolean, default: false },

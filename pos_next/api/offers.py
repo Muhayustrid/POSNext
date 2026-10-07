@@ -15,6 +15,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
+from pos_next.api.pos_profile import _assert_profile_or_manager
 from pos_next.overrides.pos_offer_usage import get_quota_info
 
 # ============================================================================
@@ -502,6 +503,11 @@ def get_offers(pos_profile: str) -> list[dict]:
 	Returns:
 		List of offer dictionaries
 	"""
+	# SEC A5: offers expose outlet pricing/campaigns — members or
+	# management only (before the try so the denial is never swallowed
+	# into the generic [] answer below).
+	_assert_profile_or_manager(pos_profile)
+
 	try:
 		profile = frappe.get_doc("POS Profile", pos_profile)
 
@@ -540,6 +546,11 @@ def get_customer_one_time_redemptions(customer: str) -> list[str]:
 	"""
 	if not customer or not frappe.db.table_exists("One Time Customer Offer Usage"):
 		return []
+
+	# SEC A5: redemption history is customer data — same gate as the wallet
+	# reads (frappe.has_permission on the probed customer).
+	if not frappe.has_permission("Customer", "read", doc=customer):
+		frappe.throw(_("Not permitted to read customer {0}").format(customer), frappe.PermissionError)
 
 	return frappe.get_all(
 		"One Time Customer Offer Usage",

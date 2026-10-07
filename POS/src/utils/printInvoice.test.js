@@ -60,6 +60,7 @@ import {
 	silentPrintInvoiceFromDoc,
 	printWithSilentFallback,
 	hydrateLocalOnlyInvoice,
+	ensureTransportInitialized,
 } from "./printInvoice"
 import * as transport from "@/utils/print/transport"
 
@@ -655,5 +656,30 @@ describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {	const ev
 		expect(html).not.toContain("&amp;")
 		expect(html).not.toContain("&quot;")
 		expect(html).not.toContain("&#39;")
+	})
+})
+
+describe("ensureTransportInitialized retry on failure", () => {
+	it("retries transport initialization after a failed attempt", async () => {
+		vi.resetModules()
+		const { ensureTransportInitialized: ensureInit } = await import(
+			"./printInvoice"
+		)
+		const transportMod = await import("@/utils/print/transport")
+		transportMod.initTransportFromServer
+			.mockRejectedValueOnce(new Error("network error"))
+			.mockResolvedValueOnce({ driver: "imin" })
+
+		// First attempt fails; ensureTransportInitialized does not throw but catches and logs
+		await ensureInit("POS Profile 1")
+		expect(transportMod.initTransportFromServer).toHaveBeenCalledTimes(1)
+
+		// Second attempt should retry instead of being stuck
+		await ensureInit("POS Profile 1")
+		expect(transportMod.initTransportFromServer).toHaveBeenCalledTimes(2)
+
+		// Third attempt after success should be cached (not call again)
+		await ensureInit("POS Profile 1")
+		expect(transportMod.initTransportFromServer).toHaveBeenCalledTimes(2)
 	})
 })

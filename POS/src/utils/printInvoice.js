@@ -551,26 +551,29 @@ export async function printInvoiceByName(
 
 // The server config is fetch-once per session: receipts print many times,
 // but the driver selection only changes when POS Settings change (and a
-// reload restarts the session anyway). Set before the await so concurrent
-// prints never double-fetch.
-let transportInitialized = false
+// reload restarts the session anyway). Storing the in-flight promise
+// deduplicates concurrent prints while allowing retry on failure.
+let transportInitPromise = null
 
 /**
  * Load the print transport config from the server at most once per session.
  * A failed fetch must never block a print — the transport keeps whatever
  * config it already has (empty defaults) and logs the reason.
  */
-async function ensureTransportInitialized(posProfile = null) {
-	if (transportInitialized) return
-	transportInitialized = true
-	try {
-		await initTransportFromServer(posProfile)
-	} catch (err) {
-		log.warn(
-			"Print transport config fetch failed, using current config:",
-			err?.message || err,
-		)
-	}
+export async function ensureTransportInitialized(posProfile = null) {
+	if (transportInitPromise) return transportInitPromise
+	transportInitPromise = (async () => {
+		try {
+			await initTransportFromServer(posProfile)
+		} catch (err) {
+			transportInitPromise = null
+			log.warn(
+				"Print transport config fetch failed, using current config:",
+				err?.message || err,
+			)
+		}
+	})()
+	return transportInitPromise
 }
 
 /**

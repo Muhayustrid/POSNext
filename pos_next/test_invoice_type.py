@@ -170,7 +170,7 @@ class TestCustomPOSInvoice(FrappeTestCase):
 		# test would pass vacuously
 		item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1, "has_batch_no": 0, "has_serial_no": 0},
 			pluck="name",
 			limit=1,
 		)
@@ -220,7 +220,7 @@ class TestCustomPOSInvoice(FrappeTestCase):
 		# a REAL item: link validation must not abort before the gate (see above)
 		item = frappe.get_all(
 			"Item",
-			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1},
+			filters={"disabled": 0, "is_sales_item": 1, "is_stock_item": 1, "has_batch_no": 0, "has_serial_no": 0},
 			pluck="name",
 			limit=1,
 		)

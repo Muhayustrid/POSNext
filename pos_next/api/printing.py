@@ -15,6 +15,7 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
+from pos_next.api.pos_profile import _assert_profile_or_manager
 from pos_next.api.settings_resolver import get_effective_pos_settings
 
 PRINT_CONFIG_FIELDS = (
@@ -188,6 +189,11 @@ def get_print_config(pos_profile):
 	The response reports which profile was actually used via `pos_profile`,
 	so callers (and logs) can see when the fallback fired.
 	"""
+	# SEC A5: a real profile is outlet-scoped; the no-profile fallback (Direct
+	# Print diagnostics) stays open on purpose.
+	if pos_profile:
+		_assert_profile_or_manager(pos_profile)
+
 	resolved_profile, settings = _resolve_settings_row(pos_profile)
 	if not settings:
 		settings = {field: None for field in PRINT_CONFIG_FIELDS}
@@ -278,6 +284,11 @@ def get_latest_closing_shift():
 @rate_limit(limit=30, seconds=60)
 def log_print_attempt(**kwargs):
 	"""Persist one print attempt. Best-effort; callers must not await its failure."""
+	# SEC A5: a log row carries outlet context — only members/management may
+	# write one for a profile (a consumer printer with no profile passes).
+	if kwargs.get("pos_profile"):
+		_assert_profile_or_manager(kwargs.get("pos_profile"))
+
 	allowed = {
 		"reference_doctype",
 		"reference_name",

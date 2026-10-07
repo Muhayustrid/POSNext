@@ -19,6 +19,7 @@ from pos_next.services.sales_recap import (
 	shift_recent,
 	shift_scope,
 )
+from pos_next.utils.authz import is_management_user
 
 
 @frappe.whitelist()
@@ -199,12 +200,8 @@ def get_closing_shift_data(opening_shift):
 	if shift_user is None:
 		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
 
-	if (
-		shift_user != frappe.session.user
-		and not frappe.has_permission("POS Opening Shift", "read", doc=opening_shift)
-	):
-		# doc= enforces per-document user permissions (e.g. company scope),
-		# matching what Desk would enforce on this exact shift
+	if shift_user != frappe.session.user and not is_management_user():
+		# only the owner or a manager may close a shift
 		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
 
 	try:
@@ -402,9 +399,8 @@ def get_session_summary(opening_shift):
 	no longer configured, tax/charge classification, refund, and sales per
 	item category.
 
-	Security: only the shift owner (or a user with POS Opening Shift read
-	access) may view it; the shift itself pins company/profile, so no
-	cross-company access via arbitrary IDs.
+	Security: only the shift owner (or a manager) may view it; the shift
+	itself pins company/profile, so no cross-company access via arbitrary IDs.
 	"""
 	if not opening_shift:
 		frappe.throw(_("Opening shift is required"))
@@ -418,12 +414,8 @@ def get_session_summary(opening_shift):
 	if not shift:
 		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
 
-	if (
-		shift.user != frappe.session.user
-		and not frappe.has_permission("POS Opening Shift", "read", doc=opening_shift)
-	):
-		# doc= enforces per-document user permissions (e.g. company scope),
-		# matching what Desk would enforce on this exact shift
+	if shift.user != frappe.session.user and not is_management_user():
+		# only the owner or a manager may view a session summary
 		frappe.throw(_("You can only view your own session summary"), frappe.PermissionError)
 
 	company_currency = frappe.get_cached_value("Company", shift.company, "default_currency")
@@ -463,9 +455,8 @@ def get_shift_dashboard(opening_shift):
 	sections: ``hourly`` (net sales per elapsed shift hour, current hour
 	flagged) and ``recent`` (latest invoices, credit returns included).
 
-	Security: only the shift owner (or a user with POS Opening Shift read
-	access) may view it; the shift itself pins company/profile, so no
-	cross-company access via arbitrary IDs.
+	Security: only the shift owner (or a manager) may view it; the shift
+	itself pins company/profile, so no cross-company access via arbitrary IDs.
 	"""
 	if not opening_shift:
 		frappe.throw(_("Opening shift is required"))
@@ -479,12 +470,8 @@ def get_shift_dashboard(opening_shift):
 	if not shift:
 		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
 
-	if (
-		shift.user != frappe.session.user
-		and not frappe.has_permission("POS Opening Shift", "read", doc=opening_shift)
-	):
-		# doc= enforces per-document user permissions (e.g. company scope),
-		# matching what Desk would enforce on this exact shift
+	if shift.user != frappe.session.user and not is_management_user():
+		# only the owner or a manager may view a session summary
 		frappe.throw(_("You can only view your own session summary"), frappe.PermissionError)
 
 	company_currency = frappe.get_cached_value("Company", shift.company, "default_currency")
@@ -530,10 +517,9 @@ def get_period_summary(pos_profile, from_date, to_date):
 	day — the rule a per-shift closing follows too. Period presets are the
 	client's job; the server only accepts explicit dates.
 
-	Security: only users listed on the POS Profile (POS Profile User) may read
-	it — the profile pins the company, and naming another outlet's profile is
-	refused, so this is stricter than the per-shift owner rule while covering
-	more data. Rate limited: it is the one endpoint doing free-range scans.
+	Security: management users only (the profile must also be their own — the
+	profile pins the company, and naming another outlet's profile is refused).
+	Rate limited: it is the one endpoint doing free-range scans.
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -547,6 +533,8 @@ def get_period_summary(pos_profile, from_date, to_date):
 	if not profile:
 		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
 	_check_profile_access(pos_profile)
+	if not is_management_user():
+		frappe.throw(_("Only managers can view period reports"), frappe.PermissionError)
 	from_date, to_date = _validate_period(from_date, to_date)
 
 	cash_mode = get_cash_mode_of_payment(pos_profile)
@@ -577,8 +565,8 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	fields (opening cash, cashier) are absent in this mode — the drawer is a
 	shift concept, payments here are takings only.
 
-	Security: only users listed on the POS Profile (POS Profile User) may read
-	it, like get_period_summary. Rate limited: free-range scans.
+	Security: management users on the POS Profile may read it, like
+	get_period_summary. Rate limited: free-range scans.
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -592,6 +580,8 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	if not profile:
 		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
 	_check_profile_access(pos_profile)
+	if not is_management_user():
+		frappe.throw(_("Only managers can view period reports"), frappe.PermissionError)
 	from_date, to_date = _validate_period(from_date, to_date)
 
 	cash_mode = get_cash_mode_of_payment(pos_profile)
@@ -612,6 +602,11 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 
 def _check_profile_access(pos_profile):
 	if frappe.session.user == "Administrator":
+		return
+	if is_management_user():
+		# Managers oversee outlets they are not a member of (monitoring,
+		# cross-outlet close); the period endpoints layer their own
+		# manager-only gate on top of this.
 		return
 	is_profile_user = frappe.db.exists(
 		"POS Profile User",

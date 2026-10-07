@@ -451,6 +451,24 @@ def ensure_site_indexes():
 			log_message("POS Next: a site index patch failed (see Error Log)", level="error")
 
 
+def register_default_log_clearing(quiet=False):
+	"""Register default log clearing doctypes in Log Settings if not already set."""
+	try:
+		if not frappe.db.exists("DocType", "Log Settings"):
+			return
+
+		log_settings = frappe.get_single("Log Settings")
+		before_count = len(log_settings.logs_to_clear)
+		log_settings.add_default_logtypes()
+		if len(log_settings.logs_to_clear) > before_count:
+			log_settings.save(ignore_permissions=True)
+			if not quiet:
+				log_message("Registered default log clearing doctypes in Log Settings", level="info")
+	except Exception:
+		frappe.log_error(title="POS Next Log Settings Setup Error", message=frappe.get_traceback())
+		log_message("POS Next: registering log clearing failed (see Error Log)", level="warning")
+
+
 def after_install():
 	"""Hook that runs after app installation"""
 	try:
@@ -463,6 +481,7 @@ def after_install():
 		ensure_price_group_custom_fields()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
 		ensure_site_indexes()
+		register_default_log_clearing()
 
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
@@ -492,6 +511,7 @@ def after_migrate():
 		ensure_price_group_custom_fields(quiet=True)
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
 		ensure_site_indexes()
+		register_default_log_clearing(quiet=True)
 
 		# Clear cache
 		frappe.clear_cache()

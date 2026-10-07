@@ -11,6 +11,7 @@ from frappe.utils import flt
 
 from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
 from pos_next.services.cash_mode import get_cash_mode_of_payment as _resolve_cash_mode
+from pos_next.utils.authz import is_management_user
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -399,7 +400,7 @@ CASHIER_FILTER_KEYS = ("parent",)
 def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 	# read gate (SEC-NEW-11), same shape as get_pos_invoices: a profile cashier
 	# may list their own profile's cashiers for the close dialog, anyone else
-	# needs closing-shift read access.
+	# must be a management user.
 	if isinstance(filters, str):
 		filters = json.loads(filters or "{}")
 	filters = {k: v for k, v in (filters or {}).items() if k in CASHIER_FILTER_KEYS}
@@ -408,7 +409,7 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 	is_profile_member = profile and frappe.db.exists(
 		"POS Profile User", {"parent": profile, "user": frappe.session.user}
 	)
-	if not is_profile_member and not frappe.has_permission("POS Closing Shift", "read"):
+	if not is_profile_member and not is_management_user():
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
 	cashiers_list = frappe.get_all("POS Profile User", filters=filters, fields=["user"])
@@ -483,8 +484,8 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 	drop the other half from every closing total, so both are always read.
 	"""
 	# read gate (SEC-NEW-01): the response exposes every invoice of the shift
-	# (customer, payments, totals), so only the shift owner or a user with
-	# closing-shift read access may call it. Same ownership rule as
+	# (customer, payments, totals), so only the shift owner or a management
+	# user may call it. Same ownership rule as
 	# make_closing_shift_from_opening; sits above any query so a bogus shift
 	# fails loudly instead of answering with an empty shift. This endpoint is
 	# a pure read: printed drafts are submitted by submit_closing_shift
@@ -492,10 +493,7 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 	shift_user = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "user")
 	if shift_user is None:
 		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
-	if (
-		shift_user != frappe.session.user
-		and not frappe.has_permission("POS Closing Shift", "read")
-	):
+	if shift_user != frappe.session.user and not is_management_user():
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
 	# whitelist gate: client input is interpolated into the SQL table name
@@ -735,11 +733,10 @@ def make_closing_shift_from_opening(opening_shift):
 		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
 
 	# read-level gate, same ownership rule as submit_closing_shift: only the
-	# shift owner (or a user with closing-shift read access) may derive the
-	# closing data of a shift
+	# shift owner (or a management user) may derive the closing data of a shift
 	if (
 		frappe.db.get_value("POS Opening Shift", opening_shift_name, "user") != frappe.session.user
-		and not frappe.has_permission("POS Closing Shift", "read")
+		and not is_management_user()
 	):
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
@@ -872,12 +869,9 @@ def submit_closing_shift(closing_shift):
 
 	opening_shift = frappe.get_doc("POS Opening Shift", opening_shift_name)
 
-	# The payload is untrusted client JSON: only the shift owner (or a user
-	# with closing-shift submit rights) may close a shift at all.
-	if (
-		opening_shift.user != frappe.session.user
-		and not frappe.has_permission("POS Closing Shift", "submit")
-	):
+	# The payload is untrusted client JSON: only the shift owner (or a
+	# management user) may close a shift at all.
+	if opening_shift.user != frappe.session.user and not is_management_user():
 		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
 
 	# COR-BE-15: printed drafts join the closing here, in the explicit close

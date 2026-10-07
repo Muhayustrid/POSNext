@@ -10,6 +10,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from pos_next.api.pos_profile import _assert_profile_or_manager
 from pos_next.api.settings_resolver import get_effective_pos_settings
 
 
@@ -462,6 +463,9 @@ def get_pos_settings(pos_profile):
 @frappe.whitelist()
 def get_wallet_payment_methods(pos_profile):
 	"""Get payment methods that are wallet-enabled for a POS profile."""
+	# SEC A5: profile-scoped read — members or management only.
+	_assert_profile_or_manager(pos_profile)
+
 	payment_methods = frappe.get_all(
 		"POS Payment Method", filters={"parent": pos_profile}, fields=["mode_of_payment", "default"]
 	)
