@@ -124,7 +124,6 @@ class HQSalesMonitor {
 	_setup_actions() {
 		this.page.set_primary_action(__("Refresh"), () => this.refresh());
 		this.page.add_menu_item(__("Print"), () => window.print());
-		this.page.add_menu_item(__("Export CSV"), () => this._export_csv());
 	}
 
 	// Frappe page-field change handlers run before the control commits its
@@ -833,7 +832,6 @@ class HQSalesMonitor {
 				</div>
 				<div class="hq-rank-group">
 					<button class="btn btn-xs btn-default" data-hq-goto-targets>${__("Manage Targets")}</button>
-					<button class="btn btn-xs btn-default" data-hq-export-xlsx="outlet_perf">${__("Export")}</button>
 				</div>
 			</div>
 			<div class="hq-table-scroll"><table class="hq-table hq-table--outlets">
@@ -1319,83 +1317,6 @@ class HQSalesMonitor {
 				$(e.currentTarget).text(
 					showPretax ? __("incl. taxes & charges") : __("pre-tax net")
 				);
-			})
-			.off("click", "[data-hq-export-xlsx]")
-			.on("click", "[data-hq-export-xlsx]", () => this._export_xlsx());
-	}
-
-	// Excel export through Frappe's own xlsx builder (Outlet Performance
-	// only — product detail exports from the POS Product Sales Report).
-	_export_xlsx() {
-		const s = this.state;
-		if (!s) return;
-		const params = new URLSearchParams({
-			from_date: (s.scope || {}).from_date || "",
-			to_date: (s.scope || {}).to_date || "",
-			outlet_performance: JSON.stringify(this._outlet_export_rows().rows),
-		});
-		window.location.href = `/api/method/pos_next.api.hq_monitoring.export_rankings_xlsx?${params}`;
-	}
-
-	// The Outlet Performance export keeps the machine-readable full schema
-	// the old CSV had (target basis labels included), just as xlsx now.
-	_outlet_export_rows() {
-		const s = this.state;
-		const mlabel = this._basis_label("monthly");
-		const olabel = this._basis_label("overall");
-		return {
-			headers: [
-				__("Outlet (Company)"),
-				__("POS Profiles"),
-				__("Currency"),
-				__("Net Sales"),
-				__("Transactions"),
-				__("Avg Ticket"),
-				__("Share %"),
-				`${__("Target")} ${mlabel} (${__("monthly")})`,
-				__("Target Transactions"),
-				`${mlabel} ${__("MTD")}`,
-				__("MTD Transactions"),
-				__("Achievement %"),
-				`${__("Projected")} ${mlabel}`,
-				`${__("Overall Target")} (${olabel})`,
-				`${olabel} ${__("Cumulative")}`,
-				__("Overall Achievement %"),
-			],
-			rows: this._outlet_rows(s).map((r) => [
-				r.company,
-				(r.profiles || []).map((p) => p.pos_profile).join("; "),
-				r.currency,
-				r.net_tax_incl,
-				r.orders,
-				r.apc,
-				r.share_pct,
-				r.target && !r.target.missing ? (r.target.target_value ?? r.target.target_sales) : "",
-				r.target && !r.target.missing ? r.target.target_transactions : "",
-				r.target ? (r.target.mtd_value ?? r.target.mtd_net_tax_incl) : "",
-				r.target ? r.target.mtd_orders : "",
-				r.target && !r.target.missing ? r.target.achievement_sales_pct : "",
-				r.target ? (r.target.projected_value ?? r.target.projected_sales) : "",
-				r.overall ? r.overall.overall_target : "",
-				r.overall ? (r.overall.cumulative_value ?? r.overall.cumulative_net_tax_incl) : "",
-				r.overall ? r.overall.achievement_pct : "",
-			]),
-		};
-	}
-
-	_export_csv() {
-		const s = this.state;
-		if (!s) return;
-		// CSV stays machine-readable: raw ungrouped numbers ("." decimal),
-		// never the localized display strings. Per-row currency gets its own
-		// column instead of being baked into the amount.
-		const out = this._outlet_export_rows();
-		const csv = HQ_UTILS.toCsv(out.headers, out.rows);
-		const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-		const a = document.createElement("a");
-		a.href = URL.createObjectURL(blob);
-		a.download = `hq-sales-monitoring-${s.scope.to_date}.csv`;
-		a.click();
-		URL.revokeObjectURL(a.href);
+			});
 	}
 }

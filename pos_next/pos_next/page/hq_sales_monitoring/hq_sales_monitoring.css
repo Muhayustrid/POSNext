@@ -753,8 +753,12 @@
    of visible bins (40px per bin, JS-side): a short window like 05–18 fits the
    card without scrolling, all 24 hours keep the calibrated full axis and
    scroll locally below that. */
+/* overflow-x: auto clips vertically too, and the bar tooltip opens above the
+   tallest bar — the top padding is its headroom; the negative margin lets
+   that headroom overlap the card header instead of adding blank space. */
 .hq-hour-scroll {
-	margin-top: 10px;
+	margin-top: -60px;
+	padding-top: 80px;
 	overflow-x: auto;
 }
 

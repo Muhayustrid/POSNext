@@ -384,64 +384,6 @@ def get_sales_monitoring(
 	result["shifts"] = _shifts_section(scope, currency_map)
 	return result
 
-
-@frappe.whitelist()
-def export_rankings_xlsx(outlet_performance=None, from_date=None, to_date=None):
-	"""Excel export of the Outlet Performance table: the client sends the
-	full outlet-performance schema rows (targets included). Product detail
-	exports from the POS Product Sales Report."""
-	_check_hq_access()
-	import json
-
-	from frappe.utils.xlsxutils import build_xlsx_response
-
-	def _rows(raw):
-		try:
-			data = json.loads(raw or "[]")
-		except ValueError:
-			data = []
-		return [row for row in data if isinstance(row, list)]
-
-	tb = _target_basis_payload()
-	mlabel = tb.get("monthly_label") or _("Net Sales")
-	olabel = tb.get("overall_label") or _("Net Sales")
-	sections = [
-		(
-			[
-				_("Outlet (Company)"),
-				_("POS Profiles"),
-				_("Currency"),
-				_("Net Sales"),
-				_("Transactions"),
-				_("Avg Ticket"),
-				_("Share %"),
-				f"{_('Target')} {mlabel} ({_('monthly')})",
-				_("Target Transactions"),
-				f"{mlabel} {_('MTD')}",
-				_("MTD Transactions"),
-				_("Achievement %"),
-				f"{_('Projected')} {mlabel}",
-				f"{_('Overall Target')} ({olabel})",
-				f"{olabel} {_('Cumulative')}",
-				_("Overall Achievement %"),
-			],
-			outlet_performance,
-		),
-	]
-	data = []
-	for headers, raw in sections:
-		if not raw:
-			continue
-		if data:
-			data.append([])
-		data += [headers] + _rows(raw)
-	if not data:
-		frappe.throw(_("Nothing to export"))
-	# provide_binary_file appends the extension itself.
-	filename = "hq-rankings-{}".format(from_date or nowdate())
-	return build_xlsx_response(data, filename)
-
-
 @frappe.whitelist()
 def set_outlet_target(
 	company=None,
