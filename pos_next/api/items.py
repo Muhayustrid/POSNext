@@ -2183,6 +2183,42 @@ def get_stock_quantities(item_codes, warehouse):
 		frappe.throw(_("Error fetching stock quantities: {0}").format(str(e)))
 
 
+@frappe.whitelist()
+def get_stock_balance(pos_profile, start=0, limit=50):
+	"""Stock balance list for the cashier Stock Lookup: one Item+Bin query.
+
+	Same item scope as get_items (groups/brands of the profile) but skips
+	prices, UOMs, barcodes and bundles — only code, name, uom and qty.
+	"""
+	_assert_profile_access(pos_profile)
+	profile = frappe.get_cached_doc("POS Profile", pos_profile)
+	if not profile.warehouse:
+		return []
+
+	warehouses = [profile.warehouse]
+	if frappe.db.get_value("Warehouse", profile.warehouse, "is_group"):
+		warehouses = frappe.db.get_descendants("Warehouse", profile.warehouse) or warehouses
+
+	conditions, params, _joins = _build_item_base_conditions(profile)
+	conditions += ["i.is_stock_item = 1", "i.has_variants = 0"]
+	wh_placeholders = ", ".join(["%s"] * len(warehouses))
+
+	return frappe.db.sql(
+		f"""
+		SELECT i.name AS item_code, i.item_name, i.stock_uom,
+			COALESCE(SUM(bin.actual_qty), 0) AS actual_qty
+		FROM `tabItem` i
+		LEFT JOIN `tabBin` bin ON bin.item_code = i.name AND bin.warehouse IN ({wh_placeholders})
+		WHERE {" AND ".join(conditions)}
+		GROUP BY i.name, i.item_name, i.stock_uom
+		ORDER BY i.item_name ASC
+		LIMIT %s OFFSET %s
+		""",
+		(*warehouses, *params, min(int(limit), 200), int(start)),
+		as_dict=True,
+	)
+
+
 # =============================================================================
 # WAREHOUSE AVAILABILITY HELPERS
 # =============================================================================

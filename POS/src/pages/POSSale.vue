@@ -1014,8 +1014,9 @@
 				@confirm="confirmClearCache"
 			/>
 
-			<!-- Footer -->
-			<POSFooter />
+			<!-- Footer: lives at the end of the item list (ItemsSelector); only
+			     the mobile cart tab, where that list is detached, keeps it here -->
+			<POSFooter v-if="!uiStore.isDesktop && uiStore.mobileActiveTab !== 'items'" />
 		</template>
 
 		<!-- Session Lock Screen (outside v-if/v-else so it renders even during loading) -->

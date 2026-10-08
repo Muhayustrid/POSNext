@@ -597,244 +597,282 @@
 									</p>
 								</div>
 
-								<!-- Invoices Grid - 2 columns on large screens -->
-								<div v-else class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+								<!-- Invoice Table (md+) -->
+								<div v-else>
 									<div
-										v-for="invoice in filteredHistoryInvoices"
-										:key="invoice.name"
-										class="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-lg transition-all overflow-hidden"
+										class="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden"
 									>
-										<!-- Card Header with gradient -->
-										<div
-											class="bg-gradient-to-r from-indigo-50 to-blue-50 px-5 py-4 border-b border-gray-200"
-										>
-											<div class="flex items-start justify-between mb-2">
-												<div class="flex-1">
-													<h3 class="text-base font-bold text-gray-900">
-														{{ invoice.name }}
-													</h3>
-													<div class="flex items-center gap-2 mt-1">
+										<table class="w-full text-sm">
+											<thead>
+												<tr class="border-b border-gray-100">
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Invoice") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Customer") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Cashier") }}
+													</th>
+													<th
+														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Total") }}
+													</th>
+													<th
+														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Paid") }}
+													</th>
+													<th
+														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Change") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Status") }}
+													</th>
+													<th class="px-4 py-3"></th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr
+													v-for="invoice in historyPager.rows"
+													:key="invoice.name"
+													class="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+													@click="$emit('view-invoice', invoice)"
+												>
+													<td class="px-4 py-3">
+														<div class="flex items-center gap-3">
+															<div
+																class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center shrink-0"
+															>
+																<svg
+																	class="w-4 h-4 text-gray-500"
+																	fill="none"
+																	stroke="currentColor"
+																	viewBox="0 0 24 24"
+																>
+																	<path
+																		stroke-linecap="round"
+																		stroke-linejoin="round"
+																		stroke-width="2"
+																		d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+																	/>
+																</svg>
+															</div>
+															<div class="min-w-0">
+																<div class="font-semibold text-gray-900">
+																	{{ invoice.name }}
+																</div>
+																<div
+																	class="flex items-center gap-1 text-xs text-gray-500 mt-0.5"
+																>
+																	<svg
+																		class="w-3 h-3"
+																		fill="none"
+																		stroke="currentColor"
+																		viewBox="0 0 24 24"
+																	>
+																		<path
+																			stroke-linecap="round"
+																			stroke-linejoin="round"
+																			stroke-width="2"
+																			d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+																		/>
+																	</svg>
+																	{{
+																		formatDate(invoice.posting_date)
+																	}}
+																	·
+																	{{ formatTime(invoice.posting_time) }}
+																</div>
+															</div>
+														</div>
+													</td>
+													<td class="px-4 py-3">
+														<div class="font-medium text-gray-900">
+															{{
+																invoice.buyer_name ||
+																invoice.customer_name ||
+																invoice.customer
+															}}
+														</div>
+														<div
+															v-if="invoice.pos_queue_number"
+															class="text-xs text-gray-500 mt-0.5"
+														>
+															#{{
+																formatQueueNumber(
+																	invoice.pos_queue_number
+																)
+															}}
+														</div>
+													</td>
+													<td class="px-4 py-3 text-gray-700">
+														{{ invoice.cashier_name || invoice.owner || "–" }}
+													</td>
+													<td
+														class="px-4 py-3 text-end font-bold text-gray-900 whitespace-nowrap"
+													>
+														{{ formatCurrency(invoice.grand_total) }}
+													</td>
+													<td
+														class="px-4 py-3 text-end text-gray-700 whitespace-nowrap"
+													>
+														{{ formatCurrency(invoice.paid_amount || 0) }}
+													</td>
+													<td
+														class="px-4 py-3 text-end text-gray-700 whitespace-nowrap"
+													>
+														{{
+															invoice.change_amount
+																? formatCurrency(invoice.change_amount)
+																: "–"
+														}}
+													</td>
+													<td class="px-4 py-3">
 														<span
 															:class="[
-																'text-xs px-2.5 py-1 rounded-full font-semibold',
+																'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
 																getInvoiceStatusColor(invoice),
 															]"
 														>
+															<span
+																:class="[
+																	'w-1.5 h-1.5 rounded-full',
+																	getStatusDotClass(invoice),
+																]"
+															></span>
 															{{ __(invoice.status) }}
 														</span>
-													</div>
-												</div>
-												<div class="text-end ms-3">
-													<div class="text-xs text-gray-500 mb-1">
-														{{ __("Total") }}
-													</div>
-													<div class="text-lg font-bold text-indigo-600">
-														{{ formatCurrency(invoice.grand_total) }}
-													</div>
-												</div>
-											</div>
-										</div>
+													</td>
+													<td class="px-4 py-3 text-end" @click.stop>
+														<button
+															@click="$emit('print-invoice', invoice)"
+															class="p-1.5 hover:bg-green-50 rounded transition-colors"
+															:title="__('Print')"
+														>
+															<svg
+																class="w-4 h-4 text-green-600"
+																fill="none"
+																stroke="currentColor"
+																viewBox="0 0 24 24"
+															>
+																<path
+																	stroke-linecap="round"
+																	stroke-linejoin="round"
+																	stroke-width="2"
+																	d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+																/>
+															</svg>
+														</button>
+													</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
 
-										<!-- Card Body -->
-										<div class="px-5 py-4 flex flex-col gap-3">
-											<!-- Queue Number -->
-											<div
-												v-if="invoice.pos_queue_number"
-												class="flex items-start"
-											>
-												<svg
-													class="w-5 h-5 me-2 mt-0.5 flex-shrink-0 text-indigo-500"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
-													/>
-												</svg>
-												<div class="flex-1">
-													<div class="text-xs text-gray-500">
-														{{ __("No. Antrian") }}
+									<!-- Invoice cards (below md) -->
+									<div class="md:hidden flex flex-col gap-3">
+										<div
+											v-for="invoice in historyPager.rows"
+											:key="invoice.name"
+											class="bg-white border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+											@click="$emit('view-invoice', invoice)"
+										>
+											<div class="flex items-start justify-between gap-2">
+												<div class="min-w-0">
+													<div class="font-semibold text-gray-900">
+														{{ invoice.name }}
 													</div>
 													<div
-														class="text-sm font-semibold font-mono text-indigo-600"
+														class="flex items-center gap-1 text-xs text-gray-500 mt-0.5"
+													>
+														<svg
+															class="w-3 h-3"
+															fill="none"
+															stroke="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path
+																stroke-linecap="round"
+																stroke-linejoin="round"
+																stroke-width="2"
+																d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+															/>
+														</svg>
+														{{ formatDate(invoice.posting_date) }} ·
+														{{ formatTime(invoice.posting_time) }}
+													</div>
+												</div>
+												<span
+													:class="[
+														'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full shrink-0',
+														getInvoiceStatusColor(invoice),
+													]"
+												>
+													<span
+														:class="[
+															'w-1.5 h-1.5 rounded-full',
+															getStatusDotClass(invoice),
+														]"
+													></span>
+													{{ __(invoice.status) }}
+												</span>
+											</div>
+											<div
+												class="flex items-center justify-between mt-2 text-sm"
+											>
+												<div class="text-gray-700 truncate">
+													{{
+														invoice.buyer_name ||
+														invoice.customer_name ||
+														invoice.customer
+													}}
+													<span
+														v-if="invoice.pos_queue_number"
+														class="text-xs text-gray-500 ms-1"
 													>
 														#{{
 															formatQueueNumber(
 																invoice.pos_queue_number
 															)
 														}}
+													</span>
+												</div>
+												<div class="flex items-center gap-1 text-xs text-gray-400 mt-1">
+													<FeatherIcon name="user" class="w-3 h-3" />
+													<span>{{ invoice.cashier_name || invoice.owner || "–" }}</span>
+												</div>
+												<div class="text-end shrink-0 ms-2">
+													<div class="font-bold text-gray-900">
+														{{ formatCurrency(invoice.grand_total) }}
+													</div>
+													<div
+														v-if="invoice.change_amount"
+														class="text-xs text-gray-500"
+													>
+														{{ __("Change") }}
+														{{ formatCurrency(invoice.change_amount) }}
 													</div>
 												</div>
 											</div>
-
-											<!-- Customer Info -->
-											<div class="flex items-start">
-												<svg
-													class="w-5 h-5 text-gray-400 me-2 mt-0.5 flex-shrink-0"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-													/>
-												</svg>
-												<div class="flex-1">
-													<div class="text-xs text-gray-500">
-														{{
-															invoice.buyer_name
-																? __("Buyer / Customer")
-																: __("Customer")
-														}}
-													</div>
-													<div
-														class="text-sm font-semibold text-gray-900"
-													>
-														{{
-															invoice.buyer_name ||
-															invoice.customer_name ||
-															invoice.customer
-														}}
-													</div>
-												</div>
-											</div>
-
-											<!-- Date & Time -->
-											<div class="flex items-start">
-												<svg
-													class="w-5 h-5 text-gray-400 me-2 mt-0.5 flex-shrink-0"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-													/>
-												</svg>
-												<div class="flex-1">
-													<div class="text-xs text-gray-500">
-														{{ __("Date & Time") }}
-													</div>
-													<div class="text-sm font-medium text-gray-900">
-														{{ formatDate(invoice.posting_date) }}
-														{{ formatTime(invoice.posting_time) }}
-													</div>
-													<div
-														v-if="invoice.cashier_name"
-														class="mt-0.5 text-xs text-gray-500"
-													>
-														{{ invoice.cashier_name }}
-													</div>
-												</div>
-											</div>
-
-											<!-- Payment Details -->
-											<div
-												class="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100"
-											>
-												<div>
-													<div class="text-xs text-gray-500 mb-1">
-														{{ __("Paid Amount") }}
-													</div>
-													<div
-														class="text-sm font-semibold text-green-600"
-													>
-														{{
-															formatCurrency(
-																invoice.paid_amount || 0
-															)
-														}}
-													</div>
-												</div>
-												<div>
-													<div class="text-xs text-gray-500 mb-1">
-														{{ __("Outstanding") }}
-													</div>
-													<div
-														class="text-sm font-semibold text-orange-600"
-													>
-														{{
-															formatCurrency(
-																invoice.outstanding_amount || 0
-															)
-														}}
-													</div>
-												</div>
-												<div class="col-span-2">
-													<div class="text-xs text-gray-500 mb-1">
-														{{ __("Payment Mode") }}
-													</div>
-													<div
-														class="text-sm font-semibold text-gray-900"
-													>
-														{{ formatPaymentModes(invoice) }}
-													</div>
-												</div>
-											</div>
-										</div>
-
-										<!-- Card Footer with Actions -->
-										<div
-											class="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2"
-										>
-											<button
-												@click="$emit('view-invoice', invoice)"
-												class="px-3 py-2 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1"
-												:title="__('View Details')"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-													/>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-													/>
-												</svg>
-												<span>{{ __("View") }}</span>
-											</button>
-											<button
-												@click="$emit('print-invoice', invoice)"
-												class="px-3 py-2 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors flex items-center gap-1"
-												:title="__('Print')"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
-													/>
-												</svg>
-												<span>{{ __("Print") }}</span>
-											</button>
 										</div>
 									</div>
+
+									<InvoiceListPager
+										v-if="historyPager.total > PAGE_SIZE"
+										:pager="historyPager"
+									/>
 								</div>
 							</div>
 
@@ -866,89 +904,233 @@
 									</p>
 								</div>
 
-								<!-- Drafts Grid -->
-								<div v-else class="grid gap-4">
+								<!-- Drafts Table (md+) -->
+								<div v-else>
 									<div
-										v-for="draft in draftInvoices"
-										:key="draft.draft_id"
-										class="bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-purple-400 transition-all cursor-pointer"
-										@click="$emit('load-draft', draft)"
+										class="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden"
 									>
-										<div class="flex items-start justify-between mb-2">
-											<div class="flex-1">
-												<h4 class="text-sm font-semibold text-gray-900">
-													{{ draft.draft_id }}
-												</h4>
-												<p
-													v-if="draft.customer"
-													class="text-xs text-gray-500 mt-0.5"
+										<table class="w-full text-sm">
+											<thead>
+												<tr class="border-b border-gray-100">
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Draft") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Cashier") }}
+													</th>
+													<th
+														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Items") }}
+													</th>
+													<th
+														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Total") }}
+													</th>
+													<th class="px-4 py-3"></th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr
+													v-for="draft in draftsPager.rows"
+													:key="draft.draft_id"
+													class="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+													@click="$emit('load-draft', draft)"
 												>
-													{{
-														__("Customer: {0}", [
-															draft.customer?.customer_name ||
+													<td class="px-4 py-3">
+														<div class="flex items-center gap-3">
+															<div
+																class="w-9 h-9 rounded-lg bg-purple-50 flex items-center justify-center shrink-0"
+															>
+																<svg
+																	class="w-4 h-4 text-purple-500"
+																	fill="none"
+																	stroke="currentColor"
+																	viewBox="0 0 24 24"
+																>
+																	<path
+																		stroke-linecap="round"
+																		stroke-linejoin="round"
+																		stroke-width="2"
+																		d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+																	/>
+																</svg>
+															</div>
+															<div class="min-w-0">
+																<div class="font-semibold text-gray-900">
+																	{{ draft.draft_id }}
+																</div>
+																<div
+																	class="flex items-center gap-1 text-xs text-gray-500 mt-0.5"
+																>
+																	<svg
+																		class="w-3 h-3"
+																		fill="none"
+																		stroke="currentColor"
+																		viewBox="0 0 24 24"
+																	>
+																		<path
+																			stroke-linecap="round"
+																			stroke-linejoin="round"
+																			stroke-width="2"
+																			d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+																		/>
+																	</svg>
+																	{{ formatDateTime(draft.created_at) }}
+																</div>
+															</div>
+														</div>
+													</td>
+													<td class="px-4 py-3">
+														<div
+															v-if="draft.customer"
+															class="font-medium text-gray-900"
+														>
+															{{
+																draft.customer?.customer_name ||
 																draft.customer?.name ||
-																draft.customer,
-														])
-													}}
-												</p>
-												<p class="text-xs text-gray-400 mt-0.5">
-													{{ formatDateTime(draft.created_at) }}
-												</p>
-											</div>
-											<button
-												@click.stop="$emit('delete-draft', draft.draft_id)"
-												class="text-gray-400 hover:text-red-600 transition-colors p-1"
-												:title="__('Delete draft')"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-													/>
-												</svg>
-											</button>
-										</div>
+																draft.customer
+															}}
+														</div>
+														<div v-else class="text-gray-400">–</div>
+													</td>
+													<td v-if="draft.cashier_name || draft.owner" class="px-4 py-3 text-gray-700">
+														{{ draft.cashier_name || draft.owner }}
+													</td>
+													<td
+														class="px-4 py-3 text-end text-gray-700"
+													>
+														{{ draft.items?.length || 0 }}
+													</td>
+													<td
+														class="px-4 py-3 text-end font-bold text-gray-900 whitespace-nowrap"
+													>
+														{{ formatCurrency(calculateDraftTotal(draft.items)) }}
+													</td>
+													<td class="px-4 py-3 text-end" @click.stop>
+														<div class="flex items-center justify-end gap-1">
+															<button
+																@click="$emit('load-draft', draft)"
+																class="px-3 py-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+																:title="__('Load draft')"
+															>
+																{{ __("Resume") }}
+															</button>
+															<button
+																@click="$emit('delete-draft', draft.draft_id)"
+																class="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
+																:title="__('Delete draft')"
+															>
+																<svg
+																	class="w-4 h-4"
+																	fill="none"
+																	stroke="currentColor"
+																	viewBox="0 0 24 24"
+																>
+																	<path
+																		stroke-linecap="round"
+																		stroke-linejoin="round"
+																		stroke-width="2"
+																		d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+																	/>
+																</svg>
+															</button>
+														</div>
+													</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
 
-										<div class="flex items-center justify-between text-xs">
-											<span class="text-gray-600">{{
-												__("{0} item(s)", [draft.items?.length || 0])
-											}}</span>
-											<span class="font-bold text-purple-600">{{
-												formatCurrency(calculateDraftTotal(draft.items))
-											}}</span>
-										</div>
-
-										<!-- Items Preview -->
+									<!-- Draft cards (below md) -->
+									<div class="md:hidden flex flex-col gap-3">
 										<div
-											v-if="draft.items && draft.items.length > 0"
-											class="mt-2 pt-2 border-t border-gray-100"
+											v-for="draft in draftsPager.rows"
+											:key="draft.draft_id"
+											class="bg-white border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+											@click="$emit('load-draft', draft)"
 										>
-											<div class="flex flex-wrap gap-1">
-												<span
-													v-for="(item, idx) in draft.items.slice(0, 3)"
-													:key="idx"
-													class="text-[10px] bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded"
+											<div class="flex items-start justify-between gap-2">
+												<div class="min-w-0">
+													<div class="font-semibold text-gray-900">
+														{{ draft.draft_id }}
+													</div>
+													<div class="text-xs text-gray-500 mt-0.5">
+														{{ formatDateTime(draft.created_at) }}
+													</div>
+													<div
+														v-if="draft.customer"
+														class="text-sm text-gray-700 mt-1"
+													>
+														{{
+															draft.customer?.customer_name ||
+															draft.customer?.name ||
+															draft.customer
+														}}
+													</div>
+													<div
+														v-if="draft.cashier_name || draft.owner"
+														class="flex items-center gap-1 text-xs text-gray-400 mt-1"
+													>
+														<FeatherIcon name="user" class="w-3 h-3" />
+														<span>{{ draft.cashier_name || draft.owner }}</span>
+													</div>
+												</div>
+												<div class="text-end shrink-0 ms-2">
+													<div class="font-bold text-purple-600">
+														{{ formatCurrency(calculateDraftTotal(draft.items)) }}
+													</div>
+													<div class="text-xs text-gray-500 mt-0.5">
+														{{
+															__("{0} item(s)", [draft.items?.length || 0])
+														}}
+													</div>
+												</div>
+											</div>
+											<div class="flex items-center justify-end gap-1 mt-3" @click.stop>
+												<button
+													@click="$emit('load-draft', draft)"
+													class="px-3 py-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+													:title="__('Load draft')"
 												>
-													{{ item.item_name }} ({{
-														item.quantity || item.qty
-													}})
-												</span>
-												<span
-													v-if="draft.items.length > 3"
-													class="text-[10px] text-gray-500 px-1.5 py-0.5"
+													{{ __("Resume") }}
+												</button>
+												<button
+													@click="$emit('delete-draft', draft.draft_id)"
+													class="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
+													:title="__('Delete draft')"
 												>
-													{{ __("+{0} more", [draft.items.length - 3]) }}
-												</span>
+													<svg
+														class="w-4 h-4"
+														fill="none"
+														stroke="currentColor"
+														viewBox="0 0 24 24"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															stroke-width="2"
+															d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+														/>
+													</svg>
+												</button>
 											</div>
 										</div>
 									</div>
+
+									<InvoiceListPager
+										v-if="draftsPager.total > PAGE_SIZE"
+										:pager="draftsPager"
+									/>
 								</div>
 							</div>
 
@@ -980,99 +1162,233 @@
 									</p>
 								</div>
 
-								<!-- Returns Grid -->
-								<div v-else class="grid gap-4">
+								<!-- Returns Table (md+) -->
+								<div v-else>
 									<div
-										v-for="invoice in returnInvoices"
-										:key="invoice.name"
-										class="bg-white border border-red-200 rounded-lg p-4 hover:shadow-md transition-all"
+										class="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden"
 									>
-										<div class="flex items-start justify-between">
-											<div class="flex-1">
-												<div class="flex items-center gap-2 mb-1">
-													<h4
-														class="text-sm font-semibold text-gray-900"
-													>
-														{{ invoice.name }}
-													</h4>
-													<span
-														class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
+										<table class="w-full text-sm">
+											<thead>
+												<tr class="border-b border-gray-100">
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
 													>
 														{{ __("Return") }}
-													</span>
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Customer") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Cashier") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Original Invoice") }}
+													</th>
+													<th
+														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Refund Total") }}
+													</th>
+													<th
+														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+													>
+														{{ __("Status") }}
+													</th>
+													<th class="px-4 py-3"></th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr
+													v-for="invoice in returnsPager.rows"
+													:key="invoice.name"
+													class="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+													@click="$emit('view-invoice', invoice)"
+												>
+													<td class="px-4 py-3">
+														<div class="flex items-center gap-3">
+															<div
+																class="w-9 h-9 rounded-lg bg-red-50 flex items-center justify-center shrink-0"
+															>
+																<svg
+																	class="w-4 h-4 text-red-500"
+																	fill="none"
+																	stroke="currentColor"
+																	viewBox="0 0 24 24"
+																>
+																	<path
+																		stroke-linecap="round"
+																		stroke-linejoin="round"
+																		stroke-width="2"
+																		d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+																	/>
+																</svg>
+															</div>
+															<div class="min-w-0">
+																<div class="font-semibold text-gray-900">
+																	{{ invoice.name }}
+																</div>
+																<div
+																	class="flex items-center gap-1 text-xs text-gray-500 mt-0.5"
+																>
+																	<svg
+																		class="w-3 h-3"
+																		fill="none"
+																		stroke="currentColor"
+																		viewBox="0 0 24 24"
+																	>
+																		<path
+																			stroke-linecap="round"
+																			stroke-linejoin="round"
+																			stroke-width="2"
+																			d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+																		/>
+																	</svg>
+																	{{ formatDate(invoice.posting_date) }} ·
+																	{{ formatTime(invoice.posting_time) }}
+																</div>
+															</div>
+														</div>
+													</td>
+													<td class="px-4 py-3">
+														<div class="font-medium text-gray-900">
+															{{ invoice.customer_name }}
+														</div>
+													</td>
+													<td class="px-4 py-3 text-gray-700">
+														{{ invoice.cashier_name || invoice.owner || "–" }}
+													</td>
+													<td class="px-4 py-3">
+														<span
+															v-if="invoice.return_against"
+															class="font-mono text-xs text-gray-600"
+														>
+															{{ invoice.return_against }}
+														</span>
+														<span v-else class="text-gray-400">–</span>
+													</td>
+													<td
+														class="px-4 py-3 text-end font-bold text-red-600 whitespace-nowrap"
+													>
+														-{{
+															formatCurrency(
+																Math.abs(invoice.grand_total)
+															)
+														}}
+													</td>
+													<td class="px-4 py-3">
+														<span
+															:class="[
+																'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
+																getInvoiceStatusColor(invoice),
+															]"
+														>
+															<span
+																:class="[
+																	'w-1.5 h-1.5 rounded-full',
+																	getStatusDotClass(invoice),
+																]"
+															></span>
+															{{ __(invoice.status) }}
+														</span>
+													</td>
+													<td class="px-4 py-3 text-end" @click.stop>
+														<button
+															@click="$emit('print-invoice', invoice)"
+															class="p-1.5 hover:bg-green-50 rounded transition-colors"
+															:title="__('Print')"
+														>
+															<svg
+																class="w-4 h-4 text-green-600"
+																fill="none"
+																stroke="currentColor"
+																viewBox="0 0 24 24"
+															>
+																<path
+																	stroke-linecap="round"
+																	stroke-linejoin="round"
+																	stroke-width="2"
+																	d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+																/>
+															</svg>
+														</button>
+													</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+
+									<!-- Return cards (below md) -->
+									<div class="md:hidden flex flex-col gap-3">
+										<div
+											v-for="invoice in returnsPager.rows"
+											:key="invoice.name"
+											class="bg-white border border-gray-200 rounded-xl p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+											@click="$emit('view-invoice', invoice)"
+										>
+											<div class="flex items-start justify-between gap-2">
+												<div class="min-w-0">
+													<div class="font-semibold text-gray-900">
+														{{ invoice.name }}
+													</div>
+													<div class="text-xs text-gray-500 mt-0.5">
+														{{ formatDate(invoice.posting_date) }} ·
+														{{ formatTime(invoice.posting_time) }}
+													</div>
+												</div>
+												<span
+													:class="[
+														'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full shrink-0',
+														getInvoiceStatusColor(invoice),
+													]"
+												>
+													<span
+														:class="[
+															'w-1.5 h-1.5 rounded-full',
+															getStatusDotClass(invoice),
+														]"
+													></span>
+													{{ __(invoice.status) }}
+												</span>
+											</div>
+											<div
+												class="flex items-center justify-between mt-2 text-sm"
+											>
+												<div class="min-w-0">
+													<div class="text-gray-700 truncate">
+														{{ invoice.customer_name }}
+													</div>
+													<div class="flex items-center gap-1 text-xs text-gray-400 mt-1">
+														<FeatherIcon name="user" class="w-3 h-3" />
+														<span>{{ invoice.cashier_name || invoice.owner || "–" }}</span>
+													</div>
+													<div
+														v-if="invoice.return_against"
+														class="text-xs text-gray-500"
+													>
+														{{ __("Against: {0}", [invoice.return_against]) }}
+													</div>
 												</div>
 												<div
-													class="flex items-center gap-4 text-xs text-gray-600"
+													class="text-end font-bold text-red-600 shrink-0 ms-2"
 												>
-													<span>{{ invoice.customer_name }}</span>
-													<span>{{
-														formatDate(invoice.posting_date)
-													}}</span>
-													<span v-if="invoice.return_against">{{
-														__("Against: {0}", [
-															invoice.return_against,
-														])
-													}}</span>
-												</div>
-											</div>
-
-											<div class="text-end ms-4">
-												<p class="text-sm font-bold text-red-600">
 													-{{
-														formatCurrency(
-															Math.abs(invoice.grand_total)
-														)
+														formatCurrency(Math.abs(invoice.grand_total))
 													}}
-												</p>
-												<div class="flex items-center gap-1 mt-2">
-													<button
-														@click="$emit('view-invoice', invoice)"
-														class="p-1.5 hover:bg-blue-50 rounded transition-colors"
-														:title="__('View Details')"
-													>
-														<svg
-															class="w-4 h-4 text-blue-600"
-															fill="none"
-															stroke="currentColor"
-															viewBox="0 0 24 24"
-														>
-															<path
-																stroke-linecap="round"
-																stroke-linejoin="round"
-																stroke-width="2"
-																d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-															/>
-															<path
-																stroke-linecap="round"
-																stroke-linejoin="round"
-																stroke-width="2"
-																d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-															/>
-														</svg>
-													</button>
-													<button
-														@click="$emit('print-invoice', invoice)"
-														class="p-1.5 hover:bg-green-50 rounded transition-colors"
-														:title="__('Print')"
-													>
-														<svg
-															class="w-4 h-4 text-green-600"
-															fill="none"
-															stroke="currentColor"
-															viewBox="0 0 24 24"
-														>
-															<path
-																stroke-linecap="round"
-																stroke-linejoin="round"
-																stroke-width="2"
-																d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
-															/>
-														</svg>
-													</button>
 												</div>
 											</div>
 										</div>
 									</div>
+
+									<InvoiceListPager
+										v-if="returnsPager.total > PAGE_SIZE"
+										:pager="returnsPager"
+									/>
 								</div>
 							</div>
 						</div>
@@ -1108,8 +1424,8 @@ import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { useFormatters } from "@/composables/useFormatters";
 import { useToast } from "@/composables/useToast";
 import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
-import { Button, call, LoadingIndicator } from "frappe-ui";
-import { computed, onMounted, ref, watch } from "vue";
+import { Button, FeatherIcon, call, LoadingIndicator } from "frappe-ui";
+import { computed, h, onMounted, reactive, ref, watch } from "vue";
 import { isOffline } from "@/utils/offline/offlineState";
 import {
 	cacheUnpaidInvoices,
@@ -1150,6 +1466,33 @@ const emit = defineEmits([
 	"delete-draft",
 	"refresh-history",
 ]);
+
+// Shared pager footer for the paged lists (History / Drafts / Returns)
+const InvoiceListPager = {
+	name: "InvoiceListPager",
+	props: { pager: { type: Object, required: true } },
+	setup(props) {
+		return () =>
+			h("div", { class: "mt-4 flex items-center justify-between text-xs text-gray-500", "data-test": "list-pager" }, [
+				h("span", __("Showing {0}–{1} of {2}", [props.pager.from, props.pager.to, props.pager.total])),
+				h("div", { class: "flex items-center gap-2" }, [
+					h(Button, {
+						variant: "ghost",
+						disabled: props.pager.page <= 1,
+						"aria-label": __("Previous page"),
+						onClick: () => props.pager.prev(),
+					}, () => h(FeatherIcon, { name: "chevron-left", class: "w-4 h-4" })),
+					h("span", __("Page {0} of {1}", [props.pager.page, props.pager.pageCount])),
+					h(Button, {
+						variant: "ghost",
+						disabled: props.pager.page >= props.pager.pageCount,
+						"aria-label": __("Next page"),
+						onClick: () => props.pager.next(),
+					}, () => h(FeatherIcon, { name: "chevron-right", class: "w-4 h-4" })),
+				]),
+			]);
+	},
+};
 
 const show = ref(props.modelValue);
 const loading = ref(false);
@@ -1220,6 +1563,52 @@ const filteredHistoryInvoices = computed(() => {
 	return tempFilters.filteredInvoices.value;
 });
 
+// Client-side pagination: only the current page's rows hit the DOM.
+const PAGE_SIZE = 20;
+
+function usePaged(list, size = PAGE_SIZE) {
+	const page = ref(1);
+	const total = computed(() => list.value.length);
+	const pageCount = computed(() =>
+		Math.max(1, Math.ceil(total.value / size))
+	);
+
+	// Clamp when the list shrinks below the current page
+	watch(pageCount, (n) => {
+		if (page.value > n) page.value = n;
+	});
+
+	return reactive({
+		rows: computed(() =>
+			list.value.slice((page.value - 1) * size, page.value * size)
+		),
+		page,
+		pageCount,
+		total,
+		from: computed(() => (total.value === 0 ? 0 : (page.value - 1) * size + 1)),
+		to: computed(() => Math.min(page.value * size, total.value)),
+		next() {
+			if (page.value < pageCount.value) page.value++;
+		},
+		prev() {
+			if (page.value > 1) page.value--;
+		},
+		reset() {
+			page.value = 1;
+		},
+	});
+}
+
+const historyPager = usePaged(filteredHistoryInvoices);
+const draftsPager = usePaged(computed(() => props.draftInvoices));
+const returnsPager = usePaged(returnInvoices);
+
+// New filters mean new result sets — start back at page 1
+filterStore.$subscribe(() => {
+	historyPager.reset();
+	returnsPager.reset();
+});
+
 // Tabs configuration
 const tabs = computed(() => [
 	{
@@ -1285,6 +1674,9 @@ watch(show, (val) => {
 
 // Watch for tab changes to emit refresh event for history/returns tabs
 watch(activeTab, (newTab) => {
+	historyPager.reset();
+	draftsPager.reset();
+	returnsPager.reset();
 	// Always emit refresh event when switching to history or returns tabs
 	// This ensures up-to-date outstanding amounts and invoice data
 	if (newTab === "history" || newTab === "returns") {
@@ -1468,6 +1860,17 @@ async function handlePaymentCompleted(paymentData) {
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+}
+
+// Dot color inside status pill badges
+function getStatusDotClass(invoice) {
+	const status = invoice.status?.toLowerCase();
+	if (status === "paid" || invoice.docstatus === 1) return "bg-green-500";
+	if (status === "unpaid" || status === "overdue" || status === "partly paid")
+		return "bg-amber-500";
+	if (status === "credit note issued" || invoice.is_return) return "bg-purple-500";
+	if (invoice.docstatus === 2) return "bg-red-500";
+	return "bg-gray-400";
 }
 
 function formatPaymentModes(invoice) {

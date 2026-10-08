@@ -3105,7 +3105,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	doctype = get_pos_invoice_doctype()
 	union = sales_invoice_union(
 		"""name, customer, customer_name, buyer_name, posting_date, posting_time,
-		grand_total, paid_amount, outstanding_amount, status, docstatus, is_return,
+		grand_total, paid_amount, change_amount, outstanding_amount, status, docstatus, is_return,
 		return_against, pos_queue_number, pos_profile, is_pos, owner, '{dt}' AS doctype"""
 	)
 
@@ -3164,6 +3164,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			posting_time,
 			grand_total,
 			paid_amount,
+			change_amount,
 			outstanding_amount,
 			status,
 			docstatus,

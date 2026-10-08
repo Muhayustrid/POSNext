@@ -24,10 +24,16 @@ vi.mock("frappe-ui", async () => {
 		},
 		template: `<div><slot name="body" /></div>`,
 	})
+	const FeatherIcon = defineComponent({
+		name: "FeatherIcon",
+		props: { name: { type: String, required: true } },
+		template: `<svg data-feather-icon="true" aria-hidden="true"><use :xlink:href="'#' + name" /></svg>`,
+	})
 	const stub = defineComponent({ name: "FrappeUIStub", render: () => null })
 	return {
 		Button,
 		Dialog,
+		FeatherIcon,
 		Input: stub,
 		createResource: (opts) => {
 			const reload = vi.fn(() => {
@@ -228,7 +234,9 @@ describe("SessionSummary", () => {
 		expect(wrapper.text()).toContain("Could not load the session summary.")
 
 		entry.resource.reload.mockClear()
-		await wrapper.find("button").trigger("click")
+		// the period chips are buttons too — target Retry by its label
+		const retry = wrapper.findAll("button").find((b) => b.text() === "Retry")
+		await retry.trigger("click")
 		expect(entry.resource.reload).toHaveBeenCalled()
 	})
 
@@ -292,18 +300,35 @@ describe("SessionSummary", () => {
 		)
 	})
 
-	it("shows the sales hero with inline companion stats and honest caption", async () => {
+	it("shows the sales hero card with the order stats and honest caption", async () => {
 		const { wrapper } = await mountWithSummary()
 		const sales = wrapper.find('[data-test="sales-summary"]').text()
 
 		expect(sales).toContain("50500 IDR") // total sales (after returns)
-		expect(sales).toContain("Total Orders 3") // orders inline with the hero
-		expect(sales).toContain("16833.333 IDR") // average per order
+		expect(sales).toContain("3 orders") // orders inline with the hero
+		expect(sales).toContain("Avg 16833.333 IDR / order")
 		expect(sales).toContain("After returns, tax included")
 		// jargon captions are gone — the values carry the meaning
 		expect(sales).not.toContain("Submitted sales invoices (returns not counted)")
 		expect(sales).not.toContain("Gross Sales ÷ Total Orders")
-		expect(sales).toContain("52500 IDR") // gross sales secondary line
+	})
+
+	it("shows gross sales as its own card with the honest caption", async () => {
+		const { wrapper } = await mountWithSummary()
+		const gross = wrapper.find('[data-test="gross-sales"]').text()
+
+		expect(gross).toContain("Gross Sales")
+		expect(gross).toContain("52500 IDR")
+		expect(gross).toContain("Before returns, incl. tax")
+		expect(gross).not.toContain("before tax")
+	})
+
+	it("hides the gross sales card when there is nothing to show", async () => {
+		const { wrapper } = await mountWithSummary({
+			gross_sales: 0,
+			credit_outstanding: 0,
+		})
+		expect(wrapper.find('[data-test="gross-sales"]').exists()).toBe(false)
 	})
 
 	it("shows the cash summary with the honest expense placeholder", async () => {
@@ -329,6 +354,7 @@ describe("SessionSummary", () => {
 
 	it("lists all configured payment methods (zero included) plus unconfigured ones", async () => {
 		const { wrapper } = await mountWithSummary()
+		const section = wrapper.find('[data-test="payments-section"]')
 		const table = wrapper.find('[data-test="payments-table"]')
 		const text = table.text()
 
@@ -341,13 +367,13 @@ describe("SessionSummary", () => {
 		expect(text).toContain("Not on the POS Profile") // used, unconfigured
 		expect(text).toContain("40500 IDR")
 		expect(text).toContain("500 IDR")
-		// totals
-		expect(text).toContain("Total Cash")
-		expect(text).toContain("40500 IDR")
-		expect(text).toContain("Total Non-Cash")
-		expect(text).toContain("10500 IDR")
-		expect(text).toContain("Grand Total")
-		expect(text).toContain("51000 IDR")
+		// totals sit below the method rows, side by side + grand total
+		expect(section.text()).toContain("Total Cash")
+		expect(section.text()).toContain("40500 IDR")
+		expect(section.text()).toContain("Total Non-Cash")
+		expect(section.text()).toContain("10500 IDR")
+		expect(section.text()).toContain("Grand Total")
+		expect(section.text()).toContain("51000 IDR")
 	})
 
 	it("shows charges and discounts without fabricating a split", async () => {
@@ -362,22 +388,24 @@ describe("SessionSummary", () => {
 		expect(charges).toContain("1250 IDR")
 	})
 
-	it("shows the refund total with the return count", async () => {
+	it("shows the refund total with the return count pill", async () => {
 		const { wrapper } = await mountWithSummary()
 		const refund = wrapper.find('[data-test="refund-section"]').text()
-		expect(refund).toContain("Total Refund")
+		expect(refund).toContain("Total Refunds")
 		expect(refund).toContain("-2000 IDR")
 		expect(refund).toContain("1 return invoices")
 	})
 
-	it("never renders a negative zero for refunds", async () => {
-		const zero = await mountWithSummary({
+	it("shows a No refunds pill when there are no returns", async () => {
+		const { wrapper } = await mountWithSummary({
 			returns_total: 0,
 			returns_count: 0,
 		})
-		const text = zero.wrapper.find('[data-test="refund-section"]').text()
-		expect(text).toContain("0 IDR")
-		expect(text).not.toContain("-0")
+		const refund = wrapper.find('[data-test="refund-section"]')
+		expect(refund.text()).toContain("No refunds")
+		expect(refund.text()).not.toContain("return invoices")
+		expect(refund.text()).toContain("0 IDR")
+		expect(refund.text()).not.toContain("-0")
 	})
 
 	it("renders sales per category as the primary table", async () => {
@@ -407,17 +435,61 @@ describe("SessionSummary", () => {
 		)
 	})
 
-	it("keeps item and package detail inside a secondary collapsible", async () => {
+	it("renders item and package detail as an always-open section", async () => {
 		const { wrapper } = await mountWithSummary()
 		const details = wrapper.find('[data-test="items-details"]')
 		expect(details.exists()).toBe(true)
-		expect(details.element.tagName.toLowerCase()).toBe("details")
-		// still rendered in the DOM (closed by default)
+		expect(details.element.tagName.toLowerCase()).not.toBe("details")
 		expect(details.text()).toContain("Paket Hemat")
 		expect(details.find('[data-test="items-table"]').exists()).toBe(true)
+		// per-row price and a subtotal column replace the bare revenue figure
+		const table = details.find('[data-test="items-table"]')
+		expect(table.text()).toContain("Price")
+		expect(table.text()).toContain("Subtotal")
 	})
 
-	it("shows item codes only to distinguish duplicate item names", async () => {
+	it("shows the discount column only when some line is discounted", async () => {
+		const withDiscounts = await mountWithSummary({
+			items: [
+				{
+					item_code: "I1",
+					item_name: "Kopi",
+					qty: 2,
+					base_net_amount: 1000,
+					price_list_rate: 600,
+					discount_amount: 200,
+				},
+			],
+		})
+		const shown = withDiscounts.wrapper.find('[data-test="items-details"]')
+		expect(shown.text()).toContain("Discount")
+		expect(shown.text()).toContain("200 IDR")
+
+		const noDiscounts = await mountWithSummary({
+			items: [
+				{
+					item_code: "I1",
+					item_name: "Kopi",
+					qty: 2,
+					base_net_amount: 1000,
+					price_list_rate: 500,
+					discount_amount: 0,
+				},
+			],
+		})
+		const hidden = noDiscounts.wrapper.find('[data-test="items-details"]')
+		expect(hidden.text()).not.toContain("Discount")
+	})
+
+	it("treats missing price/discount fields as zero (old servers)", async () => {
+		const { wrapper } = await mountWithSummary()
+		const table = wrapper.find('[data-test="items-table"]')
+		expect(table.text()).toContain("0 IDR")
+		// no discount data at all → column hidden
+		expect(table.text()).not.toContain("Discount")
+	})
+
+	it("always shows the item code under each item name", async () => {
 		const duplicates = await mountWithSummary({
 			items: [
 				{
@@ -446,7 +518,7 @@ describe("SessionSummary", () => {
 		})
 		const uniqueTable = unique.wrapper.find('[data-test="items-table"]')
 		expect(uniqueTable.text()).toContain("Kopi")
-		expect(uniqueTable.text()).not.toContain("I1")
+		expect(uniqueTable.text()).toContain("I1")
 	})
 
 	it("discloses a capped item table", async () => {
@@ -613,14 +685,17 @@ describe("SessionSummary period lens", () => {
 		resources.instances.length = 0
 		return mount(SessionSummary, {
 			props: { openingShift: "OS-1", posProfile: "Kasir 1", ...props },
-			global: { config: { globalProperties: { __: globalThis.__ } } },
+			global: {
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { Teleport: true },
+			},
 		})
 	}
 
 	it("offers the open shift first, then the profile-wide windows", () => {
 		const wrapper = mountPeriod()
-		const options = wrapper.findAll("option").map((o) => o.text())
-		expect(options).toEqual([
+		const chips = wrapper.findAll('[data-test^="period-chip-"]').map((c) => c.text())
+		expect(chips).toEqual([
 			"This Shift",
 			"Today",
 			"Yesterday",
@@ -636,7 +711,7 @@ describe("SessionSummary period lens", () => {
 
 	it("switching to a preset fetches the profile window with explicit dates", async () => {
 		const wrapper = mountPeriod()
-		await wrapper.find('[data-test="period-select"]').setValue("yesterday")
+		await wrapper.find('[data-test="period-chip-yesterday"]').trigger("click")
 		await flushPromises()
 
 		const period = periodResource()
@@ -653,7 +728,7 @@ describe("SessionSummary period lens", () => {
 
 	it("shows the period header instead of the shift info once the window loads", async () => {
 		const wrapper = mountPeriod()
-		await wrapper.find('[data-test="period-select"]').setValue("last7")
+		await wrapper.find('[data-test="period-chip-last7"]').trigger("click")
 		const period = periodResource()
 		period.resource.data = PERIOD
 		period.resource.loading = false
@@ -673,7 +748,7 @@ describe("SessionSummary period lens", () => {
 
 	it("waits for both custom dates before fetching", async () => {
 		const wrapper = mountPeriod()
-		await wrapper.find('[data-test="period-select"]').setValue("custom")
+		await wrapper.find('[data-test="period-chip-custom"]').trigger("click")
 		await flushPromises()
 		const period = periodResource()
 		expect(period.resource.reload).not.toHaveBeenCalled()
@@ -696,7 +771,7 @@ describe("SessionSummary period lens", () => {
 		const wrapper = mountPeriod({ openingShift: "" })
 		await flushPromises()
 
-		const options = wrapper.findAll("option").map((o) => o.text())
+		const options = wrapper.findAll('[data-test^="period-chip-"]').map((o) => o.text())
 		expect(options).not.toContain("This Shift")
 		const period = periodResource()
 		expect(period.resource.reload).toHaveBeenCalledTimes(1)
@@ -707,8 +782,8 @@ describe("SessionSummary period lens", () => {
 	it("returns to the shift lens with a fresh session fetch", async () => {
 		const wrapper = mountPeriod()
 		const session = summaryResource()
-		await wrapper.find('[data-test="period-select"]').setValue("month")
-		await wrapper.find('[data-test="period-select"]').setValue("shift")
+		await wrapper.find('[data-test="period-chip-month"]').trigger("click")
+		await wrapper.find('[data-test="period-chip-shift"]').trigger("click")
 		await flushPromises()
 		expect(session.resource.reload).toHaveBeenCalledTimes(2)
 	})
@@ -731,14 +806,77 @@ describe("SessionSummary period lens", () => {
 
 	it("shows the period selector to managers only", () => {
 		const asManager = mountPeriod()
-		expect(asManager.find('[data-test="period-select"]').exists()).toBe(true)
+		expect(asManager.find('[data-test="period-chip-shift"]').exists()).toBe(true)
 		asManager.unmount()
 
 		bootstrapMock.store.data.is_management = false
 		const asCashier = mountPeriod()
-		expect(asCashier.find('[data-test="period-select"]').exists()).toBe(false)
+		expect(asCashier.find('[data-test="period-chip-shift"]').exists()).toBe(false)
 		// data logic untouched: the shift lens still loads
 		expect(summaryResource().resource.reload).toHaveBeenCalledTimes(1)
 		asCashier.unmount()
+	})
+})
+
+describe("SessionSummary mobile period sheet", () => {
+	function periodResource() {
+		return resources.instances.find(
+			(i) => i.url === "pos_next.api.shifts.get_period_summary",
+		)
+	}
+
+	function mountSheet(props = {}) {
+		resources.instances.length = 0
+		return mount(SessionSummary, {
+			props: { openingShift: "OS-1", posProfile: "Kasir 1", ...props },
+			global: {
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { Teleport: true },
+			},
+		})
+	}
+
+	it("opens the sheet from the pill and applies a preset", async () => {
+		const wrapper = mountSheet()
+		const pill = wrapper.find('[data-test="period-filter-button"]')
+		expect(pill.exists()).toBe(true)
+		expect(pill.text()).toContain("This Shift")
+
+		await pill.trigger("click")
+		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(true)
+
+		await wrapper.find('[data-test="period-option-yesterday"]').trigger("click")
+		await flushPromises()
+		expect(periodResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("keeps the sheet open for custom and closes on Apply", async () => {
+		const wrapper = mountSheet()
+		await wrapper.find('[data-test="period-filter-button"]').trigger("click")
+		await wrapper.find('[data-test="period-option-custom"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="sheet-period-from"]').exists()).toBe(true)
+
+		await wrapper.find('[data-test="sheet-period-from"]').setValue("2026-08-01")
+		await wrapper.find('[data-test="sheet-period-to"]').setValue("2026-08-31")
+		await flushPromises()
+		expect(periodResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(wrapper.find('[data-test="period-filter-button"]').text()).toContain(
+			"2026-08-01",
+		)
+
+		const apply = wrapper.findAll("button").find((b) => b.text() === "Apply")
+		await apply.trigger("click")
+		expect(wrapper.find('[data-test="sheet-period-from"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("hides the filter pill from non-managers", () => {
+		bootstrapMock.store.data.is_management = false
+		const wrapper = mountSheet()
+		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(false)
+		wrapper.unmount()
 	})
 })
