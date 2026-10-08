@@ -18,6 +18,7 @@ from pos_next.api.hq_monitoring import (
 	_check_hq_access,
 	_currency_map,
 	_default_company,
+	_main_currency,
 	_metrics_from_totals,
 	_overall_target_section,
 	_resolve_scope,
@@ -30,15 +31,71 @@ from pos_next.api.hq_monitoring import (
 
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
-	return get_columns(), get_data(filters)
+	data = get_data(filters)
+	return get_columns(), data, None, get_chart(data), get_summary(data)
+
+def _main_rows(data):
+	ccy = _main_currency(data, "net_sales")
+	return ccy, [r for r in data if r["currency"] == ccy]
+
+def get_chart(data):
+	"""Top 10 outlets: net sales next to returns for the selected range."""
+	ccy, rows = _main_rows(data)
+	top = [r for r in rows if r["net_sales"] or r["refunds"]][:10]
+	if not top:
+		return None
+	return {
+		"data": {
+			"labels": [r["company"] for r in top],
+			"datasets": [
+				{"name": _("Net Sales"), "values": [r["net_sales"] for r in top]},
+				{"name": _("Returns"), "values": [r["refunds"] for r in top]},
+			],
+		},
+		"type": "bar",
+		"colors": ["#10b981", "#ef4444"],
+		"barOptions": {"spaceRatio": 0.4},
+		"fieldtype": "Currency",
+		"options": "currency",
+		"currency": ccy,
+		"height": 300,
+	}
+
+def get_summary(data):
+	ccy, rows = _main_rows(data)
+	if not rows:
+		return None
+	net = sum(r["net_sales"] for r in rows)
+	orders = sum(r["orders"] for r in rows)
+	targeted = [r for r in rows if r["target_sales"]]
+	target = sum(flt(r["target_sales"]) for r in targeted)
+	mtd = sum(flt(r["mtd_value"]) for r in targeted)
+	pct = ratio(mtd, target) if target else None
+	summary = [
+		{"value": net, "label": _("Net Sales"), "datatype": "Currency", "currency": ccy, "indicator": "Green"},
+		{"value": orders, "label": _("TC"), "datatype": "Int", "indicator": "Blue"},
+		{"value": net / orders if orders else 0, "label": _("Avg Ticket"), "datatype": "Currency", "currency": ccy, "indicator": "Blue"},
+		{"value": sum(r["refunds"] for r in rows), "label": _("Returns"), "datatype": "Currency", "currency": ccy, "indicator": "Red"},
+		{"value": sum(1 for r in rows if r["orders"]), "label": _("Active Outlets"), "datatype": "Int", "indicator": "Purple"},
+	]
+	if pct is not None:
+		summary.append({
+			"value": pct,
+			"label": _("MTD Target Achievement"),
+			"datatype": "Percent",
+			"indicator": "Green" if pct >= 100 else "Orange" if pct >= 70 else "Red",
+		})
+	return summary
 
 
 def get_columns():
 	def money(fieldname, label, width=130):
 		return {"fieldname": fieldname, "label": label, "fieldtype": "Currency", "options": "currency", "width": width}
 
+	# A summed or averaged percentage means nothing across outlets, so the
+	# total row leaves these blank.
 	def pct(fieldname, label):
-		return {"fieldname": fieldname, "label": label, "fieldtype": "Percent", "width": 100}
+		return {"fieldname": fieldname, "label": label, "fieldtype": "Percent", "width": 110, "disable_total": 1}
 
 	return [
 		{"fieldname": "company", "label": _("Outlet"), "fieldtype": "Link", "options": "Company", "width": 180},
@@ -46,8 +103,8 @@ def get_columns():
 		money("gross", _("Gross Sales")),
 		money("refunds", _("Returns")),
 		money("net_sales", _("Net Sales")),
-		{"fieldname": "orders", "label": _("TC"), "fieldtype": "Int", "width": 70},
-		money("apc", _("Avg Ticket"), 110),
+		{"fieldname": "orders", "label": _("TC"), "fieldtype": "Int", "width": 80},
+		{**money("apc", _("Avg Ticket"), 120), "disable_total": 1},
 		pct("share_pct", _("Share")),
 		money("target_sales", _("Monthly Target")),
 		money("mtd_value", _("MTD Actual")),

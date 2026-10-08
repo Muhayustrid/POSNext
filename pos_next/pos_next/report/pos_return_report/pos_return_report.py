@@ -17,6 +17,7 @@ from pos_next.api.hq_monitoring import (
 	MAX_RANGE_DAYS,
 	_check_hq_access,
 	_currency_map,
+	_main_currency,
 	_resolve_scope,
 	_si_window_where,
 )
@@ -36,7 +37,59 @@ _INVOICE_COLS = (
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
 	by_item = filters.get("group_by") == "Item"
-	return get_columns(by_item), get_data(filters, by_item)
+	data = get_data(filters, by_item)
+	return get_columns(by_item), data, None, get_chart(data), get_summary(data, by_item)
+
+def _main_rows(data):
+	ccy = _main_currency(data, "amount")
+	return ccy, [r for r in data if r.currency == ccy]
+
+def get_chart(data):
+	"""Return value per day — spikes point at a bad day/shift."""
+	ccy, rows = _main_rows(data)
+	if not rows:
+		return None
+	by_day = {}
+	for r in rows:
+		by_day[r.posting_date] = by_day.get(r.posting_date, 0) + r.amount
+	days = sorted(by_day)
+	return {
+		"data": {
+			"labels": [d.strftime("%d %b") for d in days],
+			"datasets": [{"name": _("Return Value"), "values": [round(by_day[d], 2) for d in days]}],
+		},
+		"type": "bar" if len(days) < 3 else "line",
+		"colors": ["#ef4444"],
+		"lineOptions": {"regionFill": 1, "dotSize": 4},
+		"fieldtype": "Currency",
+		"options": "currency",
+		"currency": ccy,
+		"height": 260,
+	}
+
+def get_summary(data, by_item):
+	ccy, rows = _main_rows(data)
+	if not rows:
+		return None
+	total = sum(r.amount for r in rows)
+	invoices = len({r.name for r in rows})
+	summary = [
+		{"value": invoices, "label": _("Return Invoices"), "datatype": "Int", "indicator": "Red"},
+		{"value": total, "label": _("Return Value"), "datatype": "Currency", "currency": ccy, "indicator": "Red"},
+		{"value": sum(r.qty for r in rows), "label": _("Qty Returned"), "datatype": "Float", "indicator": "Orange"},
+		{"value": total / invoices, "label": _("Avg per Return"), "datatype": "Currency", "currency": ccy, "indicator": "Blue"},
+	]
+	counts = {}
+	for r in rows:
+		key = (r.item_name or r.item_code) if by_item else r.owner
+		counts[key] = counts.get(key, 0) + r.amount
+	summary.append({
+		"value": max(counts, key=counts.get),
+		"label": _("Most Returned Item") if by_item else _("Top Cashier by Returns"),
+		"datatype": "Data",
+		"indicator": "Purple",
+	})
+	return summary
 
 
 def get_columns(by_item):

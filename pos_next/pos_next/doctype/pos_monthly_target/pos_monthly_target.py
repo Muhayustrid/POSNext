@@ -8,7 +8,7 @@ from frappe.utils import get_first_day, getdate
 
 
 class POSMonthlyTarget(Document):
-	"""HQ monthly sales / transaction target per company.
+	"""HQ monthly sales target per company.
 
 	One row per company per month (month_start must be the 1st). Currency is
 	implicit: amounts are in the company's default currency.

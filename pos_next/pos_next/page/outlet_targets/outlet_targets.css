@@ -1,7 +1,7 @@
 /* Outlet Targets — desk page styles.
    Surfaces, text and the single accent follow Frappe's theme variables so the
-   page tracks light/dark and custom themes. Structure: toolbar (search +
-   export), the targets table (monthly + balik-modal), footer line. */
+   page tracks light/dark and custom themes. Structure: the targets table
+   (monthly + balik-modal), a Frappe list-view-style pager, footer line. */
 
 #page-outlet-targets .page-form,
 .ot-page {
@@ -31,46 +31,6 @@
 	flex: 0 1 170px;
 	min-width: 140px;
 	max-width: 260px;
-}
-
-.ot-card {
-	background: var(--card-bg, #fff);
-	border: 1px solid var(--border-color, #e2e6e9);
-	border-radius: var(--border-radius-md, 8px);
-	padding: 14px 16px;
-	margin-bottom: 12px;
-	min-width: 0;
-	box-shadow: var(--shadow-xs);
-}
-
-.ot-toolbar {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 10px;
-	margin-bottom: 10px;
-	flex-wrap: wrap;
-}
-
-.ot-input {
-	border: 1px solid var(--border-color, #d0d7de);
-	border-radius: var(--border-radius-md, 6px);
-	padding: 6px 10px;
-	font-size: 12.5px;
-	max-width: 260px;
-	min-height: 36px;
-	background: var(--card-bg, #fff);
-	color: var(--text-color);
-	transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.ot-input:hover {
-	border-color: var(--primary, #2490ef);
-}
-
-.ot-input:focus-visible {
-	outline: 2px solid var(--primary, #2490ef);
-	outline-offset: 1px;
 }
 
 .ot-table-scroll {
@@ -149,10 +109,6 @@
 	font-size: 11px;
 }
 
-.ot-muted {
-	color: var(--text-muted);
-}
-
 .ot-pct {
 	font-variant-numeric: tabular-nums;
 }
@@ -182,6 +138,40 @@
 	transition: width 0.3s ease;
 }
 
+/* Pager mirrors the Frappe list view: count left, page sizes, Prev/Next. */
+.ot-pager {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin: 10px 2px;
+}
+
+.ot-pager-sizes {
+	display: inline-flex;
+	gap: 4px;
+}
+
+.ot-pager-nav {
+	display: inline-flex;
+	gap: 4px;
+}
+
+.ot-dialog-head {
+	font-size: 12px;
+	margin-bottom: 4px;
+}
+
+.ot-import-errors {
+	max-height: 200px;
+	overflow-y: auto;
+	margin: 8px 0 0;
+	padding-left: 18px;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
 .ot-error {
 	margin: 4px 0;
 	color: var(--text-muted);
@@ -189,7 +179,6 @@
 
 /* Touch targets: comfortable on coarse pointers (44px per HIG). */
 @media (pointer: coarse) {
-	.ot-input,
 	.btn-xs {
 		min-height: 44px;
 	}
@@ -202,17 +191,8 @@
 		min-width: 150px;
 	}
 
-	.ot-card {
-		padding: 12px;
-	}
-
-	.ot-toolbar {
-		flex-direction: column;
-		align-items: stretch;
-	}
-
-	.ot-input {
-		max-width: 100%;
+	.ot-pager {
+		justify-content: center;
 	}
 }
 
@@ -233,7 +213,7 @@
 		border: none !important;
 	}
 
-	.ot-card {
+	.frappe-card {
 		break-inside: avoid;
 		page-break-inside: avoid;
 		border-color: #ccc;

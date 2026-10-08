@@ -20,6 +20,7 @@ from pos_next.api.hq_monitoring import (
 	_currency_map,
 	_item_from,
 	_item_group_and_descendants,
+	_main_currency,
 	_resolve_scope,
 	_si_window_where,
 	ratio,
@@ -28,7 +29,47 @@ from pos_next.api.hq_monitoring import (
 
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
-	return get_columns(), get_data(filters)
+	data = get_data(filters)
+	return get_columns(), data, None, get_chart(data), get_summary(data)
+
+def _main_rows(data):
+	ccy = _main_currency(data, "net_amount")
+	return ccy, [r for r in data if r.currency == ccy]
+
+def get_chart(data):
+	"""Top 10 products by net sales (rows are already net-sales descending)."""
+	ccy, rows = _main_rows(data)
+	top = rows[:10]
+	if not top:
+		return None
+	return {
+		"data": {
+			"labels": [r.item_name or r.item_code for r in top],
+			"datasets": [{"name": _("Net Sales"), "values": [flt(r.net_amount) for r in top]}],
+		},
+		"type": "bar",
+		"colors": ["#6366f1"],
+		"fieldtype": "Currency",
+		"options": "currency",
+		"currency": ccy,
+		"height": 300,
+	}
+
+def get_summary(data):
+	ccy, rows = _main_rows(data)
+	if not rows:
+		return None
+	groups = {}
+	for r in rows:
+		groups[r.item_group] = groups.get(r.item_group, 0) + flt(r.net_amount)
+	top_group = max(groups, key=groups.get)
+	return [
+		{"value": sum(flt(r.net_amount) for r in rows), "label": _("Net Sales"), "datatype": "Currency", "currency": ccy, "indicator": "Green"},
+		{"value": sum(flt(r.qty) for r in rows), "label": _("Qty Sold"), "datatype": "Float", "indicator": "Blue"},
+		{"value": len(rows), "label": _("Products Sold"), "datatype": "Int", "indicator": "Blue"},
+		{"value": rows[0].item_name or rows[0].item_code, "label": _("Best Seller"), "datatype": "Data", "indicator": "Purple"},
+		{"value": top_group or "-", "label": _("Top Item Group"), "datatype": "Data", "indicator": "Orange"},
+	]
 
 
 def get_columns():

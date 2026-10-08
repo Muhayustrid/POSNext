@@ -10,7 +10,6 @@
   "month_start",
   "column_break_main",
   "target_sales",
-  "target_transactions",
   "notes_section",
   "notes"
  ],
@@ -46,14 +45,6 @@
    "options": "company:default_currency"
   },
   {
-   "default": "0",
-   "description": "Target number of (non-refund) transactions",
-   "fieldname": "target_transactions",
-   "fieldtype": "Int",
-   "label": "Target Transactions",
-   "non_negative": 1
-  },
-  {
    "fieldname": "notes_section",
    "fieldtype": "Section Break"
   },
@@ -65,7 +56,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-07 08:00:00.000000",
+ "modified": "2026-10-08 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Monthly Target",

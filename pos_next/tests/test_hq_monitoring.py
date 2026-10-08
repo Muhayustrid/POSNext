@@ -326,7 +326,6 @@ class TestHQMonitoring(IntegrationTestCase):
 				"company": company,
 				"month_start": frappe.utils.get_first_day(frappe.utils.nowdate()),
 				"target_sales": 100000,
-				"target_transactions": 10,
 			}
 		).insert(ignore_permissions=True)
 
@@ -776,16 +775,11 @@ class TestHQMonitoring(IntegrationTestCase):
 		t = data["targets"]
 		self.assertTrue(t["available"])
 		self.assertEqual(t["target_sales"]["by_currency"][self.currency_a], 100000.0)
-		self.assertEqual(t["target_transactions"], 10)
 		expected = round(4500 / 100000 * 100, 2)
 		self.assertEqual(t["achievement_sales_pct"][self.currency_a], expected)
 		# daily target is pro-rata monthly / days-in-month, not invented
 		dim = data["windows"]["days_in_month"]
 		self.assertEqual(t["daily_target_sales"][self.currency_a], round(100000 / dim, 2))
-		self.assertEqual(t["apc_target"][self.currency_a], 10000.0)
-		# TC projection = MTD orders / days elapsed x days in month
-		elapsed = data["windows"]["days_elapsed"]
-		self.assertEqual(t["projected_orders"], round(3 / elapsed * dim))
 
 	def test_targets_by_company_rows(self):
 		data = self._payload()
@@ -795,12 +789,10 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertFalse(row["missing"])
 		self.assertEqual(row["currency"], self.currency_a)
 		self.assertEqual(row["target_sales"], 100000.0)
-		self.assertEqual(row["target_transactions"], 10)
 		self.assertEqual(row["mtd_net_tax_incl"], 4500.0)
 		self.assertEqual(row["mtd_orders"], 3)
 		self.assertEqual(row["mtd_apc"], 1500.0)
 		self.assertEqual(row["achievement_sales_pct"], round(4500 / 100000 * 100, 2))
-		self.assertEqual(row["achievement_transactions_pct"], 30.0)
 		elapsed = data["windows"]["days_elapsed"]
 		dim = data["windows"]["days_in_month"]
 		self.assertEqual(row["projected_sales"], round(4500 / elapsed * dim, 2))
@@ -845,7 +837,6 @@ class TestHQMonitoring(IntegrationTestCase):
 			company=self.company_a,
 			month_start=month,
 			target_sales=200000,
-			target_transactions=20,
 			overall_target=500000,
 			overall_from="",
 		)
@@ -853,7 +844,6 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertTrue(out["overall_updated"])
 		doc = frappe.get_doc("POS Monthly Target", out["monthly"])
 		self.assertEqual(doc.target_sales, 200000.0)
-		self.assertEqual(doc.target_transactions, 20)
 		self.assertEqual(
 			frappe.db.get_value("Company", self.company_a, "pos_overall_sales_target"), 500000.0
 		)
@@ -879,7 +869,6 @@ class TestHQMonitoring(IntegrationTestCase):
 		out = set_outlet_target(company=self.company_a, target_sales=80000)
 		doc = frappe.get_doc("POS Monthly Target", out["monthly"])
 		self.assertEqual(doc.target_sales, 80000.0)
-		self.assertEqual(doc.target_transactions, 0)
 
 		# restore the class fixture for sibling tests (method changes persist)
 		frappe.db.delete("POS Monthly Target", {"company": self.company_a, "month_start": month})
@@ -932,7 +921,6 @@ class TestHQMonitoring(IntegrationTestCase):
 			a = rows[self.company_a]
 			self.assertFalse(a["monthly"]["missing"])
 			self.assertEqual(a["monthly"]["target_sales"], 100000.0)
-			self.assertEqual(a["monthly"]["target_transactions"], 10)
 			self.assertEqual(a["currency"], self.currency_a)
 			self.assertEqual(a["mtd_net_tax_incl"], 4500.0)
 			self.assertEqual(a["mtd_orders"], 3)
@@ -1050,7 +1038,7 @@ class TestHQMonitoring(IntegrationTestCase):
 		frappe.set_user(ADMIN)
 		today = frappe.utils.nowdate()
 		base = {"company": self.company_a, "from_date": today, "to_date": today}
-		_, rows = execute(base)
+		_, rows, _, chart, summary = execute(base)
 		self.assertEqual(len(rows), 1)  # one return invoice, sales excluded
 		row = rows[0]
 		self.assertEqual(row.amount, self._payload()["returns"]["value"])
@@ -1058,8 +1046,10 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(row.company, self.company_a)
 		self.assertIn(row.doctype, ("POS Invoice", "Sales Invoice"))
 		self.assertEqual(len(row.posting_time), 5)
+		self.assertEqual(chart["data"]["datasets"][0]["values"], [row.amount])
+		self.assertEqual(summary[1]["value"], row.amount)
 
-		columns, items = execute({**base, "group_by": "Item"})
+		columns, items = execute({**base, "group_by": "Item"})[:2]
 		self.assertIn("item_code", [c["fieldname"] for c in columns])
 		self.assertEqual([(r.item_code, r.qty, r.amount) for r in items], [(self.item_x, 1, 1000)])
 
@@ -1329,7 +1319,6 @@ class TestTargetBasis(IntegrationTestCase):
 				"company": company,
 				"month_start": frappe.utils.get_first_day(frappe.utils.nowdate()),
 				"target_sales": 100000,
-				"target_transactions": 10,
 			}
 		).insert(ignore_permissions=True)
 

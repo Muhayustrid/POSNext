@@ -389,11 +389,10 @@ def set_outlet_target(
 	company=None,
 	month_start=None,
 	target_sales=None,
-	target_transactions=None,
 	overall_target=None,
 	overall_from=None,
 ):
-	"""Set an outlet's targets from the HQ Sales Monitoring page.
+	"""Set an outlet's targets from the Outlet Targets page.
 
 	- Monthly: upserts the POS Monthly Target of ``month_start`` (default the
 	  current month). A blank field keeps the stored value.
@@ -412,13 +411,12 @@ def set_outlet_target(
 		frappe.throw(_("Not permitted to access Company {0}").format(company), frappe.PermissionError)
 
 	sales = _parse_amount(target_sales, _("Monthly Target Sales"))
-	transactions = _parse_count(target_transactions)
 	overall = _parse_amount(overall_target, _("Overall Sales Target"))
 	start = _parse_date(overall_from)
 
 	result = {"monthly": None, "overall_updated": False}
 
-	if sales is not None or transactions is not None:
+	if sales is not None:
 		month = _parse_date(month_start) or get_first_day(nowdate())
 		if month != get_first_day(month):
 			frappe.throw(_("Month Start must be the first day of the month"))
@@ -436,10 +434,7 @@ def set_outlet_target(
 				{"doctype": "POS Monthly Target", "company": company, "month_start": str(month)}
 			)
 		)
-		if sales is not None:
-			doc.target_sales = sales
-		if transactions is not None:
-			doc.target_transactions = transactions
+		doc.target_sales = sales
 		doc.save()
 		result["monthly"] = doc.name
 
@@ -466,7 +461,13 @@ def set_outlet_target(
 
 
 @frappe.whitelist()
-def get_outlet_targets(month_start=None):
+def get_outlet_targets(
+	month_start=None,
+	company=None,
+	search=None,
+	start=0,
+	page_length=None,
+):
 	"""Per-outlet target sheet for the "Outlet Targets" desk page (read-only).
 
 	One row for EVERY company in the user's full permission window (selling or
@@ -476,6 +477,10 @@ def get_outlet_targets(month_start=None):
 	current month stops at today (cut at "now"); a closed month reports its
 	full actuals (projection = actual); a future month has no elapsed days, so
 	its actuals are 0 and the projection is null.
+
+	Filtering/pagination run BEFORE the expensive aggregate queries: only the
+	companies on the requested page are computed. ``page_length=None`` (the
+	default) returns all rows — the old full-sheet behaviour.
 	"""
 	_check_hq_access()
 
@@ -489,7 +494,35 @@ def get_outlet_targets(month_start=None):
 	# company_options = the user's full visible window, pre-narrowing.
 	scope = _resolve_scope(None, 0)
 	companies = scope["company_options"]
-	currency_map = _currency_map(companies)
+	# Exact company pick wins over the substring search.
+	if company:
+		companies = [c for c in companies if c == company]
+	elif search:
+		needle = search.strip().lower()
+		if needle:
+			companies = [c for c in companies if needle in c.lower()]
+	total_count = len(companies)
+
+	start = cint(start)
+	page_length = cint(page_length) if page_length not in (None, "", 0) else None
+	if page_length:
+		page = companies[start : start + page_length]
+	else:
+		page = companies[start:]
+	if not page:
+		return {
+			"month_start": str(month),
+			"month_end": str(month_end),
+			"days_elapsed": 0,
+			"total_count": total_count,
+			"start": start,
+			"page_length": page_length,
+			"target_basis": _target_basis_payload(),
+			"rows": [],
+			"generated_at": now_datetime().strftime("%Y-%m-%d %H:%M:%S"),
+		}
+
+	currency_map = _currency_map(page)
 
 	if month == get_first_day(today):
 		days_elapsed = (today - month).days + 1
@@ -501,13 +534,13 @@ def get_outlet_targets(month_start=None):
 		days_elapsed = 0
 		window_end, cutoff = month_end, None
 
-	where, params = _si_window_where(companies, scope["profiles"], month, window_end, cutoff)
+	where, params = _si_window_where(page, scope["profiles"], month, window_end, cutoff)
 	mtd_rows = _totals_rows(where, params)
 	mtd_by_company = {r.company: r for r in mtd_rows}
 	# The MTD numerator follows the configured monthly target basis; the sales
 	# columns below (mtd_net_tax_incl, mtd_orders) stay sales on every basis.
 	actuals = _basis_actuals(
-		companies,
+		page,
 		scope["profiles"],
 		get_target_basis("monthly"),
 		month,
@@ -520,14 +553,18 @@ def get_outlet_targets(month_start=None):
 		r.company: r
 		for r in frappe.get_all(
 			"POS Monthly Target",
-			filters={"company": ["in", companies], "month_start": str(month)},
-			fields=["company", "target_sales", "target_transactions"],
+			filters={"company": ["in", page], "month_start": str(month)},
+			fields=["company", "target_sales"],
 		)
 	}
-	overall_by_company = _overall_target_section(scope, currency_map)["by_company"]
+	# Payback section rides the same page slice: scope copy narrowed to the
+	# page's companies so the cumulative query only touches what is shown.
+	overall_by_company = _overall_target_section(
+		{**scope, "companies": page}, currency_map
+	)["by_company"]
 
 	rows = []
-	for company in companies:
+	for company in page:
 		target = targets_by_company.get(company)
 		actual = mtd_by_company.get(company)
 		net = flt(actual.net_tax_incl) if actual else 0.0
@@ -545,7 +582,6 @@ def get_outlet_targets(month_start=None):
 				"currency": currency_map.get(company),
 				"monthly": {
 					"target_sales": target_sales,
-					"target_transactions": int(target.target_transactions or 0) if target else None,
 					"missing": target is None,
 				},
 				"mtd_net_tax_incl": round(net, 2),
@@ -564,6 +600,9 @@ def get_outlet_targets(month_start=None):
 		"month_start": str(month),
 		"month_end": str(month_end),
 		"days_elapsed": days_elapsed,
+		"total_count": total_count,
+		"start": start,
+		"page_length": page_length,
 		"target_basis": _target_basis_payload(),
 		"rows": rows,
 		"generated_at": now_datetime().strftime("%Y-%m-%d %H:%M:%S"),
@@ -607,6 +646,14 @@ def _currency_map(companies):
 	rows = frappe.get_all("Company", filters={"name": ["in", companies]}, fields=["name", "default_currency"])
 	return {r.name: r.default_currency for r in rows}
 
+
+def _main_currency(rows, amount_key):
+	"""Report charts/cards can't mix currencies: show the one carrying the most
+	money; rows in other currencies stay in the table only."""
+	totals = {}
+	for r in rows:
+		totals[r.get("currency")] = totals.get(r.get("currency"), 0) + abs(flt(r.get(amount_key)))
+	return max(totals, key=totals.get) if totals else None
 
 def _default_company(companies):
 	default = frappe.db.get_single_value("Global Defaults", "default_company")
@@ -1707,7 +1754,7 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 	rows = frappe.get_all(
 		"POS Monthly Target",
 		filters={"company": ["in", companies], "month_start": month_start},
-		fields=["company", "target_sales", "target_transactions"],
+		fields=["company", "target_sales"],
 	)
 	missing = [c for c in companies if c not in {r.company for r in rows}]
 
@@ -1728,7 +1775,6 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		basis_row = actuals.get(company) or {}
 		value = flt(basis_row.get("value"))
 		target_sales = flt(target.target_sales) if target else None
-		target_tx = int(target.target_transactions or 0) if target else None
 		projected = (
 			round(value / days_elapsed * days_in_month, 2)
 			if target and days_elapsed
@@ -1740,12 +1786,10 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 				"currency": currency_map.get(company),
 				"missing": target is None,
 				"target_sales": target_sales,
-				"target_transactions": target_tx,
 				"mtd_net_tax_incl": round(net, 2),
 				"mtd_orders": orders,
 				"mtd_apc": round(net / orders, 2) if orders else None,
 				"achievement_sales_pct": ratio(value, target_sales) if target else None,
-				"achievement_transactions_pct": ratio(orders, target_tx) if target else None,
 				"projected_sales": projected,
 				"projected_achievement_pct": (
 					ratio(projected, target_sales) if target and projected is not None else None
@@ -1758,13 +1802,10 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		)
 
 	sales_target = {}
-	tx_by_ccy = {}
 	for r in rows:
 		ccy = currency_map.get(r.company)
 		if ccy:
 			sales_target[ccy] = sales_target.get(ccy, 0) + flt(r.target_sales)
-			tx_by_ccy[ccy] = tx_by_ccy.get(ccy, 0) + int(r.target_transactions or 0)
-	tx_target = sum(tx_by_ccy.values())
 
 	# Basis MTD per currency — same aggregation path as monthly["net_tax_incl"]
 	# so the two reconcile bit-for-bit on the default basis.
@@ -1806,18 +1847,9 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 		"month_start": month_start,
 		"by_company": by_company,
 		"target_sales": target_metric,
-		"target_transactions": tx_target,
 		"mtd_value_by_currency": mtd_value_metric,
 		"achievement_sales_pct": achievement,
-		"achievement_transactions_pct": ratio(monthly["orders"], tx_target),
 		"surplus_sales": surplus,
-		"apc_target": {
-			# per-currency transaction targets: one shared denominator would
-			# divide e.g. an SGD sales target by the global (IDR-heavy) count
-			ccy: (round(sales_target[ccy] / n, 2) if n else None)
-			for ccy, n in tx_by_ccy.items()
-			if ccy in sales_target
-		},
 		"daily_target_sales": {
 			ccy: (round(v / days_in_month, 2) if days_in_month else None) for ccy, v in sales_target.items()
 		},
@@ -1829,12 +1861,6 @@ def _targets_section(companies, currency_map, default_ccy, window, monthly, mtd_
 			"Projection = MTD actual / days elapsed x days in month; days elapsed counts today."
 		),
 		"projected_orders": projected_orders if window["days_elapsed"] else None,
-		"projected_achievement_transactions_pct": (
-			ratio(projected_orders, tx_target) if window["days_elapsed"] else None
-		),
-		"projected_surplus_orders": (
-			projected_orders - tx_target if window["days_elapsed"] and tx_target else None
-		),
 		"apc_projection_note": _(
 			"APC is an average, so its projection equals the MTD figure (never day-extrapolated)."
 		),

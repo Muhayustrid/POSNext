@@ -780,10 +780,7 @@ class HQSalesMonitor {
 
 		// One stacked cell replaces the old target/MTD/achievement trio: the
 		// progress bar + bold pct on top, "MTD / Target" as a quiet sub line.
-		// Secondary figures (target/MTD transactions) ride one native-title
-		// tooltip so the sub stays a single line. Money figures read the
-		// basis-neutral keys (mtd_value/target_value/...) with the old
-		// net-sales keys as fallback for older payloads.
+		// Money figures read the basis-neutral keys (mtd_value/target_value/...)
 		const projTip =
 			!missing && (t.projected_value ?? t.projected_sales) != null
 				? this._cell_tip(`${__("proy.")} ${HQ_UTILS.fmtMoney(t.projected_value ?? t.projected_sales, bare)} · ${HQ_UTILS.fmtPct(t.projected_achievement_pct, 1)}`)

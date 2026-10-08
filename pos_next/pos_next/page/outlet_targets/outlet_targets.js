@@ -46,23 +46,26 @@ frappe.pages["outlet-targets"].on_page_show = function (wrapper) {
 };
 
 // One table, one job: monthly targets + the overall payback ("balik modal")
-// target per outlet. Replaces the Set Target dialog on the HQ page.
+// target per outlet, with the standard Frappe filter bar, server-side
+// pagination and Excel export/import.
 class OutletTargetsPage {
 	constructor(page) {
 		this.page = page;
 		this.state = null;
-		this.search = "";
+		this.start = 0;
+		this.page_length = 20;
 		this._setup_actions();
 		this._setup_filters();
 		this.$root = $('<div class="ot-page">').appendTo(page.main);
-		this.$root.html(`<p class="ot-muted">${__("Loading...")}</p>`);
+		this.$root.html(`<p class="text-muted">${__("Loading...")}</p>`);
 		this.refresh();
 	}
 
 	_setup_actions() {
 		this.page.set_primary_action(__("Refresh"), () => this.refresh());
-		this.page.add_menu_item(__("Print"), () => window.print());
-		this.page.add_menu_item(__("Export CSV"), () => this._export_csv());
+		this.page.add_menu_item(__("Export Excel"), () => this._export_excel());
+		this.page.add_menu_item(__("Import Excel"), () => this._import_dialog());
+		this.page.add_menu_item(__("Download Template"), () => this._export_excel(true));
 	}
 
 	// Frappe page-field change handlers run before the control commits its
@@ -87,7 +90,10 @@ class OutletTargetsPage {
 			fieldtype: "Select",
 			options: monthOpts,
 			default: start[1],
-			change: this._later(() => this.refresh()),
+			change: this._later(() => {
+				this.start = 0;
+				this.refresh();
+			}),
 		});
 		this.year_field = this.page.add_field({
 			fieldname: "year",
@@ -95,13 +101,33 @@ class OutletTargetsPage {
 			fieldtype: "Select",
 			options: yearOpts,
 			default: String(year),
-			change: this._later(() => this.refresh()),
+			change: this._later(() => {
+				this.start = 0;
+				this.refresh();
+			}),
+		});
+		this.outlet_field = this.page.add_field({
+			fieldname: "outlet",
+			label: __("Outlet"),
+			fieldtype: "Data",
+			placeholder: __("Search outlet"),
+			change: frappe.utils.debounce(
+				this._later(() => {
+					this.start = 0;
+					this.refresh();
+				}),
+				300
+			),
 		});
 	}
 
 	// The API receives exactly this key: year + "-" + month + "-01".
 	_month_start() {
 		return `${this.year_field.get_value()}-${this.month_field.get_value()}-01`;
+	}
+
+	_search() {
+		return (this.outlet_field.get_value() || "").trim();
 	}
 
 	// Target basis (enum + server-translated labels arrive in the payload's
@@ -120,7 +146,12 @@ class OutletTargetsPage {
 		return new Promise((resolve) => {
 			frappe.call({
 				method: "pos_next.api.hq_monitoring.get_outlet_targets",
-				args: { month_start: this._month_start() },
+				args: {
+					month_start: this._month_start(),
+					search: this._search(),
+					start: this.start,
+					page_length: this.page_length,
+				},
 				freeze: true,
 				callback: (r) => {
 					if (r.message) {
@@ -144,7 +175,7 @@ class OutletTargetsPage {
 		const exc = r && r.exc ? String(r.exc).trim().split("\n").filter(Boolean) : [];
 		if (exc.length) msg = exc[exc.length - 1];
 		this.$root.html(
-			`<div class="ot-card"><p class="ot-error">${frappe.utils.escape_html(msg)}</p></div>`
+			`<div class="frappe-card"><p class="text-muted">${frappe.utils.escape_html(msg)}</p></div>`
 		);
 	}
 
@@ -154,21 +185,18 @@ class OutletTargetsPage {
 
 	_render() {
 		const rows = this.state.rows || [];
+		const total = this.state.total_count || 0;
 		if (!rows.length) {
-			this.$root.html(`<div class="ot-card"><p class="ot-muted">${__("No data")}</p></div>`);
+			this.$root.html(
+				`<div class="frappe-card"><p class="text-muted">${__("No data")}</p></div>`
+			);
 			return;
 		}
 		// Target columns are headed by the configured basis (e.g.
 		// "Target Laba Kotor (bulanan)"); the sales columns stay sales.
 		const mlabel = frappe.utils.escape_html(this._basis_label("monthly"));
 		this.$root.html([
-			`<div class="ot-toolbar">
-				<input type="search" class="ot-input" data-ot-search
-					placeholder="${__("Search outlet…")}" value="${frappe.utils.escape_html(this.search)}"
-					aria-label="${__("Search outlet")}">
-				<button class="btn btn-xs btn-default" data-ot-export>${__("Export CSV")}</button>
-			</div>`,
-			`<div class="ot-card"><div class="ot-table-scroll"><table class="ot-table">
+			`<div class="frappe-card"><div class="ot-table-scroll"><table class="ot-table">
 				<thead><tr>
 					<th>${__("Outlet (Company)")}</th>
 					<th class="ot-num">${__("Target")} ${mlabel} (${__("monthly")})</th>
@@ -180,12 +208,12 @@ class OutletTargetsPage {
 				</tr></thead>
 				<tbody>${rows.map((r) => this._row(r)).join("")}</tbody>
 			</table></div></div>`,
-			`<div class="ot-sub ot-muted">${__("Month")}: ${frappe.utils.escape_html(this.state.month_start)}
+			this._pager(total),
+			`<div class="ot-sub text-muted">${__("Month")}: ${frappe.utils.escape_html(this.state.month_start)}
 				· ${__("days elapsed")}: ${HQ_UTILS.fmtCount(this.state.days_elapsed ?? 0)}
 				· ${__("Generated")}: ${frappe.utils.escape_html(this.state.generated_at)}</div>`,
 		].join(""));
-		this._bind_delegates();
-		this._apply_search();
+		this._bind_pager();
 	}
 
 	_row(r) {
@@ -193,7 +221,7 @@ class OutletTargetsPage {
 		const o = r.overall;
 		const ccy = r.currency || "";
 		const missing = !!m.missing;
-		const unset = `<span class="ot-small ot-muted">${__("not set yet")}</span>`;
+		const unset = `<span class="text-muted ot-small">${__("not set yet")}</span>`;
 		// Neutral basis keys with the old net-sales keys as fallback; MTD TC
 		// stays a sales count on every basis.
 		const mtdValue = r.mtd_value ?? r.mtd_net_tax_incl;
@@ -201,21 +229,20 @@ class OutletTargetsPage {
 
 		const targetCell = missing
 			? unset
-			: `<span class="ot-money">${HQ_UTILS.fmtMoney(r.target_value ?? m.target_sales, ccy)}</span>
-				<div class="ot-sub">${HQ_UTILS.fmtCount(m.target_transactions ?? 0)} ${__("target TC")}</div>`;
+			: `<span class="ot-money">${HQ_UTILS.fmtMoney(r.target_value ?? m.target_sales, ccy)}</span>`;
 		const mtdCell = `<span class="ot-money">${HQ_UTILS.fmtMoney(mtdValue ?? 0, ccy)}</span>
 			<div class="ot-sub">${HQ_UTILS.fmtCount(r.mtd_orders ?? 0)} ${__("TC")}</div>`;
 		const achCell = missing
 			? unset
 			: `${this._bar(r.achievement_sales_pct)} <b class="ot-pct">${HQ_UTILS.fmtPct(r.achievement_sales_pct, 1)}</b>`;
 		const projCell = missing || projected == null
-			? `<span class="ot-muted">-</span>`
+			? `<span class="text-muted">-</span>`
 			: `<span class="ot-money">${HQ_UTILS.fmtMoney(projected, ccy)}</span>`;
 		const overallCell = o && o.overall_target != null
 			? `${this._bar(o.achievement_pct, "ot-bar--thin")} <b class="ot-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>
 				<div class="ot-sub">${__("cum.")} <span class="ot-money">${HQ_UTILS.fmtMoney(o.cumulative_value ?? o.cumulative_net_tax_incl, ccy)}</span>
 				/ <span class="ot-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)} →` : ""}</div>`
-			: `<span class="ot-muted">-</span>`;
+			: `<span class="text-muted">-</span>`;
 
 		return `<tr data-ot-row data-ot-company="${frappe.utils.escape_html(r.company)}">
 			<td class="ot-outlet">${frappe.utils.escape_html(r.company)}</td>
@@ -235,6 +262,49 @@ class OutletTargetsPage {
 			aria-label="${HQ_UTILS.fmtPct(pct === null || pct === undefined ? 0 : pct)}"><span class="ot-bar-fill" style="width:${value}%"></span></span>`;
 	}
 
+	// Frappe list-view-style pager: page-size buttons + Prev/Next + count.
+	_pager(total) {
+		const from = this.start + 1;
+		const to = Math.min(this.start + this.page_length, total);
+		const sizes = [20, 100, 500];
+		const sizeBtns = sizes
+			.map(
+				(n) =>
+					`<button class="btn btn-xs btn-default${n === this.page_length ? " btn-primary" : ""}" data-ot-size="${n}">${n}</button>`
+			)
+			.join("");
+		return `<div class="ot-pager">
+			<span class="ot-pager-sizes">${sizeBtns}</span>
+			<span class="ot-pager-nav">
+				<button class="btn btn-xs btn-default" data-ot-prev ${this.start <= 0 ? "disabled" : ""}>${__("Previous")}</button>
+				<button class="btn btn-xs btn-default" data-ot-next ${to >= total ? "disabled" : ""}>${__("Next")}</button>
+			</span>
+			<span class="ot-sub text-muted">${from}–${to} ${__("of {0}", [total])}</span>
+		</div>`;
+	}
+
+	_bind_pager() {
+		this.$root
+			.off("click", "[data-ot-set]")
+			.on("click", "[data-ot-set]", (e) => this._set_dialog($(e.currentTarget).data("ot-set")))
+			.off("click", "[data-ot-size]")
+			.on("click", "[data-ot-size]", (e) => {
+				this.page_length = Number($(e.currentTarget).data("ot-size"));
+				this.start = 0;
+				this.refresh();
+			})
+			.off("click", "[data-ot-prev]")
+			.on("click", "[data-ot-prev]", () => {
+				this.start = Math.max(0, this.start - this.page_length);
+				this.refresh();
+			})
+			.off("click", "[data-ot-next]")
+			.on("click", "[data-ot-next]", () => {
+				this.start = this.start + this.page_length;
+				this.refresh();
+			});
+	}
+
 	// ------------------------------------------------------------------
 	// Set Target dialog — monthly targets for the selected month plus the
 	// overall payback target on the Company master. Blank fields keep stored
@@ -251,35 +321,59 @@ class OutletTargetsPage {
 		const mlabel = this._basis_label("monthly");
 		const olabel = this._basis_label("overall");
 		const netHint = this._basis("monthly") === "Net Sales" ? ` (${__("net incl. tax")})` : "";
+		const ccy = row.currency || "";
+		const mtdValue = row.mtd_value ?? row.mtd_net_tax_incl ?? 0;
+		const achievement =
+			row.achievement_sales_pct == null
+				? ""
+				: `${__("Achievement")}: ${HQ_UTILS.fmtPct(row.achievement_sales_pct, 1)} · ${__("MTD")}: ${HQ_UTILS.fmtMoney(mtdValue, ccy)}`;
+		const overallAch =
+			!o || o.overall_target == null
+				? ""
+				: `${__("cum.")} ${HQ_UTILS.fmtMoney(o.cumulative_value ?? o.cumulative_net_tax_incl, ccy)} / ${HQ_UTILS.fmtMoney(o.overall_target, ccy)} = ${HQ_UTILS.fmtPct(o.achievement_pct, 1)}`;
 		const d = new frappe.ui.Dialog({
 			title: `${__("Set Target")} · ${frappe.utils.escape_html(company)}`,
 			fields: [
 				{
-					fieldname: "monthly_head",
+					fieldname: "monthly_section",
+					fieldtype: "Section Break",
+					label: `${__("Monthly Target")} (${frappe.utils.escape_html(mlabel)})`,
+				},
+				{
+					fieldname: "mtd_head",
 					fieldtype: "HTML",
-					options: `<div class="ot-dialog-head">${__("Monthly targets")} (${frappe.utils.escape_html(mlabel)}) · <b>${frappe.utils.escape_html(month_start)}</b></div>`,
+					options: `<div class="ot-dialog-head text-muted">${frappe.utils.escape_html(month_start)}${achievement ? ` · ${frappe.utils.escape_html(achievement)}` : ""}</div>`,
+				},
+				{
+					fieldname: "cb_monthly",
+					fieldtype: "Column Break",
 				},
 				{
 					fieldname: "target_sales",
 					label: `${__("Target")} ${mlabel}${netHint}`,
 					fieldtype: "Currency",
+					options: ccy,
 					default: m.target_sales ?? "",
 				},
 				{
-					fieldname: "target_transactions",
-					label: __("Target Transactions"),
-					fieldtype: "Int",
-					default: m.target_transactions ?? "",
+					fieldname: "overall_section",
+					fieldtype: "Section Break",
+					label: `${__("Overall / balik modal")} (${frappe.utils.escape_html(olabel)})`,
 				},
 				{
 					fieldname: "overall_head",
 					fieldtype: "HTML",
-					options: `<div class="ot-dialog-head">${__("Overall / balik modal")} (${frappe.utils.escape_html(olabel)}) · ${__("one-time target on the outlet")}</div>`,
+					options: `<div class="ot-dialog-head text-muted">${frappe.utils.escape_html(overallAch || __("one-time target on the outlet"))}</div>`,
+				},
+				{
+					fieldname: "cb_overall",
+					fieldtype: "Column Break",
 				},
 				{
 					fieldname: "overall_target",
 					label: `${__("Overall Target")} (${olabel})`,
 					fieldtype: "Currency",
+					options: ccy,
 					default: o.overall_target ?? "",
 					description: `${__("0 clears the overall target")}.`,
 				},
@@ -299,7 +393,6 @@ class OutletTargetsPage {
 						company,
 						month_start,
 						target_sales: values.target_sales ?? "",
-						target_transactions: values.target_transactions ?? "",
 						overall_target: values.overall_target ?? "",
 						overall_from: values.overall_from || "",
 					},
@@ -316,81 +409,81 @@ class OutletTargetsPage {
 	}
 
 	// ------------------------------------------------------------------
-	// Events delegated from the DOM
+	// Excel export / import
 	// ------------------------------------------------------------------
 
-	_bind_delegates() {
-		this.$root
-			.off("click", "[data-ot-set]")
-			.on("click", "[data-ot-set]", (e) => {
-				this._set_dialog($(e.currentTarget).data("ot-set"));
-			})
-			.off("input", "[data-ot-search]")
-			.on("input", "[data-ot-search]", frappe.utils.debounce((e) => {
-				this.search = (e.currentTarget.value || "").trim();
-				this._apply_search();
-			}, 150))
-			.off("click", "[data-ot-export]")
-			.on("click", "[data-ot-export]", () => this._export_csv());
-	}
-
-	_apply_search() {
-		const q = (this.search || "").toLowerCase();
-		this.$root.find("[data-ot-row]").each((_, el) => {
-			const name = String($(el).data("ot-company") || "").toLowerCase();
-			$(el).toggle(!q || name.includes(q));
+	_export_excel(template) {
+		const params = new URLSearchParams({
+			month_start: this._month_start(),
 		});
+		const search = this._search();
+		if (search) params.set("search", search);
+		if (!template && this.state && this.state.total_count <= this.page_length) {
+			params.set("page_length", String(this.state.total_count));
+		}
+		window.open(
+			frappe.urllib.get_full_url(`/api/method/pos_next.api.outlet_targets.export_outlet_targets?${params}`)
+		);
 	}
 
-	// CSV stays machine-readable: raw ungrouped numbers, never the localized
-	// display strings. Per-row currency gets its own column instead of being
-	// baked into the amount.
-	_export_csv() {
-		const s = this.state;
-		if (!s) return;
-		// Target columns are headed by the configured basis labels; values
-		// read the neutral keys with the old net-sales keys as fallback.
-		const mlabel = this._basis_label("monthly");
-		const olabel = this._basis_label("overall");
-		const csv = HQ_UTILS.toCsv(
-			[
-				__("Outlet (Company)"),
-				__("Currency"),
-				`${__("Target")} ${mlabel} (${__("monthly")})`,
-				__("Target Transactions"),
-				`${mlabel} ${__("MTD")}`,
-				__("MTD Transactions"),
-				__("Achievement %"),
-				`${__("Projected")} ${mlabel}`,
-				`${__("Overall Target")} (${olabel})`,
-				__("Overall From"),
-				`${olabel} ${__("Cumulative")}`,
-				__("Overall Achievement %"),
+	_import_dialog() {
+		const d = new frappe.ui.Dialog({
+			title: __("Import Excel"),
+			fields: [
+				{
+					fieldname: "attach",
+					label: __("Excel File"),
+					fieldtype: "Attach",
+					options: { restrictions: { allowed_file_types: [".xlsx"], max_file_size: 5 * 1024 * 1024 } },
+				},
+				{
+					fieldname: "help",
+					fieldtype: "HTML",
+					options: `<p class="text-muted ot-sub">${frappe.utils.escape_html(
+						__("Use the Export Excel sheet layout. Only Monthly Target, Balik Modal Target and Balik Modal From are applied.")
+					)}</p>`,
+				},
 			],
-			(s.rows || []).map((r) => {
-				const m = r.monthly || {};
-				const o = r.overall || {};
-				return [
-					r.company,
-					r.currency,
-					m.missing ? "" : (r.target_value ?? m.target_sales),
-					m.missing ? "" : m.target_transactions,
-					r.mtd_value ?? r.mtd_net_tax_incl,
-					r.mtd_orders,
-					m.missing ? "" : r.achievement_sales_pct,
-					m.missing ? "" : (r.projected_value ?? r.projected_sales),
-					o.overall_target ?? "",
-					o.from_date || "",
-					o.cumulative_value ?? o.cumulative_net_tax_incl ?? "",
-					o.achievement_pct ?? "",
-				];
-			})
-		);
-		const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-		const a = document.createElement("a");
-		a.href = URL.createObjectURL(blob);
-		a.download = `outlet-targets-${s.month_start}.csv`;
-		a.click();
-		URL.revokeObjectURL(a.href);
+			primary_action_label: __("Import"),
+			primary_action: (values) => {
+				if (!values.attach) {
+					frappe.msgprint(__("Please attach a file"));
+					return;
+				}
+				frappe.call({
+					method: "pos_next.api.outlet_targets.import_outlet_targets",
+					args: { file_url: values.attach, month_start: this._month_start() },
+					freeze: true,
+					callback: (r) => {
+						d.hide();
+						this._import_summary(r.message || {});
+						this.refresh();
+					},
+				});
+			},
+		});
+		d.show();
+	}
+
+	_import_summary(result) {
+		const errors = result.errors || [];
+		const html = [
+			`<p>${__("Updated")}: <b>${result.updated || 0}</b> · ${__("Skipped")}: <b>${result.skipped || 0}</b> · ${__("Errors")}: <b>${errors.length}</b></p>`,
+		];
+		if (errors.length) {
+			html.push(
+				`<ul class="ot-import-errors">${errors
+					.map(
+						(e) =>
+							`<li>${__("Row")} ${e.row} · ${frappe.utils.escape_html(e.company || "")}: ${frappe.utils.escape_html(e.message || "")}</li>`
+					)
+					.join("")}</ul>`
+			);
+		}
+		frappe.msgprint({
+			title: __("Import summary"),
+			indicator: errors.length ? "orange" : "green",
+			message: html.join(""),
+		});
 	}
 }
