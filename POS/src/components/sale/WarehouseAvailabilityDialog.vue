@@ -517,6 +517,54 @@
 						</div>
 					</div>
 
+					<!-- Stock Balance (Search Mode, No Item Selected) -->
+					<div
+						v-else-if="
+							isSearchMode &&
+							!selectedItemCode &&
+							!showVariantSelection &&
+							balanceItems.length > 0
+						"
+						class="flex flex-col"
+					>
+						<div
+							class="flex items-center justify-between px-1 pb-2 text-xs font-medium text-gray-500"
+						>
+							<span>{{ __("Stock Balance") }}</span>
+							<span>{{ __("Qty") }}</span>
+						</div>
+						<button
+							v-for="item in balanceItems"
+							:key="item.item_code"
+							@click="selectItem(item)"
+							class="w-full text-start px-3 py-2.5 flex items-center gap-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
+						>
+							<div class="flex-1 min-w-0">
+								<p class="text-sm font-medium text-gray-900 truncate">
+									{{ item.item_name }}
+								</p>
+								<p class="text-xs text-gray-500 truncate">{{ item.item_code }}</p>
+							</div>
+							<span
+								:class="[
+									'text-sm font-semibold flex-shrink-0',
+									(item.actual_qty || 0) > 0 ? 'text-green-600' : 'text-red-500',
+								]"
+							>
+								{{ Math.floor(item.actual_qty || 0) }}
+								{{ item.stock_uom || __("Nos") }}
+							</span>
+						</button>
+						<button
+							v-if="balanceHasMore"
+							@click="loadBalance()"
+							:disabled="balanceLoading"
+							class="mt-3 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+						>
+							{{ balanceLoading ? __("Loading...") : __("Load More") }}
+						</button>
+					</div>
+
 					<!-- Prompt to Search (Search Mode, No Item Selected) -->
 					<div
 						v-else-if="isSearchMode && !selectedItemCode && !showVariantSelection"
@@ -936,6 +984,12 @@ const selectedVariants = ref([]);
 const loadingVariants = ref(false);
 const showVariantSelection = ref(false);
 
+// Stock balance list for the profile warehouse, shown before any search
+const BALANCE_PAGE = 50;
+const balanceItems = ref([]);
+const balanceLoading = ref(false);
+const balanceHasMore = ref(false);
+
 // Warehouse availability state
 const loading = ref(false);
 const error = ref(null);
@@ -1005,6 +1059,7 @@ watch(
 				loading.value = false;
 				await nextTick();
 				focusSearch();
+				loadBalance(true);
 			} else if (props.itemCode) {
 				// Item mode - check if item has variants first
 				// We need to fetch item details to check has_variants
@@ -1067,6 +1122,26 @@ function resetSearchState() {
 	warehouses.value = [];
 	error.value = null;
 	// Don't reset isReady here - it's managed by the watch
+}
+
+async function loadBalance(reset = false) {
+	if (!props.posProfile || balanceLoading.value) return;
+	balanceLoading.value = true;
+	try {
+		const start = reset ? 0 : balanceItems.value.length;
+		const response =
+			(await call("pos_next.api.items.get_stock_balance", {
+				pos_profile: props.posProfile,
+				start,
+				limit: BALANCE_PAGE,
+			})) || [];
+		balanceItems.value = reset ? response : [...balanceItems.value, ...response];
+		balanceHasMore.value = response.length === BALANCE_PAGE;
+	} catch (err) {
+		console.error("Error loading stock balance:", err);
+	} finally {
+		balanceLoading.value = false;
+	}
 }
 
 function focusSearch() {

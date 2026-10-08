@@ -15,10 +15,14 @@ vi.mock("frappe-ui", async () => {
 		emits: ["click"],
 		template: `<button v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
 	})
-	const stub = defineComponent({ name: "FrappeUIStub", render: () => null })
+	const FeatherIcon = defineComponent({
+		name: "FeatherIcon",
+		props: ["name"],
+		template: `<i :data-icon="name" />`,
+	})
 	return {
 		Button,
-		FeatherIcon: stub,
+		FeatherIcon,
 		createResource: (opts) => {
 			const reload = vi.fn(() => {
 				r.loading = true
@@ -41,6 +45,7 @@ vi.mock("@/composables/useFormatters", () => ({
 vi.mock("@/utils/currency", () => ({
 	DEFAULT_CURRENCY: "IDR",
 	formatCurrency: (amount, currency) => `${amount} ${currency}`,
+	getCurrencySymbol: () => "Rp",
 }))
 
 // Read-only store usage: a fixed duration keeps the header chip deterministic;
@@ -152,7 +157,11 @@ function mountDashboard(props = {}) {
 	resources.instances.length = 0
 	const wrapper = mount(ShiftDashboard, {
 		props: { openingShift: "OS-1", ...props },
-		global: { config: { globalProperties: { __: globalThis.__ } } },
+		global: {
+			config: { globalProperties: { __: globalThis.__ } },
+			// BottomSheet teleports to body; keep the sheet findable in tests
+			stubs: { Teleport: true },
+		},
 	})
 	return { wrapper, entry: dashboardResource() }
 }
@@ -190,18 +199,26 @@ describe("ShiftDashboard", () => {
 		expect(wrapper.find('[data-test="kpi-grid"]').exists()).toBe(true)
 	})
 
-	it("renders the sales hero with companion stats instead of equal KPI cards", async () => {
+	it("renders KPI cards with Net Sales leading", async () => {
 		const { wrapper } = await mountWithData()
-		const hero = wrapper.find('[data-test="kpi-net-sales"]')
-		expect(hero.text()).toContain("Net Sales")
-		expect(hero.text()).toContain("150000 IDR")
-		expect(hero.text()).toContain("Transactions 3")
-		expect(hero.text()).toContain("50000 IDR")
-		// companion stats live in the quiet strip
+		const netSales = wrapper.find('[data-test="kpi-net-sales"]')
+		expect(netSales.text()).toContain("Net Sales")
+		expect(netSales.text()).toContain("150000 IDR")
+		// discounts live as a quiet caption under Net Sales
+		const discounts = wrapper.find('[data-test="kpi-discounts"]')
+		expect(discounts.text()).toContain("2000 IDR")
+		// companion stats live in their own cards
+		const cards = wrapper.findAll('[data-test="kpi-grid"] > div')
+		expect(cards.map((c) => c.text())).toEqual([
+			expect.stringContaining("Net Sales"),
+			expect.stringContaining("Transactions"),
+			expect.stringContaining("Average Transaction"),
+			expect.stringContaining("Items Sold"),
+			expect.stringContaining("Returns"),
+		])
+		expect(cards[1].text()).toContain("3")
+		expect(cards[2].text()).toContain("50000 IDR")
 		expect(wrapper.find('[data-test="kpi-items-sold"]').text()).toContain("7")
-		expect(wrapper.find('[data-test="kpi-discounts"]').text()).toContain(
-			"2000 IDR",
-		)
 		expect(wrapper.find('[data-test="kpi-returns"]').text()).toContain(
 			"-10000 IDR",
 		)
@@ -210,8 +227,32 @@ describe("ShiftDashboard", () => {
 		)
 		// count and nominal are no longer piled into one "1 · -10.000" line
 		expect(wrapper.find('[data-test="kpi-returns"]').text()).not.toContain("·")
-		// no cash card in the hero band — cash reads once, in Payment Methods
+		// no cash card in the KPI band — cash reads once, in Payment Methods
 		expect(wrapper.find('[data-test="kpi-cash"]').exists()).toBe(false)
+	})
+
+	it("renders the y-axis with nice gridline labels", async () => {
+		const { wrapper } = await mountWithData()
+		// max positive = 100000 → nice step 25000 → labels 0..100k
+		const labels = wrapper
+			.findAll('[data-test="hourly-y-axis"] span')
+			.map((s) => s.text())
+		expect(labels).toEqual([
+			"Rp 100K",
+			"Rp 75K",
+			"Rp 50K",
+			"Rp 25K",
+			"0",
+		])
+	})
+
+	it("emits view-invoice when a recent transaction row is clicked", async () => {
+		const { wrapper } = await mountWithData()
+		const rows = wrapper.findAll('[data-test="recent-row"]')
+		await rows[1].trigger("click")
+		expect(wrapper.emitted("view-invoice")).toEqual([
+			[{ name: "INV-2026-0002" }],
+		])
 	})
 
 	it("hides the returns stat when there are no returns", async () => {
@@ -238,12 +279,29 @@ describe("ShiftDashboard", () => {
 		)
 	})
 
-	it("renders calm payment rows with one drawer note for the whole section", async () => {
+	it("renders payment rows with share percentage and progress bar width", async () => {
 		const { wrapper } = await mountWithData()
 		const rows = wrapper.findAll('[data-test="payment-row"]')
 		expect(rows.length).toBe(2)
 		expect(rows[0].text()).toContain("Cash")
 		expect(rows[0].text()).toContain("90000 IDR")
+		// share of the 150000 positive total
+		const pcts = rows.map((r) => r.find('[data-test="payment-pct"]').text())
+		expect(pcts).toEqual(["60%", "40%"])
+		// progress bars carry the same share as inline width
+		const bar = rows[0].find('[data-test="payment-bar"] > div')
+		expect(bar.attributes("style")).toContain("width: 60%")
+		// total line closes the section
+		expect(wrapper.find('[data-test="payments-section"]').text()).toContain(
+			"Total Payments",
+		)
+		expect(wrapper.find('[data-test="payments-section"]').text()).toContain(
+			"150000 IDR",
+		)
+	})
+
+	it("keeps one drawer note for the whole section", async () => {
+		const { wrapper } = await mountWithData()
 		// expense_supported is false in the fixture: the section note carries it
 		const note = wrapper.find('[data-test="drawer-note"]')
 		expect(note.text()).toContain("in drawer")
@@ -251,11 +309,6 @@ describe("ShiftDashboard", () => {
 		expect(note.text()).toContain("Before expenses")
 		// exactly one drawer note — it belongs to the section, not each row
 		expect(wrapper.findAll('[data-test="drawer-note"]').length).toBe(1)
-		// no percentage share and no bars — amounts only
-		expect(wrapper.find('[data-test="payment-bar"]').exists()).toBe(false)
-		expect(wrapper.find('[data-test="payments-section"]').text()).not.toContain(
-			"%",
-		)
 	})
 
 	it("hides the drawer note in period mode and when expenses are supported", async () => {
@@ -293,6 +346,13 @@ describe("ShiftDashboard", () => {
 		const amount = rows[1].find('[data-test="recent-amount"]')
 		expect(amount.classes()).toContain("text-red-600")
 		expect(amount.text()).toContain("-20000 IDR")
+	})
+
+	it("emits navigate from both View all buttons", async () => {
+		const { wrapper } = await mountWithData()
+		await wrapper.find('[data-test="view-all-items"]').trigger("click")
+		await wrapper.find('[data-test="view-all-recent"]').trigger("click")
+		expect(wrapper.emitted("navigate")).toEqual([["sales-recap"], ["invoices"]])
 	})
 
 	it("shows the shift context chips and the updated-minutes-ago label", async () => {
@@ -431,7 +491,7 @@ describe("ShiftDashboard period mode", () => {
 
 	async function mountPeriodData(overrides = {}) {
 		const { wrapper } = mountDashboard({ posProfile: "P1" })
-		await wrapper.find('[data-test="period-select"]').setValue("today")
+		await wrapper.find('[data-test="period-chip-today"]').trigger("click")
 		const entry = periodDashboardResource()
 		entry.resource.data = { ...PERIOD, ...overrides }
 		entry.resource.loading = false
@@ -441,7 +501,7 @@ describe("ShiftDashboard period mode", () => {
 
 	it("shows the period selector to managers only", () => {
 		const { wrapper: asManager } = mountDashboard({ posProfile: "P1" })
-		expect(asManager.find('[data-test="period-select"]').exists()).toBe(true)
+		expect(asManager.find('[data-test="period-chip-today"]').exists()).toBe(true)
 		asManager.unmount()
 
 		bootstrapMock.store.data.is_management = false
@@ -449,7 +509,7 @@ describe("ShiftDashboard period mode", () => {
 			openingShift: "",
 			posProfile: "P1",
 		})
-		expect(asCashier.find('[data-test="period-select"]').exists()).toBe(false)
+		expect(asCashier.find('[data-test="period-chip-today"]').exists()).toBe(false)
 		// data logic untouched: the default window still loads for the profile
 		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
 		asCashier.unmount()
@@ -478,10 +538,10 @@ describe("ShiftDashboard period mode", () => {
 		wrapper.unmount()
 	})
 
-	it("renders a period dropdown like the recap and swaps the cash card to Cash Payments", async () => {
+	it("renders a period chip row with every preset", async () => {
 		const wrapper = await mountPeriodData()
-		const options = wrapper.findAll('[data-test="period-select"] option')
-		expect(options.map((o) => o.text().trim())).toEqual([
+		const chips = wrapper.findAll('[data-test="mode-chips"] button')
+		expect(chips.map((c) => c.text().trim())).toEqual([
 			"This Shift",
 			"Today",
 			"Yesterday",
@@ -490,6 +550,13 @@ describe("ShiftDashboard period mode", () => {
 			"This Year",
 			"Custom Range",
 		])
+		// active preset highlighted, the rest quiet
+		expect(wrapper.find('[data-test="period-chip-today"]').classes()).toContain(
+			"bg-white",
+		)
+		expect(wrapper.find('[data-test="period-chip-shift"]').classes()).not.toContain(
+			"bg-white",
+		)
 		expect(wrapper.find('[data-test="chip-period"]').text()).toBe("Today")
 
 		// no cash card anywhere — cash payments read in Payment Methods
@@ -509,7 +576,7 @@ describe("ShiftDashboard period mode", () => {
 		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("14/09")
 
 		expect(wrapper.find('[data-test="drawer-note"]').exists()).toBe(false)
-		// payments render as plain amounts, no share text
+		// payments render as amounts with shares
 		expect(wrapper.findAll('[data-test="payment-row"]')[0].text()).toContain(
 			"180000 IDR",
 		)
@@ -521,13 +588,13 @@ describe("ShiftDashboard period mode", () => {
 		expect(entry.resource.reload).toHaveBeenCalledTimes(1)
 		expect(periodDashboardResource().resource.reload).not.toHaveBeenCalled()
 
-		const periodSelect = () => wrapper.find('[data-test="period-select"]')
-		await periodSelect().setValue("today")
+		const chip = (value) => wrapper.find(`[data-test="period-chip-${value}"]`)
+		await chip("today").trigger("click")
 		await flushPromises()
 		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
 		expect(entry.resource.reload).toHaveBeenCalledTimes(1)
 
-		await periodSelect().setValue("shift")
+		await chip("shift").trigger("click")
 		await flushPromises()
 		expect(entry.resource.reload).toHaveBeenCalledTimes(2)
 		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
@@ -537,7 +604,7 @@ describe("ShiftDashboard period mode", () => {
 	it("applies a custom range once both dates are set", async () => {
 		const { wrapper } = mountDashboard({ posProfile: "P1" })
 		const periodEntry = periodDashboardResource()
-		await wrapper.find('[data-test="period-select"]').setValue("custom")
+		await wrapper.find('[data-test="period-chip-custom"]').trigger("click")
 		await flushPromises()
 		// incomplete custom range: nothing fetched, prompt shown, inputs out
 		expect(periodEntry.resource.reload).not.toHaveBeenCalled()
@@ -555,6 +622,55 @@ describe("ShiftDashboard period mode", () => {
 			from_date: "2026-09-13",
 			to_date: "2026-09-20",
 		})
+		wrapper.unmount()
+	})
+})
+
+describe("ShiftDashboard mobile period sheet", () => {
+	it("opens the sheet from the pill and applies a preset", async () => {
+		const { wrapper } = mountDashboard({ posProfile: "P1" })
+		const pill = wrapper.find('[data-test="period-filter-button"]')
+		expect(pill.exists()).toBe(true)
+		expect(pill.text()).toContain("This Shift")
+
+		await pill.trigger("click")
+		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(true)
+
+		await wrapper.find('[data-test="period-option-yesterday"]').trigger("click")
+		await flushPromises()
+		// period switched and the sheet closed
+		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("keeps the sheet open for custom and closes on Apply", async () => {
+		const { wrapper } = mountDashboard({ posProfile: "P1" })
+		await wrapper.find('[data-test="period-filter-button"]').trigger("click")
+		await wrapper.find('[data-test="period-option-custom"]').trigger("click")
+		await flushPromises()
+		// still open, with the date inputs inside
+		expect(wrapper.find('[data-test="sheet-period-from"]').exists()).toBe(true)
+
+		await wrapper.find('[data-test="sheet-period-from"]').setValue("2026-09-13")
+		await wrapper.find('[data-test="sheet-period-to"]').setValue("2026-09-20")
+		await flushPromises()
+		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
+		// the pill carries the custom range
+		expect(wrapper.find('[data-test="period-filter-button"]').text()).toContain(
+			"2026-09-13",
+		)
+
+		const apply = wrapper.findAll("button").find((b) => b.text() === "Apply")
+		await apply.trigger("click")
+		expect(wrapper.find('[data-test="sheet-period-from"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("hides the filter pill from non-managers", () => {
+		bootstrapMock.store.data.is_management = false
+		const { wrapper } = mountDashboard({ openingShift: "", posProfile: "P1" })
+		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(false)
 		wrapper.unmount()
 	})
 })

@@ -147,10 +147,11 @@ button.active\:scale-95:active,
 	max-height: 100vh;
 }
 
-/* Main content area between header and viewport bottom (same formula as the
-   inline style it replaces, but dvh-aware). */
+/* Main content area between header and viewport bottom (dvh-aware). The
+   branding footer scrolls inside the item list, so no footer row is reserved;
+   where it still renders below (mobile cart tab) flex-1 shrinks to fit. */
 .pos-content-shell {
-	max-height: calc(100vh - 60px - var(--header-height, 60px));
+	max-height: calc(100vh - var(--header-height, 60px));
 }
 
 @supports (height: 100dvh) {
@@ -159,7 +160,7 @@ button.active\:scale-95:active,
 		max-height: 100dvh;
 	}
 	.pos-content-shell {
-		max-height: calc(100dvh - 60px - var(--header-height, 60px));
+		max-height: calc(100dvh - var(--header-height, 60px));
 	}
 }
 

@@ -1,92 +1,72 @@
 <template>
-	<Dialog
+	<PosDialogShell
 		v-model="show"
-		:options="{ title: __('POS Shift History'), size: '7xl' }"
+		:title="__('POS Shift History')"
+		:subtitle="__('Opening and closing of every shift')"
+		icon="calendar"
 	>
-		<template #body-content>
-			<div class="flex flex-col gap-6">
+			<div class="flex flex-col gap-4">
 				<!-- Quick Summary Cards — totals come from the server (#11 fix) -->
-				<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-					<div class="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col justify-between shadow-sm">
-						<span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">{{ __('Total Sales') }}</span>
-						<span class="text-2xl font-bold text-blue-900 mt-1">{{ formatCurrency(serverTotals.total_sales) }}</span>
+				<div class="grid grid-cols-3 gap-2 sm:gap-3">
+					<div class="rounded-xl border border-gray-200 bg-white p-3">
+						<p class="text-xs font-medium text-gray-500">{{ __('Total Sales') }}</p>
+						<p class="text-lg sm:text-xl font-bold text-gray-900 mt-0.5 tabular-nums truncate">{{ formatCurrency(serverTotals.total_sales) }}</p>
 					</div>
-					<div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex flex-col justify-between shadow-sm">
-						<span class="text-xs font-semibold text-indigo-600 uppercase tracking-wider">{{ __('Total Shifts') }}</span>
-						<span class="text-2xl font-bold text-indigo-900 mt-1">{{ serverTotals.total_shifts }}</span>
+					<div class="rounded-xl border border-gray-200 bg-white p-3">
+						<p class="text-xs font-medium text-gray-500">{{ __('Total Shifts') }}</p>
+						<p class="text-lg sm:text-xl font-bold text-gray-900 mt-0.5 tabular-nums">{{ serverTotals.total_shifts }}</p>
 					</div>
-					<div :class="['rounded-xl p-4 flex flex-col justify-between shadow-sm border', serverTotals.total_cash_diff >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100']">
-						<span :class="['text-xs font-semibold uppercase tracking-wider', serverTotals.total_cash_diff >= 0 ? 'text-emerald-600' : 'text-rose-600']">{{ __('Net Cash Diff') }}</span>
-						<span :class="['text-2xl font-bold mt-1', serverTotals.total_cash_diff >= 0 ? 'text-emerald-900' : 'text-rose-900']">{{ formatCurrency(serverTotals.total_cash_diff) }}</span>
+					<div class="rounded-xl border border-gray-200 bg-white p-3">
+						<p class="text-xs font-medium text-gray-500">{{ __('Net Cash Diff') }}</p>
+						<p :class="['text-lg sm:text-xl font-bold mt-0.5 tabular-nums truncate', getCashDiffColor(serverTotals.total_cash_diff)]">{{ formatCurrency(serverTotals.total_cash_diff) }}</p>
 					</div>
 				</div>
 
-				<!-- Filters Section -->
-				<div class="flex flex-col sm:flex-row items-end gap-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
-					<div class="w-full sm:w-44">
-						<label class="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">{{ __('From Date') }}</label>
-						<Input
+				<!-- Filters: quick ranges + custom date range -->
+				<div class="flex flex-wrap items-center gap-2">
+					<div class="inline-flex rounded-xl bg-gray-100 p-1" role="group">
+						<button
+							v-for="opt in quickRanges"
+							:key="opt.key"
+							type="button"
+							:aria-pressed="activeRange === opt.key"
+							:class="[
+								'rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors',
+								activeRange === opt.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900',
+							]"
+							@click="setQuickFilter(opt.key)"
+						>
+							{{ opt.label }}
+						</button>
+					</div>
+					<div class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5">
+						<FeatherIcon name="calendar" class="w-4 h-4 text-gray-400" />
+						<input
 							type="date"
 							v-model="filters.from_date"
-							class="shadow-sm"
-							@change="loadShifts"
+							:aria-label="__('From Date')"
+							class="border-0 p-0 text-sm focus:ring-0 bg-transparent"
+							@change="onCustomRange"
 						/>
-					</div>
-					<div class="w-full sm:w-44">
-						<label class="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">{{ __('To Date') }}</label>
-						<Input
+						<span class="text-gray-400">→</span>
+						<input
 							type="date"
 							v-model="filters.to_date"
-							class="shadow-sm"
-							@change="loadShifts"
+							:aria-label="__('To Date')"
+							class="border-0 p-0 text-sm focus:ring-0 bg-transparent"
+							@change="onCustomRange"
 						/>
 					</div>
-					<div class="flex-1"></div>
-					<div class="flex items-center gap-2">
-						<Button
-							variant="subtle"
-							theme="gray"
-							class="shadow-sm font-bold"
-							@click="setQuickFilter('7days')"
-						>
-							{{ __('7D') }}
-						</Button>
-						<Button
-							variant="subtle"
-							theme="gray"
-							class="shadow-sm font-bold"
-							@click="setQuickFilter('1month')"
-						>
-							{{ __('1M') }}
-						</Button>
-						<Button
-							variant="solid"
-							theme="blue"
-							class="shadow-md"
-							@click="loadShifts"
-							:loading="shiftsResource.loading"
-						>
-							<template #icon>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-								</svg>
-							</template>
-							{{ __('Refresh') }}
-						</Button>
-						<Button
-							variant="subtle"
-							theme="gray"
-							class="shadow-sm border border-gray-100"
-							@click="exportToCSV"
-							:disabled="shifts.length === 0"
-						>
-							<template #icon>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-								</svg>
-							</template>
-						</Button>
-					</div>
+					<button
+						type="button"
+						class="ms-auto w-9 h-9 rounded-lg border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+						:disabled="shiftsResource.loading"
+						:title="__('Refresh')"
+						:aria-label="__('Refresh')"
+						@click="loadShifts"
+					>
+						<FeatherIcon name="refresh-cw" :class="['w-4 h-4', shiftsResource.loading && 'animate-spin']" />
+					</button>
 				</div>
 
 				<!-- Shifts Table -->
@@ -103,7 +83,7 @@
 						<p class="mt-4 text-sm font-semibold text-gray-500 uppercase tracking-widest">{{ __('No shifts found for this range') }}</p>
 					</div>
 
-					<div v-else class="overflow-x-auto max-h-[50vh]">
+					<div v-else class="overflow-x-auto">
 						<table class="w-full text-left text-sm whitespace-nowrap border-collapse">
 							<thead class="bg-gray-50 border-b border-gray-100 top-0 sticky z-10">
 								<tr>
@@ -137,7 +117,7 @@
 									</td>
 									<td class="px-5 py-4 text-center">
 										<div class="flex items-center justify-center gap-2">
-											<span class="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.open_time) }}</span>
+											<span class="text-[11px] font-semibold text-green-700 bg-green-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.open_time) }}</span>
 											<svg class="w-3 h-3 text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
 											<span v-if="shift.close_time" class="text-[11px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.close_time) }}</span>
 											<span v-else class="text-[11px] font-semibold text-green-600 bg-green-50 px-1.5 py-0.5 rounded italic uppercase tracking-tighter">{{ __('Running') }}</span>
@@ -182,7 +162,7 @@
 				<!-- Pagination bar (shown when there is more than one page) -->
 				<div
 					v-if="totalPages > 1"
-					class="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-b-xl"
+					class="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-xl"
 				>
 					<span class="text-[11px] font-medium text-gray-500 select-none">
 						{{ __('Showing') }}
@@ -227,19 +207,24 @@
 					</div>
 				</div>
 			</div>
-		</template>
-		<template #actions>
-			<Button variant="subtle" @click="show = false" class="font-bold uppercase tracking-widest text-xs px-6">
-				{{ __('Close History') }}
+		<template #footer>
+			<Button
+				variant="subtle"
+				:disabled="shifts.length === 0"
+				@click="exportToCSV"
+			>
+				<template #prefix><FeatherIcon name="download" class="w-4 h-4" /></template>
+				{{ __('Export CSV') }}
 			</Button>
 		</template>
-	</Dialog>
+	</PosDialogShell>
 </template>
 
 <script setup>
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
+import PosDialogShell from "@/components/common/PosDialogShell.vue"
+import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { ref, watch, reactive, onMounted, computed } from "vue"
 
 const { showError } = useToast()
@@ -441,7 +426,20 @@ function getCashDiffColor(diff) {
 	return 'text-gray-900'
 }
 
+const quickRanges = [
+	{ key: "today", label: __("Today") },
+	{ key: "7days", label: __("7 Days") },
+	{ key: "1month", label: __("This Month") },
+]
+const activeRange = ref("1month")
+
+function onCustomRange() {
+	activeRange.value = ""
+	loadShifts()
+}
+
 function setQuickFilter(type) {
+	activeRange.value = type
 	const today = new Date()
 	filters.to_date = today.toISOString().split('T')[0]
 	
@@ -449,7 +447,7 @@ function setQuickFilter(type) {
 	if (type === '7days') {
 		from.setDate(today.getDate() - 7)
 	} else if (type === '1month') {
-		from.setMonth(today.getMonth() - 1)
+		from.setDate(1)
 	}
 	filters.from_date = from.toISOString().split('T')[0]
 	

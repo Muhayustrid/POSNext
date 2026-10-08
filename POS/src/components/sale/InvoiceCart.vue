@@ -466,12 +466,6 @@
 
 			<!-- Optional buyer name: a receipt-only label, NOT saved as a Customer -->
 			<div class="mt-1.5">
-				<label
-					for="cart-buyer-name"
-					class="block text-[10px] font-medium text-gray-500 mb-0.5"
-				>
-					{{ __("Buyer name (optional)") }}
-				</label>
 				<div class="relative">
 					<div
 						class="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none"
@@ -495,7 +489,8 @@
 						name="cart-buyer-name"
 						v-model="cartStore.buyerName"
 						type="text"
-						:placeholder="__('e.g. Budi (not saved as a customer)')"
+						:placeholder="__('Buyer name (optional)')"
+						:title="__('e.g. Budi (not saved as a customer)')"
 						class="w-full h-11 sm:h-9 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
 						autocomplete="off"
 						:aria-label="__('Buyer name')"
@@ -505,16 +500,58 @@
 		</div>
 
 		<!-- Action Buttons Section -->
-		<div v-if="items.length > 0" class="px-2 py-2 border-b border-gray-200 bg-white">
-			<div class="flex items-center justify-between mb-1.5">
-				<h2 class="text-xs font-bold text-gray-900">{{ __("Cart Items") }}</h2>
-				<div class="flex items-center gap-1">
-					<!-- Clear Cart Button -->
+		<!-- One row (title, offers, coupon, sort, clear) so short screens keep
+		     room for the item list. -->
+		<div
+			v-if="items.length > 0"
+			class="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-200 bg-white"
+		>
+			<h2 class="text-xs font-bold text-gray-900 me-auto truncate">
+				{{ __("Cart Items") }}
+				<span class="font-semibold text-gray-400">({{ items.length }})</span>
+			</h2>
+			<div class="flex items-center gap-1 shrink-0 order-last">
+				<!-- Clear Cart Button -->
+				<button
+					@click="$emit('clear-cart')"
+					class="inline-flex items-center justify-center rounded-lg w-9 h-9 text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
+					type="button"
+					:title="__('Clear all items')"
+					:aria-label="__('Clear all items')"
+				>
+					<svg
+						class="w-4 h-4"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+						stroke-width="2"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"
+						/>
+					</svg>
+				</button>
+				<!-- Sort Dropdown -->
+				<div class="relative" ref="cartSortContainer">
 					<button
-						@click="$emit('clear-cart')"
-						class="inline-flex items-center gap-1.5 rounded-lg px-3 min-h-[36px] py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
+						@click="toggleCartSortDropdown"
+						:class="[
+							'inline-flex items-center justify-center rounded-lg w-9 h-9 transition-colors touch-manipulation',
+							cartSortBy
+								? 'text-blue-600 hover:bg-blue-50'
+								: 'text-gray-600 hover:bg-gray-50',
+						]"
+						:title="
+							cartSortBy
+								? cartSortOrder === 'asc'
+									? __('Sorted by {0} A-Z', [getCartSortLabel()])
+									: __('Sorted by {0} Z-A', [getCartSortLabel()])
+								: __('Sort cart items')
+						"
+						:aria-label="__('Sort cart items')"
 						type="button"
-						:title="__('Clear all items')"
 					>
 						<svg
 							class="w-4 h-4"
@@ -526,128 +563,38 @@
 							<path
 								stroke-linecap="round"
 								stroke-linejoin="round"
-								d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"
+								d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
 							/>
 						</svg>
-						<span>{{ __("Clear") }}</span>
 					</button>
-					<!-- Sort Dropdown -->
-					<div class="relative" ref="cartSortContainer">
-						<button
-							@click="toggleCartSortDropdown"
-							:class="[
-								'inline-flex items-center gap-1.5 rounded-lg px-3 min-h-[36px] py-1.5 text-xs font-semibold transition-colors touch-manipulation',
-								cartSortBy
-									? 'text-blue-600 hover:bg-blue-50'
-									: 'text-gray-600 hover:bg-gray-50',
-							]"
-							:title="
-								cartSortBy
-									? cartSortOrder === 'asc'
-										? __('Sorted by {0} A-Z', [getCartSortLabel()])
-										: __('Sorted by {0} Z-A', [getCartSortLabel()])
-									: __('Sort cart items')
-							"
-							:aria-label="__('Sort cart items')"
-							type="button"
-						>
-							<svg
-								class="w-4 h-4"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								stroke-width="2"
+
+					<!-- Sort Dropdown Menu -->
+					<div
+						v-if="showCartSortDropdown"
+						@click.stop
+						class="absolute end-0 mt-1 w-52 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]"
+					>
+						<div class="py-2">
+							<div
+								class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100"
 							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
-								/>
-							</svg>
-							<span>{{ __("Sort") }}</span>
-						</button>
-
-						<!-- Sort Dropdown Menu -->
-						<div
-							v-if="showCartSortDropdown"
-							@click.stop
-							class="absolute end-0 mt-1 w-52 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]"
-						>
-							<div class="py-2">
-								<div
-									class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100"
+								{{ __("Sort Cart") }}
+							</div>
+							<div class="py-1">
+								<!-- No Sorting (clear) -->
+								<button
+									@click="handleCartSortToggle(null)"
+									:class="[
+										'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
+										!cartSortBy
+											? 'bg-blue-50 text-blue-700'
+											: 'text-gray-700 hover:bg-gray-50',
+									]"
+									type="button"
 								>
-									{{ __("Sort Cart") }}
-								</div>
-								<div class="py-1">
-									<!-- No Sorting (clear) -->
-									<button
-										@click="handleCartSortToggle(null)"
-										:class="[
-											'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
-											!cartSortBy
-												? 'bg-blue-50 text-blue-700'
-												: 'text-gray-700 hover:bg-gray-50',
-										]"
-										type="button"
-									>
-										<span class="flex items-center gap-2.5">
-											<svg
-												class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2"
-													d="M6 18L18 6M6 6l12 12"
-												/>
-											</svg>
-											<span>{{ __("No Sorting") }}</span>
-										</span>
-									</button>
-
-									<div class="h-px bg-gray-100 my-1"></div>
-
-									<!-- Sort Options Loop -->
-									<button
-										v-for="option in CART_SORT_OPTIONS"
-										:key="option.field"
-										@click="handleCartSortToggle(option.field)"
-										:class="[
-											'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
-											cartSortBy === option.field
-												? 'bg-blue-50 text-blue-700'
-												: 'text-gray-700 hover:bg-gray-50',
-										]"
-										type="button"
-									>
-										<span class="flex items-center gap-2.5">
-											<svg
-												class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2"
-													:d="option.icon"
-												/>
-											</svg>
-											<span>{{ option.label }}</span>
-										</span>
-										<!-- Sort direction icon -->
+									<span class="flex items-center gap-2.5">
 										<svg
-											class="w-5 h-5"
-											:class="
-												cartSortBy === option.field
-													? 'text-blue-600'
-													: 'text-gray-300'
-											"
+											class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
@@ -656,15 +603,68 @@
 												stroke-linecap="round"
 												stroke-linejoin="round"
 												stroke-width="2"
-												:d="
-													CART_SORT_ICONS[
-														getCartSortIconState(option.field)
-													]
-												"
+												d="M6 18L18 6M6 6l12 12"
 											/>
 										</svg>
-									</button>
-								</div>
+										<span>{{ __("No Sorting") }}</span>
+									</span>
+								</button>
+
+								<div class="h-px bg-gray-100 my-1"></div>
+
+								<!-- Sort Options Loop -->
+								<button
+									v-for="option in CART_SORT_OPTIONS"
+									:key="option.field"
+									@click="handleCartSortToggle(option.field)"
+									:class="[
+										'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
+										cartSortBy === option.field
+											? 'bg-blue-50 text-blue-700'
+											: 'text-gray-700 hover:bg-gray-50',
+									]"
+									type="button"
+								>
+									<span class="flex items-center gap-2.5">
+										<svg
+											class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												:d="option.icon"
+											/>
+										</svg>
+										<span>{{ option.label }}</span>
+									</span>
+									<!-- Sort direction icon -->
+									<svg
+										class="w-5 h-5"
+										:class="
+											cartSortBy === option.field
+												? 'text-blue-600'
+												: 'text-gray-300'
+										"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											:d="
+												CART_SORT_ICONS[
+													getCartSortIconState(option.field)
+												]
+											"
+										/>
+									</svg>
+								</button>
 							</div>
 						</div>
 					</div>
@@ -672,12 +672,12 @@
 			</div>
 
 			<!-- Offers & Coupon Buttons -->
-			<div class="flex gap-2">
+			<div class="flex gap-1.5 shrink-0">
 				<!-- View All Offers Button -->
 				<button
 					type="button"
 					@click="$emit('show-offers')"
-					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 min-h-[40px] py-2 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+					class="relative flex items-center justify-center gap-1.5 px-2.5 h-9 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 					:aria-label="__('View all available offers')"
 				>
 					<svg
@@ -708,7 +708,7 @@
 				<button
 					type="button"
 					@click="$emit('apply-coupon')"
-					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 min-h-[40px] py-2 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+					class="relative flex items-center justify-center gap-1.5 px-2.5 h-9 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 					:aria-label="__('Apply coupon code')"
 				>
 					<svg
@@ -1454,28 +1454,26 @@
 
 		<!-- Totals Summary -->
 		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
-			<!-- Summary Details -->
+			<!-- Summary: quantity, subtotal and tax share one row -->
 			<div v-if="items.length > 0" class="mb-1.5">
-				<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">
-					<span class="font-medium">{{ __("Total Quantity") }}</span>
-					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
-						formatQuantity(totalQuantity)
-					}}</span>
+				<div class="grid grid-cols-3 gap-2 px-1 text-xs">
+					<div class="min-w-0">
+						<div class="text-[10px] text-gray-500 truncate">{{ __("Total Quantity") }}</div>
+						<div class="font-bold text-gray-900">{{ formatQuantity(totalQuantity) }}</div>
+					</div>
+					<div class="min-w-0 text-center">
+						<div class="text-[10px] text-gray-500 truncate">{{ __("Subtotal") }}</div>
+						<div class="font-bold text-gray-900 truncate">{{ formatCurrency(displaySubtotal) }}</div>
+					</div>
+					<div class="min-w-0 text-end">
+						<div class="text-[10px] text-gray-500 truncate">{{ __("Tax") }}</div>
+						<div class="font-bold text-gray-900 truncate">{{ formatCurrency(taxAmount) }}</div>
+					</div>
 				</div>
-				<div class="flex items-center justify-between text-xs text-gray-600">
-					<span class="font-medium">{{ __("Subtotal") }}</span>
-					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
-						formatCurrency(displaySubtotal)
-					}}</span>
-				</div>
-			</div>
-
-			<!-- Summary Details (continued) -->
-			<div v-if="items.length > 0" class="mb-1.5">
 				<!-- Discount Display - Highlighted -->
 				<div
 					v-if="discountAmount > 0"
-					class="flex items-center justify-between mb-0.5 bg-red-50 rounded px-1.5 py-1 -mx-0.5"
+					class="flex items-center justify-between mt-1 bg-red-50 rounded px-1.5 py-1 -mx-0.5"
 				>
 					<div class="flex items-center gap-1">
 						<svg
@@ -1496,31 +1494,10 @@
 					}}</span>
 				</div>
 
-				<div class="flex items-center justify-between text-xs text-gray-600">
-					<div class="flex items-center gap-1">
-						<svg
-							class="w-3.5 h-3.5 text-gray-500"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-							/>
-						</svg>
-						<span class="font-medium">{{ __("Tax") }}</span>
-					</div>
-					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
-						formatCurrency(taxAmount)
-					}}</span>
-				</div>
 			</div>
 
 			<!-- Grand Total -->
-			<div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-2.5 mb-1.5">
+			<div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg px-2.5 py-2 mb-1.5">
 				<div class="flex items-center justify-between">
 					<span class="text-sm font-extrabold text-gray-900">{{
 						__("Grand Total")

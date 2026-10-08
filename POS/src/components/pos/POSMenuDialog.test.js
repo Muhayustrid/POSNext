@@ -35,7 +35,10 @@ const viewStubs = {
 	POSSettings: { template: `<div data-testid="view-settings" />` },
 	InvoiceManagement: { template: `<div data-testid="view-invoices" />` },
 	SessionSummary: { template: `<div data-testid="view-sales-recap" />` },
-	ShiftDashboard: { template: `<div data-testid="view-dashboard" />` },
+	ShiftDashboard: {
+		name: "ShiftDashboard",
+		template: `<div data-testid="view-dashboard" />`,
+	},
 	WarehouseAvailabilityDialog: { template: `<div data-testid="view-products" />` },
 	ProductionDialog: { template: `<div data-testid="view-production" />` },
 	PurchaseOrderDialog: { template: `<div data-testid="view-purchase-order" />` },
@@ -170,6 +173,23 @@ describe("POSMenuDialog menu", () => {
 		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(true)
 		wrapper.unmount()
 	})
+
+	it("switches to the invoices view when the dashboard emits navigate", async () => {
+		const wrapper = mountShell({
+			open: true,
+			openingShift: "OS-1",
+			initialView: "dashboard",
+		})
+		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(true)
+
+		// "View all" on Recent Transactions navigates to the invoices view
+		const dashboard = wrapper.findComponent({ name: "ShiftDashboard" })
+		await dashboard.vm.$emit("navigate", "invoices")
+		await nextTick()
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
 })
 
 describe("POSMenuDialog views", () => {
@@ -181,6 +201,54 @@ describe("POSMenuDialog views", () => {
 		})
 		// First item of the Sales group is Invoice Management
 		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
+		wrapper.unmount()
+	})
+
+	it("marks only the active sidebar item with aria-current", async () => {
+		const wrapper = mountShell({ open: true })
+		const current = () =>
+			wrapper
+				.find('[data-testid="pos-menu-sidebar"]')
+				.findAll('button[aria-current="page"]')
+				.map((b) => b.text())
+		expect(current()).toEqual(["Invoice Management"])
+		await wrapper
+			.find('[data-testid="pos-menu-sidebar"]')
+			.findAll("button")
+			.find((b) => b.text() === "Settings")
+			.trigger("click")
+		expect(current()).toEqual(["Settings"])
+		wrapper.unmount()
+	})
+
+	it("burger opens the mobile menu list; back steps view -> list -> POS", async () => {
+		const mm = window.matchMedia
+		window.matchMedia = () => ({ matches: false }) // phone width
+		const wrapper = mountShell({ open: true })
+		const list = () => wrapper.find('[data-testid="pos-menu-list"]')
+		expect(list().exists()).toBe(true)
+
+		await list()
+			.findAll("button")
+			.find((b) => b.text() === "Settings")
+			.trigger("click")
+		expect(list().exists()).toBe(false)
+		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true)
+		expect(wrapper.emitted("menu-selected")).toEqual([["settings"]])
+
+		await wrapper.find('button[aria-label="Close menu"]').trigger("click")
+		expect(list().exists()).toBe(true)
+		expect(wrapper.emitted("update:open")).toBeUndefined()
+
+		await wrapper.find('button[aria-label="Close menu"]').trigger("click")
+		expect(wrapper.emitted("update:open")).toEqual([[false]])
+		window.matchMedia = mm
+		wrapper.unmount()
+	})
+
+	it("skips the mobile list when initialView is given", () => {
+		const wrapper = mountShell({ open: true, initialView: "settings" })
+		expect(wrapper.find('[data-testid="pos-menu-list"]').exists()).toBe(false)
 		wrapper.unmount()
 	})
 
@@ -301,9 +369,18 @@ describe("POSMenuDialog chrome", () => {
 		wrapper.unmount()
 	})
 
-	it("emits update:open false from the header close button", async () => {
+	it("emits update:open false from the header back button", async () => {
 		const wrapper = mountShell({ open: true })
 		await wrapper.find('button[aria-label="Close menu"]').trigger("click")
+		expect(wrapper.emitted("update:open")).toEqual([[false]])
+		wrapper.unmount()
+	})
+
+	it("renders the back-to-POS button that closes the shell", async () => {
+		const wrapper = mountShell({ open: true })
+		const back = wrapper.find('button[title="Back to POS"]')
+		expect(back.exists()).toBe(true)
+		await back.trigger("click")
 		expect(wrapper.emitted("update:open")).toEqual([[false]])
 		wrapper.unmount()
 	})

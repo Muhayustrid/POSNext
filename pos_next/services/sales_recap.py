@@ -618,7 +618,9 @@ def _aggregate_items(scope, limit=100):
 			MAX(sii.item_name) AS item_name,
 			sii.pos_package_role AS package_role,
 			SUM(sii.qty) AS qty,
-			SUM(sii.base_net_amount) AS base_net_amount
+			SUM(sii.base_net_amount) AS base_net_amount,
+			SUM(ifnull(sii.price_list_rate, sii.rate) * sii.qty) AS gross_list_amount,
+			SUM((ifnull(sii.price_list_rate, sii.rate) - sii.rate) * sii.qty) AS discount_amount
 		{where}
 		ORDER BY base_net_amount DESC
 		LIMIT {cint(limit)}
@@ -630,11 +632,14 @@ def _aggregate_items(scope, limit=100):
 	items = []
 	packages = []
 	for row in rows:
+		qty = flt(row.qty)
 		entry = {
 			"item_code": row.item_code,
 			"item_name": row.item_name,
-			"qty": flt(row.qty),
+			"qty": qty,
 			"base_net_amount": flt(row.base_net_amount),
+			"price_list_rate": flt(flt(row.gross_list_amount) / qty) if qty else 0,
+			"discount_amount": flt(row.discount_amount),
 		}
 		if row.package_role == PACKAGE_PARENT_ROLE:
 			packages.append(entry)

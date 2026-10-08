@@ -1,215 +1,219 @@
 <template>
 	<!-- Application shell for the management menu: one overlay hosting every
 	     management module as an embedded view, sharing a single sidebar.
+	     Rendered as a full-screen page (still a mounted overlay, no routes).
 	     z-[300] keeps it below frappe Dialog overlays (z-400/500) so nested
 	     sub-dialogs (payment, invoice detail...) stack above it. -->
 	<Transition name="fade">
 		<div
 			v-if="open"
-			class="fixed inset-0 bg-black bg-opacity-50 z-[300]"
-			@click.self="close"
+			role="dialog"
+			aria-modal="true"
+			:aria-label="activeLabel"
+			class="fixed inset-0 z-[300] bg-white overflow-hidden flex flex-col"
 		>
-			<div class="fixed inset-0 flex items-center justify-center sm:p-4">
-				<div
-					role="dialog"
-					aria-modal="true"
-					:aria-label="activeLabel"
-					class="w-full h-full sm:w-[95vw] sm:h-[92vh] max-w-none bg-white sm:rounded-xl shadow-2xl overflow-hidden flex flex-col"
+			<!-- Header -->
+			<div
+				class="flex shrink-0 items-center gap-3 px-4 py-3 sm:px-5 sm:py-4 border-b border-gray-200"
+			>
+				<button
+					type="button"
+					class="flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-gray-900 text-white hover:bg-gray-700 active:bg-gray-800 transition-colors"
+					:aria-label="__('Close menu')"
+					:title="__('Back to POS')"
+					@click="back"
 				>
-					<!-- Header -->
-					<div
-						class="flex shrink-0 items-center justify-between px-4 py-3 sm:px-5 sm:py-4 border-b border-gray-200"
-					>
-						<div class="flex items-center gap-3 min-w-0">
-							<FeatherIcon
-								v-if="activeItem"
-								:name="activeItem.icon"
-								class="w-5 h-5 text-gray-700 shrink-0"
-							/>
-							<h2 class="text-lg font-semibold text-gray-900 truncate">
-								{{ activeLabel }}
-							</h2>
+					<FeatherIcon name="arrow-left" class="w-5 h-5" />
+				</button>
+				<!-- < md: the burger lands on the menu list; the title follows it -->
+				<FeatherIcon
+					v-if="activeItem"
+					:name="activeItem.icon"
+					class="w-5 h-5 text-gray-700 shrink-0"
+					:class="{ 'hidden md:block': mobileList }"
+				/>
+				<h2 class="text-lg font-semibold text-gray-900 truncate">
+					<span v-if="mobileList" class="md:hidden">{{ __("Menu") }}</span>
+					<span :class="{ 'hidden md:inline': mobileList }">{{ activeLabel }}</span>
+				</h2>
+			</div>
+
+			<div class="flex-1 flex min-h-0 overflow-hidden">
+				<!-- Menu list page (< md) -->
+				<nav
+					v-if="mobileList"
+					class="md:hidden flex-1 overflow-y-auto px-2 pb-4"
+					data-testid="pos-menu-list"
+				>
+					<template v-for="group in menuGroups" :key="group.id">
+						<div
+							class="px-3 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+						>
+							{{ __(group.label) }}
 						</div>
 						<button
+							v-for="item in group.items"
+							:key="item.id"
 							type="button"
-							class="p-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200 transition-colors"
-							:aria-label="__('Close menu')"
-							@click="close"
+							class="flex w-full items-center gap-3 px-3 py-3.5 rounded-xl text-base text-gray-700 active:bg-gray-100 transition-colors text-start"
+							@click="selectItem(item.id)"
 						>
-							<FeatherIcon name="x" class="w-5 h-5" />
+							<FeatherIcon :name="item.icon" class="w-5 h-5 shrink-0 text-gray-500" />
+							<span class="flex-1 truncate">{{ __(item.label) }}</span>
+							<FeatherIcon name="chevron-right" class="w-5 h-5 shrink-0 text-gray-300" />
 						</button>
-					</div>
+					</template>
+				</nav>
 
-					<!-- Menu chips (< lg): wrapped, so every destination stays visible
-					     without horizontal scrolling on phones -->
+				<!-- Sidebar (md+) -->
+				<div
+					class="hidden md:flex w-56 shrink-0 flex-col py-2 border-e border-gray-200 bg-white overflow-y-auto"
+					data-testid="pos-menu-sidebar"
+				>
+					<template v-for="group in menuGroups" :key="group.id">
 						<div
-							class="lg:hidden shrink-0 border-b border-gray-200 bg-white px-3 py-2"
+							class="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
 						>
-							<div class="flex flex-wrap items-center gap-2">
-							<button
-								v-for="item in visibleItems"
-								:key="item.id"
-								type="button"
-								class="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
-								:class="
-									activeView === item.id
-										? item.activeClass
-										: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-								"
-								@click="selectItem(item.id)"
+							{{ __(group.label) }}
+						</div>
+						<button
+							v-for="item in group.items"
+							:key="item.id"
+							type="button"
+							:aria-current="activeView === item.id ? 'page' : undefined"
+							class="flex items-center gap-3 mx-2 px-3 py-2.5 rounded-lg text-sm transition-colors text-start"
+							:class="
+								activeView === item.id
+									? 'bg-blue-50 text-blue-700 font-semibold'
+									: 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+							"
+							@click="selectItem(item.id)"
+						>
+							<FeatherIcon :name="item.icon" class="w-4 h-4 shrink-0" />
+							<span class="truncate">{{ __(item.label) }}</span>
+						</button>
+					</template>
+				</div>
+
+				<!-- Active view. $attrs forwards POSSale's module listeners
+				     (view-invoice, print-invoice, promotion-saved, ...) onto
+				     whichever view is mounted, so its handlers stay unchanged. -->
+				<div
+					class="flex-1 min-w-0 overflow-hidden"
+					:class="{ 'hidden md:block': mobileList }"
+				>
+					<PromotionManagement
+						v-if="activeView === 'promotions'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						:company="company"
+						:currency="currency"
+						class="h-full"
+						v-bind="$attrs"
+					/>
+					<POSSettings
+						v-else-if="activeView === 'settings'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						:current-warehouse="currentWarehouse"
+						class="h-full"
+						v-bind="$attrs"
+					/>
+					<InvoiceManagement
+						v-else-if="activeView === 'invoices'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						:currency="currency"
+						:history-invoices="historyInvoices"
+						:draft-invoices="draftInvoices"
+						class="h-full"
+						v-bind="$attrs"
+						@load-draft="close"
+					/>
+					<template v-else-if="activeView === 'sales-recap'">
+						<div class="h-full flex flex-col text-start">
+							<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
+								<SessionSummary
+									ref="summaryEl"
+									:opening-shift="openingShift"
+									:pos-profile="posProfile"
+								/>
+							</div>
+							<!-- Same fixed print footer as the old SalesRecapDialog -->
+							<div
+								class="flex shrink-0 items-center border-t border-gray-200 px-4 pb-4 pt-3 sm:px-6"
 							>
-								<FeatherIcon :name="item.icon" class="w-4 h-4" />
-								<span>{{ __(item.label) }}</span>
-							</button>
-						</div>
-					</div>
-
-					<div class="flex-1 flex min-h-0 overflow-hidden">
-						<!-- Sidebar (lg+) -->
-						<div
-							class="hidden lg:flex w-56 shrink-0 flex-col py-2 border-e border-gray-200 bg-white overflow-y-auto"
-							data-testid="pos-menu-sidebar"
-						>
-							<template v-for="group in menuGroups" :key="group.id">
-								<div
-									class="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+								<Button
+									variant="subtle"
+									theme="blue"
+									:loading="printing"
+									:disabled="!canPrint"
+									@click="printRecap"
 								>
-									{{ __(group.label) }}
-								</div>
-								<button
-									v-for="item in group.items"
-									:key="item.id"
-									type="button"
-									class="flex items-center gap-3 mx-2 px-3 py-2.5 rounded-lg text-sm transition-colors text-start"
-									:class="
-										activeView === item.id
-											? item.activeClass
-											: 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-									"
-									@click="selectItem(item.id)"
-								>
-									<FeatherIcon :name="item.icon" class="w-4 h-4 shrink-0" />
-									<span class="truncate">{{ __(item.label) }}</span>
-								</button>
-							</template>
+									{{ __("Print") }}
+								</Button>
+							</div>
 						</div>
-
-						<!-- Active view. $attrs forwards POSSale's module listeners
-						     (view-invoice, print-invoice, promotion-saved, ...) onto
-						     whichever view is mounted, so its handlers stay unchanged. -->
-						<div class="flex-1 min-w-0 overflow-hidden">
-							<PromotionManagement
-								v-if="activeView === 'promotions'"
-								embedded
-								:model-value="true"
-								:pos-profile="posProfile"
-								:company="company"
-								:currency="currency"
-								class="h-full"
-								v-bind="$attrs"
-							/>
-							<POSSettings
-								v-else-if="activeView === 'settings'"
-								embedded
-								:model-value="true"
-								:pos-profile="posProfile"
-								:current-warehouse="currentWarehouse"
-								class="h-full"
-								v-bind="$attrs"
-							/>
-							<InvoiceManagement
-								v-else-if="activeView === 'invoices'"
-								embedded
-								:model-value="true"
-								:pos-profile="posProfile"
-								:currency="currency"
-								:history-invoices="historyInvoices"
-								:draft-invoices="draftInvoices"
-								class="h-full"
-								v-bind="$attrs"
-								@load-draft="close"
-							/>
-							<template v-else-if="activeView === 'sales-recap'">
-								<div class="h-full flex flex-col text-start">
-									<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
-										<SessionSummary
-											ref="summaryEl"
-											:opening-shift="openingShift"
-											:pos-profile="posProfile"
-										/>
-									</div>
-									<!-- Same fixed print footer as the old SalesRecapDialog -->
-									<div
-										class="flex shrink-0 items-center border-t border-gray-200 px-4 pb-4 pt-3 sm:px-6"
-									>
-										<Button
-											variant="subtle"
-											theme="blue"
-											:loading="printing"
-											:disabled="!canPrint"
-											@click="printRecap"
-										>
-											{{ __("Print") }}
-										</Button>
-									</div>
-								</div>
-							</template>
-							<template v-else-if="activeView === 'dashboard'">
-								<div class="h-full flex flex-col text-start">
-									<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
-										<ShiftDashboard
-											:opening-shift="openingShift"
-											:pos-profile="posProfile"
-										/>
-									</div>
-								</div>
-							</template>
-							<WarehouseAvailabilityDialog
-								v-else-if="activeView === 'products'"
-								embedded
-								:model-value="true"
-								mode="search"
-								:pos-profile="posProfile"
-								:company="company"
-								class="h-full"
-								v-bind="$attrs"
-								@close="close"
-								@update:model-value="closeIfHidden"
-							/>
-							<ProductionDialog
-								v-else-if="activeView === 'production'"
-								embedded
-								:model-value="true"
-								:pos-profile="posProfile"
-								:company="company"
-								:currency="currency"
-								class="h-full"
-								v-bind="$attrs"
-								@update:model-value="closeIfHidden"
-							/>
-							<PurchaseOrderDialog
-								v-else-if="activeView === 'purchase-order'"
-								embedded
-								:model-value="true"
-								:pos-profile="posProfile"
-								:company="company"
-								:warehouse="warehouse"
-								:currency="currency"
-								class="h-full"
-								v-bind="$attrs"
-								@update:model-value="closeIfHidden"
-							/>
-							<PurchaseReceiptDialog
-								v-else-if="activeView === 'purchase-receipt'"
-								embedded
-								:model-value="true"
-								:pos-profile="posProfile"
-								class="h-full"
-								v-bind="$attrs"
-								@update:model-value="closeIfHidden"
-							/>
+					</template>
+					<template v-else-if="activeView === 'dashboard'">
+						<div class="h-full flex flex-col text-start">
+							<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
+								<ShiftDashboard
+									v-bind="$attrs"
+									:opening-shift="openingShift"
+									:pos-profile="posProfile"
+									@navigate="selectItem"
+								/>
+							</div>
 						</div>
-					</div>
+					</template>
+					<WarehouseAvailabilityDialog
+						v-else-if="activeView === 'products'"
+						embedded
+						:model-value="true"
+						mode="search"
+						:pos-profile="posProfile"
+						:company="company"
+						class="h-full"
+						v-bind="$attrs"
+						@close="close"
+						@update:model-value="closeIfHidden"
+					/>
+					<ProductionDialog
+						v-else-if="activeView === 'production'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						:company="company"
+						:currency="currency"
+						class="h-full"
+						v-bind="$attrs"
+						@update:model-value="closeIfHidden"
+					/>
+					<PurchaseOrderDialog
+						v-else-if="activeView === 'purchase-order'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						:company="company"
+						:warehouse="warehouse"
+						:currency="currency"
+						class="h-full"
+						v-bind="$attrs"
+						@update:model-value="closeIfHidden"
+					/>
+					<PurchaseReceiptDialog
+						v-else-if="activeView === 'purchase-receipt'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						class="h-full"
+						v-bind="$attrs"
+						@update:model-value="closeIfHidden"
+					/>
 				</div>
 			</div>
 		</div>
@@ -251,6 +255,9 @@ const props = defineProps({
 const emit = defineEmits(["update:open", "menu-selected"])
 
 const activeView = ref(null)
+// < md the shell has no sidebar: the burger opens a full-page menu list and
+// the back arrow steps view -> list -> POS. md+ ignores it (sidebar visible).
+const mobileList = ref(false)
 
 const visibleItems = computed(() =>
 	MANAGEMENT_MENU.filter(
@@ -262,8 +269,7 @@ const visibleItems = computed(() =>
 	),
 )
 
-// Sidebar renders items grouped (and ordered) by workflow; the mobile chip
-// bar stays flat, following the same order.
+// Sidebar and the mobile menu list render items grouped (and ordered) by workflow.
 const menuGroups = computed(() =>
 	MENU_GROUPS.map((group) => ({
 		...group,
@@ -289,8 +295,10 @@ watch(
 		const requested = props.initialView
 		if (requested && visibleItems.value.some((i) => i.id === requested)) {
 			activeView.value = requested
+			mobileList.value = false
 			return
 		}
+		mobileList.value = true
 		const fallback =
 			visibleItems.value.find((i) => i.id === "invoices") ||
 			visibleItems.value[0]
@@ -299,7 +307,17 @@ watch(
 	{ immediate: true },
 )
 
+function isDesktop() {
+	return window.matchMedia?.("(min-width: 768px)").matches ?? true
+}
+
+function back() {
+	if (!mobileList.value && !isDesktop()) mobileList.value = true
+	else close()
+}
+
 function selectItem(itemId) {
+	mobileList.value = false
 	activeView.value = itemId
 	emit("menu-selected", itemId)
 }

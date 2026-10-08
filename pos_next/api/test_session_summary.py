@@ -701,6 +701,18 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(summary["returns_count"], 0)
 		self.assertEqual(summary["items"][0]["qty"], -1)  # stock moved
 
+	def test_item_price_list_rate_and_discount(self):
+		"""Per-item recap carries the average list price and the (list - rate) x qty discount."""
+		shift = self._make_opening_shift(opening_cash=0)
+		self._make_invoice_on(
+			shift, [{"item": self.item_a, "qty": 2, "rate": 800, "price_list_rate": 1000}], paid=1600
+		)
+
+		summary = get_session_summary(shift)
+		entry = next(i for i in summary["items"] if i["item_code"] == self.item_a)
+		self.assertEqual(entry["price_list_rate"], 1000)
+		self.assertEqual(entry["discount_amount"], 400)
+
 	def test_currency_breakdown_present(self):
 		summary = get_session_summary(self.opening_shift)
 		self.assertEqual(len(summary["currency_breakdown"]), 1)
