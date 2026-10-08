@@ -1844,20 +1844,36 @@ onUnmounted(() => {
 // PERIODIC STOCK SYNC
 // ============================================================================
 
+// The global switch can arrive (settings reload) after the worker was
+// configured; follow it instead of keeping the boot-time state.
+watch(
+	() => posSettingsStore.automaticStockSync,
+	async (enabled) => {
+		if (!periodicSyncConfigured) return;
+		try {
+			if (enabled) await offlineWorker.startStockSync();
+			else await offlineWorker.stopStockSync();
+			isStockSyncActive.value = enabled;
+		} catch (error) {
+			log.error("Failed to toggle stock sync:", error);
+		}
+	},
+);
+
 /**
  * Setup and start periodic stock sync from worker (called when items first load)
  */
 async function setupPeriodicStockSync(warehouse) {
 	try {
-		// Check if user has enabled stock sync in settings
-		let syncEnabled = false;
+		// On/off is the global switch (POS Next Global Settings); the interval
+		// stays a per-device setting
+		const syncEnabled = posSettingsStore.automaticStockSync;
 		let syncIntervalMs = 60000; // Default 60 seconds
 
 		try {
 			const savedSettings = localStorage.getItem("pos_stock_sync_settings");
 			if (savedSettings) {
 				const parsed = JSON.parse(savedSettings);
-				syncEnabled = parsed.enabled ?? false;
 				syncIntervalMs = (parsed.intervalSeconds ?? 60) * 1000;
 			}
 		} catch (error) {

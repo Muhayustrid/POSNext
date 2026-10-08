@@ -396,10 +396,9 @@ class TestShiftManagerGates(FrappeTestCase):
 	  POS Opening/Closing Shift read) used to pass the removed
 	  `frappe.has_permission(..., doc=...)` fallback; now only the owner and
 	  management do.
-	- get_period_summary / get_period_dashboard: management-only, on top of
-	  the membership gate. The manager fixture is deliberately NOT a POS
-	  Profile User: `shifts._check_profile_access` carries its own management
-	  bypass, so a manager outside the profile passes both gates.
+	- get_period_summary / get_period_dashboard: profile members or
+	  management. The manager fixture is deliberately NOT a POS Profile User:
+	  `shifts._check_profile_access` carries its own management bypass.
 
 	Each test opens its own shift through create_opening_shift (the real API
 	path) and registers a per-test cleanup — only one open shift may hold a
@@ -537,69 +536,27 @@ class TestShiftManagerGates(FrappeTestCase):
 		except Exception:
 			pass
 
-	# ── period reports: membership AND management ────────────────────────────
+	# ── period reports: membership OR management ─────────────────────────────
 
-	def test_period_summary_rejects_profile_cashier_allows_manager(self):
-		from_date = to_date = nowdate()
-
+	def test_period_summary_allows_profile_cashier(self):
+		# profile membership alone is enough: cashiers filter their own
+		# outlet's recap/dashboard by date range like managers do
 		frappe.set_user(self.cashier_a)
 		try:
-			# premise: membership alone passed the pre-existing profile gate —
-			# the refusal comes from the new management gate
-			self.assertTrue(
-				frappe.db.exists(
-					"POS Profile User",
-					{"parent": self.profile.name, "user": self.cashier_a},
-				)
-			)
-			with self.assertRaises(frappe.PermissionError):
-				get_period_summary(self.profile.name, from_date, to_date)
+			data = get_period_summary(self.profile.name, nowdate(), nowdate())
 		finally:
 			frappe.set_user(ADMIN)
+		self.assertEqual(data["pos_profile"], self.profile.name)
 
-		# ...and management is a pure bypass: the manager is NOT a member of
-		# the profile (see setUpClass), yet passes both gates
-		self.assertFalse(
-			frappe.db.exists(
-				"POS Profile User",
-				{"parent": self.profile.name, "user": self.manager},
-			)
-		)
-		frappe.set_user(self.manager)
-		try:
-			summary = get_period_summary(self.profile.name, from_date, to_date)
-		finally:
-			frappe.set_user(ADMIN)
-		self.assertEqual(summary["pos_profile"], self.profile.name)
-
-	def test_period_dashboard_rejects_profile_cashier_allows_manager(self):
-		from_date = to_date = nowdate()
-
+	def test_period_dashboard_allows_profile_cashier(self):
+		# profile membership alone is enough: cashiers filter their own
+		# outlet's recap/dashboard by date range like managers do
 		frappe.set_user(self.cashier_a)
 		try:
-			self.assertTrue(
-				frappe.db.exists(
-					"POS Profile User",
-					{"parent": self.profile.name, "user": self.cashier_a},
-				)
-			)
-			with self.assertRaises(frappe.PermissionError):
-				get_period_dashboard(self.profile.name, from_date, to_date)
+			data = get_period_dashboard(self.profile.name, nowdate(), nowdate())
 		finally:
 			frappe.set_user(ADMIN)
-
-		self.assertFalse(
-			frappe.db.exists(
-				"POS Profile User",
-				{"parent": self.profile.name, "user": self.manager},
-			)
-		)
-		frappe.set_user(self.manager)
-		try:
-			dashboard = get_period_dashboard(self.profile.name, from_date, to_date)
-		finally:
-			frappe.set_user(ADMIN)
-		self.assertEqual(dashboard["pos_profile"], self.profile.name)
+		self.assertEqual(data["pos_profile"], self.profile.name)
 
 	def test_non_member_manager_passes_period_reports(self):
 		# dedicated probe for the shifts._check_profile_access management

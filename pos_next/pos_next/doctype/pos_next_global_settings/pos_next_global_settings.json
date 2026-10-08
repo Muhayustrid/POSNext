@@ -15,6 +15,7 @@
   "pos_closing_shift_naming_series",
   "section_break_negative_stock",
   "allow_negative_stock",
+  "enable_automatic_stock_sync",
   "section_break_localization",
   "allowed_locales",
   "tab_details",
@@ -187,6 +188,13 @@
    "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
    "label": "Allow Negative Stock"
+  },
+  {
+   "default": "1",
+   "description": "POS terminals refresh stock quantities from the server in the background. The interval stays a per-device setting on the POS.",
+   "fieldname": "enable_automatic_stock_sync",
+   "fieldtype": "Check",
+   "label": "Enable Automatic Stock Sync"
   },
   {
    "fieldname": "section_break_localization",

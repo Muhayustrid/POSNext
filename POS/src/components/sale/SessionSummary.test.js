@@ -67,16 +67,7 @@ vi.mock("reka-ui", () => ({
 	DialogTitle: { name: "DialogTitle", template: "<h2><slot /></h2>" },
 }))
 
-// Manager flag source; the period bar is manager-only. Reactive so the
-// visibility test can flip it, defaulting to manager for the period-lens
 // tests below.
-const bootstrapMock = vi.hoisted(() => ({ store: null }))
-vi.mock("@/stores/bootstrap", async () => {
-	const { reactive } = await import("vue")
-	bootstrapMock.store = reactive({ data: { is_management: true } })
-	return { useBootstrapStore: () => bootstrapMock.store }
-})
-
 // Real period math, stubbed printer: the print stack needs a device.
 const printMock = vi.hoisted(() => ({ printSalesRecap: vi.fn() }))
 vi.mock("@/utils/salesRecap", async (importOriginal) => ({
@@ -208,7 +199,6 @@ async function mountWithSummary(overrides = {}) {
 
 beforeEach(() => {
 	resources.instances.length = 0
-	bootstrapMock.store.data.is_management = true
 })
 
 describe("SessionSummary", () => {
@@ -438,12 +428,14 @@ describe("SessionSummary", () => {
 		)
 	})
 
-	it("renders item and package detail as an always-open section", async () => {
+	it("renders packages and items as separate always-open cards", async () => {
 		const { wrapper } = await mountWithSummary()
+		const packages = wrapper.find('[data-test="packages-section"]')
+		expect(packages.text()).toContain("Paket Hemat")
 		const details = wrapper.find('[data-test="items-details"]')
 		expect(details.exists()).toBe(true)
 		expect(details.element.tagName.toLowerCase()).not.toBe("details")
-		expect(details.text()).toContain("Paket Hemat")
+		expect(details.text()).not.toContain("Paket Hemat")
 		expect(details.find('[data-test="items-table"]').exists()).toBe(true)
 		// per-row price and a subtotal column replace the bare revenue figure
 		const table = details.find('[data-test="items-table"]')
@@ -842,16 +834,10 @@ describe("SessionSummary period lens", () => {
 		})
 	})
 
-	it("shows the period selector to managers only", () => {
-		const asManager = mountPeriod()
-		expect(asManager.find('[data-test="period-chip-shift"]').exists()).toBe(true)
-		asManager.unmount()
-
-		bootstrapMock.store.data.is_management = false
+	it("shows the period selector to cashiers too", () => {
 		const asCashier = mountPeriod()
-		expect(asCashier.find('[data-test="period-chip-shift"]').exists()).toBe(false)
-		// data logic untouched: the shift lens still loads
-		expect(summaryResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(asCashier.find('[data-test="period-chip-shift"]').exists()).toBe(true)
+		expect(asCashier.find('[data-test="period-chip-today"]').exists()).toBe(true)
 		asCashier.unmount()
 	})
 })
@@ -911,10 +897,9 @@ describe("SessionSummary mobile period sheet", () => {
 		wrapper.unmount()
 	})
 
-	it("hides the filter pill from non-managers", () => {
-		bootstrapMock.store.data.is_management = false
+	it("shows the filter pill to cashiers too", () => {
 		const wrapper = mountSheet()
-		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(false)
+		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(true)
 		wrapper.unmount()
 	})
 })

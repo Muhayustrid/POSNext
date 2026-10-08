@@ -533,8 +533,8 @@ def get_period_summary(pos_profile, from_date, to_date):
 	day — the rule a per-shift closing follows too. Period presets are the
 	client's job; the server only accepts explicit dates.
 
-	Security: management users only (the profile must also be their own — the
-	profile pins the company, and naming another outlet's profile is refused).
+	Security: members of the profile and management users (the profile pins
+	the company, and naming another outlet's profile is refused).
 	Rate limited: it is the one endpoint doing free-range scans.
 	"""
 	if not pos_profile:
@@ -549,8 +549,6 @@ def get_period_summary(pos_profile, from_date, to_date):
 	if not profile:
 		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
 	_check_profile_access(pos_profile)
-	if not is_management_user():
-		frappe.throw(_("Only managers can view period reports"), frappe.PermissionError)
 	from_date, to_date = _validate_period(from_date, to_date)
 
 	cash_mode = get_cash_mode_of_payment(pos_profile)
@@ -581,8 +579,8 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	fields (opening cash, cashier) are absent in this mode — the drawer is a
 	shift concept, payments here are takings only.
 
-	Security: management users on the POS Profile may read it, like
-	get_period_summary. Rate limited: free-range scans.
+	Security: same gate as get_period_summary (profile members and
+	management). Rate limited: free-range scans.
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -596,8 +594,6 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	if not profile:
 		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
 	_check_profile_access(pos_profile)
-	if not is_management_user():
-		frappe.throw(_("Only managers can view period reports"), frappe.PermissionError)
 	from_date, to_date = _validate_period(from_date, to_date)
 
 	cash_mode = get_cash_mode_of_payment(pos_profile)
@@ -621,8 +617,7 @@ def _check_profile_access(pos_profile):
 		return
 	if is_management_user():
 		# Managers oversee outlets they are not a member of (monitoring,
-		# cross-outlet close); the period endpoints layer their own
-		# manager-only gate on top of this.
+		# cross-outlet close).
 		return
 	is_profile_user = frappe.db.exists(
 		"POS Profile User",

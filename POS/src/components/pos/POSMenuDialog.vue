@@ -137,24 +137,9 @@
 						<div class="h-full flex flex-col text-start">
 							<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
 								<SessionSummary
-									ref="summaryEl"
 									:opening-shift="openingShift"
 									:pos-profile="posProfile"
 								/>
-							</div>
-							<!-- Same fixed print footer as the old SalesRecapDialog -->
-							<div
-								class="flex shrink-0 items-center border-t border-gray-200 px-4 pb-4 pt-3 sm:px-6"
-							>
-								<Button
-									variant="subtle"
-									theme="blue"
-									:loading="printing"
-									:disabled="!canPrint"
-									@click="printRecap"
-								>
-									{{ __("Print") }}
-								</Button>
 							</div>
 						</div>
 					</template>
@@ -332,31 +317,6 @@ function closeIfHidden(value) {
 	if (!value) close()
 }
 
-// Sales recap print — same gating as the old SalesRecapDialog footer: disabled
-// until SessionSummary has a recap loaded, busy while it prints.
-const summaryEl = ref(null)
-const printing = ref(false)
-const canPrint = ref(false)
-
-watch(summaryEl, (el) => {
-	canPrint.value = Boolean(el?.printable)
-})
-watch(
-	() => summaryEl.value?.printable,
-	(val) => {
-		canPrint.value = Boolean(val)
-	},
-)
-
-async function printRecap() {
-	if (!canPrint.value || printing.value) return
-	printing.value = true
-	try {
-		await summaryEl.value?.print()
-	} finally {
-		printing.value = false
-	}
-}
 </script>
 
 <style scoped>

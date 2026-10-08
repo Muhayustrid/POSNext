@@ -73,13 +73,14 @@ const RECAP_CSS = `
 	.divider { border: none; border-top: 2px dashed #333; margin: 6px 0; }
 	.subtotal-divider { border: none; border-top: 1px dashed #333; margin: 5px 0; }
 	.group-title { text-align: center; font-weight: bold; margin: 2px 0 3px; }
+	.row, .item-row { display: -webkit-box; -webkit-box-pack: justify; }
 	.row { display: flex; justify-content: space-between; }
 	.row.bold { font-weight: bold; }
 	.category { margin-top: 6px; }
 	.category:first-of-type { margin-top: 0; }
 	.category-name { font-weight: bold; margin-bottom: 1px; }
 	.item-row { display: flex; justify-content: space-between; }
-	.item-row .name { flex: 1; padding-right: 8px; }
+	.item-row .name { -webkit-box-flex: 1; flex: 1; padding-right: 8px; }
 	.component-row { padding-left: 12px; font-size: 10px; }
 	.footer { margin-top: 8px; text-align: center; font-size: 10px; }
 `
@@ -261,24 +262,55 @@ ${body.join("\n")}
 
 /**
  * Print a recap through the EOD lane of the print transport (imin -> qz ->
- * browser, per POS Settings). The transport already ends in the browser
- * driver, so there is no second fallback here; a failure means every driver
- * refused and the caller should tell the cashier.
+ * browser, per POS Settings). When every driver refuses, the same sheet is
+ * rendered to a PDF and downloaded instead, so the cashier always gets a
+ * copy. A sheet that already came out (postPrint) is never duplicated.
  *
  * The print stack (transport, drivers, offline caches) is loaded on demand:
  * the summary view itself never needs it.
+ *
+ * @returns {Promise<"printed"|"pdf">} which path produced the recap
  */
 export async function printSalesRecap(summary, { posProfile = null } = {}) {
-	const { silentPrintHTML } = await import("@/utils/printInvoice")
+	const html = buildRecapHTML(summary)
 	const reference = summary.opening_shift
 		? {
 				reference_doctype: "POS Opening Shift",
 				reference_name: summary.opening_shift,
 			}
 		: { reference_doctype: "POS Profile", reference_name: summary.pos_profile }
-	await silentPrintHTML(buildRecapHTML(summary), {
-		posProfile,
-		kind: "eod",
-		logContext: reference,
+	try {
+		const { silentPrintHTML } = await import("@/utils/printInvoice")
+		await silentPrintHTML(html, {
+			posProfile,
+			kind: "eod",
+			logContext: reference,
+		})
+		return "printed"
+	} catch (error) {
+		if (error?.postPrint) throw error
+		await downloadRecapPDF(html, `${__("Sales Recap")} ${reference.reference_name}.pdf`)
+		return "pdf"
+	}
+}
+
+/** Render the sheet server-side (wkhtmltopdf) and hand it to the browser. */
+export async function downloadRecapPDF(html, filename) {
+	const response = await fetch("/api/method/frappe.utils.print_format.report_to_pdf", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/x-www-form-urlencoded",
+			"X-Frappe-CSRF-Token": window.csrf_token || "",
+		},
+		body: new URLSearchParams({ html, orientation: "Portrait" }),
 	})
+	if (!response.ok) throw new Error(__("Could not create the sales recap PDF"))
+	const url = URL.createObjectURL(await response.blob())
+	const link = document.createElement("a")
+	link.href = url
+	link.download = filename
+	document.body.appendChild(link)
+	link.click()
+	link.remove()
+	URL.revokeObjectURL(url)
 }

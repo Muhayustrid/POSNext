@@ -6,8 +6,27 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 from pos_next.api.settings_resolver import get_effective_pos_settings
+from pos_next.utils.authz import is_management_user
 from pos_next.invoice_type import get_pos_invoice_doctype
 
+
+# The POS "Sales Management" tab: money rules a cashier must not loosen for
+# themselves. Only management may change them through update_pos_settings.
+SALES_MANAGEMENT_FIELDS = (
+	"allow_credit_sale",
+	"allow_partial_payment",
+	"allow_return",
+	"allow_user_to_edit_additional_discount",
+	"allow_user_to_edit_item_discount",
+	"allow_user_to_edit_rate",
+	"allow_write_off_change",
+	"disable_rounded_total",
+	"max_discount_allowed",
+	"print_mode",
+	"require_refund_code",
+	"tax_inclusive",
+	"use_percentage_discount",
+)
 
 class POSSettings(Document):
 	def validate(self):
@@ -77,6 +96,9 @@ def get_pos_settings(pos_profile):
 	from pos_next.api.packages import _package_allocation_enabled
 
 	settings["enable_pos_package_allocation"] = cint(_package_allocation_enabled())
+	settings["enable_automatic_stock_sync"] = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "enable_automatic_stock_sync")
+	)
 
 	# Legacy global columns: the DB columns survive the doctype migration
 	# (inert), so drop them instead of leaking stale per-row copies.
@@ -110,6 +132,11 @@ def update_pos_settings(pos_profile, settings):
 
 	if not has_access and not frappe.has_permission("POS Settings", "write"):
 		frappe.throw(_("You don't have permission to update this POS Profile"))
+
+	if not is_management_user():
+		# the SPA still posts the whole form; drop what a cashier may not touch
+		for field in SALES_MANAGEMENT_FIELDS:
+			settings.pop(field, None)
 
 	# Check if settings exist
 	existing = frappe.db.exists("POS Settings", {"pos_profile": pos_profile})

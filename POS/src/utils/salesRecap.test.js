@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { buildRecapHTML, periodRange, toISODate } from "./salesRecap"
 
 // The app installs __() as a global; the sheet builder uses it for labels.
@@ -316,5 +316,36 @@ describe("buildRecapHTML", () => {
 		expect(html).toContain("SALES PER CATEGORY")
 		expect(html).not.toContain("ITEMS SOLD")
 		expect(html).toContain("-- Akhir Laporan --")
+	})
+})
+
+describe("printSalesRecap PDF fallback", () => {
+	it("downloads a PDF when every printer driver refuses", async () => {
+		vi.resetModules()
+		vi.doMock("@/utils/printInvoice", () => ({
+			silentPrintHTML: vi.fn().mockRejectedValue(new Error("no driver")),
+		}))
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			blob: async () => new Blob(["%PDF"]),
+		})
+		vi.stubGlobal("fetch", fetchMock)
+		URL.createObjectURL = vi.fn(() => "blob:x")
+		URL.revokeObjectURL = vi.fn()
+		const { printSalesRecap } = await import("./salesRecap")
+
+		await expect(printSalesRecap(PERIOD_SUMMARY)).resolves.toBe("pdf")
+		expect(fetchMock.mock.calls[0][0]).toContain("report_to_pdf")
+		vi.unstubAllGlobals()
+	})
+
+	it("never falls back after a sheet already printed", async () => {
+		vi.resetModules()
+		const err = Object.assign(new Error("cut failed"), { postPrint: true })
+		vi.doMock("@/utils/printInvoice", () => ({
+			silentPrintHTML: vi.fn().mockRejectedValue(err),
+		}))
+		const { printSalesRecap } = await import("./salesRecap")
+		await expect(printSalesRecap(PERIOD_SUMMARY)).rejects.toBe(err)
 	})
 })

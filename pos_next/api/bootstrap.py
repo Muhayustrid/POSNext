@@ -224,6 +224,9 @@ def _get_pos_settings(pos_profile_doc):
 	# mirror can split component rates when the toggle is on. Read through the
 	# same schema-guarded helper packages.py uses, so both feeds always agree.
 	package_allocation = cint(_package_allocation_enabled())
+	stock_sync = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "enable_automatic_stock_sync")
+	)
 
 	def _resolved_defaults():
 		base = DEFAULT_POS_SETTINGS.copy()
@@ -255,6 +258,7 @@ def _get_pos_settings(pos_profile_doc):
 		settings["invoice_type"] = invoice_type
 		settings["allow_negative_stock"] = allow_negative_stock
 		settings["enable_pos_package_allocation"] = package_allocation
+		settings["enable_automatic_stock_sync"] = stock_sync
 
 		return settings
 	except Exception:
@@ -263,6 +267,7 @@ def _get_pos_settings(pos_profile_doc):
 		settings["invoice_type"] = invoice_type
 		settings["allow_negative_stock"] = allow_negative_stock
 		settings["enable_pos_package_allocation"] = package_allocation
+		settings["enable_automatic_stock_sync"] = stock_sync
 		return settings
 
 

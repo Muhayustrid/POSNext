@@ -86,6 +86,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// the settings feeds (bootstrap preload + get_pos_settings); 0 until
 		// loaded, so an offline-first boot quotes the legacy shape.
 		enable_pos_package_allocation: 0,
+		// Global switch (POS Next Global Settings) for the background stock
+		// sync worker; injected into both settings feeds like the one above.
+		enable_automatic_stock_sync: 1,
 	});
 
 	const isLoading = ref(false);
@@ -219,6 +222,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.enable_pos_package_allocation)
 	);
 
+	const automaticStockSync = computed(() =>
+		Boolean(settings.value.enable_automatic_stock_sync)
+	);
+
 	// Resource
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
@@ -330,6 +337,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			enable_session_lock: 0,
 			session_lock_timeout: 5,
 			enable_pos_package_allocation: 0,
+			enable_automatic_stock_sync: 1,
 		};
 		isLoaded.value = false;
 	}
@@ -479,6 +487,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 
 		// Computed - POS Packages
 		packageAllocationEnabled,
+		automaticStockSync,
 
 		// Actions
 		loadSettings,

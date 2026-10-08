@@ -7,10 +7,10 @@
 
 		<template v-else>
 			<!-- Mode selector: shift lens or a posting-date window over the whole
-			     profile. Managers only — cashiers get the shift lens without the
-			     profile-wide windows. Mobile folds the chips into one pill that
-			     opens a period sheet; desktop keeps the touch-friendly chip row. -->
-			<div v-if="isManagement" class="flex items-center justify-between gap-2 md:hidden">
+			     profile, for every cashier on it. Mobile folds the chips into one
+			     pill that opens a period sheet; desktop keeps the touch-friendly
+			     chip row. -->
+			<div class="flex items-center justify-between gap-2 md:hidden">
 				<button
 					type="button"
 					class="flex min-w-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700"
@@ -24,7 +24,6 @@
 				<RefreshButton :loading="loading" @click="refresh" />
 			</div>
 			<div
-				v-if="isManagement"
 				class="hidden flex-wrap items-center gap-3 md:flex"
 				data-test="mode-chips"
 			>
@@ -575,7 +574,6 @@ import BottomSheet from "@/components/common/BottomSheet.vue"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import StatusBadge from "@/components/common/StatusBadge.vue"
 import { useFormatters } from "@/composables/useFormatters"
-import { useBootstrapStore } from "@/stores/bootstrap"
 import { usePOSShiftStore } from "@/stores/posShift"
 import {
 	DEFAULT_CURRENCY,
@@ -592,10 +590,6 @@ const { formatDate, formatTime } = useFormatters()
 // clock that keeps the "updated N min ago" label aging).
 const shiftStore = usePOSShiftStore()
 
-// Period lens is a manager view; the bootstrap flag lives next to
-// can_switch_to_desk (see POSSale).
-const bootstrapStore = useBootstrapStore()
-const isManagement = computed(() => Boolean(bootstrapStore.data?.is_management))
 
 const props = defineProps({
 	embedded: { type: Boolean, default: false },
@@ -623,7 +617,7 @@ const mode = ref(props.openingShift ? "shift" : "today")
 const customFrom = ref("")
 const customTo = ref("")
 const isShiftMode = computed(() => mode.value === "shift")
-// Mobile period sheet (manager-only filter pill)
+// Mobile period sheet (filter pill)
 const sheetOpen = ref(false)
 // Custom range is picked inline in the sheet; the pill shows it once active
 const sheetPeriodLabel = computed(() => {

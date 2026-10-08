@@ -44,11 +44,7 @@
 							:aria-label="__('Tabs')"
 						>
 							<button
-								v-for="tab in [
-									{ id: 'stock', label: __('Stock Management') },
-									{ id: 'sales', label: __('Sales Management') },
-									{ id: 'printing', label: __('Printing') },
-								]"
+								v-for="tab in tabs"
 								:key="tab.id"
 								@click="activeTab = tab.id"
 								:class="[
@@ -418,16 +414,14 @@
 										</div>
 
 										<div class="flex flex-col gap-4">
-											<!-- Enable Sync Toggle -->
-											<CheckboxField
-												v-model="stockSyncEnabled"
-												:label="__('Enable Automatic Stock Sync')"
-												:description="
-													__(
-														'Periodically sync stock quantities from server in the background (runs in Web Worker)'
-													)
-												"
-											/>
+											<!-- On/off is global (POS Next Global Settings); only the interval is per device -->
+											<p class="text-xs text-gray-600">
+												{{
+													stockSyncEnabled
+														? __("Automatic Stock Sync is enabled in POS Next Global Settings.")
+														: __("Automatic Stock Sync is disabled in POS Next Global Settings.")
+												}}
+											</p>
 
 											<!-- Sync Interval -->
 											<div
@@ -574,7 +568,7 @@
 
 							<!-- Sales Management Section - Prominent -->
 							<div
-								v-if="activeTab === 'sales'"
+								v-if="activeTab === 'sales' && isManagement"
 								class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
 							>
 								<div :class="salesSectionClasses.header">
@@ -1698,6 +1692,8 @@ import { usePOSEvents } from "@/composables/usePOSEvents";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 import { useQzTray } from "@/composables/useQzTray";
 import { ensureIminSdk, getTransport, initTransportFromServer } from "@/utils/print/transport";
+import { useBootstrapStore } from "@/stores/bootstrap";
+import { usePOSSettingsStore } from "@/stores/posSettings";
 
 const log = logger.create("POSSettings");
 const { detectSettingsChanges, updateSettingsSnapshot, emitStockSyncConfigured } = usePOSEvents();
@@ -1713,6 +1709,16 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue"]);
 
 const show = ref(props.modelValue);
+
+// Sales Management (discount, credit, return rules) is a manager setting;
+// the server drops those fields from a cashier's save as well.
+const bootstrapStore = useBootstrapStore();
+const isManagement = computed(() => Boolean(bootstrapStore.data?.is_management));
+const tabs = computed(() => [
+	{ id: "stock", label: __("Stock Management") },
+	...(isManagement.value ? [{ id: "sales", label: __("Sales Management") }] : []),
+	{ id: "printing", label: __("Printing") },
+]);
 
 // State
 const activeTab = ref("stock");
@@ -1769,8 +1775,10 @@ const settings = ref({
 	imin_eod_top_margin: 0,
 });
 
-// Stock Sync Settings (localStorage persisted)
-const stockSyncEnabled = ref(false);
+// Stock Sync: on/off follows the global switch, the interval is per device
+// (localStorage persisted)
+const posSettingsStore = usePOSSettingsStore();
+const stockSyncEnabled = computed(() => posSettingsStore.automaticStockSync);
 const stockSyncIntervalSeconds = ref(60); // Default 60 seconds
 const stockSyncStatus = ref({
 	enabled: false,
@@ -2093,7 +2101,6 @@ function loadStockSyncSettings() {
 		const saved = localStorage.getItem("pos_stock_sync_settings");
 		if (saved) {
 			const parsed = JSON.parse(saved);
-			stockSyncEnabled.value = parsed.enabled ?? false;
 			stockSyncIntervalSeconds.value = parsed.intervalSeconds ?? 60;
 		}
 	} catch (error) {
@@ -2107,7 +2114,6 @@ function saveStockSyncSettings() {
 		localStorage.setItem(
 			"pos_stock_sync_settings",
 			JSON.stringify({
-				enabled: stockSyncEnabled.value,
 				intervalSeconds: stockSyncIntervalSeconds.value,
 			})
 		);
@@ -2175,11 +2181,7 @@ function formatSyncTime(timestamp) {
 	}
 }
 
-// Watch for changes and apply
-watch(stockSyncEnabled, () => {
-	applyStockSyncConfig();
-});
-
+// On/off is followed by POSSale; only the interval is applied here
 watch(stockSyncIntervalSeconds, () => {
 	if (stockSyncEnabled.value) {
 		applyStockSyncConfig();

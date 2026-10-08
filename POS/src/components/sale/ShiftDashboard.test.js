@@ -61,15 +61,6 @@ vi.mock("@/stores/posShift", async () => {
 	}
 })
 
-// Manager flag source; the period selector is manager-only. Reactive so the
-// visibility test can flip it, defaulting to manager for the period tests.
-const bootstrapMock = vi.hoisted(() => ({ store: null }))
-vi.mock("@/stores/bootstrap", async () => {
-	const { reactive } = await import("vue")
-	bootstrapMock.store = reactive({ data: { is_management: true } })
-	return { useBootstrapStore: () => bootstrapMock.store }
-})
-
 // The app installs __() as a global property; templates need it.
 globalThis.__ = (message, replacements = []) => {
 	if (!Array.isArray(replacements) || !replacements.length) return message
@@ -176,7 +167,6 @@ async function mountWithData(overrides = {}) {
 
 beforeEach(() => {
 	resources.instances.length = 0
-	bootstrapMock.store.data.is_management = true
 })
 
 describe("ShiftDashboard", () => {
@@ -499,21 +489,15 @@ describe("ShiftDashboard period mode", () => {
 		return wrapper
 	}
 
-	it("shows the period selector to managers only", () => {
-		const { wrapper: asManager } = mountDashboard({ posProfile: "P1" })
-		expect(asManager.find('[data-test="period-chip-today"]').exists()).toBe(true)
-		asManager.unmount()
-
-		bootstrapMock.store.data.is_management = false
+	it("shows the period selector to cashiers too", () => {
 		const { wrapper: asCashier } = mountDashboard({
 			openingShift: "",
 			posProfile: "P1",
 		})
-		expect(asCashier.find('[data-test="period-chip-today"]').exists()).toBe(false)
-		// data logic untouched: the default window still loads for the profile
-		expect(periodDashboardResource().resource.reload).toHaveBeenCalledTimes(1)
+		expect(asCashier.find('[data-test="period-chip-today"]').exists()).toBe(true)
 		asCashier.unmount()
 	})
+
 
 	it("defaults to period mode with today's window when there is no shift", async () => {
 		const { wrapper } = mountDashboard({ openingShift: "", posProfile: "P1" })
@@ -667,10 +651,9 @@ describe("ShiftDashboard mobile period sheet", () => {
 		wrapper.unmount()
 	})
 
-	it("hides the filter pill from non-managers", () => {
-		bootstrapMock.store.data.is_management = false
+	it("shows the filter pill to cashiers too", () => {
 		const { wrapper } = mountDashboard({ openingShift: "", posProfile: "P1" })
-		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(false)
+		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(true)
 		wrapper.unmount()
 	})
 })

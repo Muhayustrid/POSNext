@@ -1,10 +1,9 @@
 <template>
 	<div class="flex flex-col gap-5">
-		<!-- Period selector: chips, manager-only — cashiers get the shift lens
-		     without the profile-wide windows. Mobile folds them into one pill
-		     that opens a period sheet; desktop keeps the chip row. -->
+		<!-- Period selector: chips for every profile member. Mobile folds them
+		     into one pill that opens a period sheet; desktop keeps the chip row. -->
 		<div
-			v-if="(openingShift || posProfile) && isManagement"
+			v-if="openingShift || posProfile"
 			class="flex items-center justify-between gap-2 md:hidden"
 		>
 			<button
@@ -30,7 +29,7 @@
 			</Button>
 		</div>
 		<div
-			v-if="(openingShift || posProfile) && isManagement"
+			v-if="openingShift || posProfile"
 			class="hidden flex-wrap items-center gap-3 md:flex"
 			data-test="period-bar"
 		>
@@ -503,7 +502,53 @@
 					</p>
 				</section>
 
-				<!-- Item & Package Detail: always open, secondary breakdown -->
+				<!-- Package and item breakdowns: separate cards so a bundle never
+				     reads as a loose item -->
+				<section aria-labelledby="ss-pkg-h" data-test="packages-section" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
+					<div class="flex items-center gap-3">
+						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
+							<FeatherIcon name="gift" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
+						</div>
+						<div class="min-w-0">
+							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Transaction breakdown") }}</p>
+							<h3 id="ss-pkg-h" class="text-base font-semibold text-gray-900">{{ __("Package Detail") }}</h3>
+						</div>
+					</div>
+					<table v-if="summary.packages.length" class="mt-4 w-full text-sm" data-test="packages-table">
+						<thead>
+							<tr class="text-xs uppercase text-gray-500">
+								<th class="py-1.5 text-start font-medium">{{ __("Package") }}</th>
+								<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+								<th class="py-1.5 text-end font-medium">{{ __("Price") }}</th>
+								<th v-if="hasItemDiscounts" class="py-1.5 text-end font-medium">{{ __("Discount") }}</th>
+								<th class="py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr v-for="pkg in summary.packages" :key="pkg.item_code" class="border-t border-gray-100">
+								<td class="py-1.5 text-gray-900 min-w-0 break-words">
+									{{ pkg.item_name }}
+									<span class="block text-xs text-gray-500">{{ pkg.item_code }}</span>
+								</td>
+								<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(pkg.qty) }}</td>
+								<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+									{{ formatMoney(pkg.price_list_rate || 0) }}
+								</td>
+								<td v-if="hasItemDiscounts" class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+									{{ formatMoney(pkg.discount_amount || 0) }}
+								</td>
+								<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
+									{{ formatMoney(pkg.base_net_amount) }}
+								</td>
+							</tr>
+						</tbody>
+					</table>
+					<p v-else class="mt-4 text-xs text-gray-500">{{ emptyText }}</p>
+					<p class="mt-2 text-xs text-gray-500">
+						{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
+					</p>
+				</section>
+
 				<section aria-labelledby="ss-items-h" data-test="items-details" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
 					<div class="flex items-center gap-3">
 						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
@@ -511,98 +556,56 @@
 						</div>
 						<div class="min-w-0">
 							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Transaction breakdown") }}</p>
-							<h3 id="ss-items-h" class="text-base font-semibold text-gray-900">{{ __("Item & Package Detail") }}</h3>
+							<h3 id="ss-items-h" class="text-base font-semibold text-gray-900">{{ __("Item Detail") }}</h3>
 						</div>
 					</div>
-					<div class="mt-4 flex flex-col gap-5">
-						<section v-if="summary.packages.length" class="flex flex-col gap-1.5">
-							<h4 class="text-xs font-semibold text-gray-500 uppercase">{{ __("Sold Packages") }}</h4>
-							<table class="w-full text-sm">
-								<thead>
-									<tr class="text-xs uppercase text-gray-500">
-										<th class="py-1.5 text-start font-medium">{{ __("Item") }}</th>
-										<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-										<th class="py-1.5 text-end font-medium">{{ __("Price") }}</th>
-										<th v-if="hasItemDiscounts" class="py-1.5 text-end font-medium">{{ __("Discount") }}</th>
-										<th class="py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
-									</tr>
-								</thead>
-								<tbody>
-									<tr v-for="pkg in summary.packages" :key="pkg.item_code" class="border-t border-gray-100">
-										<td class="py-1.5 text-gray-900 min-w-0 break-words">
-											{{ pkg.item_name }}
-											<span class="block text-xs text-gray-500">{{ pkg.item_code }}</span>
-										</td>
-										<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(pkg.qty) }}</td>
-										<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-											{{ formatMoney(pkg.price_list_rate || 0) }}
-										</td>
-										<td v-if="hasItemDiscounts" class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-											{{ formatMoney(pkg.discount_amount || 0) }}
-										</td>
-										<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
-											{{ formatMoney(pkg.base_net_amount) }}
-										</td>
-									</tr>
-								</tbody>
-							</table>
-						</section>
-
-						<section v-if="summary.items.length" class="flex flex-col gap-1.5" data-test="items-section">
-							<h4 class="text-xs font-semibold text-gray-500 uppercase">{{ __("Items Sold") }}</h4>
-							<div class="overflow-x-auto max-h-64 overflow-y-auto">
-								<table class="w-full text-sm" data-test="items-table">
-									<thead class="sticky top-0 bg-white">
-										<tr class="text-xs uppercase text-gray-500">
-											<th class="py-1.5 text-start font-medium">{{ __("Item") }}</th>
-											<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-											<th class="py-1.5 text-end font-medium">{{ __("Price") }}</th>
-											<th v-if="hasItemDiscounts" class="py-1.5 text-end font-medium">{{ __("Discount") }}</th>
-											<th class="py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
-										</tr>
-									</thead>
-									<tbody>
-										<tr v-for="item in summary.items" :key="item.item_code" class="border-t border-gray-100">
-											<td class="py-1.5 text-gray-900 min-w-0 break-words">
-												<span
-													v-if="item.qty < 0"
-													class="me-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-400 align-middle"
-													:title="__('Returned')"
-												></span>{{ item.item_name }}
-												<span class="block text-xs text-gray-500">{{ item.item_code }}</span>
-											</td>
-											<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(item.qty) }}</td>
-											<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-												{{ formatMoney(item.price_list_rate || 0) }}
-											</td>
-											<td v-if="hasItemDiscounts" class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-												{{ formatMoney(item.discount_amount || 0) }}
-											</td>
-											<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
-												{{ formatMoney(item.base_net_amount) }}
-											</td>
-										</tr>
-									</tbody>
-								</table>
-							</div>
-							<p v-if="summary.items_truncated" class="text-xs text-gray-500">
-								{{
-									__(
-										"Showing top {0} of {1} items; the totals above cover the whole session.",
-										[summary.items_shown, summary.items_total_groups],
-									)
-								}}
-							</p>
-						</section>
-
-						<p v-if="!summary.items.length && !summary.packages.length" class="text-xs text-gray-500">
-							{{ emptyText }}
-						</p>
-
-						<p class="text-xs text-gray-500">
-							{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
-						</p>
+					<div v-if="summary.items.length" class="mt-4 overflow-x-auto max-h-64 overflow-y-auto" data-test="items-section">
+						<table class="w-full text-sm" data-test="items-table">
+							<thead class="sticky top-0 bg-white">
+								<tr class="text-xs uppercase text-gray-500">
+									<th class="py-1.5 text-start font-medium">{{ __("Item") }}</th>
+									<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+									<th class="py-1.5 text-end font-medium">{{ __("Price") }}</th>
+									<th v-if="hasItemDiscounts" class="py-1.5 text-end font-medium">{{ __("Discount") }}</th>
+									<th class="py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr v-for="item in summary.items" :key="item.item_code" class="border-t border-gray-100">
+									<td class="py-1.5 text-gray-900 min-w-0 break-words">
+										<span
+											v-if="item.qty < 0"
+											class="me-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-400 align-middle"
+											:title="__('Returned')"
+										></span>{{ item.item_name }}
+										<span class="block text-xs text-gray-500">{{ item.item_code }}</span>
+									</td>
+									<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(item.qty) }}</td>
+									<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+										{{ formatMoney(item.price_list_rate || 0) }}
+									</td>
+									<td v-if="hasItemDiscounts" class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+										{{ formatMoney(item.discount_amount || 0) }}
+									</td>
+									<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
+										{{ formatMoney(item.base_net_amount) }}
+									</td>
+								</tr>
+							</tbody>
+						</table>
 					</div>
+					<p v-else class="mt-4 text-xs text-gray-500">{{ emptyText }}</p>
+					<p v-if="summary.items_truncated" class="mt-2 text-xs text-gray-500">
+						{{
+							__(
+								"Showing top {0} of {1} items; the totals above cover the whole session.",
+								[summary.items_shown, summary.items_total_groups],
+							)
+						}}
+					</p>
+					<p class="mt-2 text-xs text-gray-500">
+						{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
+					</p>
 				</section>
 			</div>
 		</template>
@@ -613,7 +616,6 @@
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import BottomSheet from "@/components/common/BottomSheet.vue"
-import { useBootstrapStore } from "@/stores/bootstrap"
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
@@ -625,10 +627,6 @@ import { computed, ref, watch } from "vue"
 const { formatDate, formatTime } = useFormatters()
 const { showSuccess, showError } = useToast()
 
-// The period lens is a manager view; bootstrap flag sits beside
-// can_switch_to_desk (read via the same store POSSale uses).
-const bootstrapStore = useBootstrapStore()
-const isManagement = computed(() => Boolean(bootstrapStore.data?.is_management))
 
 const props = defineProps({
 	openingShift: { type: String, default: "" },
@@ -642,7 +640,7 @@ const period = ref(props.openingShift ? "shift" : "today")
 const customFrom = ref("")
 const customTo = ref("")
 const isShiftMode = computed(() => period.value === "shift")
-// Mobile period sheet (manager-only filter pill)
+// Mobile period sheet (filter pill)
 const sheetOpen = ref(false)
 const sheetPeriodLabel = computed(() => {
 	if (period.value === "custom" && range.value)
@@ -738,10 +736,14 @@ async function print() {
 	if (!summary.value || printing.value) return
 	printing.value = true
 	try {
-		await printSalesRecap(summary.value, {
+		const via = await printSalesRecap(summary.value, {
 			posProfile: props.posProfile || summary.value.pos_profile,
 		})
-		showSuccess(__("Sales recap sent to the printer"))
+		showSuccess(
+			via === "pdf"
+				? __("Printer unavailable — sales recap downloaded as PDF")
+				: __("Sales recap sent to the printer"),
+		)
 	} catch (error) {
 		showError(error?.message || __("Could not print the sales recap"))
 	} finally {
@@ -749,11 +751,6 @@ async function print() {
 	}
 }
 
-// A recap exists and is printable — the enclosing dialog shows its own Print
-// button and needs to know when to enable it.
-const printable = computed(() => Boolean(summary.value))
-
-defineExpose({ print, printing, printable })
 
 // Label and numbers come from the same response, so a window that is still
 // loading never shows the new dates over the old figures.
