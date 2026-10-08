@@ -821,7 +821,7 @@ class HQSalesMonitor {
 		return `<div class="hq-card hq-card--table hq-card--outlets">
 			<div class="hq-card-title">${__("Outlet Performance")}
 				${this._tip(__("Outlet = company; balik modal = cumulative sales vs overall target"))}
-				<a class="btn btn-xs btn-default hq-title-link" href="${this._report_href("POS Product Sales Report")}">${__("Product Sales")} →</a></div>
+				<a class="btn btn-xs btn-default hq-title-link" href="${this._report_href("POS Outlet Performance Report")}">${__("View details")} →</a></div>
 			<div class="hq-rank-controls">
 				<div class="hq-rank-group">
 					<div class="hq-search"><input type="search" class="hq-input" data-hq-outlet-search
@@ -944,7 +944,8 @@ class HQSalesMonitor {
 	_ranking_card(s) {
 		const blocks = [this._rank_category_block(s, "a"), this._rank_category_block(s, "b")];
 		return `<div class="hq-card hq-card--rankings">
-			<div class="hq-card-title">${__("Rankings")}</div>
+			<div class="hq-card-title">${__("Rankings")}
+				<a class="btn btn-xs btn-default hq-title-link" href="${this._report_href("POS Product Sales Report")}">${__("Product Sales")} →</a></div>
 			<div class="hq-rank-grid">${blocks.join("")}</div>
 		</div>`;
 	}
@@ -1236,7 +1237,7 @@ class HQSalesMonitor {
 			},
 			type: "bar",
 			colors: ["#2490ef"],
-			height: 180,
+			height: 260,
 			barOptions: { spaceRatio: 0.3 },
 			// xIsSeries skips (never truncates) labels that don't fit; the
 			// proportional min-width above keeps every "HH:00" label drawable.

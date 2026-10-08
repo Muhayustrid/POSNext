@@ -166,6 +166,18 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
+   "label": "Refund Code",
+   "link_to": "POS Discount Confirmation Code",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Bank Deposits",
    "link_to": "Bank Deposits",
    "link_type": "DocType",
@@ -273,7 +285,19 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
-   "label": "HQ Sales Monitoring",
+   "label": "POS Outlet Performance Report",
+   "link_to": "POS Outlet Performance Report",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "HQ Dashboard",
    "link_to": "hq-sales-monitoring",
    "link_type": "Page",
    "show_arrow": 0,
@@ -492,7 +516,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-08 10:00:00.000000",
+ "modified": "2026-10-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
