@@ -3379,8 +3379,20 @@ def _return_access_denied(pos_profile):
 		"POS Profile User",
 		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
 	):
-		return False
+		company = _open_shift_company()
+		return bool(company) and frappe.db.get_value("POS Profile", pos_profile, "company") != company
 	return True
+
+
+def _open_shift_company():
+	"""Company of the caller's open shift, or None. Returns stay inside that
+	company: refunding company A's sale from company B's drawer would split
+	the books between two companies."""
+	return frappe.db.get_value(
+		"POS Opening Shift",
+		{"user": frappe.session.user, "docstatus": 1, "status": "Open", "pos_closing_shift": ["is", "not set"]},
+		"company",
+	)
 
 
 def _check_return_read_access(pos_profile):
@@ -3405,6 +3417,12 @@ def _return_scope_for(pos_profile=None):
 	profiles = frappe.get_all("POS Profile User", filters={"user": frappe.session.user}, pluck="parent")
 	if not profiles:
 		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
+	company = _open_shift_company()
+	if company:
+		# [] (no same-company profile) matches nothing via isin — fail closed
+		profiles = frappe.get_all(
+			"POS Profile", filters={"name": ["in", profiles], "company": company}, pluck="name"
+		) or [""]
 	return profiles
 
 

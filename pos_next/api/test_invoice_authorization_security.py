@@ -495,6 +495,36 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		finally:
 			frappe.set_user(ADMIN)
 
+	def test_return_blocked_across_companies_even_for_member(self):
+		# cashier belongs to both outlets, but the open shift is in the home
+		# company: the other company's invoice must not be returnable from
+		# this drawer (refund would leave B's cash for A's sale)
+		foreign = self._make_foreign_profile()
+		member = frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": foreign.name,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": self.cashier,
+			}
+		).insert(ignore_permissions=True)
+		# the foreign fixture survives rollback (see tearDownClass): a leaked
+		# membership would un-foreign the profile for later tests
+		self.addCleanup(lambda: frappe.db.delete("POS Profile User", {"name": member.name}) or frappe.db.commit())
+		name = self._seed_invoice_row(foreign.name, foreign.company)
+		self._open_shift(self.cashier)
+
+		frappe.set_user(self.cashier)
+		try:
+			self.assertEqual(check_invoice_return_validity(name)["error_type"], "wrong_outlet")
+			self.assertEqual(search_invoice_by_number(name[-6:]), [])
+			self.assertNotIn(name, [row.name for row in get_returnable_invoices()])
+			with self.assertRaises(frappe.PermissionError):
+				prepare_return_invoice(name)
+		finally:
+			frappe.set_user(ADMIN)
+
 	def test_admin_return_scope_follows_requested_profile(self):
 		# own invoice first: the submit pipeline runs inner savepoint rollbacks
 		# that would wipe an uncommitted seed created before it
