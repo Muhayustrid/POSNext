@@ -36,6 +36,12 @@
 										<p class="text-sm text-gray-500 mt-1">
 											{{ profile.company }}
 										</p>
+										<p
+											v-if="profile.pos_schedule_enabled && profile.pos_schedule_start && profile.pos_schedule_end"
+											class="text-sm font-medium text-blue-700 mt-1"
+										>
+											🕒 {{ hhmm(profile.pos_schedule_start) }} – {{ hhmm(profile.pos_schedule_end) }}
+										</p>
 									</div>
 									<span
 										class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded"
@@ -246,6 +252,7 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useShift } from "../composables/useShift";
 import { useFormatters } from "../composables/useFormatters";
+import { useToast } from "../composables/useToast";
 import { formatAmountInput, parseAmountInput } from "../utils/amountInput";
 import { serverErrorMessage } from "../utils/apiWrapper";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
@@ -268,6 +275,7 @@ const open = computed({
 
 const { createOpeningShift, getOpeningDialogData, checkOpeningShift } = useShift();
 const { formatDateTime } = useFormatters();
+const { showInfo } = useToast();
 
 const step = ref(1);
 const selectedProfile = ref(null);
@@ -348,6 +356,12 @@ function resetDialog() {
 	createShiftResource.reset();
 }
 
+// Time fields arrive as "8:00:00" (serialized timedelta) → "08:00"
+function hhmm(time) {
+	const [h, m] = String(time).split(":");
+	return `${h.padStart(2, "0")}:${m}`;
+}
+
 function selectPosProfile(profile) {
 	selectedProfile.value = profile;
 }
@@ -375,6 +389,16 @@ async function openShift() {
 			balance_details,
 		});
 
+		// manager on a profile that is already active: the server joined the
+		// running shift instead of opening a second drawer
+		if (createShiftResource.data?.resumed) {
+			showInfo(
+				__("POS Profile {0} is already active. Resumed shift {1}.", [
+					selectedProfile.value.name,
+					createShiftResource.data.pos_opening_shift?.name,
+				])
+			);
+		}
 		emit("shift-opened");
 		closeDialog("shift-opened");
 	} catch (error) {

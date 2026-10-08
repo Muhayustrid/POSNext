@@ -54,7 +54,8 @@ def get_pos_profiles():
 	pos_profiles = frappe.db.sql(
 		"""
 		SELECT DISTINCT p.name, p.company, p.currency, p.warehouse,
-			p.selling_price_list, p.write_off_account, p.write_off_cost_center
+			p.selling_price_list, p.write_off_account, p.write_off_cost_center,
+			p.pos_schedule_enabled, p.pos_schedule_start, p.pos_schedule_end
 		FROM `tabPOS Profile` p
 		INNER JOIN `tabPOS Profile User` u ON u.parent = p.name
 		WHERE p.disabled = 0 AND u.user = %s

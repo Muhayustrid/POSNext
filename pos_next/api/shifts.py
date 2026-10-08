@@ -10,6 +10,10 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import cint, flt, get_datetime, getdate, nowdate, nowtime
 
 from pos_next.api.utilities import get_wallet_payment_modes
+from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
+	get_active_profile_shift,
+	throw_profile_in_use,
+)
 from pos_next.services.cash_mode import get_cash_mode_of_payment
 from pos_next.services.sales_recap import (
 	build_recap,
@@ -150,6 +154,14 @@ def create_opening_shift(pos_profile, company, balance_details):
 			_("You already have an open shift: {0}").format(existing_shift["pos_opening_shift"].name)
 		)
 
+	# One profile = one active shift. A manager joins the active shift
+	# (resume) instead of opening a second drawer; anyone else is refused.
+	active = get_active_profile_shift(pos_profile)
+	if active:
+		if not is_management_user():
+			throw_profile_in_use(pos_profile, active)
+		return _shift_payload(frappe.get_doc("POS Opening Shift", active.name), resumed=True)
+
 	new_pos_opening = frappe.get_doc(
 		{
 			"doctype": "POS Opening Shift",
@@ -174,15 +186,19 @@ def create_opening_shift(pos_profile, company, balance_details):
 	new_pos_opening.insert(ignore_permissions=True)
 	new_pos_opening.submit()
 
-	data = {}
-	data["pos_opening_shift"] = new_pos_opening.as_dict()
-	# read-only masters come from the cache (never mutated here, only serialized)
-	data["pos_profile"] = frappe.get_cached_doc("POS Profile", pos_profile)
-	data["company"] = frappe.get_cached_doc("Company", company)
-	# Server timestamp so the frontend can anchor the schedule deadline clock
-	data["server_now"] = str(get_datetime())
+	return _shift_payload(new_pos_opening)
 
-	return data
+
+def _shift_payload(shift, resumed=False):
+	return {
+		"pos_opening_shift": shift.as_dict(),
+		# read-only masters come from the cache (never mutated here, only serialized)
+		"pos_profile": frappe.get_cached_doc("POS Profile", shift.pos_profile),
+		"company": frappe.get_cached_doc("Company", shift.company),
+		# Server timestamp so the frontend can anchor the schedule deadline clock
+		"server_now": str(get_datetime()),
+		"resumed": resumed,
+	}
 
 
 @frappe.whitelist()

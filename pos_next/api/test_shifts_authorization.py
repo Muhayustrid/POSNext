@@ -14,8 +14,8 @@ Four gates under test:
   same (profile, user) cannot both open a shift;
 - single open shift per POS Profile: the doctype before_submit guard refuses
   a second opening while another shift (any user) holds the profile — one
-  profile is one cash drawer. Exempt by design: a user who may cancel a POS
-  Closing Shift (manager) may deliberately open over an in-use profile.
+  profile is one cash drawer. No exemption: create_opening_shift resumes the
+  active shift for a manager instead of opening a second one.
 
 Run via pos_next/_pn_run_tests.py pos_next.api.test_shifts_authorization
 """
@@ -331,11 +331,10 @@ class TestShiftsAuthorization(FrappeTestCase):
 			frappe.set_user(ADMIN)
 		self.assertEqual(second["pos_opening_shift"].get("user"), self.cashier2)
 
-	def test_create_opening_shift_manager_bypasses_profile_guard(self):
-		# deliberate exemption: whoever may cancel a POS Closing Shift (the
-		# manager-only right; cashiers hold submit, never cancel) may open a
-		# second shift over an in-use profile — a manager taking the register
-		# while the previous shift waits for its close
+	def test_create_opening_shift_manager_resumes_active_shift(self):
+		# a manager on an in-use profile joins the running shift instead of
+		# opening a second drawer (regression: two managers each opened their
+		# own shift on one profile)
 		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
 		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
 		frappe.get_doc("User", self.cashier2).add_roles("POSNext Manager")
@@ -345,17 +344,24 @@ class TestShiftsAuthorization(FrappeTestCase):
 			second = create_opening_shift(
 				self.profile.name, self.profile.company, self._balance_details()
 			)
-			self.addCleanup(self._remove_shift, second["pos_opening_shift"])
 		finally:
 			frappe.set_user(ADMIN)
-		self.assertEqual(second["pos_opening_shift"].get("user"), self.cashier2)
+		self.assertTrue(second["resumed"])
+		self.assertEqual(second["pos_opening_shift"].get("name"), first["pos_opening_shift"].name)
 		self.assertEqual(
 			frappe.db.count(
 				"POS Opening Shift",
 				{"pos_profile": self.profile.name, "docstatus": 1, "status": "Open"},
 			),
-			2,
+			1,
 		)
+
+	def test_second_open_shift_refused_at_doctype_level_even_for_manager(self):
+		# Desk/import path: the doctype guard no longer exempts managers
+		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
+		with self.assertRaises(frappe.ValidationError):
+			self._open_shift(user=self.cashier2)
 
 	@staticmethod
 	def _revoke_role(user, role):
@@ -686,20 +692,3 @@ class TestShiftManagerGates(FrappeTestCase):
 			frappe.set_user(ADMIN)
 		self.assertEqual(summary["opening_shift"], name)
 		self.assertEqual(dashboard["opening_shift"], name)
-
-	# ── double-shift guard: manager bypass via is_management_user ────────────
-
-	def test_manager_bypasses_double_shift_guard(self):
-		# cashier_a holds the profile; a second member would be refused by the
-		# doctype guard, but a manager may deliberately open over an in-use
-		# profile (the refactored is_management_user() bypass)
-		first = self._open_shift_as(self.cashier_a)
-		second = self._open_shift_as(self.manager)
-
-		self.assertEqual(second.get("user"), self.manager)
-		for shift in (first, second):
-			meta = frappe.db.get_value(
-				"POS Opening Shift", shift.get("name"), ["docstatus", "status"], as_dict=True
-			)
-			self.assertEqual(meta.docstatus, 1)
-			self.assertEqual(meta.status, "Open")

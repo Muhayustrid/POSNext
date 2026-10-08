@@ -5,9 +5,42 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint
+from frappe.utils import cint, format_datetime
 
-from pos_next.utils.authz import is_management_user
+
+def get_active_profile_shift(pos_profile, exclude=None):
+	"""The open shift currently holding ``pos_profile`` (locking read), or None."""
+	filters = {
+		"pos_profile": pos_profile,
+		"docstatus": 1,
+		"status": "Open",
+		"pos_closing_shift": ["is", "not set"],
+	}
+	if exclude:
+		filters["name"] = ["!=", exclude]
+	return frappe.db.get_value(
+		"POS Opening Shift",
+		filters,
+		["name", "user", "period_start_date"],
+		as_dict=True,
+		order_by="period_start_date asc",
+		for_update=True,
+	)
+
+
+def throw_profile_in_use(pos_profile, shift):
+	cashier = frappe.db.get_value("User", shift.user, "full_name") or shift.user
+	frappe.throw(
+		_(
+			"POS Profile {0} is still active on shift {1}, opened by {2} since {3}. Only one shift can be open per POS Profile. Ask {2} or a POS Manager to close that shift first."
+		).format(
+			frappe.bold(pos_profile),
+			frappe.bold(shift.name),
+			frappe.bold(cashier),
+			format_datetime(shift.period_start_date, "dd-MM-yyyy HH:mm"),
+		),
+		title=_("POS Profile Is Active"),
+	)
 
 
 class POSOpeningShift(Document):
@@ -47,39 +80,14 @@ class POSOpeningShift(Document):
 
 	def validate_single_open_shift_per_profile(self):
 		# One POS Profile is one physical cash drawer: at most one open shift
-		# may hold it at a time. create_opening_shift already holds the profile
-		# row lock before insert+submit, so this locking read is serialized
-		# against concurrent SPA opens; being on the doctype it also covers
-		# Desk submits and imports.
-		# Managers are exempt by design: "is a manager" is the shared
-		# is_management_user() test, and a manager may deliberately open over
-		# an in-use profile — e.g. to take the register while the previous
-		# shift waits for its close.
-		if is_management_user():
-			return
-		other = frappe.db.get_value(
-			"POS Opening Shift",
-			{
-				"pos_profile": self.pos_profile,
-				"docstatus": 1,
-				"status": "Open",
-				"pos_closing_shift": ["is", "not set"],
-				"name": ["!=", self.name],
-			},
-			["name", "user", "period_start_date"],
-			as_dict=True,
-			for_update=True,
-		)
+		# may hold it at a time — managers included (they resume the active
+		# shift through create_opening_shift instead of opening a second one).
+		# create_opening_shift already holds the profile row lock before
+		# insert+submit, so this locking read is serialized against concurrent
+		# SPA opens; being on the doctype it also covers Desk submits and imports.
+		other = get_active_profile_shift(self.pos_profile, exclude=self.name)
 		if other:
-			frappe.throw(
-				_("POS Profile {0} is in use by shift {1} ({2}) since {3}. Ask that cashier or a manager to close it first.").format(
-					frappe.bold(self.pos_profile),
-					frappe.bold(other.name),
-					other.user,
-					other.period_start_date,
-				),
-				title=_("Another Shift Is Open"),
-			)
+			throw_profile_in_use(self.pos_profile, other)
 
 	def validate_pos_profile_and_cashier(self):
 		if self.company != frappe.db.get_value("POS Profile", self.pos_profile, "company"):
