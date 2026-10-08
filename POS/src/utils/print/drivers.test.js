@@ -35,6 +35,22 @@ describe("createBrowserDriver", () => {
 		await expect(createBrowserDriver().isAvailable()).resolves.toBe(true)
 	})
 
+	it("prints through a hidden iframe, never a popup", async () => {
+		vi.useFakeTimers()
+		const open = vi.spyOn(window, "open")
+		await createBrowserDriver().printHTML("<p>EOD</p>")
+		const frame = document.querySelector("iframe")
+		expect(frame).not.toBeNull()
+		expect(frame.contentDocument.body.innerHTML).toContain("EOD")
+		const print = vi.spyOn(frame.contentWindow, "print").mockImplementation(() => {})
+		vi.advanceTimersByTime(3000)
+		expect(print).toHaveBeenCalledTimes(1)
+		expect(open).not.toHaveBeenCalled()
+		vi.advanceTimersByTime(60000)
+		expect(document.querySelector("iframe")).toBeNull()
+		vi.useRealTimers()
+	})
+
 	it("reports describe metadata", () => {
 		expect(createBrowserDriver().describe().id).toBe("browser")
 	})
