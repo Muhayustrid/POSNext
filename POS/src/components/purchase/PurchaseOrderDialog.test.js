@@ -313,7 +313,7 @@ describe("PurchaseOrderDialog", () => {
 		await flushPromises()
 		expect(wrapper.text()).toContain("PO-2026-00001")
 
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		expect(
 			wrapper.find('input[placeholder="Search supplier..."]').exists(),
 		).toBe(true)
@@ -329,7 +329,7 @@ describe("PurchaseOrderDialog", () => {
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await vi.advanceTimersByTimeAsync(400)
 
 		expect(mocks.call).toHaveBeenCalledWith(
@@ -365,7 +365,7 @@ describe("PurchaseOrderDialog", () => {
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await flushPromises()
 
 		const supplierInput = wrapper
@@ -393,7 +393,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockResolvedValue({ suppliers: [] })
 		const wrapper = mountOpen()
 		await flushPromises()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 
 		const input = wrapper
 			.findAll("input")
@@ -414,7 +414,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockResolvedValue({ orders: [] })
 		const wrapper = mountOpen()
 		await flushPromises()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await fillForm(wrapper)
 
 		const table = wrapper.find('[data-test="items-table"]')
@@ -431,7 +431,12 @@ describe("PurchaseOrderDialog", () => {
 		// is rendered — no rate input, no amount, no total
 		expect(wrapper.find('[data-test="item-rate"]').exists()).toBe(false)
 		expect(table.text()).not.toContain("300")
-		expect(wrapper.text()).not.toContain("Total")
+		expect(wrapper.text()).not.toContain("Grand Total")
+		expect(wrapper.text()).not.toContain("Subtotal")
+		// the summary counts quantities only
+		const summary = wrapper.find('[data-test="order-summary"]').text()
+		expect(summary).toContain("Total Items")
+		expect(summary).toContain("3 Nos")
 
 		// the row UOM is a selector over the item's UOMs, defaulting to the
 		// backend's default UOM
@@ -445,7 +450,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockResolvedValue({ orders: [] })
 		const wrapper = mountOpen()
 		await flushPromises()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await fillForm(wrapper)
 
 		const uomSelect = wrapper.find('[data-test="item-uom"]')
@@ -461,12 +466,54 @@ describe("PurchaseOrderDialog", () => {
 		expect(JSON.parse(localStorage.getItem("posNext.poUom"))).toEqual({ "ITEM-1": "Box" })
 
 		// a fresh pick for the same item starts from the remembered UOM
+		await wrapper.find('[data-test="items-table"] button[aria-label="Remove"]').trigger("click")
+		await wrapper.find('[data-test="add-item"]').trigger("click")
 		await autocomplete(wrapper, "Search item...").vm.$emit("update:modelValue", "ITEM-1")
 		await flushPromises()
 		const lastFetch = mocks.call.mock.calls
 			.filter(([m]) => m.includes("get_purchase_item_details"))
 			.at(-1)
 		expect(lastFetch[1]).toEqual(expect.objectContaining({ uom: "Box" }))
+	})
+
+	it("Add Item appends a row; re-picking the same item bumps its qty instead", async () => {
+		mocks.call.mockResolvedValue({ orders: [] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await fillForm(wrapper)
+
+		await wrapper.find('[data-test="add-item"]').trigger("click")
+		await autocomplete(wrapper, "Search item...").vm.$emit("update:modelValue", "ITEM-1")
+		await flushPromises()
+
+		const qty = wrapper.findAll('[data-test="item-qty"]')
+		expect(qty).toHaveLength(1)
+		expect(Number(qty[0].element.value)).toBe(4)
+	})
+
+	it("blocks save with inline errors for zero qty and Required By before the order date", async () => {
+		mocks.call.mockResolvedValue({ orders: [] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await fillForm(wrapper)
+		await wrapper.find('[data-test="item-qty"]').setValue(0)
+
+		await button(wrapper, "Save Draft").trigger("click")
+		await flushPromises()
+		expect(mocks.toast.error).toHaveBeenCalledWith("Quantity must be greater than 0")
+
+		await wrapper.find('[data-test="item-qty"]').setValue(2)
+		await wrapper.find("#po-transaction-date").setValue("2026-10-08")
+		await wrapper.find("#po-schedule-date").setValue("2026-10-01")
+		await button(wrapper, "Save Draft").trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("Required By cannot be before Transaction Date")
+		expect(mocks.call).not.toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.save_purchase_order",
+			expect.anything(),
+		)
 	})
 
 	it("the POS Settings price list rides the item fetch and the save payload", async () => {
@@ -482,7 +529,7 @@ describe("PurchaseOrderDialog", () => {
 		})
 		const wrapper = mountOpen()
 		await flushPromises()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await fillForm(wrapper)
 
 		expect(mocks.call).toHaveBeenCalledWith(
@@ -508,7 +555,7 @@ describe("PurchaseOrderDialog", () => {
 		})
 		const wrapper = mountOpen()
 		await flushPromises()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await fillForm(wrapper)
 
 		mocks.call.mockImplementation(async (method) =>
@@ -543,7 +590,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockResolvedValue({ orders: [] })
 		const wrapper = mountOpen()
 		await flushPromises()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		await fillForm(wrapper)
 
 		mocks.call.mockImplementation(async (method) => {
@@ -602,7 +649,7 @@ describe("PurchaseOrderDialog", () => {
 		// list: draft row has no Submit action
 		expect(button(wrapper, "Submit")).toBeUndefined()
 
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		// form: no Save & Submit in the footer
 		expect(button(wrapper, "Save & Submit")).toBeUndefined()
 		expect(button(wrapper, "Save Draft")).toBeDefined()
@@ -614,7 +661,7 @@ describe("PurchaseOrderDialog", () => {
 		await wrapper.setProps({ modelValue: true })
 		await flushPromises()
 		expect(button(wrapper, "Submit")).toBeDefined()
-		await button(wrapper, "New").trigger("click")
+		await button(wrapper, "New Purchase Order").trigger("click")
 		expect(button(wrapper, "Save & Submit")).toBeDefined()
 	})
 
