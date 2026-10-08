@@ -80,6 +80,7 @@ const RECAP_CSS = `
 	.category-name { font-weight: bold; margin-bottom: 1px; }
 	.item-row { display: flex; justify-content: space-between; }
 	.item-row .name { flex: 1; padding-right: 8px; }
+	.component-row { padding-left: 12px; font-size: 10px; }
 	.footer { margin-top: 8px; text-align: center; font-size: 10px; }
 `
 
@@ -173,9 +174,17 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 		if (!items.length) {
 			return itemRow(c.qty, label, money(c.base_net_amount))
 		}
-		const lines = items.map((i) =>
-			itemRow(i.qty, i.item_name || i.item_code, money(i.base_net_amount)),
-		)
+		const lines = items.flatMap((i) => [
+			itemRow(
+				i.qty,
+				`${i.item_name || i.item_code}${i.is_return ? ` (${__("Return")})` : ""}`,
+				money(i.base_net_amount),
+			),
+			...(i.components || []).map(
+				(c) =>
+					`<div class="component-row">${esc(fmtQty(c.qty))}x ${esc(c.item_name || c.item_code)}</div>`,
+			),
+		])
 		if (c.items_truncated) {
 			lines.push(
 				note(__("Top {0} items shown", [c.items_shown ?? items.length])),

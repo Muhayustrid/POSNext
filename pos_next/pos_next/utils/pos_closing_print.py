@@ -8,7 +8,7 @@ from frappe.query_builder import DocType
 from frappe.utils import flt
 from pypika.functions import Sum
 
-from pos_next.invoice_type import package_sold_amount, package_sold_row_filter
+from pos_next.invoice_type import package_components, package_sold_amount, package_sold_row_filter
 
 _TAX_KEYWORDS = ("PPN", "TAX", "VAT", "PAJAK")
 _SERVICE_KEYWORDS = ("SERVICE", "JASA", "CHARGE")
@@ -92,6 +92,7 @@ def _sold_item_rows(doctype: str, parents: list[str], group_by: str) -> list[dic
 		SELECT {group_by}, SUM(sii.qty) AS qty,
 			SUM({package_sold_amount("amount", dt=doctype)}) AS amount
 		FROM `tab{doctype} Item` sii
+		JOIN `tab{doctype}` si ON si.name = sii.parent
 		WHERE sii.parent IN %(parents)s AND {package_sold_row_filter("amount")}
 		GROUP BY {group_by}
 		""",
@@ -205,7 +206,26 @@ def _fetch_grouped_items_for_targets(parent_targets: set[tuple[str, str]]) -> li
 	for doctype in ("Sales Invoice", "POS Invoice"):
 		parents = sorted(parent for parent, parenttype in parent_targets if parenttype == doctype)
 		if parents:
-			rows.extend(_sold_item_rows(doctype, parents, "sii.item_group, sii.item_code, sii.item_name"))
+			# is_return keeps a return on its own line: netted into the sale of
+			# the same item it printed as a confusing "0x Item Rp0"
+			sold = _sold_item_rows(
+				doctype, parents, "sii.item_group, sii.item_code, sii.item_name, si.is_return"
+			)
+			components = package_components(
+				frappe.db.sql(
+					f"""
+					SELECT sii.parent, sii.item_code, sii.item_name, sii.qty,
+						sii.pos_package_role, sii.pos_package_instance
+					FROM `tab{doctype} Item` sii
+					WHERE sii.parent IN %(parents)s AND sii.pos_package_role IN ('Package', 'Package Item')
+					""",
+					{"parents": parents},
+					as_dict=True,
+				)
+			)
+			for row in sold:
+				row["components"] = components.get((row.item_code, bool(row.is_return)), [])
+			rows.extend(sold)
 
 	return rows
 
@@ -223,6 +243,8 @@ def _collect_categories(rows: list[dict]) -> list[dict]:
 				"qty": flt(row.get("qty"), 2),
 				"item_name": row.get("item_name"),
 				"amount": amount,
+				"is_return": bool(row.get("is_return")),
+				"components": row.get("components") or [],
 			}
 		)
 

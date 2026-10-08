@@ -21,6 +21,7 @@ import frappe
 from frappe.utils import cint, flt, get_datetime, getdate
 
 from pos_next.invoice_type import (
+	package_components,
 	package_sold_amount,
 	package_sold_row_filter,
 	sales_invoice_item_union,
@@ -765,23 +766,42 @@ def _aggregate_categories(scope, limit=20):
 				{category_expr} AS category,
 				sii.item_code,
 				MAX(sii.item_name) AS item_name,
+				si.is_return,
 				SUM(sii.qty) AS qty,
 				SUM(sii.base_net_amount) AS base_net_amount
 			{item_where}
-			GROUP BY category, sii.item_code
+			GROUP BY category, sii.item_code, si.is_return
 			ORDER BY category, base_net_amount DESC
 			""",
 			scope.values,
 			as_dict=True,
 		)
+		# Package contents print under their package line; returns stay on
+		# their own line (netted into the sale they printed "0x Item Rp0").
+		components = package_components(
+			frappe.db.sql(
+				f"""
+				SELECT sii.parent, sii.item_code, sii.item_name, sii.qty,
+					sii.pos_package_role, sii.pos_package_instance
+				FROM {_item_from(scope)}
+				JOIN {_invoice_from(scope)} ON si.name = sii.parent
+				WHERE sii.pos_package_role IN ('Package', 'Package Item')
+				""",
+				scope.values,
+				as_dict=True,
+			)
+		)
 		by_category: dict = {}
 		for row in item_rows:
+			is_return = bool(cint(row.is_return))
 			by_category.setdefault(row.category, []).append(
 				{
 					"item_code": row.item_code,
 					"item_name": row.item_name,
+					"is_return": is_return,
 					"qty": flt(row.qty),
 					"base_net_amount": flt(row.base_net_amount),
+					"components": components.get((row.item_code, is_return), []),
 				}
 			)
 		for category in categories:

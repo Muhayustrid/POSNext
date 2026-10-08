@@ -649,9 +649,22 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(summary["items"], [])
 		self.assertEqual(summary["net_sales"], 20000)
 
-		eod = {r.item_code: r for r in _fetch_grouped_items_for_targets({(sale, "Sales Invoice"), (ret, "Sales Invoice")})}
-		self.assertEqual(set(eod), {self.pkg_parent})
-		self.assertEqual(eod[self.pkg_parent].amount, 20000)
+		# EOD prints the sale and the return as separate lines (netted they read
+		# "0x Paket"), each with the components it moved
+		eod = {
+			(r.item_code, r.is_return): r
+			for r in _fetch_grouped_items_for_targets({(sale, "Sales Invoice"), (ret, "Sales Invoice")})
+		}
+		self.assertEqual(set(eod), {(self.pkg_parent, 0), (self.pkg_parent, 1)})
+		self.assertEqual(eod[(self.pkg_parent, 0)].amount, 50000)
+		self.assertEqual(eod[(self.pkg_parent, 1)].amount, -30000)
+		self.assertEqual(
+			{c["item_code"]: c["qty"] for c in eod[(self.pkg_parent, 0)].components},
+			{self.item_a: 1, self.pkg_component: 2},
+		)
+		self.assertEqual(
+			[(c["item_code"], c["qty"]) for c in eod[(self.pkg_parent, 1)].components], [(self.item_a, -1)]
+		)
 
 	def test_legacy_mode_package_with_instance_keeps_its_price(self):
 		shift = self._make_opening_shift(opening_cash=0)

@@ -1,6 +1,7 @@
 """Global invoice-doctype resolution for POS Next (see spec 2026-09-10)."""
 
 import frappe
+from frappe.utils import flt
 
 SALES_INVOICE = "Sales Invoice"
 POS_INVOICE = "POS Invoice"
@@ -204,6 +205,35 @@ def package_sold_row_filter(amount="base_net_amount"):
 		" OR (ifnull(sii.pos_package_instance, '') <> '' AND sii.pos_package_role = 'Package')"
 		f" OR (ifnull(sii.pos_package_instance, '') = '' AND sii.{amount} <> 0))"
 	)
+
+
+def package_components(rows):
+	"""Contents of the packages sold, for printing under each package line.
+
+	``rows``: item rows with parent, item_code, item_name, qty,
+	pos_package_role, pos_package_instance (Package and Package Item only is
+	enough). Components are linked to their package through
+	(parent, instance) and summed per (package item_code, is_return) — the
+	same key the printed package line uses. A return is a negative qty.
+	"""
+	packages = {
+		(row["parent"], row["pos_package_instance"]): (row["item_code"], flt(row["qty"]) < 0)
+		for row in rows
+		if row.get("pos_package_role") == "Package" and row.get("pos_package_instance")
+	}
+	out: dict = {}
+	for row in rows:
+		if row.get("pos_package_role") != "Package Item":
+			continue
+		key = packages.get((row["parent"], row.get("pos_package_instance")))
+		if not key:
+			continue
+		lines = out.setdefault(key, {})
+		line = lines.setdefault(
+			row["item_code"], {"item_code": row["item_code"], "item_name": row["item_name"], "qty": 0.0}
+		)
+		line["qty"] += flt(row["qty"])
+	return {key: list(lines.values()) for key, lines in out.items()}
 
 
 def is_pos_next_owned(doc):
