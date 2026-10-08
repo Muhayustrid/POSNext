@@ -183,17 +183,6 @@
 											</div>
 										</div>
 									</div>
-									<Button
-										@click="loadPromotions"
-										variant="outline"
-										class="w-full"
-										:loading="loading"
-									>
-										<template #prefix>
-											<FeatherIcon name="refresh-cw" class="w-4 h-4" />
-										</template>
-										{{ __("Refresh") }}
-									</Button>
 								</div>
 
 								<!-- Promotions list lives in the main content area (read-only info cards) -->

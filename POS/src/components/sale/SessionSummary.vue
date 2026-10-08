@@ -16,17 +16,7 @@
 				<span class="min-w-0 truncate">{{ sheetPeriodLabel }}</span>
 				<FeatherIcon name="chevron-down" class="h-4 w-4 shrink-0 text-gray-400" :aria-hidden="true" />
 			</button>
-			<Button
-				variant="subtle"
-				:loading="loading"
-				@click="refresh"
-				:title="__('Refresh')"
-				:aria-label="__('Refresh')"
-			>
-				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-				</svg>
-			</Button>
+			<RefreshButton :loading="loading" @click="refresh" />
 		</div>
 		<div
 			v-if="openingShift || posProfile"
@@ -193,17 +183,7 @@
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
 							</svg>
 						</Button>
-						<Button
-							variant="subtle"
-							:loading="loading"
-							@click="refresh"
-							:title="__('Refresh')"
-							:aria-label="__('Refresh')"
-						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-							</svg>
-						</Button>
+						<RefreshButton :loading="loading" @click="refresh" />
 					</div>
 					<p class="text-xs text-gray-500">
 						{{ __("Updated {0}", [formatDateTime(summary.generated_at)]) }}
@@ -613,6 +593,7 @@
 </template>
 
 <script setup>
+import RefreshButton from "@/components/common/RefreshButton.vue"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import BottomSheet from "@/components/common/BottomSheet.vue"

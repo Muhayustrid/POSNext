@@ -16,10 +16,10 @@
 						class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
 						@input="onListSearch"
 					/>
-					<RefreshButton :loading="loadingOrders" @click="loadOrders" />
 					<Button variant="solid" data-test="new-button" @click="openNew">
 						{{ __("New") }}
 					</Button>
+					<RefreshButton :loading="loadingOrders" @click="loadOrders" />
 				</div>
 
 				<div class="flex flex-wrap gap-1">
