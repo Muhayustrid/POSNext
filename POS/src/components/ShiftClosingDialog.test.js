@@ -186,10 +186,55 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 
 		expect(toastSpies.showWarning).toHaveBeenCalledWith(
 			"EOD report did not print. Use the Reprint button to retry.",
+			"Print failed",
 		)
 		expect(toastSpies.showInfo).not.toHaveBeenCalled()
 		// Closing is aborted so the cashier can retry the print.
 		expect(wrapper.emitted("shift-closed")).toBeUndefined()
+
+		// Failure state hides the reconciliation form, shows the final panel.
+		expect(wrapper.vm.isPrintFailureState).toBe(true)
+		expect(wrapper.vm.showSuccessReport).toBe(true)
+	})
+
+	it("print-failure state hides reconciliation inputs and shows Reprint/Done", async () => {
+		printEODReport.mockRejectedValue(new Error("No print driver available"))
+		// Mount with slot-rendering stubs so body/footer templates actually
+		// render (the default null stub never mounts slot content).
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: false, openingShift: "POS-OPEN-0001" },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					// The frappe-ui mock registers Dialog/Button/FeatherIcon all as
+					// "FrappeUIStub"; re-stub it to render slots so the templates show.
+					// Dialog needs the named body-content/actions slots.
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await rendered.setProps({ modelValue: true })
+		await flushPromises()
+
+		await rendered.vm.submitClosing()
+		await flushPromises()
+
+		expect(rendered.vm.isPrintFailureState).toBe(true)
+		// Reconciliation form must be gone from the rendered body
+		expect(rendered.html()).not.toContain("Enter actual amount for")
+		expect(rendered.html()).toContain("The EOD report has not been printed yet.")
+
+		// Footer shows Reprint + Done, not the mixed-signal texts
+		const text = rendered.text()
+		expect(text).toContain("Reprint EOD Report")
+		expect(text).toContain("Done")
+		expect(text).not.toContain("EOD report pending print")
+		expect(text).not.toContain("Cancel")
 	})
 
 	it("retryEodPrint reports success only for the silent lane", async () => {
@@ -231,6 +276,7 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 
 		expect(toastSpies.showWarning).toHaveBeenCalledWith(
 			"EOD report did not print. Retry, or check the printer.",
+			"Print failed",
 		)
 		expect(toastSpies.showInfo).not.toHaveBeenCalled()
 		expect(toastSpies.showSuccess).not.toHaveBeenCalled()

@@ -2,7 +2,26 @@
 	<Dialog v-model="open" :options="{ title: __('Close POS Shift'), size: '4xl' }">
 		<template #body-content>
 			<div class="pos-dialog-bound flex flex-col gap-3 md:gap-6">
-				<div v-if="closingDataResource.loading" class="text-center py-8 md:py-12">
+				<!-- Print-failure final state: shift is closed, only the print is
+				     pending. Hide the whole reconciliation form so the cashier does
+				     not think the close itself failed. -->
+				<div
+					v-if="isPrintFailureState"
+					class="flex flex-col items-center gap-2 py-8 md:py-12 text-center"
+				>
+					<FeatherIcon
+						name="check-circle"
+						class="h-12 w-12 md:h-16 md:w-16 text-green-600"
+					/>
+					<h3 class="text-base md:text-lg font-semibold text-gray-900">
+						{{ __("Shift closed successfully") }}
+					</h3>
+					<p class="text-xs md:text-sm text-gray-500">
+						{{ __("The EOD report has not been printed yet.") }}
+					</p>
+				</div>
+
+				<div v-else-if="closingDataResource.loading" class="text-center py-8 md:py-12">
 					<div
 						class="inline-block animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-b-4 border-blue-600"
 					></div>
@@ -926,64 +945,65 @@
 			<div
 				class="flex flex-col sm:flex-row justify-between w-full items-stretch sm:items-center gap-2 sm:gap-0"
 			>
-				<!-- Left side - Cancel/Close button -->
-				<Button
-					variant="subtle"
-					@click="closeDialog"
-					:disabled="submitResource.loading"
-					class="order-2 sm:order-1"
-				>
-					{{ showSuccessReport ? __("Close") : __("Cancel") }}
-				</Button>
-
-				<div
-					class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 order-1 sm:order-2"
-				>
-					<!-- Validation Warning (only in entry mode) -->
-					<div
-						v-if="!canSubmit && closingData && !showSuccessReport"
-						class="text-xs md:text-sm text-yellow-600 font-medium text-center sm:text-end"
-					>
-						{{ syncStore.hasPendingInvoices ? syncBlockMessage : __("Please enter all closing amounts") }}
-					</div>
-
-					<!-- Success message (shown in report view) -->
-					<div
-						v-if="showSuccessReport"
-						class="text-xs md:text-sm text-green-600 font-medium text-center sm:text-end"
-					>
-						{{ __("✓ Shift closed successfully") }}
-					</div>
-
-					<div
-						v-if="eodPrintFailed"
-						class="text-xs md:text-sm text-amber-600 font-medium text-center sm:text-end"
-					>
-						{{ __("EOD report pending print") }}
-					</div>
-
-					<!-- Submit/Close button (only shown in entry mode) -->
-					<Button
-						v-if="!showSuccessReport"
-						variant="solid"
-						theme="blue"
-						@click="submitClosing"
-						:loading="submitResource.loading"
-						:disabled="!canSubmit"
-					>
-						{{ submitResource.loading ? __("Closing Shift...") : __("Close Shift") }}
+				<!-- Print-failure state: neutral Done + solid Reprint, no mixed signals -->
+				<template v-if="isPrintFailureState">
+					<Button variant="subtle" @click="closeDialog" class="order-2 sm:order-1">
+						{{ __("Done") }}
 					</Button>
-
 					<Button
-						v-if="eodPrintFailed"
 						variant="solid"
 						theme="blue"
+						class="order-1 sm:order-2"
 						@click="retryEodPrint"
 						:loading="retryPrintLoading"
 					>
-						{{ __("Print EOD Report") }}
+						{{ __("Reprint EOD Report") }}
 					</Button>
-				</div>
+				</template>
+
+				<template v-else>
+					<!-- Left side - Cancel/Close button -->
+					<Button
+						variant="subtle"
+						@click="closeDialog"
+						:disabled="submitResource.loading"
+						class="order-2 sm:order-1"
+					>
+						{{ showSuccessReport ? __("Close") : __("Cancel") }}
+					</Button>
+
+					<div
+						class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 order-1 sm:order-2"
+					>
+						<!-- Validation Warning (only in entry mode) -->
+						<div
+							v-if="!canSubmit && closingData && !showSuccessReport"
+							class="text-xs md:text-sm text-yellow-600 font-medium text-center sm:text-end"
+						>
+							{{ syncStore.hasPendingInvoices ? syncBlockMessage : __("Please enter all closing amounts") }}
+						</div>
+
+						<!-- Success message (shown in report view) -->
+						<div
+							v-if="showSuccessReport"
+							class="text-xs md:text-sm text-green-600 font-medium text-center sm:text-end"
+						>
+							{{ __("✓ Shift closed successfully") }}
+						</div>
+
+						<!-- Submit/Close button (only shown in entry mode) -->
+						<Button
+							v-if="!showSuccessReport"
+							variant="solid"
+							theme="blue"
+							@click="submitClosing"
+							:loading="submitResource.loading"
+							:disabled="!canSubmit"
+						>
+							{{ submitResource.loading ? __("Closing Shift...") : __("Close Shift") }}
+						</Button>
+					</div>
+				</template>
 			</div>
 		</template>
 	</Dialog>
@@ -1223,6 +1243,7 @@ async function submitClosing() {
 				console.warn("[eod] print failed", err)
 				showWarning(
 					__("EOD report did not print. Use the Reprint button to retry."),
+					__("Print failed"),
 				)
 				eodPrintFailed.value = { closingShiftName }
 				showSuccessReport.value = true
@@ -1269,7 +1290,10 @@ async function retryEodPrint() {
 		closeDialog()
 	} catch (err) {
 		console.warn("[eod] retry print failed", err)
-		showWarning(__("EOD report did not print. Retry, or check the printer."))
+		showWarning(
+			__("EOD report did not print. Retry, or check the printer."),
+			__("Print failed"),
+		)
 	} finally {
 		retryPrintLoading.value = false
 	}
@@ -1294,6 +1318,10 @@ function closeDialog() {
 const shouldShowSummary = computed(
 	() => !hideExpectedAmount.value || showSuccessReport.value,
 )
+
+// Final state after "Close Shift" succeeded but the EOD print failed: the
+// shift IS closed, so show a compact panel instead of the reconciliation form.
+const isPrintFailureState = computed(() => Boolean(eodPrintFailed.value))
 
 const isInEntryMode = computed(
 	() => hideExpectedAmount.value && !showSuccessReport.value,
