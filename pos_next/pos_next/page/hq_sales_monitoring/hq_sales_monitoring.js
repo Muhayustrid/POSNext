@@ -1141,7 +1141,7 @@ class HQSalesMonitor {
 					<div class="hq-item-code">${frappe.utils.escape_html(r.company)} · ${frappe.utils.escape_html(r.time)}</div>
 					<div class="hq-item-code">${frappe.utils.escape_html(r.name)}</div>
 				</div>
-				${money}
+				<div class="hq-act-amount">${money}${r.mode_of_payment ? `<div class="hq-item-code">${frappe.utils.escape_html(r.mode_of_payment)}</div>` : ""}</div>
 			</div>`;
 		});
 		const generated = ((s.generated_at || "").split(" ")[1] || "").slice(0, 5);

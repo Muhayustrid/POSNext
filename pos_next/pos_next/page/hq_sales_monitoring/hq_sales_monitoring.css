@@ -620,6 +620,10 @@
 	white-space: nowrap;
 }
 
+.hq-act-amount {
+	text-align: right;
+}
+
 .hq-item-code {
 	font-size: 11px;
 	color: var(--text-muted);
