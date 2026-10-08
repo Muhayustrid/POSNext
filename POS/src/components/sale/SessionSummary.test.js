@@ -8,6 +8,8 @@ import { flushPromises, mount } from "@vue/test-utils"
 // resolve/reject by mutating the reactive resource the component holds.
 const resources = vi.hoisted(() => ({ instances: [] }))
 
+const frappeCall = vi.hoisted(() => vi.fn())
+
 vi.mock("frappe-ui", async () => {
 	const { defineComponent, reactive } = await import("vue")
 	const Button = defineComponent({
@@ -35,6 +37,7 @@ vi.mock("frappe-ui", async () => {
 		Dialog,
 		FeatherIcon,
 		Input: stub,
+		call: frappeCall,
 		createResource: (opts) => {
 			const reload = vi.fn(() => {
 				r.loading = true
@@ -614,7 +617,7 @@ describe("InvoiceHistoryDialog", () => {
 		const urls = resources.instances.map((i) => i.url)
 		expect(urls).not.toContain("pos_next.api.shifts.get_session_summary")
 		expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
-		expect(wrapper.text()).toContain("Load More")
+		expect(wrapper.text()).toContain("No invoices found")
 	})
 
 	it("uses a constrained dialog with a fixed header, close and a minimal footer", async () => {
@@ -623,8 +626,8 @@ describe("InvoiceHistoryDialog", () => {
 		await flushPromises()
 
 		const dialog = wrapper.findComponent({ name: "Dialog" })
-		// constrained width (~1152px) instead of full-viewport stretch
-		expect(dialog.props("options").size).toBe("6xl")
+		// one shared width (~1024px) for every cashier list dialog
+		expect(dialog.props("options").size).toBe("5xl")
 		expect(
 			wrapper
 				.find('[data-test="dialog-header"] button[aria-label="Close"]')
@@ -635,6 +638,41 @@ describe("InvoiceHistoryDialog", () => {
 		expect(wrapper.find('[data-test="dialog-footer"]').text()).toContain(
 			"Close",
 		)
+	})
+
+	it("opens the eye/View detail inside the dialog and loads it", async () => {
+		resources.instances.length = 0
+		frappeCall.mockResolvedValue({
+			name: "INV-0001",
+			customer_name: "Budi",
+			status: "Paid",
+			grand_total: 25000,
+			items: [{ item_name: "Kopi", qty: 1, rate: 25000, amount: 25000 }],
+			payments: [],
+		})
+		const wrapper = mountDialog()
+		await flushPromises()
+		resources.instances
+			.find((i) => i.url === "pos_next.api.invoices.get_invoices")
+			.opts.onSuccess([
+				{ name: "INV-0001", posting_date: "2026-10-01", status: "Paid", docstatus: 1, grand_total: 25000, payments: [] },
+			])
+		await flushPromises()
+
+		const view = wrapper.findAll("button").find((b) => b.text() === "View")
+		await view.trigger("click")
+		await flushPromises()
+
+		expect(frappeCall).toHaveBeenCalledWith("pos_next.api.invoices.get_invoice", {
+			invoice_name: "INV-0001",
+		})
+		expect(wrapper.text()).toContain("Kopi")
+		expect(wrapper.text()).not.toContain("Failed to load invoice details")
+
+		await wrapper.find('button[aria-label="Back"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).not.toContain("Kopi")
+		expect(wrapper.text()).toContain("INV-0001")
 	})
 
 	it("names the cashier on the date line, and only when the API provides one", async () => {

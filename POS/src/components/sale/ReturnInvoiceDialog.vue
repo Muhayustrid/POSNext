@@ -1,7 +1,12 @@
 <template>
-	<Dialog v-model="showDialog" :options="{ title: __('Create Return Invoice'), size: '5xl' }">
-		<template #body-content>
-			<div class="flex flex-col gap-4">
+	<PosDialogShell
+		v-model="showDialog"
+		:title="__('Create Return Invoice')"
+		:subtitle="__('Select Invoice to Return')"
+		icon="corner-up-left"
+	>
+		<template #toolbar>
+			<div class="flex flex-col gap-3">
 				<!-- Offline Mode Warning -->
 				<div
 					v-if="isOffline"
@@ -24,14 +29,8 @@
 					</div>
 				</div>
 
-				<!-- Recent Invoices List -->
-				<div>
-					<label class="block text-sm text-start font-medium text-gray-700 mb-3">
-						{{ __("Select Invoice to Return") }}
-					</label>
-
-					<!-- Smart Search Input with Autocomplete -->
-					<div class="mb-3 flex gap-2">
+				<!-- Smart Search Input with Autocomplete -->
+				<div class="flex gap-2">
 						<div class="flex-1 relative">
 							<div class="relative">
 								<FeatherIcon
@@ -172,6 +171,9 @@
 						</Button>
 					</div>
 
+			</div>
+		</template>
+
 					<!-- Loading State - Skeleton Loader -->
 					<div v-if="loadInvoicesResource.loading" class="flex flex-col gap-2 pe-2">
 						<div
@@ -208,7 +210,7 @@
 					</div>
 
 					<!-- Invoice List -->
-					<div v-else class="max-h-96 overflow-y-auto flex flex-col gap-2 pe-2">
+					<div v-else class="flex flex-col gap-2">
 						<div
 							v-for="invoice in filteredInvoiceList"
 							:key="invoice.name"
@@ -313,15 +315,7 @@
 							</template>
 						</div>
 					</div>
-				</div>
-			</div>
-		</template>
-		<template #actions>
-			<Button variant="subtle" @click="showDialog = false">
-				{{ __("Close") }}
-			</Button>
-		</template>
-	</Dialog>
+	</PosDialogShell>
 
 	<!-- Return Process Modal -->
 	<Dialog v-model="returnModal.visible" :options="{ title: __('Process Return'), size: '5xl' }">
@@ -1227,6 +1221,7 @@ import {
 	formatCurrency as formatCurrencyUtil,
 	roundCurrency,
 } from "@/utils/currency";
+import PosDialogShell from "@/components/common/PosDialogShell.vue";
 import { getInvoiceStatusColor } from "@/utils/invoice";
 import { highlightSafe } from "@/utils/escapeHtml";
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";

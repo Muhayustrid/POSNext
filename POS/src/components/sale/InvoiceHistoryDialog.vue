@@ -1,191 +1,147 @@
 <template>
-	<Dialog v-model="show" :options="{ title: __('Invoice History'), size: '6xl' }">
-		<template #body>
-			<!-- Constrained dialog: fixed header + tabs, scrollable body, minimal footer -->
-			<div class="flex flex-col max-h-[calc(100dvh-6rem)] text-start">
-				<!-- Compact fixed header: title, close -->
-				<div class="shrink-0 border-b border-gray-200 px-4 pt-4 pb-3 sm:px-5" data-test="dialog-header">
-					<div class="flex items-center justify-between gap-3">
-						<DialogTitle class="text-lg font-semibold leading-6 text-gray-900">
-							{{ __("Invoice History") }}
-						</DialogTitle>
-						<Button
-							variant="ghost"
-							@click="show = false"
-							:aria-label="__('Close')"
-							:title="__('Close')"
-						>
-							<svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-							</svg>
-						</Button>
-					</div>
+	<PosDialogShell
+		v-model="show"
+		:title="__('Invoice History')"
+		:subtitle="__('Recent invoices of this POS profile')"
+		icon="clock"
+	>
+		<template v-if="!viewingInvoice" #toolbar>
+			<div class="flex items-center gap-2">
+				<div class="relative flex-1">
+					<FeatherIcon
+						name="search"
+						class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+					/>
+					<input
+						v-model="searchTerm"
+						type="text"
+						:placeholder="__('Search by invoice number, buyer, or customer...')"
+						class="w-full h-10 ps-10 pe-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						@input="onSearchInput"
+					/>
 				</div>
-
-				<!-- Scrollable body -->
-				<div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5" data-test="dialog-body">
-					<!-- Filters -->
-				<div class="flex items-center gap-2">
-					<div class="flex-1">
-						<Input
-							v-model="searchTerm"
-							type="text"
-							:placeholder="__('Search by invoice number, buyer, or customer...')"
-							@input="onSearchInput"
-						>
-							<template #prefix>
-								<svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-								</svg>
-							</template>
-						</Input>
-					</div>
-					<Button
-						variant="subtle"
-						@click="loadInvoices"
-						:loading="invoicesResource.loading && !isLoadingMore"
-						:title="__('Refresh')"
-					>
-						<!-- RotateCcw icon -->
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-						</svg>
-					</Button>
-				</div>
-
-				<!-- Invoices List -->
-				<div v-if="invoicesResource.loading" class="text-center py-8">
-					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-					<p class="mt-3 text-xs text-gray-500">{{ __('Loading invoices...') }}</p>
-				</div>
-
-				<div v-else-if="filteredInvoices.length === 0" class="text-center py-8">
-					<svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-					</svg>
-					<p class="mt-2 text-sm text-gray-500">{{ __('No invoices found') }}</p>
-				</div>
-
-				<!-- Invoices List -->
-				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
-					<div
-						v-for="(invoice, index) in filteredInvoices"
-						:key="invoice.name + invoice.posting_date"
-						class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-all"
-					>
-						<div class="flex items-start justify-between gap-3">
-							<!-- Invoice Info (Start Side) -->
-							<div class="flex-1 min-w-0">
-								<div class="flex items-center gap-2 mb-1 flex-wrap">
-									<h4 class="text-sm font-semibold text-gray-900">
-										{{ invoice.name }}
-									</h4>
-									<!-- Return badge -->
-									<span
-										v-if="invoice.is_return"
-										class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
-									>
-										{{ __("Return") }}
-									</span>
-									<!-- Status badge -->
-									<span
-										v-else
-										:class="[
-											'text-xs px-2 py-0.5 rounded-full font-medium',
-											getInvoiceStatusColor(invoice),
-										]"
-									>
-										{{ __(invoice.status) }}
-									</span>
-								</div>
-								<p class="text-xs text-gray-600 text-start">
-									{{ invoice.buyer_name || invoice.customer_name }}
-								</p>
-								<p class="text-xs text-gray-500 text-start">
-									{{
-										formatDateTime(invoice.posting_date, invoice.posting_time)
-									}}
-									<span v-if="invoice.cashier_name">· {{ invoice.cashier_name }}</span>
-								</p>
-								<p class="text-xs text-gray-500 text-start">
-									{{ formatPaymentModes(invoice) }}
-								</p>
-							</div>
-
-							<!-- Amount & Actions (End Side) -->
-							<div class="flex-shrink-0 flex flex-col items-end">
-								<p class="text-sm font-bold text-gray-900 text-end">
-									{{ formatCurrency(invoice.grand_total) }}
-								</p>
-								<p
-									v-if="invoice.pos_queue_number"
-									class="text-xs font-mono font-semibold text-indigo-600 mt-0.5"
-									:title="__('Queue Number')"
-								>
-									#{{ formatQueueNumber(invoice.pos_queue_number) }}
-								</p>
-								<div class="flex items-center gap-1 mt-2">
-									<Button
-										variant="ghost"
-										theme="blue"
-										size="sm"
-										@click="viewInvoice(invoice)"
-										:title="__('View Details')"
-									>
-										<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-										</svg>
-									</Button>
-									<Button
-										variant="ghost"
-										theme="green"
-										size="sm"
-										@click="printInvoice(invoice)"
-										:title="__('Print')"
-									>
-										<svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
-										</svg>
-									</Button>
-									<Button
-										v-if="canCreateReturn(invoice)"
-										variant="ghost"
-										theme="orange"
-										size="sm"
-										@click="openReturnModal(invoice)"
-										:title="__('Create Return')"
-									>
-										<svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
-										</svg>
-									</Button>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Load More -->
-				<div v-if="hasMore && !invoicesResource.loading" class="text-center">
-					<Button variant="subtle" @click="loadMore">
-						{{ __('Load More') }}
-					</Button>
-				</div>
-				</div>
-
-				<!-- Minimal footer -->
-				<div
-					class="flex shrink-0 items-center justify-end border-t border-gray-200 px-4 py-2.5 sm:px-5"
-					data-test="dialog-footer"
+				<button
+					type="button"
+					class="w-10 h-10 shrink-0 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+					:disabled="invoicesResource.loading"
+					:title="__('Refresh')"
+					:aria-label="__('Refresh')"
+					@click="loadInvoices"
 				>
-					<Button variant="subtle" @click="show = false">
-						{{ __("Close") }}
-					</Button>
-				</div>
+					<FeatherIcon
+						name="refresh-cw"
+						:class="['w-4 h-4', invoicesResource.loading && !isLoadingMore && 'animate-spin']"
+					/>
+				</button>
 			</div>
 		</template>
-	</Dialog>
+
+		<!-- Detail opens in place so the dialog keeps its size; Back returns to the list -->
+		<InvoiceDetailDialog
+			v-if="viewingInvoice"
+			v-model="detailOpen"
+			embedded
+			:invoice-name="viewingInvoice"
+			:pos-profile="posProfile"
+			:currency="currency"
+			@print-invoice="printInvoice"
+		/>
+
+		<div v-else-if="invoicesResource.loading && !isLoadingMore" class="text-center py-12">
+			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+			<p class="mt-3 text-xs text-gray-500">{{ __('Loading invoices...') }}</p>
+		</div>
+
+		<div v-else-if="filteredInvoices.length === 0" class="text-center py-12">
+			<div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+				<FeatherIcon name="file-text" class="h-8 w-8 text-gray-400" />
+			</div>
+			<p class="text-sm font-medium text-gray-900">{{ __('No invoices found') }}</p>
+		</div>
+
+		<div v-else class="flex flex-col gap-2">
+			<div
+				v-for="invoice in filteredInvoices"
+				:key="invoice.name + invoice.posting_date"
+				class="bg-white border border-gray-200 rounded-xl p-3 hover:border-blue-300 transition-colors"
+			>
+				<div class="flex items-start justify-between gap-3">
+					<div class="flex-1 min-w-0">
+						<div class="flex items-center gap-2 flex-wrap">
+							<h4 class="text-sm font-semibold text-gray-900">{{ invoice.name }}</h4>
+							<span
+								v-if="invoice.is_return"
+								class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
+							>
+								{{ __("Return") }}
+							</span>
+							<span
+								v-else
+								:class="['text-xs px-2 py-0.5 rounded-full font-medium', getInvoiceStatusColor(invoice)]"
+							>
+								{{ __(invoice.status) }}
+							</span>
+							<span
+								v-if="invoice.pos_queue_number"
+								class="text-xs font-mono font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded"
+								:title="__('Queue Number')"
+							>
+								#{{ formatQueueNumber(invoice.pos_queue_number) }}
+							</span>
+						</div>
+						<p class="text-sm text-gray-700 mt-1 truncate">
+							{{ invoice.buyer_name || invoice.customer_name }}
+						</p>
+						<p class="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 mt-0.5">
+							<span>{{ formatDateTime(invoice.posting_date, invoice.posting_time) }}</span>
+							<template v-if="invoice.cashier_name">
+								<span class="text-gray-300">·</span>
+								<span>{{ invoice.cashier_name }}</span>
+							</template>
+							<span class="text-gray-300">·</span>
+							<span>{{ formatPaymentModes(invoice) }}</span>
+						</p>
+					</div>
+					<p class="text-base font-bold text-gray-900 tabular-nums shrink-0">
+						{{ formatCurrency(invoice.grand_total) }}
+					</p>
+				</div>
+				<div class="flex items-center justify-end gap-1.5 mt-2 pt-2 border-t border-gray-100">
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
+						@click="viewInvoice(invoice)"
+					>
+						<FeatherIcon name="eye" class="w-4 h-4 text-blue-600" />
+						{{ __('View') }}
+					</button>
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
+						@click="printInvoice(invoice)"
+					>
+						<FeatherIcon name="printer" class="w-4 h-4 text-green-600" />
+						{{ __('Print') }}
+					</button>
+					<button
+						v-if="canCreateReturn(invoice)"
+						type="button"
+						class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-orange-50"
+						@click="openReturnModal(invoice)"
+					>
+						<FeatherIcon name="corner-up-left" class="w-4 h-4 text-orange-600" />
+						{{ __('Return') }}
+					</button>
+				</div>
+			</div>
+
+			<div v-if="hasMore" class="text-center pt-1">
+				<Button variant="subtle" :loading="isLoadingMore" @click="loadMore">
+					{{ __('Load More') }}
+				</Button>
+			</div>
+		</div>
+	</PosDialogShell>
 
 	<!-- Return Invoice Dialog -->
 	<ReturnInvoiceDialog
@@ -208,10 +164,11 @@ import {
 } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
-import { DialogTitle } from "reka-ui"
+import PosDialogShell from "@/components/common/PosDialogShell.vue"
+import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
+import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue"
 
 const { showError } = useToast()
 const { formatDate, formatTime } = useFormatters()
@@ -233,7 +190,6 @@ function formatCurrency(amount) {
 const emit = defineEmits([
 	"update:modelValue",
 	"create-return",
-	"view-invoice",
 	"print-invoice",
 	"return-created",
 ])
@@ -306,6 +262,7 @@ watch(show, (val) => {
 	emit("update:modelValue", val)
 	// Dialog cleanup: reset state when dialog closes
 	if (!val) {
+		viewingInvoice.value = null
 		searchTerm.value = ""
 		page.value = 0
 		invoices.value = []
@@ -363,8 +320,16 @@ function onSearchInput() {
 	_debouncedSearch()
 }
 
+const viewingInvoice = ref(null)
+const detailOpen = computed({
+	get: () => !!viewingInvoice.value,
+	set: (val) => {
+		if (!val) viewingInvoice.value = null
+	},
+})
+
 function viewInvoice(invoice) {
-	emit("view-invoice", invoice)
+	viewingInvoice.value = invoice.name
 }
 
 function printInvoice(invoice) {

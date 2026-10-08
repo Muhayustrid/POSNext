@@ -636,7 +636,6 @@
 				:pos-profile="shiftStore.profileName"
 				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
-				@view-invoice="handleViewInvoice"
 				@print-invoice="handlePrintInvoice"
 				@return-created="handleReturnCreated"
 			/>

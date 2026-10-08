@@ -1,22 +1,27 @@
 <template>
-	<Teleport to="body">
-		<Transition name="drawer">
+	<!-- embedded: rendered in place (inside another dialog) instead of a side drawer -->
+	<Teleport to="body" :disabled="embedded">
+		<Transition :name="embedded ? '' : 'drawer'">
 			<div
 				v-if="show"
-				class="fixed inset-0 z-[400] flex"
-				role="dialog"
-				aria-modal="true"
+				:class="embedded ? 'flex' : 'fixed inset-0 z-[400] flex'"
+				:role="embedded ? undefined : 'dialog'"
+				:aria-modal="embedded ? undefined : 'true'"
 				:aria-label="__('Invoice Detail')"
 			>
 				<!-- Backdrop -->
-				<div class="absolute inset-0 bg-black/30" @click="show = false"></div>
+				<div v-if="!embedded" class="absolute inset-0 bg-black/30" @click="show = false"></div>
 
 				<!-- Panel -->
 				<div
-					class="relative ms-auto h-full w-full sm:max-w-md bg-white shadow-2xl flex flex-col"
+					:class="
+						embedded
+							? 'w-full bg-white flex flex-col'
+							: 'relative ms-auto h-full w-full sm:max-w-md bg-white shadow-2xl flex flex-col'
+					"
 				>
 					<template v-if="loading">
-						<div class="flex-1 flex flex-col items-center justify-center">
+						<div class="flex-1 flex flex-col items-center justify-center py-12">
 							<div
 								class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"
 							></div>
@@ -28,9 +33,19 @@
 
 					<template v-else-if="invoiceData">
 						<!-- Header -->
-						<div class="px-5 pt-5 pb-4 border-b border-gray-100">
+						<div :class="embedded ? 'pb-3 border-b border-gray-100' : 'px-5 pt-5 pb-4 border-b border-gray-100'">
 							<div class="flex items-start justify-between gap-3">
-								<div class="min-w-0">
+								<button
+									v-if="embedded"
+									type="button"
+									class="w-9 h-9 shrink-0 rounded-lg border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50"
+									:aria-label="__('Back')"
+									:title="__('Back')"
+									@click="show = false"
+								>
+									<FeatherIcon name="arrow-left" class="w-4 h-4 rtl:rotate-180" />
+								</button>
+								<div class="min-w-0 flex-1">
 									<div class="text-xs font-semibold uppercase tracking-wide text-blue-600">
 										{{ __("Invoice Detail") }}
 									</div>
@@ -43,6 +58,7 @@
 									</div>
 								</div>
 								<button
+									v-if="!embedded"
 									class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
 									:aria-label="__('Close')"
 									@click="show = false"
@@ -60,14 +76,19 @@
 						</div>
 
 						<!-- Scrollable Body -->
-						<div class="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-5">
+						<div
+							:class="[
+								'flex flex-col gap-5',
+								embedded ? 'py-4' : 'flex-1 overflow-y-auto px-5 py-4',
+							]"
+						>
 							<!-- Customer Card -->
 							<div
 								class="flex items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-lg p-3"
 							>
 								<div class="flex items-center gap-3 min-w-0">
 									<div
-										class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-semibold flex-shrink-0"
+										class="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold flex-shrink-0"
 									>
 										{{ customerInitials }}
 									</div>
@@ -77,7 +98,7 @@
 										</div>
 										<div
 											v-if="invoiceData.pos_queue_number"
-											class="text-xs font-mono font-semibold text-indigo-600"
+											class="text-xs font-mono font-semibold text-blue-700"
 										>
 											#{{ formatQueueNumber(invoiceData.pos_queue_number) }}
 										</div>
@@ -220,7 +241,7 @@
 								</div>
 								<div class="pt-2 border-t border-gray-200 flex justify-between">
 									<span class="font-semibold text-gray-900">{{ __("Grand Total") }}</span>
-									<span class="font-bold text-lg text-indigo-600">{{
+									<span class="font-bold text-lg text-blue-700">{{
 										formatCurrency(invoiceData.grand_total)
 									}}</span>
 								</div>
@@ -298,9 +319,14 @@
 						</div>
 
 						<!-- Sticky Footer -->
-						<div class="border-t border-gray-100 px-5 py-4 flex items-center gap-3 bg-white">
+						<div
+							:class="[
+								'border-t border-gray-100 flex items-center gap-3 bg-white',
+								embedded ? 'sticky -bottom-3 pt-3 pb-3' : 'px-5 py-4',
+							]"
+						>
 							<Button variant="subtle" @click="show = false">
-								{{ __("Close") }}
+								{{ embedded ? __("Back") : __("Close") }}
 							</Button>
 							<Button variant="solid" class="flex-1" @click="handlePrint">
 								<template #prefix>
@@ -319,7 +345,7 @@
 					</template>
 
 					<template v-else>
-						<div class="flex-1 flex flex-col items-center justify-center">
+						<div class="flex-1 flex flex-col items-center justify-center py-12">
 							<svg
 								class="h-12 w-12 text-gray-400"
 								fill="none"
@@ -336,6 +362,10 @@
 							<p class="mt-2 text-sm text-gray-500">
 								{{ __("Failed to load invoice details") }}
 							</p>
+							<Button v-if="embedded" class="mt-4" variant="subtle" @click="show = false">
+								<template #prefix><FeatherIcon name="arrow-left" class="w-4 h-4 rtl:rotate-180" /></template>
+								{{ __("Back") }}
+							</Button>
 						</div>
 					</template>
 				</div>
@@ -361,6 +391,7 @@ const props = defineProps({
 	modelValue: Boolean,
 	invoiceName: String,
 	posProfile: String,
+	embedded: Boolean,
 	currency: {
 		type: String,
 		default: DEFAULT_CURRENCY,
@@ -428,7 +459,9 @@ watch(
 		if (val && props.invoiceName) {
 			loadInvoiceDetails();
 		}
-	}
+	},
+	// embedded hosts mount this already open; load on mount too
+	{ immediate: true }
 );
 
 watch(show, (val) => {
@@ -440,7 +473,8 @@ watch(show, (val) => {
 });
 
 function onKeydown(e) {
-	if (e.key === "Escape" && show.value) {
+	// embedded: the host dialog owns Escape
+	if (e.key === "Escape" && show.value && !props.embedded) {
 		show.value = false;
 	}
 }

@@ -1,153 +1,103 @@
 <template>
 	<!-- Main Dialog -->
-	<Dialog v-model="show" :options="{ title: __('Draft Invoices'), size: 'lg' }">
-		<template #body-content>
-			<div class="flex flex-col gap-3">
-				<!-- Empty State -->
-				<div v-if="drafts.length === 0" class="text-center py-8">
-					<div
-						class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3"
-					>
-						<svg
-							class="h-8 w-8 text-gray-400"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-							/>
-						</svg>
+	<PosDialogShell
+		v-model="show"
+		:title="__('Draft Invoices')"
+		:subtitle="drafts.length ? __('{0} saved draft(s) · tap one to continue', [drafts.length]) : ''"
+		icon="file-text"
+	>
+		<!-- Empty State -->
+		<div v-if="drafts.length === 0" class="h-full flex flex-col items-center justify-center text-center py-12">
+			<div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+				<FeatherIcon name="file-text" class="h-8 w-8 text-gray-400" />
+			</div>
+			<p class="text-sm font-medium text-gray-900">{{ __("No draft invoices") }}</p>
+			<p class="text-xs text-gray-500 mt-1">
+				{{ __("Save invoices as drafts to continue later") }}
+			</p>
+		</div>
+
+		<!-- Drafts List -->
+		<div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-2">
+			<div
+				v-for="draft in drafts"
+				:key="draft.draft_id"
+				role="button"
+				tabindex="0"
+				class="group bg-white border border-gray-200 rounded-xl p-3 hover:border-blue-400 hover:bg-blue-50/30 transition-colors cursor-pointer flex flex-col gap-2"
+				@click="$emit('load-draft', draft)"
+				@keydown.enter="$emit('load-draft', draft)"
+			>
+				<div class="flex items-start justify-between gap-2">
+					<div class="min-w-0">
+						<p class="text-sm font-semibold text-gray-900 truncate">
+							{{ draftCustomer(draft) || __("Walk-in Customer") }}
+						</p>
+						<p class="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+							<FeatherIcon name="clock" class="w-3 h-3" />
+							{{ formatDateTime(draft.created_at) }}
+							<span class="text-gray-300">·</span>
+							{{ __("{0} item(s)", [draft.items?.length || 0]) }}
+						</p>
 					</div>
-					<p class="text-sm font-medium text-gray-900">{{ __("No draft invoices") }}</p>
-					<p class="text-xs text-gray-500 mt-1">
-						{{ __("Save invoices as drafts to continue later") }}
-					</p>
+					<span class="text-base font-bold text-gray-900 tabular-nums shrink-0">
+						{{ formatCurrency(calculateTotal(draft.items)) }}
+					</span>
 				</div>
 
-				<!-- Drafts List -->
-				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto">
-					<div
-						v-for="draft in drafts"
-						:key="draft.draft_id"
-						class="bg-white border border-gray-200 rounded-lg p-3 hover:border-blue-400 transition-all cursor-pointer"
-						@click="$emit('load-draft', draft)"
+				<div v-if="draft.items && draft.items.length > 0" class="flex flex-wrap gap-1">
+					<span
+						v-for="(item, idx) in draft.items.slice(0, 3)"
+						:key="idx"
+						class="text-[11px] bg-gray-100 text-gray-700 px-2 py-0.5 rounded-md"
 					>
-						<div class="flex items-start justify-between mb-2">
-							<div class="flex-1">
-								<h4 class="text-sm font-semibold text-gray-900">
-									{{ draft.draft_id }}
-								</h4>
-								<p v-if="draft.customer" class="text-xs text-gray-500 mt-0.5">
-									{{
-										__("Customer: {0}", [
-											draft.customer?.customer_name ||
-												draft.customer?.name ||
-												draft.customer,
-										])
-									}}
-								</p>
-								<p class="text-xs text-gray-400 mt-0.5">
-									{{ formatDateTime(draft.created_at) }}
-								</p>
-							</div>
-							<div class="flex items-center gap-1">
-								<button
-									v-if="props.allowPrintDraftInvoices"
-									@click.stop="handlePrintDraft(draft)"
-									class="text-gray-400 hover:text-blue-600 transition-colors p-1"
-									:title="__('Print draft')"
-								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
-										/>
-									</svg>
-								</button>
-								<button
-									@click.stop="handleDeleteDraft(draft.draft_id)"
-									class="text-gray-400 hover:text-red-600 transition-colors p-1"
-									:title="__('Delete draft')"
-								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-										/>
-									</svg>
-								</button>
-							</div>
-						</div>
+						{{ item.item_name }} × {{ item.quantity || item.qty }}
+					</span>
+					<span v-if="draft.items.length > 3" class="text-[11px] text-gray-500 px-1 py-0.5">
+						{{ __("+{0} more", [draft.items.length - 3]) }}
+					</span>
+				</div>
 
-						<!-- Items Preview -->
-						<div class="flex items-center justify-between text-xs">
-							<span class="text-gray-600">
-								{{ __("{0} item(s)", [draft.items?.length || 0]) }}
-							</span>
-							<span class="font-bold text-blue-600">
-								{{ formatCurrency(calculateTotal(draft.items)) }}
-							</span>
-						</div>
-
-						<!-- Items List (condensed) -->
-						<div
-							v-if="draft.items && draft.items.length > 0"
-							class="mt-2 pt-2 border-t border-gray-100"
+				<div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-100">
+					<span class="text-[11px] font-mono text-gray-400 truncate">{{ draft.draft_id }}</span>
+					<div class="flex items-center gap-1 shrink-0">
+						<button
+							v-if="props.allowPrintDraftInvoices"
+							@click.stop="handlePrintDraft(draft)"
+							class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-blue-600"
+							:title="__('Print draft')"
+							:aria-label="__('Print draft')"
 						>
-							<div class="flex flex-wrap gap-1">
-								<span
-									v-for="(item, idx) in draft.items.slice(0, 3)"
-									:key="idx"
-									class="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded"
-								>
-									{{ item.item_name }} ({{ item.quantity || item.qty }})
-								</span>
-								<span
-									v-if="draft.items.length > 3"
-									class="text-[10px] text-gray-500 px-1.5 py-0.5"
-								>
-									{{ __("+{0} more", [draft.items.length - 3]) }}
-								</span>
-							</div>
-						</div>
+							<FeatherIcon name="printer" class="w-4 h-4" />
+						</button>
+						<button
+							@click.stop="handleDeleteDraft(draft.draft_id)"
+							class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-600"
+							:title="__('Delete draft')"
+							:aria-label="__('Delete draft')"
+						>
+							<FeatherIcon name="trash-2" class="w-4 h-4" />
+						</button>
+						<span class="ms-1 inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 h-8 text-xs font-semibold text-white">
+							{{ __("Continue") }}
+							<FeatherIcon name="arrow-right" class="w-3.5 h-3.5" />
+						</span>
 					</div>
 				</div>
 			</div>
+		</div>
+
+		<template #footer>
+			<Button
+				v-if="drafts.length > 0"
+				variant="subtle"
+				theme="red"
+				@click="showClearAllDialog = true"
+			>
+				{{ __("Clear All") }}
+			</Button>
 		</template>
-		<template #actions>
-			<div class="flex justify-between items-center w-full">
-				<Button
-					v-if="drafts.length > 0"
-					variant="subtle"
-					theme="red"
-					@click="showClearAllDialog = true"
-				>
-					{{ __("Clear All") }}
-				</Button>
-				<Button variant="subtle" @click="show = false">
-					{{ __("Close") }}
-				</Button>
-			</div>
-		</template>
-	</Dialog>
+	</PosDialogShell>
 
 	<!-- Delete Single Draft Confirmation -->
 	<Dialog v-model="showDeleteDialog" :options="{ title: __('Delete Draft?'), size: 'xs' }">
@@ -204,7 +154,8 @@ import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printInvoiceCustom } from "@/utils/printInvoice";
 import { useToast } from "@/composables/useToast";
 import { usePOSShiftStore } from "@/stores/posShift";
-import { Button, Dialog } from "frappe-ui";
+import PosDialogShell from "@/components/common/PosDialogShell.vue";
+import { Button, Dialog, FeatherIcon } from "frappe-ui";
 import { onMounted, ref, watch } from "vue";
 
 const { showSuccess, showError } = useToast();
@@ -318,6 +269,10 @@ async function confirmClearAll() {
 		console.error("Error clearing drafts:", error);
 		showError(__("Failed to clear drafts"));
 	}
+}
+
+function draftCustomer(draft) {
+	return draft.customer?.customer_name || draft.customer?.name || draft.customer || "";
 }
 
 function formatDateTime(dateStr) {
