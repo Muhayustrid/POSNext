@@ -298,8 +298,8 @@ describe("buildReceiptHTML (package grouped under its title)", () => {
 		})
 
 		expect(html).toContain("1 × 25.000")
-		expect(html).toContain("- Ropi Coklat x1")
-		expect(html).toContain("- Ropi Keju x1")
+		expect(html).toContain("- 1x&nbsp;</span><span>Ropi Coklat")
+		expect(html).toContain("- 1x&nbsp;</span><span>Ropi Keju")
 		expect(html).not.toContain("15.000")
 		expect(html).not.toContain("10.000")
 	})
@@ -316,7 +316,7 @@ describe("buildReceiptHTML (package grouped under its title)", () => {
 
 		expect(html).toContain("2 × 23.000")
 		expect(html).toContain("46.000")
-		expect(html).toContain("- Ropi Coklat x2")
+		expect(html).toContain("- 2x&nbsp;</span><span>Ropi Coklat")
 		expect(html).not.toContain("2 × 0")
 	})
 })

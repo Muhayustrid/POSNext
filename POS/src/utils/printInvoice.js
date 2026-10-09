@@ -210,9 +210,11 @@ export function buildReceiptHTML(invoiceData) {
 		.map((item) => {
 			const instance = item.pos_package_instance
 			if (instance && item.pos_package_role === "Package Item") {
+				// qty leads so it never wraps away from the name; a long name wraps
+				// under itself, not under the qty
 				return `
 						<div class="item-row" style="padding-left: 12px;">
-							<div class="item-name">- ${escapeHtml(item.item_name || item.item_code)} x${escapeHtml(item.quantity || item.qty || 0)}</div>
+							<div class="item-name" style="display: flex;"><span style="white-space: nowrap;">- ${escapeHtml(item.quantity || item.qty || 0)}x&nbsp;</span><span>${escapeHtml(item.item_name || item.item_code)}</span></div>
 						</div>`
 			}
 			if (instance && item.pos_package_role === "Package") {
