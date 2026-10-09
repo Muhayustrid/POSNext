@@ -279,7 +279,7 @@
 									v-if="invoiceData.change_amount && invoiceData.change_amount > 0"
 									class="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2"
 								>
-									<span class="text-sm font-semibold text-gray-900">{{ __("Change") }}</span>
+									<span class="text-sm font-semibold text-gray-900">{{ __("Change", null, "payment") }}</span>
 									<span class="text-base font-bold text-gray-900">{{
 										formatCurrency(invoiceData.change_amount)
 									}}</span>

@@ -54,7 +54,7 @@ def get_po_defaults(pos_profile=None):
 	POS Profile's own warehouse.
 	"""
 	_check_guest()
-	_check_permission("Purchase Order", "read")
+	_check_permission("read")
 	supplier = _po_setting(pos_profile, "po_default_supplier")
 	return {
 		"supplier": supplier,

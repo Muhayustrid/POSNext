@@ -611,7 +611,7 @@
 													<th
 														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
 													>
-														{{ __("Change") }}
+														{{ __("Change", null, "payment") }}
 													</th>
 													<th
 														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
@@ -839,7 +839,7 @@
 														v-if="invoice.change_amount"
 														class="text-xs text-gray-500"
 													>
-														{{ __("Change") }}
+														{{ __("Change", null, "payment") }}
 														{{ formatCurrency(invoice.change_amount) }}
 													</div>
 												</div>
