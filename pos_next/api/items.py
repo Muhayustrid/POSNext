@@ -2004,13 +2004,15 @@ def get_item_groups(pos_profile):
 		POSItemGroup = DocType("POS Item Group")
 		ItemGroup = DocType("Item Group")
 
-		configured_groups = (
-			frappe.qb.from_(POSItemGroup)
-			.select(POSItemGroup.item_group)
-			.distinct()
-			.where(POSItemGroup.parent == pos_profile)
-			.orderby(POSItemGroup.item_group)
-			.run(pluck="item_group")
+		# Row order of the profile's Item Groups table is the tab order
+		configured_groups = list(
+			dict.fromkeys(
+				frappe.qb.from_(POSItemGroup)
+				.select(POSItemGroup.item_group)
+				.where(POSItemGroup.parent == pos_profile)
+				.orderby(POSItemGroup.idx)
+				.run(pluck="item_group")
+			)
 		)
 
 		if not configured_groups:

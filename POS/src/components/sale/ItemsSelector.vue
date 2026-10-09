@@ -8,30 +8,6 @@
 				class="flex items-center gap-1 sm:gap-2 overflow-x-auto pb-1 scrollbar-hide snap-x snap-mandatory"
 			>
 				<button
-					@click="handleAllFilterClick"
-					:class="[
-						'flex items-center px-2 sm:px-3 py-2.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
-						!activeFilterValue
-							? 'bg-blue-50 text-blue-600 border-2 border-blue-500 shadow-sm'
-							: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100',
-					]"
-				>
-					<svg
-						class="w-3.5 h-3.5 sm:w-4 sm:h-4"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M4 6h16M4 12h16M4 18h16"
-						/>
-					</svg>
-					<span>{{ isBrandSortActive ? __("All Brands") : __("All Items") }}</span>
-				</button>
-				<button
 					v-for="option in activeFilterOptions"
 					:key="option.value"
 					@click="handleFilterClick(option.value)"
@@ -1549,15 +1525,9 @@ function setViewMode(mode) {
 	localStorage.setItem(VIEW_PREF_KEY, mode);
 }
 
-function handleAllFilterClick() {
-	if (isBrandSortActive.value) {
-		itemStore.setSelectedBrand(null);
-		return;
-	}
-	itemStore.setSelectedItemGroup(null);
-}
-
+// No "All" chip: tapping the active chip again clears the filter (all items).
 function handleFilterClick(value) {
+	if (value === activeFilterValue.value) value = null;
 	if (isBrandSortActive.value) {
 		itemStore.setSelectedBrand(value);
 		return;
