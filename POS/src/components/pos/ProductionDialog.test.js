@@ -660,4 +660,20 @@ describe("ProductionDialog", () => {
 		await flushPromises()
 		expect(wrapper.text()).toContain("No production history yet")
 	})
+
+	it("Overview loads the production dashboard for the last 7 days", async () => {
+		const dashCall = mockCall("pos_next.api.production.get_production_dashboard", () =>
+			Promise.resolve({
+				produced: 40, loss: 2, loss_pct: 4.8, runs: 4, active: 1,
+				top_items: [{ item_code: "ICED-LATTE", item_name: "Iced Latte", produced: 40, loss: 2, runs: 4 }],
+				daily: [{ day: "2026-10-08", produced: 40, loss: 2 }],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "Overview").trigger("click")
+		await flushPromises()
+		expect(dashCall).toHaveBeenCalledWith(expect.objectContaining({ pos_profile: "POS-1" }))
+		expect(wrapper.text()).toContain("4.8%")
+		expect(wrapper.text()).toContain("Most produced")
+	})
 })

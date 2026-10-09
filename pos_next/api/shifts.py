@@ -612,6 +612,44 @@ def get_period_dashboard(pos_profile, from_date, to_date):
 	return dashboard
 
 
+@frappe.whitelist()
+def export_sales_recap(opening_shift=None, pos_profile=None, from_date=None, to_date=None):
+	"""The sales recap (shift or period) as one .xlsx sheet: totals, payments,
+	items. Same gates as the on-screen recap — it is built by those endpoints."""
+	from frappe.utils.xlsxutils import build_xlsx_response
+
+	if opening_shift:
+		s = get_session_summary(opening_shift)
+		title = opening_shift
+	else:
+		s = get_period_summary(pos_profile, from_date, to_date)
+		title = f"{pos_profile} {s['period_from']} - {s['period_to']}"
+
+	rows = [
+		[_("Sales Recap"), title],
+		[_("Currency"), s.get("company_currency")],
+		[],
+		[_("Gross Sales"), flt(s.get("gross_sales"))],
+		[_("Returns"), flt(s.get("returns_total"))],
+		[_("Discount"), flt(s.get("total_discount"))],
+		[_("Tax"), flt(s.get("tax_total"))],
+		[_("Net Sales"), flt(s.get("net_sales"))],
+		[_("Transactions"), cint(s.get("sales_count"))],
+		[_("Average Sale"), flt(s.get("average_sale"))],
+		[_("Items Sold"), flt(s.get("total_qty"))],
+		[],
+		[_("Payment Method"), _("Amount")],
+		*[[p.get("mode_of_payment"), flt(p.get("amount"))] for p in s.get("payments") or []],
+		[],
+		[_("Item Code"), _("Item Name"), _("Qty"), _("Net Amount"), _("Discount")],
+		*[
+			[i["item_code"], i["item_name"], i["qty"], i["base_net_amount"], i["discount_amount"]]
+			for i in (s.get("items") or []) + (s.get("packages") or [])
+		],
+	]
+	return build_xlsx_response(rows, f"sales-recap-{title}".replace(" ", "_"))
+
+
 def _check_profile_access(pos_profile):
 	if frappe.session.user == "Administrator":
 		return

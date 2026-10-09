@@ -183,6 +183,16 @@
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
 							</svg>
 						</Button>
+						<Button
+							variant="subtle"
+							:loading="exporting"
+							data-test="recap-export"
+							:title="__('Export to Excel')"
+							:aria-label="__('Export to Excel')"
+							@click="exportExcel"
+						>
+							<FeatherIcon name="download" class="w-4 h-4" />
+						</Button>
 						<RefreshButton :loading="loading" @click="refresh" />
 					</div>
 					<p class="text-xs text-gray-500">
@@ -602,6 +612,7 @@ import {
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
 import { periodRange, printSalesRecap } from "@/utils/salesRecap"
+import { downloadXlsx } from "@/utils/downloadXlsx"
 import { Button, createResource, FeatherIcon } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
@@ -653,6 +664,24 @@ const periodOptions = computed(() => [
 
 const stale = ref(false)
 const printing = ref(false)
+const exporting = ref(false)
+
+async function exportExcel() {
+	if (exporting.value) return
+	exporting.value = true
+	try {
+		await downloadXlsx(
+			"pos_next.api.shifts.export_sales_recap",
+			isShiftMode.value
+				? { opening_shift: props.openingShift }
+				: { pos_profile: props.posProfile, from_date: range.value?.from, to_date: range.value?.to },
+		)
+	} catch (error) {
+		showError(error?.message || __("Export failed"))
+	} finally {
+		exporting.value = false
+	}
+}
 
 const sessionResource = createResource({
 	url: "pos_next.api.shifts.get_session_summary",

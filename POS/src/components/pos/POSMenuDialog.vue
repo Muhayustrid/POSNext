@@ -155,17 +155,11 @@
 							</div>
 						</div>
 					</template>
-					<WarehouseAvailabilityDialog
+					<ProductsView
 						v-else-if="activeView === 'products'"
-						embedded
-						:model-value="true"
-						mode="search"
 						:pos-profile="posProfile"
 						:company="company"
-						class="h-full"
-						v-bind="$attrs"
-						@close="close"
-						@update:model-value="closeIfHidden"
+						:currency="currency"
 					/>
 					<ProductionDialog
 						v-else-if="activeView === 'production'"
@@ -214,7 +208,7 @@ import POSSettings from "@/components/settings/POSSettings.vue"
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue"
 import SessionSummary from "@/components/sale/SessionSummary.vue"
 import ShiftDashboard from "@/components/sale/ShiftDashboard.vue"
-import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
+import ProductsView from "@/components/sale/ProductsView.vue"
 import ProductionDialog from "@/components/pos/ProductionDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"

@@ -7,38 +7,54 @@
 		<template #body-content>
 			<!-- LIST LEVEL: Recipes (one-shot + start) | In Production (two-phase) -->
 			<template v-if="view !== 'detail'">
-				<div class="flex items-center gap-2 mb-3">
-						<div class="flex rounded-lg bg-gray-100 p-1">
-							<button
-								v-for="tab in [
-									{ id: 'recipes', label: __('Recipes') },
-									{ id: 'active', label: __('In Production') },
-									{ id: 'history', label: __('History') },
-								]"
+				<div class="flex items-end gap-2 mb-4 border-b border-gray-200">
+					<nav class="flex gap-5 overflow-x-auto" role="tablist">
+						<button
+							v-for="tab in [
+								{ id: 'recipes', label: __('Recipes') },
+								{ id: 'active', label: __('In Production') },
+								{ id: 'history', label: __('History') },
+								{ id: 'overview', label: __('Overview') },
+							]"
 							:key="tab.id"
 							type="button"
-							class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+							role="tab"
+							:aria-selected="view === tab.id"
+							class="-mb-px pb-2.5 pt-1 border-b-2 text-sm font-medium whitespace-nowrap transition-colors"
 							:class="
 								view === tab.id
-									? 'bg-white text-gray-900 shadow-sm'
-									: 'text-gray-600 hover:text-gray-900'
+									? 'border-gray-900 text-gray-900'
+									: 'border-transparent text-gray-500 hover:text-gray-800'
 							"
 							@click="switchView(tab.id)"
 						>
 							{{ tab.label }}
+							<span
+								v-if="tab.id === 'active' && productions.length"
+								class="ms-1 inline-flex min-w-[1.25rem] justify-center rounded-full bg-blue-600 px-1.5 text-xs font-semibold text-white tabular-nums"
+								>{{ productions.length }}</span
+							>
 						</button>
-					</div>
+					</nav>
 					<RefreshButton
-						class="ms-auto"
+						class="ms-auto mb-1.5"
 						:loading="
 							view === 'recipes'
 								? loadingRecipes
 								: view === 'active'
 									? loadingActive
-									: loadingHistory
+									: view === 'history'
+										? loadingHistory
+										: loadingDashboard
 						"
 						@click="
-							view === 'recipes' ? loadRecipes() : view === 'active' ? loadActive() : loadHistory()
+							view === 'recipes'
+								? loadRecipes()
+								: view === 'active'
+									? loadActive()
+									: view === 'history'
+										? loadHistory()
+										: loadDashboard()
 						"
 					/>
 				</div>
@@ -62,24 +78,27 @@
 					</div>
 					<div
 						v-else
-						class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto mt-2"
+						class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto mt-3"
 					>
 						<button
 							v-for="r in filteredRecipes"
 							:key="r.name"
-							class="w-full text-start px-4 py-3 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-colors"
+							class="w-full text-start px-4 py-3 border border-gray-200 rounded-lg hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
 							@click="selectRecipe(r)"
 						>
-							<div class="flex items-center justify-between">
-								<span class="font-medium text-gray-900">{{ r.recipe_name }}</span>
-								<span class="text-xs text-gray-500">
-									{{ __("makes {0} × {1}", [r.output_qty, r.production_item_name]) }}
-								</span>
+							<div class="font-semibold text-gray-900 truncate">{{ r.recipe_name }}</div>
+							<div class="text-xs text-gray-500 mt-0.5 truncate">
+								{{ __("makes {0} × {1}", [r.output_qty, r.production_item_name]) }}
 							</div>
 							<div
-								class="text-xs mt-1"
-								:class="canMake(r) ? 'text-green-600' : 'text-red-500'"
+								class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium"
+								:class="canMake(r) ? 'text-green-700' : 'text-red-600'"
 							>
+								<span
+									class="w-2 h-2 rounded-full"
+									:class="canMake(r) ? 'bg-green-500' : 'bg-red-500'"
+									aria-hidden="true"
+								/>
 								{{
 									canMake(r)
 										? __("Materials available")
@@ -269,7 +288,21 @@
 				</template>
 
 				<!-- HISTORY: finished Work Orders of this outlet, newest first -->
-				<template v-else>
+				<template v-else-if="view === 'history'">
+					<div class="flex items-center justify-end gap-2 mb-3">
+						<select
+							v-model="period"
+							:aria-label="__('Export period')"
+							class="py-1.5 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white"
+						>
+							<option v-for="o in periodOptions" :key="o.value" :value="o.value">
+								{{ o.label }}
+							</option>
+						</select>
+						<Button variant="subtle" :loading="exporting" @click="exportHistory">
+							{{ __("Export to Excel") }}
+						</Button>
+					</div>
 					<div v-if="loadingHistory" class="py-10 text-center text-sm text-gray-500">
 						{{ __("Loading production history...") }}
 					</div>
@@ -280,11 +313,11 @@
 						{{ __("No production history yet") }}
 					</div>
 					<template v-else>
-						<div class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto">
+						<div class="flex flex-col max-h-[60vh] overflow-y-auto divide-y divide-gray-100 border-y border-gray-100">
 							<div
 								v-for="p in historyProductions"
 								:key="p.work_order"
-								class="border border-gray-200 rounded-lg px-4 py-3"
+								class="px-1 py-3"
 							>
 								<div class="flex items-start justify-between gap-2">
 									<div class="min-w-0">
@@ -317,8 +350,8 @@
 											p.process_loss_qty
 										}}</span>
 									</span>
-									<span class="ms-auto inline-flex items-center gap-1 text-xs text-gray-500">
-										{{ historyStamp(p) }} · {{ p.operator }}
+									<span class="ms-auto text-xs text-gray-500 tabular-nums">
+										{{ historyStamp(p) }}<template v-if="p.operator">, {{ p.operator }}</template>
 									</span>
 								</div>
 							</div>
@@ -334,6 +367,150 @@
 							</Button>
 						</div>
 					</template>
+				</template>
+
+			<!-- OVERVIEW: output / loss for a period, top items, daily trend -->
+				<template v-else>
+					<div class="flex flex-wrap items-center gap-2 mb-4">
+						<div class="flex rounded-lg border border-gray-300 overflow-hidden" role="group">
+							<button
+								v-for="o in periodOptions"
+								:key="o.value"
+								type="button"
+								class="px-3 py-1.5 text-sm border-e border-gray-300 last:border-e-0 transition-colors"
+								:class="
+									period === o.value
+										? 'bg-gray-900 text-white'
+										: 'bg-white text-gray-700 hover:bg-gray-50'
+								"
+								:aria-pressed="period === o.value"
+								@click="period = o.value"
+							>
+								{{ o.label }}
+							</button>
+						</div>
+						<Button class="ms-auto" variant="subtle" :loading="exporting" @click="exportHistory">
+							{{ __("Export to Excel") }}
+						</Button>
+					</div>
+					<div
+						v-if="loadingDashboard && !dashboard"
+						class="py-10 text-center text-sm text-gray-500"
+					>
+						{{ __("Loading...") }}
+					</div>
+					<div v-else-if="dashboard" class="flex flex-col gap-6">
+						<!-- Figures: produced is the one number that matters, the rest support it -->
+						<div class="grid grid-cols-2 lg:grid-cols-4 gap-y-4 border-y border-gray-200 py-4">
+							<div class="col-span-2 lg:col-span-1 lg:border-e lg:border-gray-200 lg:pe-4">
+								<div class="text-sm text-gray-500">{{ __("Produced") }}</div>
+								<div class="text-4xl font-bold text-gray-900 tabular-nums leading-tight">
+									{{ fmtQty(dashboard.produced) }}
+								</div>
+								<div class="text-xs text-gray-500">
+									{{ __("{0} runs", [dashboard.runs]) }}
+								</div>
+							</div>
+							<div class="lg:border-e lg:border-gray-200 lg:px-4">
+								<div class="text-sm text-gray-500">{{ __("Loss rate") }}</div>
+								<div
+									class="text-2xl font-semibold tabular-nums"
+									:class="dashboard.loss_pct >= 10 ? 'text-red-600' : 'text-gray-900'"
+								>
+									{{ dashboard.loss_pct }}%
+								</div>
+								<div class="text-xs text-gray-500">
+									{{ __("{0} units lost", [fmtQty(dashboard.loss)]) }}
+								</div>
+							</div>
+							<div class="lg:border-e lg:border-gray-200 lg:px-4">
+								<div class="text-sm text-gray-500">{{ __("Running now") }}</div>
+								<div class="text-2xl font-semibold text-gray-900 tabular-nums">
+									{{ dashboard.active }}
+								</div>
+								<button
+									v-if="dashboard.active"
+									type="button"
+									class="text-xs text-blue-600 hover:underline"
+									@click="switchView('active')"
+								>
+									{{ __("Open list") }}
+								</button>
+							</div>
+							<div class="lg:px-4">
+								<div class="text-sm text-gray-500">{{ __("Average per run") }}</div>
+								<div class="text-2xl font-semibold text-gray-900 tabular-nums">
+									{{ dashboard.runs ? fmtQty(dashboard.produced / dashboard.runs) : "0" }}
+								</div>
+							</div>
+						</div>
+
+						<p v-if="!dashboard.runs" class="text-sm text-gray-500 text-center py-6">
+							{{ __("Nothing was produced in this period.") }}
+						</p>
+						<div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+							<!-- Daily trend: produced (blue) with loss stacked on top (red) -->
+							<section class="lg:col-span-3">
+								<h3 class="text-sm font-semibold text-gray-900 mb-3">
+									{{ __("Output per day") }}
+								</h3>
+								<div class="flex items-end gap-1 h-40" role="img" :aria-label="__('Output per day')">
+									<div
+										v-for="d in dashboard.daily"
+										:key="d.day"
+										class="flex-1 min-w-[4px] flex flex-col justify-end h-full"
+										:title="`${d.day}: ${fmtQty(d.produced)} / ${__('Loss')} ${fmtQty(d.loss)}`"
+									>
+										<div
+											class="bg-red-400 rounded-t-sm"
+											:style="{ height: barPct(d.loss) }"
+										/>
+										<div
+											class="bg-blue-600"
+											:class="{ 'rounded-t-sm': !d.loss }"
+											:style="{ height: barPct(d.produced) }"
+										/>
+									</div>
+								</div>
+								<div class="flex justify-between mt-1 text-xs text-gray-500 tabular-nums">
+									<span>{{ dashboard.daily[0]?.day }}</span>
+									<span v-if="dashboard.daily.length > 1">{{
+										dashboard.daily[dashboard.daily.length - 1].day
+									}}</span>
+								</div>
+								<div class="flex gap-4 mt-2 text-xs text-gray-600">
+									<span class="inline-flex items-center gap-1.5"
+										><span class="w-2.5 h-2.5 rounded-sm bg-blue-600" />{{ __("Produced") }}</span
+									>
+									<span class="inline-flex items-center gap-1.5"
+										><span class="w-2.5 h-2.5 rounded-sm bg-red-400" />{{ __("Loss") }}</span
+									>
+								</div>
+							</section>
+							<!-- Top items -->
+							<section class="lg:col-span-2">
+								<h3 class="text-sm font-semibold text-gray-900 mb-3">
+									{{ __("Most produced") }}
+								</h3>
+								<ol class="flex flex-col gap-3">
+									<li v-for="t in dashboard.top_items" :key="t.item_code">
+										<div class="flex items-baseline justify-between gap-2 text-sm">
+											<span class="truncate text-gray-900">{{ t.item_name }}</span>
+											<span class="shrink-0 font-semibold tabular-nums">{{
+												fmtQty(t.produced)
+											}}</span>
+										</div>
+										<div class="mt-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+											<div
+												class="h-full bg-blue-600 rounded-full"
+												:style="{ width: topPct(t.produced) }"
+											/>
+										</div>
+									</li>
+								</ol>
+							</section>
+						</div>
+					</div>
 				</template>
 			</template>
 
@@ -491,6 +668,8 @@ import { useToast } from "@/composables/useToast"
 import { computed, onUnmounted, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
+import { downloadXlsx } from "@/utils/downloadXlsx"
+import { periodRange } from "@/utils/salesRecap"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -554,6 +733,61 @@ const loadingHistory = ref(false)
 const historyHasMore = ref(false)
 const HISTORY_PAGE = 30
 
+// Overview + export share one period
+const period = ref("last7")
+const periodOptions = [
+	{ value: "today", label: __("Today") },
+	{ value: "last7", label: __("Last 7 Days") },
+	{ value: "month", label: __("This Month") },
+	{ value: "year", label: __("This Year") },
+]
+const dashboard = ref(null)
+const loadingDashboard = ref(false)
+const exporting = ref(false)
+
+async function loadDashboard() {
+	const range = periodRange(period.value)
+	if (!props.posProfile || !range) return
+	loadingDashboard.value = true
+	try {
+		dashboard.value = await call("pos_next.api.production.get_production_dashboard", {
+			pos_profile: props.posProfile,
+			from_date: range.from,
+			to_date: range.to,
+		})
+	} catch (err) {
+		showError(errMsg(err, "Failed to load production overview"))
+	} finally {
+		loadingDashboard.value = false
+	}
+}
+watch(period, () => view.value === "overview" && loadDashboard())
+
+async function exportHistory() {
+	const range = periodRange(period.value)
+	if (exporting.value || !range) return
+	exporting.value = true
+	try {
+		await downloadXlsx("pos_next.api.production.export_production_history", {
+			pos_profile: props.posProfile,
+			from_date: range.from,
+			to_date: range.to,
+		})
+	} catch (err) {
+		showError(err?.message || __("Export failed"))
+	} finally {
+		exporting.value = false
+	}
+}
+
+const dailyMax = computed(() =>
+	Math.max(1, ...(dashboard.value?.daily || []).map((d) => d.produced + d.loss)),
+)
+const barPct = (v) => `${(v / dailyMax.value) * 100}%`
+const topPct = (v) =>
+	`${(v / Math.max(1, dashboard.value?.top_items?.[0]?.produced || 0)) * 100}%`
+const fmtQty = (v) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })
+
 const filteredRecipes = computed(() => {
 	if (!search.value) return recipes.value
 	const term = search.value.toLowerCase()
@@ -604,6 +838,7 @@ function switchView(target) {
 	view.value = target
 	if (target === "active") loadActive()
 	if (target === "history") loadHistory()
+	if (target === "overview") loadDashboard()
 }
 
 const recipesResource = createResource({

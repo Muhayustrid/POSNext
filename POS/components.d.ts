@@ -45,6 +45,7 @@ declare module 'vue' {
     POSMenuDialog: typeof import('./src/components/pos/POSMenuDialog.vue')['default']
     POSSettings: typeof import('./src/components/settings/POSSettings.vue')['default']
     ProductionDialog: typeof import('./src/components/pos/ProductionDialog.vue')['default']
+    ProductsView: typeof import('./src/components/sale/ProductsView.vue')['default']
     PromotionManagement: typeof import('./src/components/sale/PromotionManagement.vue')['default']
     PurchaseAttachments: typeof import('./src/components/purchase/PurchaseAttachments.vue')['default']
     PurchaseOrderDialog: typeof import('./src/components/purchase/PurchaseOrderDialog.vue')['default']

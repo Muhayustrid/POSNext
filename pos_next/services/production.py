@@ -795,6 +795,63 @@ def get_production_history(pos_profile, limit=30, offset=0):
 	}
 
 
+def get_production_dashboard(pos_profile, from_date, to_date):
+	"""Output, loss and run counts of this outlet's Work Orders created in
+	[from_date, to_date]; cancelled Work Orders (docstatus 2) are excluded —
+	their stock was reversed, so they produced nothing."""
+	_resolve_profile(pos_profile)
+	where = "wo.posa_pos_profile = %(p)s AND wo.docstatus = 1 AND DATE(wo.creation) BETWEEN %(f)s AND %(t)s"
+	params = {"p": pos_profile, "f": getdate(from_date), "t": getdate(to_date)}
+	totals = frappe.db.sql(
+		f"""SELECT COALESCE(SUM(wo.produced_qty), 0) AS produced,
+			COALESCE(SUM(wo.process_loss_qty), 0) AS loss, COUNT(*) AS runs
+		FROM `tabWork Order` wo WHERE {where}""",
+		params,
+		as_dict=True,
+	)[0]
+	top = frappe.db.sql(
+		f"""SELECT wo.production_item AS item_code, i.item_name,
+			SUM(wo.produced_qty) AS produced, SUM(wo.process_loss_qty) AS loss, COUNT(*) AS runs
+		FROM `tabWork Order` wo LEFT JOIN `tabItem` i ON i.name = wo.production_item
+		WHERE {where}
+		GROUP BY wo.production_item, i.item_name ORDER BY produced DESC LIMIT 5""",
+		params,
+		as_dict=True,
+	)
+	daily = frappe.db.sql(
+		f"""SELECT DATE(wo.creation) AS day, SUM(wo.produced_qty) AS produced,
+			SUM(wo.process_loss_qty) AS loss
+		FROM `tabWork Order` wo WHERE {where} GROUP BY DATE(wo.creation) ORDER BY day""",
+		params,
+		as_dict=True,
+	)
+	active = frappe.db.count(
+		"Work Order",
+		{"docstatus": 1, "status": ["in", ACTIVE_STATUSES], "posa_pos_profile": pos_profile},
+	)
+	produced, loss = flt(totals.produced), flt(totals.loss)
+	return {
+		"from_date": str(params["f"]),
+		"to_date": str(params["t"]),
+		"produced": produced,
+		"loss": loss,
+		"loss_pct": round(loss / (produced + loss) * 100, 1) if produced + loss else 0,
+		"runs": cint(totals.runs),
+		"active": cint(active),
+		"top_items": [
+			{
+				"item_code": r.item_code,
+				"item_name": r.item_name or r.item_code,
+				"produced": flt(r.produced),
+				"loss": flt(r.loss),
+				"runs": cint(r.runs),
+			}
+			for r in top
+		],
+		"daily": [{"day": str(r.day), "produced": flt(r.produced), "loss": flt(r.loss)} for r in daily],
+	}
+
+
 def create_production(recipe, qty, pos_profile, good_qty=None, loss_qty=0, notes=None):
 	"""One-shot Start+Finish in a single request = a single DB transaction (D3)."""
 	started = start_production(recipe, qty, pos_profile, notes=notes)

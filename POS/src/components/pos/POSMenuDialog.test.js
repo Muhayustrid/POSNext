@@ -39,7 +39,7 @@ const viewStubs = {
 		name: "ShiftDashboard",
 		template: `<div data-testid="view-dashboard" />`,
 	},
-	WarehouseAvailabilityDialog: { template: `<div data-testid="view-products" />` },
+	ProductsView: { template: `<div data-testid="view-products" />` },
 	ProductionDialog: { template: `<div data-testid="view-production" />` },
 	PurchaseOrderDialog: { template: `<div data-testid="view-purchase-order" />` },
 }

@@ -16,7 +16,7 @@ from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull, Sum
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import cint, flt, getdate, nowdate
 
 from pos_next.utils.authz import is_management_user
 
@@ -2217,6 +2217,75 @@ def get_stock_balance(pos_profile, start=0, limit=50):
 		(*warehouses, *params, min(int(limit), 200), int(start)),
 		as_dict=True,
 	)
+
+
+PRODUCT_SORTS = {
+	"name": "i.item_name ASC",
+	"stock_asc": "actual_qty ASC, i.item_name ASC",
+	"stock_desc": "actual_qty DESC, i.item_name ASC",
+}
+
+
+def _product_rows(pos_profile, search=None, item_group=None, stock=None, sort=None, start=0, limit=None):
+	"""Products page rows: stock items of the profile scope with total stock in
+	the profile warehouse, group, image and selling price (stock UOM)."""
+	_assert_profile_access(pos_profile)
+	profile = frappe.get_cached_doc("POS Profile", pos_profile)
+	if not profile.warehouse:
+		return []
+
+	warehouses = [profile.warehouse]
+	if frappe.db.get_value("Warehouse", profile.warehouse, "is_group"):
+		warehouses = frappe.db.get_descendants("Warehouse", profile.warehouse) or warehouses
+
+	conditions, params, _joins = _build_item_base_conditions(profile, item_group=item_group or None)
+	conditions += ["i.is_stock_item = 1", "i.has_variants = 0"]
+	if search:
+		conditions.append("(i.name LIKE %s OR i.item_name LIKE %s)")
+		params += [f"%{search}%"] * 2
+	having = {"in": "HAVING actual_qty > 0", "out": "HAVING actual_qty <= 0"}.get(stock, "")
+	paging = f"LIMIT {min(cint(limit), 200)} OFFSET {max(cint(start), 0)}" if limit else ""
+	wh_placeholders = ", ".join(["%s"] * len(warehouses))
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT i.name AS item_code, i.item_name, i.item_group, i.image, i.stock_uom,
+			COALESCE(SUM(bin.actual_qty), 0) AS actual_qty
+		FROM `tabItem` i
+		LEFT JOIN `tabBin` bin ON bin.item_code = i.name AND bin.warehouse IN ({wh_placeholders})
+		WHERE {" AND ".join(conditions)}
+		GROUP BY i.name, i.item_name, i.item_group, i.image, i.stock_uom
+		{having}
+		ORDER BY {PRODUCT_SORTS.get(sort, PRODUCT_SORTS["name"])}
+		{paging}
+		""",
+		(*warehouses, *params),
+		as_dict=True,
+	)
+	prices = _fetch_uom_prices_map([r.item_code for r in rows], profile.selling_price_list, selling=True)
+	for r in rows:
+		uom_prices = prices.get(r.item_code, {})
+		r.rate = flt(uom_prices.get(r.stock_uom, uom_prices.get("", 0)))
+		r.actual_qty = flt(r.actual_qty)
+	return rows
+
+
+@frappe.whitelist()
+def get_product_list(pos_profile, search=None, item_group=None, stock=None, sort=None, start=0, limit=50):
+	"""Products page: filterable, sortable stock list (stock: 'in' | 'out')."""
+	return _product_rows(pos_profile, search, item_group, stock, sort, start, limit or 50)
+
+
+@frappe.whitelist()
+def export_product_list(pos_profile, search=None, item_group=None, stock=None, sort=None):
+	"""Same filters as get_product_list, every row, as .xlsx (GET)."""
+	from frappe.utils.xlsxutils import build_xlsx_response
+
+	rows = _product_rows(pos_profile, search, item_group, stock, sort)
+	data = [["Item Code", "Item Name", "Item Group", "Price", "Stock", "UOM"]] + [
+		[r.item_code, r.item_name, r.item_group, r.rate, r.actual_qty, r.stock_uom] for r in rows
+	]
+	return build_xlsx_response(data, f"products-{nowdate()}")
 
 
 # =============================================================================

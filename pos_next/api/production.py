@@ -14,6 +14,7 @@ from frappe.utils import cint, flt
 
 from pos_next.api.packages import _assert_profile_access
 from pos_next.services.production import (  # noqa: F401  (_uom_whole_field re-exported for tests)
+	_pos_status_label,
 	_uom_whole_field,
 	close_production as _close_production,
 	create_production as _create_production,
@@ -21,6 +22,7 @@ from pos_next.services.production import (  # noqa: F401  (_uom_whole_field re-e
 	finish_production as _finish_production,
 	get_active_productions as _get_active_productions,
 	get_finish_context as _get_finish_context,
+	get_production_dashboard as _get_production_dashboard,
 	get_production_history as _get_production_history,
 	get_recipes as _get_recipes,
 	start_production as _start_production,
@@ -184,6 +186,55 @@ def get_production_history(pos_profile, limit=30, offset=0):
 		frappe.log_error(frappe.get_traceback(), "Get Production History Error")
 		frappe.throw(_("Error fetching production history: {0}").format(str(e)))
 
+
+def _period(from_date, to_date):
+	from pos_next.api.shifts import _validate_period
+
+	return _validate_period(from_date, to_date)
+
+@frappe.whitelist()
+def get_production_dashboard(pos_profile, from_date, to_date):
+	"""Output / loss / runs of this outlet over a creation-date window."""
+	_assert_profile_access(pos_profile)
+	from_date, to_date = _period(from_date, to_date)
+	return _get_production_dashboard(pos_profile, from_date, to_date)
+
+EXPORT_HEADERS = ("Date", "Work Order", "Item", "Recipe", "Planned", "Produced", "Loss", "Status", "Operator")
+
+@frappe.whitelist()
+def export_production_history(pos_profile, from_date, to_date):
+	"""Download this outlet's Work Orders in the window as .xlsx (GET)."""
+	_assert_profile_access(pos_profile)
+	from frappe.utils.xlsxutils import build_xlsx_response
+
+	from_date, to_date = _period(from_date, to_date)
+	rows = frappe.db.sql(
+		"""SELECT wo.creation, wo.name, COALESCE(i.item_name, wo.production_item) AS item_name,
+			r.recipe_name, wo.qty, wo.produced_qty, wo.process_loss_qty, wo.status,
+			wo.docstatus, wo.posa_operator
+		FROM `tabWork Order` wo
+		LEFT JOIN `tabItem` i ON i.name = wo.production_item
+		LEFT JOIN `tabPOS Production Recipe` r ON r.name = wo.posa_recipe
+		WHERE wo.posa_pos_profile = %s AND wo.docstatus > 0 AND DATE(wo.creation) BETWEEN %s AND %s
+		ORDER BY wo.creation DESC""",
+		(pos_profile, from_date, to_date),
+		as_dict=True,
+	)
+	data = [list(EXPORT_HEADERS)] + [
+		[
+			str(r.creation)[:16],
+			r.name,
+			r.item_name,
+			r.recipe_name or "",
+			flt(r.qty),
+			flt(r.produced_qty),
+			flt(r.process_loss_qty),
+			"Cancelled" if r.docstatus == 2 else _pos_status_label(r.status, r.produced_qty, r.qty),
+			r.posa_operator or "",
+		]
+		for r in rows
+	]
+	return build_xlsx_response(data, f"production-{from_date}-{to_date}")
 
 def _profile_of(work_order):
 	"""The profile a Work Order belongs to decides who may act on it (SEC-NEW-03
