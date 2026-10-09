@@ -252,7 +252,7 @@ describe("small-screen responsive contracts", () => {
 
 	it("gives the header hamburger a 44px touch target", () => {
 		const wrapper = mount(POSHeader, {
-			props: { currentTime: "10:00", userName: "Kasir" },
+			props: { userName: "Kasir" },
 			global: {
 				config: { globalProperties: { __: globalThis.__ } },
 				stubs: {

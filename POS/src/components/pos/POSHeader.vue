@@ -41,14 +41,6 @@
 							>
 								{{ __("POS Next") }}
 							</h1>
-							<span
-								class="hidden sm:inline-flex relative items-center px-1 sm:px-2 py-0.5 text-[8px] sm:text-[10px] font-bold bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-md shadow-sm hover:shadow-md transition-shadow flex-shrink-0"
-							>
-								<span
-									class="absolute inset-0 bg-white/20 rounded-md animate-pulse"
-								></span>
-								<span class="relative">v{{ appVersion }}</span>
-							</span>
 						</div>
 						<p
 							v-if="profileName"
@@ -59,33 +51,25 @@
 						</p>
 					</div>
 
-					<!-- Time and Shift Duration - Compact on mobile -->
-					<div class="hidden lg:flex items-center gap-4 ms-6 flex-shrink-0">
-						<!-- Current Time -->
-						<StatusBadge
-							variant="blue"
-							size="sm"
-							:icon="timeIcon"
-							:text="currentTime"
-						/>
-
-						<!-- Shift Duration -->
-						<StatusBadge
-							v-if="hasOpenShift && shiftDuration"
-							variant="green"
-							size="xs"
-							:icon="shiftIcon"
-							:label="__('Shift Open:')"
-							:value="shiftDuration"
-						/>
-					</div>
-
-					<!-- Mobile Time Display - Very compact -->
-					<div
-						class="flex lg:hidden items-center text-[10px] text-gray-600 font-medium flex-shrink-0 ms-1"
-					>
-						<span class="hidden xs:inline whitespace-nowrap">{{ currentTime }}</span>
-					</div>
+						<!-- Shift Group countdown: time left until the scheduled shift end -->
+						<div v-if="hasOpenShift && shiftRemaining" class="flex-shrink-0 ms-1 lg:ms-6">
+							<StatusBadge
+								class="hidden lg:inline-flex"
+								:variant="remainingVariant"
+								size="sm"
+								:icon="timeIcon"
+								:label="scheduleStatus?.expired ? __('Shift ended') : __('Shift ends in:')"
+								:value="scheduleStatus?.expired ? '' : shiftRemaining"
+							/>
+							<span
+								:class="[
+									'lg:hidden text-[10px] font-semibold whitespace-nowrap',
+									remainingTextClass,
+								]"
+							>
+								{{ scheduleStatus?.expired ? __("Shift ended") : shiftRemaining }}
+							</span>
+						</div>
 				</div>
 
 				<!-- Right Side: Controls -->
@@ -406,11 +390,9 @@ import UserMenu from "@/components/common/UserMenu.vue";
 import LanguageSwitcher from "@/components/common/LanguageSwitcher.vue";
 import { FeatherIcon } from "frappe-ui";
 import { DEFAULT_LOCALE } from "@/utils/currency";
-import { ref } from "vue";
-import { version } from "../../../package.json";
+import { computed, ref } from "vue";
 
 const showCacheTooltip = ref(false);
-const appVersion = version;
 
 const emit = defineEmits([
 	"sync-click",
@@ -438,12 +420,12 @@ function handleBlur(event) {
 }
 
 const props = defineProps({
-	currentTime: {
+	shiftRemaining: {
 		type: String,
-		required: true,
+		default: "",
 	},
-	shiftDuration: {
-		type: String,
+	scheduleStatus: {
+		type: Object,
 		default: null,
 	},
 	hasOpenShift: {
@@ -566,10 +548,18 @@ function formatCompactNumber(num) {
 	return num.toString();
 }
 
+const remainingVariant = computed(() =>
+	props.scheduleStatus?.expired ? "red" : props.scheduleStatus?.warning ? "orange" : "green"
+);
+const remainingTextClass = computed(
+	() =>
+		({ red: "text-red-600", orange: "text-orange-600", green: "text-green-700" })[
+			remainingVariant.value
+		]
+);
+
 // SVG Path Icons
 const timeIcon = "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z";
-const shiftIcon =
-	"M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z";
 const printerIcon =
 	"M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z";
 const refreshIcon =

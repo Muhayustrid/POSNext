@@ -9,8 +9,8 @@
 		<template v-else>
 			<!-- Header -->
 			<POSHeader
-				:current-time="shiftStore.currentTime"
-				:shift-duration="shiftStore.shiftDuration"
+				:shift-remaining="shiftStore.shiftRemaining"
+				:schedule-status="shiftStore.scheduleStatus"
 				:has-open-shift="shiftStore.hasOpenShift"
 				:profile-name="shiftStore.profileName"
 				:user-name="userName"

@@ -91,7 +91,7 @@
 						@keydown="handleKeyDown"
 						@click="handleSearchClick"
 						type="text"
-						:placeholder="searchPlaceholder"
+						:placeholder="__('Search')"
 						:class="[
 							'w-full text-[11px] sm:text-sm border rounded-lg px-2 sm:px-3 py-2 ps-7 sm:ps-10 pe-16 sm:pe-24 focus:outline-none transition-all',
 							autoAddEnabled
@@ -420,7 +420,7 @@
 				style="min-height: 0"
 			>
 				<div
-					class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 sm:gap-2.5"
+					class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3"
 				>
 					<div
 						v-for="item in displayedItems"
@@ -550,21 +550,22 @@
 								{{ __("Package") }}
 							</span>
 							<h3
-								class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight"
+								class="text-xs sm:text-sm font-semibold text-gray-900 line-clamp-2 mb-1 leading-snug"
+								:title="item.item_name"
 							>
 								{{ item.item_name }}
 							</h3>
 							<p
 								v-if="item.attributes"
-								class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight"
+								class="text-[10px] sm:text-xs text-gray-400 truncate leading-tight"
 							>
 								{{ Object.values(item.attributes).join(" / ") }}
 							</p>
-							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
-								<span class="font-semibold text-blue-600">{{
+							<p class="leading-tight">
+								<span class="text-sm sm:text-base font-bold text-blue-700">{{
 									formatCurrency(getDisplayRate(item))
 								}}</span>
-								<span class="text-gray-400"
+								<span class="text-[10px] sm:text-xs text-gray-400"
 									>/
 									{{
 										item.uom || item.stock_uom || __("Nos", null, "UOM")
@@ -767,7 +768,7 @@
 						>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[50px] sm:w-[60px]">
 								<div
-									class="w-8 h-8 sm:w-10 sm:h-10 bg-gray-100 rounded flex items-center justify-center overflow-hidden"
+									class="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded flex items-center justify-center overflow-hidden"
 								>
 									<LazyImage
 										v-if="item.image"
@@ -813,7 +814,7 @@
 								class="px-2 sm:px-3 py-2 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]"
 							>
 								<div
-									class="text-xs sm:text-sm font-medium text-gray-900 truncate"
+									class="text-sm sm:text-base font-medium text-gray-900 truncate"
 									:title="item.item_name"
 								>
 									<span
@@ -826,7 +827,7 @@
 								</div>
 								<div
 									v-if="item.attributes"
-									class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight"
+									class="text-[10px] sm:text-xs text-gray-400 truncate leading-tight"
 								>
 									{{ Object.values(item.attributes).join(" / ") }}
 								</div>
@@ -842,7 +843,7 @@
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
-								<div class="text-xs sm:text-sm font-semibold text-blue-600">
+								<div class="text-sm sm:text-base font-bold text-blue-700">
 									{{ formatCurrency(getDisplayRate(item)) }}
 								</div>
 							</td>
@@ -1191,12 +1192,6 @@ const totalPages = computed(() => {
 	return Math.ceil(filteredItems.value.length / itemsPerPage.value);
 });
 
-const SEARCH_PLACEHOLDERS = Object.freeze({
-	auto: __("Auto-Add ON - Type or scan barcode"),
-	scanner: __("Scanner ON - Enable Auto for automatic addition"),
-	default: __("Search by item code, name, item group or scan barcode"),
-});
-
 // Sort configuration
 const BASE_SORT_OPTIONS = Object.freeze([
 	{
@@ -1240,19 +1235,6 @@ const SORT_ICONS = Object.freeze({
 	inactive: "M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4",
 });
 
-const searchMode = computed(() => {
-	if (autoAddEnabled.value) {
-		return "auto";
-	}
-
-	if (scannerEnabled.value) {
-		return "scanner";
-	}
-
-	return "default";
-});
-
-const searchPlaceholder = computed(() => SEARCH_PLACEHOLDERS[searchMode.value]);
 const isBrandSortActive = computed(() => sortBy.value === "brand");
 const sortOptions = computed(() => {
 	// Context switcher:

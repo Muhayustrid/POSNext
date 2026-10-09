@@ -1,6 +1,10 @@
 import { useShift, shiftState } from "@/composables/useShift";
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency";
-import { computeScheduleStatus, isSameScheduleStatus } from "@/utils/shiftSchedule";
+import {
+	computeScheduleStatus,
+	isSameScheduleStatus,
+	parseServerDatetime,
+} from "@/utils/shiftSchedule";
 import { formatShiftDuration } from "@/utils/shiftDuration";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
@@ -14,6 +18,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const shiftDuration = ref("");
 	const shiftTimerPaused = ref(false);
 	const scheduleStatus = ref(null);
+	const shiftRemaining = ref("");
 
 	// Computed
 	const profileName = computed(() => currentProfile.value?.name);
@@ -65,6 +70,26 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		}
 	}
 
+	/**
+	 * Countdown to the shift-group deadline snapshotted on the opening shift,
+	 * on the same server-anchored clock as the schedule gate. "" when the
+	 * shift has no schedule deadline.
+	 */
+	function updateShiftRemaining() {
+		const state = shiftState.value;
+		const shift = state.isOpen ? state.pos_opening_shift : null;
+		const deadlineMs =
+			shift && Number(shift.pos_schedule_enabled)
+				? parseServerDatetime(shift.pos_schedule_deadline)
+				: null;
+		if (deadlineMs == null || !state._serverNowMs || !state._receivedAt) {
+			shiftRemaining.value = "";
+			return;
+		}
+		const nowMs = state._serverNowMs + Math.max(0, Date.now() - state._receivedAt);
+		shiftRemaining.value = formatShiftDuration(Math.max(0, deadlineMs - nowMs));
+	}
+
 	function updateCurrentTime() {
 		const now = new Date();
 		currentTime.value = now.toLocaleTimeString(DEFAULT_LOCALE, { hour12: false });
@@ -75,12 +100,14 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		updateCurrentTime();
 		updateShiftDuration();
 		updateScheduleStatus();
+		updateShiftRemaining();
 
 		// Then update every second
 		const intervalId = setInterval(() => {
 			updateCurrentTime();
 			updateShiftDuration();
 			updateScheduleStatus();
+			updateShiftRemaining();
 		}, 1000);
 
 		return intervalId;
@@ -89,6 +116,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	async function checkShift() {
 		await checkOpeningShift.fetch();
 		updateScheduleStatus();
+		updateShiftRemaining();
 		return hasOpenShift.value;
 	}
 
@@ -101,6 +129,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		shiftDuration,
 		shiftTimerPaused,
 		scheduleStatus,
+		shiftRemaining,
 
 		// Computed
 		profileName,
