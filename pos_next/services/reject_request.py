@@ -137,25 +137,7 @@ def _transfer_to_reject_warehouse(doc):
 				_("Item {0} has only {1} in {2}, cannot reject {3}").format(item_code, available, source, qty)
 			)
 
-	se = frappe.new_doc("Stock Entry")
-	se.company = doc.company
-	se.purpose = "Material Transfer"
-	se.set_stock_entry_type()
-	se.remarks = TRANSFER_REMARK_PREFIX + doc.name
-	for row in doc.items:
-		line = {
-			"item_code": row.item_code,
-			"qty": row.qty,
-			"s_warehouse": source,
-			"t_warehouse": target,
-			"use_serial_batch_fields": 1,
-		}
-		if frappe.db.get_value("Item", row.item_code, "has_batch_no"):
-			line["batch_no"] = _pick_batch(row.item_code, source, flt(row.qty))
-		se.append("items", line)
-	se.flags.ignore_permissions = True
-	se.insert()
-	se.submit()
+	se = _make_stock_entry(doc, "Material Transfer", source, target, TRANSFER_REMARK_PREFIX + doc.name)
 	doc.db_set("transfer_entry", se.name)
 
 
@@ -210,6 +192,15 @@ def apply_decision(doc, decision, notes=None, system=False):
 	The row is locked for update first: a double click loses the race and the
 	second call throws instead of creating a second Stock Entry.
 	"""
+	decided_by = "Administrator" if system else frappe.session.user
+	if not system:
+		if APPROVER_ROLE not in frappe.get_roles(decided_by):
+			frappe.throw(
+				_("Only {0} can decide a reject request").format(APPROVER_ROLE), frappe.PermissionError
+			)
+		if decided_by == doc.owner:
+			frappe.throw(_("You cannot decide your own request"), frappe.PermissionError)
+
 	frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
 	if frappe.db.get_value("POS Reject Request", doc.name, "status") != "Pending":
 		frappe.throw(_("Only a Pending reject request can be decided"))
@@ -222,15 +213,6 @@ def apply_decision(doc, decision, notes=None, system=False):
 	notes = (notes or "").strip()
 	if decision in ("Charge Crew", "Rejected") and not notes:
 		frappe.throw(_("Notes are required for {0}").format(decision))
-
-	decided_by = "Administrator" if system else frappe.session.user
-	if not system:
-		if APPROVER_ROLE not in frappe.get_roles(decided_by):
-			frappe.throw(
-				_("Only {0} can decide a reject request").format(APPROVER_ROLE), frappe.PermissionError
-			)
-		if decided_by == doc.owner:
-			frappe.throw(_("You cannot decide your own request"), frappe.PermissionError)
 
 	if decision == "Rejected":
 		_return_to_outlet(doc)
@@ -254,7 +236,9 @@ def close_request(doc):
 	Unsold stock leaves the reject warehouse via a Material Issue to the
 	company's stock adjustment account; Production Loss never touched stock.
 	"""
-	if doc.status != "Approved":
+	frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
+	status, issue_entry = frappe.db.get_value("POS Reject Request", doc.name, ["status", "issue_entry"])
+	if status != "Approved":
 		frappe.throw(_("Only an Approved reject request can be closed"))
 	if not frappe.db.count(
 		"File",
@@ -266,7 +250,7 @@ def close_request(doc):
 	):
 		frappe.throw(_("Attach at least one destruction photo"))
 
-	if doc.purpose == "Unsold" and not doc.issue_entry:
+	if doc.purpose == "Unsold" and not issue_entry:
 		doc.db_set("issue_entry", _write_off_reject_stock(doc).name)
 	doc.db_set("status", "Closed")
 	doc.db_set("closed_on", now())

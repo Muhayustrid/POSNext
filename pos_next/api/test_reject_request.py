@@ -266,7 +266,7 @@ class TestDecision(RejectRequestTest):
 
 	def test_reject_returns_stock_and_needs_notes(self):
 		doc = self._submitted(3)
-		self.assertRaises(frappe.ValidationError, reject_request.apply_decision, doc, "Rejected", None)
+		self.assertRaises(frappe.ValidationError, self._decide, doc, "Rejected", None)
 		self.assertEqual(self._transfers(doc), 1)
 		self._decide(doc, "Rejected", "wrong batch")
 		self.assertEqual(self._bin(self.warehouse), 10)
@@ -278,12 +278,12 @@ class TestDecision(RejectRequestTest):
 		doc = self._submitted(1)
 		self._decide(doc, "Write Off", None)
 		before = self._transfers(doc)
-		self.assertRaises(frappe.ValidationError, reject_request.apply_decision, doc, "Rejected", "twice")
+		self.assertRaises(frappe.ValidationError, self._decide, doc, "Rejected", "twice")
 		self.assertEqual(self._transfers(doc), before)
 
 	def test_charge_crew_requires_notes(self):
 		doc = self._submitted(1)
-		self.assertRaises(frappe.ValidationError, reject_request.apply_decision, doc, "Charge Crew", None)
+		self.assertRaises(frappe.ValidationError, self._decide, doc, "Charge Crew", None)
 		self._decide(doc, "Charge Crew", "crew negligence")
 		values = frappe.db.get_value("POS Reject Request", doc.name, ["decision", "status"], as_dict=True)
 		self.assertEqual(values.decision, "Charge Crew")
