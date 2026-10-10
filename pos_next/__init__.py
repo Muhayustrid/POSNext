@@ -72,6 +72,18 @@ try:
 except Exception:
 	pass
 
+# Patch POS reserved qty: POS Next POS Invoices already moved stock at submit,
+# so ERPNext must not subtract them again as "reserved" (false negative stock).
+try:
+	from erpnext.accounts.doctype.pos_invoice import pos_invoice as pos_invoice_module
+
+	from pos_next.overrides.pos_reserved_qty import patch_pos_reserved_qty
+
+	patch_pos_reserved_qty(pos_invoice_module)
+except Exception:
+	if frappe:
+		frappe.log_error(frappe.get_traceback(), "POS Reserved Qty Patch Error")
+
 # Patch Document.round_floats_in for ERPNext/Frappe compatibility:
 # newer ERPNext may pass do_not_round_fields, while older Frappe
 # only supports fieldnames.
