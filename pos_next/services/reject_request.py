@@ -50,7 +50,23 @@ def validate_request(doc):
 	if doc.video_link and not doc.video_link.lower().startswith(("http://", "https://")):
 		frappe.throw(_("Video link must start with http:// or https://"))
 
-	if doc.is_system_generated:
+	system = bool(doc.is_system_generated)
+	if doc.is_new():
+		# only the system lane (ignore_permissions, set server-side) may mint
+		# system-generated drafts or link a Work Order — the crew cannot forge one
+		if system or doc.work_order:
+			if not doc.flags.ignore_permissions:
+				frappe.throw(_("Only the system can create a system-generated Production Loss request"))
+	else:
+		# read_only isn't enforced server-side: a flipped flag must not
+		# disable the guard, so the stored value is the source of truth
+		stored_flag = frappe.db.get_value("POS Reject Request", doc.name, "is_system_generated")
+		if stored_flag:
+			if not system:
+				frappe.throw(_("This request is system-generated and stays that way"))
+			system = True
+	if system:
+		doc.is_system_generated = 1
 		_validate_system_generated(doc)
 
 	if doc._action != "submit":
@@ -115,7 +131,10 @@ def _validate_system_generated(doc):
 	if len(doc.items) != 1 or doc.items[0].item_code != wo.production_item:
 		frappe.throw(_("A system-generated request holds exactly the production item of its Work Order"))
 	loss = flt(wo.qty) - flt(wo.produced_qty)
-	if flt(doc.items[0].qty) != loss:
+	# exact compare at the row's own precision: decimal losses (7.3 of 10)
+	# must not trip a float-representation guard, but 1 vs 2.7 still throws
+	precision = doc.items[0].precision("qty") or 3
+	if flt(doc.items[0].qty, precision) != flt(loss, precision):
 		frappe.throw(
 			_("The lost quantity is fixed at {0} by the Work Order and cannot be changed").format(loss)
 		)
@@ -130,7 +149,9 @@ def ensure_production_loss_request(wo):
 		return None
 
 	existing = frappe.db.get_value(
-		"POS Reject Request", {"work_order": wo.name, "docstatus": ["!=", 2]}, "name"
+		"POS Reject Request",
+		{"work_order": wo.name, "is_system_generated": 1, "docstatus": ["!=", 2]},
+		"name",
 	)
 	if existing:
 		return existing
@@ -151,7 +172,8 @@ def ensure_production_loss_request(wo):
 	return doc.name
 
 
-def _month_total(doc, incident):	return flt(
+def _month_total(doc, incident):
+	return flt(
 		frappe.db.sql(
 			"""select sum(total_amount) from `tabPOS Reject Request`
 			where pos_profile = %s and docstatus = 1 and name != %s

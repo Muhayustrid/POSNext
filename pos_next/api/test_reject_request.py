@@ -272,13 +272,120 @@ class TestProductionLoss(InvoiceTypeAmbientMixin, RejectRequestTest):
 		result = self._produce(10, good=8, loss=2)
 		name = self._drafts(result["work_order"])[0].name
 		frappe.db.set_value("POS Reject Request", name, "deadline_date", add_days(today(), -1))
+		markers = frappe.db.count(
+			"Comment",
+			{
+				"reference_doctype": "POS Reject Request",
+				"reference_name": name,
+				"content": ["like", "Unreported production loss notified%"],
+			},
+		)
 		self.assertEqual(notify_overdue_drafts(), 1)
+		self.assertEqual(
+			frappe.db.count(
+				"Comment",
+				{
+					"reference_doctype": "POS Reject Request",
+					"reference_name": name,
+					"content": ["like", "Unreported production loss notified%"],
+				},
+			),
+			markers + 1,
+		)
 		self.assertEqual(notify_overdue_drafts(), 0)
+		self.assertEqual(
+			frappe.db.count(
+				"Comment",
+				{
+					"reference_doctype": "POS Reject Request",
+					"reference_name": name,
+					"content": ["like", "Unreported production loss notified%"],
+				},
+			),
+			markers + 1,
+		)
 		self.assertTrue(
 			frappe.db.exists(
 				"Notification Log", {"for_user": approver, "document_type": "POS Reject Request", "document_name": name}
 			)
 		)
+
+	def test_flip_system_flag_and_shrink_rejected(self):
+		result = self._produce(10, good=8, loss=2)
+		draft = frappe.get_doc("POS Reject Request", self._drafts(result["work_order"])[0].name)
+		draft.is_system_generated = 0
+		draft.items[0].qty = 1
+		self.assertRaises(frappe.ValidationError, draft.save)
+		# even without shrinking, clearing the flag alone is refused
+		draft.reload()
+		draft.is_system_generated = 0
+		self.assertRaises(frappe.ValidationError, draft.save)
+
+	def test_crew_cannot_forge_work_order_link(self):
+		self._produce(5, good=5)
+		work_order = frappe.get_all("Work Order", filters={"posa_recipe": self.recipe.name}, pluck="name")[0]
+		with _as_user(self._user(["POSNext Manager"], prefix="pl-fg")):
+			self.assertRaises(
+				frappe.ValidationError,
+				lambda: frappe.get_doc(
+					{
+						"doctype": "POS Reject Request",
+						"purpose": "Production Loss",
+						"pos_profile": self.pos_profile,
+						"incident_date": today(),
+						"reason": "forged",
+						"work_order": work_order,
+						"is_system_generated": 1,
+						"items": [{"item_code": self.fg, "qty": 1}],
+					}
+				).insert(ignore_permissions=True),
+			)
+			# the crew lane (no ignore_permissions) can't forge either way
+			self.assertRaises(
+				frappe.ValidationError,
+				lambda: frappe.get_doc(
+					{
+						"doctype": "POS Reject Request",
+						"purpose": "Production Loss",
+						"pos_profile": self.pos_profile,
+						"incident_date": today(),
+						"reason": "forged",
+						"work_order": work_order,
+						"items": [{"item_code": self.fg, "qty": 1}],
+					}
+				).insert(),
+			)
+
+	def test_decimal_loss_qty_roundtrips(self):
+		from pos_next.api.production import _uom_whole_field
+
+		whole_field = _uom_whole_field()
+		was_whole = frappe.db.get_value("UOM", "Nos", whole_field)
+		frappe.db.set_value("UOM", "Nos", whole_field, 0)
+		try:
+			result = self._produce(10, good=7.3, loss=2.7)
+		finally:
+			frappe.db.set_value("UOM", "Nos", whole_field, was_whole)
+		draft = frappe.get_doc("POS Reject Request", self._drafts(result["work_order"])[0].name)
+		self.assertEqual(flt(draft.items[0].qty), 2.7)
+		draft.reason = "burnt batch"
+		self._evidence(draft)
+		draft.submit()
+		self.assertEqual(frappe.db.get_value("POS Reject Request", draft.name, "docstatus"), 1)
+
+	def test_daily_job_backfills_missed_terminal_wo(self):
+		from pos_next.tasks.reject_overdue import notify_overdue_drafts
+
+		# a terminal WO with loss but no request: the finish hook's draft was
+		# removed, the daily sweep must recreate it
+		result = self._produce(10, good=8, loss=2)
+		name = self._drafts(result["work_order"])[0].name
+		frappe.db.delete("POS Reject Request", name)
+		self.assertEqual(notify_overdue_drafts(), 0)
+		drafts = self._drafts(result["work_order"])
+		self.assertEqual(len(drafts), 1)
+		self.assertEqual(flt(frappe.get_doc("POS Reject Request", drafts[0].name).items[0].qty), 2)
+
 
 
 class TestUnsoldSubmit(RejectRequestTest):

@@ -1010,11 +1010,18 @@ def _make_material_issue(wo, notes=None):
 def _ensure_loss_request(wo):
 	"""Draft the Production Loss request for a terminal Work Order's
 	unproduced remainder. Failures never block the production itself: the
-	loss is already recorded natively, the draft can be filed later."""
+	loss is already recorded natively, the draft can be filed later. The
+	draft runs inside a savepoint so a half-written failure leaves nothing
+	behind (the daily sweep backfills it)."""
 	try:
 		from pos_next.services.reject_request import ensure_production_loss_request
 
-		return ensure_production_loss_request(wo)
+		frappe.db.savepoint("pos_next_loss_request")
+		try:
+			return ensure_production_loss_request(wo)
+		except Exception:
+			frappe.db.rollback(save_point="pos_next_loss_request")
+			raise
 	except Exception:
 		frappe.log_error(title="Production Loss draft creation failed")
 		return None
