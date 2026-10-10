@@ -103,7 +103,7 @@ class TestUninstallCoverage(unittest.TestCase):
             uninstall.remove_workspaces()
         deleted = {(call.args[0], call.args[1]) for call in delete_doc.call_args_list}
         expected = (
-            {("Role", role) for role in uninstall.UNINSTALL_ROLES}
+            {("Role", role) for role in uninstall.UNINSTALL_FIXTURE_ROLES}
             | {("Workspace", ws) for ws in uninstall.UNINSTALL_WORKSPACES}
             | {("Workspace Sidebar", sb) for sb in uninstall.UNINSTALL_WORKSPACE_SIDEBARS}
         )
@@ -121,3 +121,10 @@ class TestUninstallCoverage(unittest.TestCase):
             {entry.get("role") for entry in entries},
             set(uninstall.UNINSTALL_ROLES),
         )
+
+    def test_fixture_roles_match_role_removal_list(self):
+        """remove_roles deletes exactly the roles shipped in fixtures/role.json."""
+        fixture_path = Path(frappe.get_app_path("pos_next")) / "fixtures" / "role.json"
+        with open(fixture_path, encoding="utf-8") as handle:
+            names = {entry["role_name"] for entry in json.load(handle)}
+        self.assertEqual(names, set(uninstall.UNINSTALL_FIXTURE_ROLES))

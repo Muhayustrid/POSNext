@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 # Roles shipped by the app (hooks.py:fixtures) and their Custom DocPerms
 UNINSTALL_ROLES = ("POSNext Cashier", "POSNext Manager")
+# Every role in fixtures/role.json; UNINSTALL_ROLES stays the Custom DocPerm set
+UNINSTALL_FIXTURE_ROLES = (*UNINSTALL_ROLES, "POSNext Reject Approver")
 UNINSTALL_WORKSPACES = ("POSNext",)
 UNINSTALL_WORKSPACE_SIDEBARS = ("POSNext",)
 
@@ -148,7 +150,7 @@ def remove_roles():
 	"""
 	try:
 		log_message("Removing roles", level="info")
-		for role in UNINSTALL_ROLES:
+		for role in UNINSTALL_FIXTURE_ROLES:
 			frappe.db.delete("DocPerm", {"role": role})
 			frappe.db.delete("Has Role", {"role": role})
 			if frappe.db.exists("Role", role):
