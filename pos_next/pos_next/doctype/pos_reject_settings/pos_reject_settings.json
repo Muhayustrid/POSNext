@@ -1,0 +1,35 @@
+{
+ "actions": [],
+ "creation": "2026-10-11 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "deadline_days",
+  "production_loss_deadline_days",
+  "late_mode",
+  "monthly_limit_amount",
+  "notify_emails"
+ ],
+ "fields": [
+  {"default": "3", "fieldname": "deadline_days", "fieldtype": "Int", "label": "Deadline (days)"},
+  {"default": "0", "description": "0 = use the global deadline", "fieldname": "production_loss_deadline_days", "fieldtype": "Int", "label": "Production Loss Deadline (days)"},
+  {"default": "Lenient", "fieldname": "late_mode", "fieldtype": "Select", "label": "Late Mode", "options": "Lenient\nStrict"},
+  {"default": "0", "description": "0 = off", "fieldname": "monthly_limit_amount", "fieldtype": "Currency", "label": "Monthly Limit Amount"},
+  {"description": "One email per line", "fieldname": "notify_emails", "fieldtype": "Small Text", "label": "Notify Emails"}
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Pos Next",
+ "name": "POS Reject Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1},
+  {"role": "POSNext Reject Approver", "read": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

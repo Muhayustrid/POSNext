@@ -108,7 +108,8 @@
   "section_break_production",
   "production_source_warehouse",
   "column_break_production",
-  "production_fg_warehouse"
+  "production_fg_warehouse",
+  "reject_warehouse"
  ],
  "fields": [
   {
@@ -847,6 +848,13 @@
    "fieldname": "production_fg_warehouse",
    "fieldtype": "Link",
    "label": "Production FG Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "description": "Warehouse approved rejected goods are moved to before write-off / charge crew.",
+   "fieldname": "reject_warehouse",
+   "fieldtype": "Link",
+   "label": "Reject Warehouse",
    "options": "Warehouse"
   }
  ],
