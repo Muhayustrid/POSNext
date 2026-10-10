@@ -26,7 +26,7 @@
 				:qz-connected="posSettingsStore.printDriver === 'imin' ? iminReady : qzConnected"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
-				@printer-click="openHistoryDialog"
+				@printer-click="handlePrinterClick"
 				@refresh-click="handleRefresh"
 				@clear-cache="handleClearCache"
 				@logout="uiStore.showLogoutDialog = true"
@@ -1293,12 +1293,87 @@ const handleWindowResize = () => {
 	updateLayoutBounds();
 };
 
+// Keeps the socket warm so the first print after idle doesn't pay ~3 s reconnect
+// (setup scope so handlePrinterClick can reuse probeImin for manual reconnect)
+const IMIN_PROBE_RETRY_MS = 5000;
+const IMIN_PROBE_KEEPALIVE_MS = 30000;
+
+let iminWarmupTimer = null;
+function stopIminWarmup() {
+	if (iminWarmupTimer) {
+		clearTimeout(iminWarmupTimer);
+		iminWarmupTimer = null;
+	}
+}
+
+const probeImin = async () => {
+	stopIminWarmup();
+	if (posSettingsStore.printDriver !== "imin") return;
+	let ok = false;
+	try {
+		await ensureIminSdk();
+		const status = await getTransport().getDriver("imin").getStatus();
+		ok = Boolean(status?.ok);
+	} catch (err) {
+		log.warn("iMin warm-up failed:", err?.message || err);
+	}
+	iminReady.value = ok;
+	// A visibility probe may overlap a timer probe; never leave two loops.
+	stopIminWarmup();
+	if (posSettingsStore.printDriver === "imin") {
+		iminWarmupTimer = setTimeout(
+			probeImin,
+			ok ? IMIN_PROBE_KEEPALIVE_MS : IMIN_PROBE_RETRY_MS
+		);
+	}
+};
+
+const handleIminVisibility = () => {
+	if (document.visibilityState === "visible" && posSettingsStore.printDriver === "imin") {
+		probeImin();
+	}
+};
+if (typeof document !== "undefined") {
+	document.addEventListener("visibilitychange", handleIminVisibility);
+}
+
+// iMin warm-up — lazy connect & prompt origin permission; keep socket warm
+watch(
+	() => posSettingsStore.printDriver,
+	(driver) => {
+		stopIminWarmup();
+		if (driver !== "imin") {
+			iminReady.value = false;
+			return;
+		}
+		probeImin();
+	},
+	{ immediate: true }
+);
+
+// Store cleanup function for unmount.
+// `cleanup` is assigned inside onMounted (onStockUpdate listener); it's only
+// called if already assigned — on early unmount it simply doesn't run.
+onUnmounted(() => {
+	if (typeof document !== "undefined") {
+		document.removeEventListener("visibilitychange", handleIminVisibility);
+	}
+	stopIminWarmup();
+	cleanup();
+	stopActivityTracking();
+	qzDisconnect();
+});
+
+// Holds the onStockUpdate unsubscribe fn, assigned when onMounted runs.
+// Hoisted to setup scope because the onUnmounted above references it.
+let cleanup = () => {};
+
 onMounted(async () => {
 	// Window resize listeners (passive for better performance)
 	window.addEventListener("resize", handleWindowResize, { passive: true });
 
 	// Set up real-time stock update listener
-	const cleanup = onStockUpdate(async (stockUpdates) => {
+	cleanup = onStockUpdate(async (stockUpdates) => {
 		// Filter updates to only include items from our warehouse(s)
 		const profileWarehouses = shiftStore.profileWarehouse
 			? [shiftStore.profileWarehouse]
@@ -1442,74 +1517,6 @@ onMounted(async () => {
 		},
 		{ immediate: true }
 	);
-
-	// Keeps the socket warm so the first print after idle doesn't pay ~3 s reconnect
-	const IMIN_PROBE_RETRY_MS = 5000;
-	const IMIN_PROBE_KEEPALIVE_MS = 30000;
-
-	let iminWarmupTimer = null;
-	function stopIminWarmup() {
-		if (iminWarmupTimer) {
-			clearTimeout(iminWarmupTimer);
-			iminWarmupTimer = null;
-		}
-	}
-
-	const probeImin = async () => {
-		stopIminWarmup();
-		if (posSettingsStore.printDriver !== "imin") return;
-		let ok = false;
-		try {
-			await ensureIminSdk();
-			const status = await getTransport().getDriver("imin").getStatus();
-			ok = Boolean(status?.ok);
-		} catch (err) {
-			log.warn("iMin warm-up failed:", err?.message || err);
-		}
-		iminReady.value = ok;
-		// A visibility probe may overlap a timer probe; never leave two loops.
-		stopIminWarmup();
-		if (posSettingsStore.printDriver === "imin") {
-			iminWarmupTimer = setTimeout(
-				probeImin,
-				ok ? IMIN_PROBE_KEEPALIVE_MS : IMIN_PROBE_RETRY_MS
-			);
-		}
-	};
-
-	const handleIminVisibility = () => {
-		if (document.visibilityState === "visible" && posSettingsStore.printDriver === "imin") {
-			probeImin();
-		}
-	};
-	if (typeof document !== "undefined") {
-		document.addEventListener("visibilitychange", handleIminVisibility);
-	}
-
-	// iMin warm-up — lazy connect & prompt origin permission; keep socket warm
-	watch(
-		() => posSettingsStore.printDriver,
-		(driver) => {
-			stopIminWarmup();
-			if (driver !== "imin") {
-				iminReady.value = false;
-				return;
-			}
-			probeImin();
-		},
-		{ immediate: true }
-	);
-
-	// Store cleanup function for unmount
-	onUnmounted(() => {
-		if (typeof document !== "undefined") {
-			document.removeEventListener("visibilitychange", handleIminVisibility);
-		}
-		stopIminWarmup();
-		cleanup();
-		stopActivityTracking();
-		qzDisconnect();
-	});
 
 	try {
 		// Start timers for current time and shift duration
@@ -2742,6 +2749,57 @@ function openHistoryDialog() {
 	}
 
 	uiStore.showHistoryDialog = true;
+}
+
+/**
+ * Printer icon in the header is a pure status indicator + reconnect button.
+ * Click behavior:
+ *  - not connected  -> attempt to reconnect (QZ Tray or iMin)
+ *                       - success: toast "Printer connected"
+ *                       - failure: toast + open Settings so the user can fix it
+ *  - already connected -> toast only
+ */
+let printerReconnecting = false;
+async function handlePrinterClick() {
+	if (!canAccessShiftActions.value || printerReconnecting) {
+		return;
+	}
+
+	if (posSettingsStore.isPrintOff) {
+		showWarning(__("Print mode is off. Enable it in Settings to use the printer."));
+		openPOSMenu("settings");
+		return;
+	}
+
+	const isImin = posSettingsStore.printDriver === "imin";
+	const connected = isImin ? iminReady.value : qzConnected.value;
+
+	if (connected) {
+		showSuccess(__("Printer connected"));
+		return;
+	}
+
+	let ok = false;
+	printerReconnecting = true;
+	try {
+		if (isImin) {
+			await probeImin();
+			ok = iminReady.value;
+		} else {
+			ok = await qzConnect();
+		}
+	} catch (err) {
+		log.warn("Printer reconnect failed:", err?.message || err);
+	} finally {
+		printerReconnecting = false;
+	}
+
+	if (ok) {
+		showSuccess(__("Printer connected"));
+	} else {
+		showError(__("Printer not connected. Open Print Settings to configure it."));
+		openPOSMenu("settings");
+	}
 }
 
 function openReturnDialog() {

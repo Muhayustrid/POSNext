@@ -637,6 +637,26 @@ describe("View Shift with active shift", () => {
 	})
 })
 
+describe("header printer icon", () => {
+	it("opens Settings when the reconnect attempt fails", async () => {
+		await mountPOS({
+			POSHeader: defineComponent({
+				name: "POSHeader",
+				emits: ["printer-click"],
+				template: `<button data-test="printer" @click="$emit('printer-click')"></button>`,
+			}),
+			POSMenuDialog: POSMenuDialogProbe,
+		})
+
+		await wrapper.find('[data-test="printer"]').trigger("click")
+		await flushPromises()
+
+		const menu = wrapper.find('[data-test="pos-menu"]')
+		expect(menu.attributes("data-open")).toBe("true")
+		expect(menu.attributes("data-view")).toBe("settings")
+	})
+})
+
 describe("close-existing-shift handoff (step 3 Close & Open New)", () => {
 	it("closes the opening dialog and routes the close through the page-level dialog", async () => {
 		await mountPOS({ ShiftOpeningDialog: ShiftOpeningDialogStub })

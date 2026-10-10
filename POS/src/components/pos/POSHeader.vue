@@ -318,24 +318,16 @@
 						</div>
 					</div>
 
-					<!-- Printer - Visible only while shift is open -->
+					<!-- Printer - Visible only while shift is open.
+					     Doubles as a connection indicator: green = connected,
+					     red = disconnected. Clicking attempts to reconnect. -->
 					<div v-if="hasOpenShift" class="hidden md:block relative">
 						<ActionButton
 							:icon="printerIcon"
-							:title="
-								printEnabled
-									? qzConnected
-										? __('Silent Print: Connected')
-										: __('Silent Print: Disconnected')
-									: __('Print Invoice')
-							"
+							:variant="printerVariant"
+							:title="printerTitle"
 							@click="$emit('printer-click')"
 						/>
-						<span
-							v-if="printEnabled"
-							class="absolute top-0.5 end-0.5 w-2 h-2 rounded-full border border-white"
-							:class="qzConnected ? 'bg-green-500' : 'bg-red-500'"
-						></span>
 					</div>
 
 					<!-- Refresh -->
@@ -480,6 +472,20 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+});
+
+// Printer indicator: green when connected, red when disconnected.
+// Print-off keeps the neutral gray look since indicator isn't relevant then.
+const printerVariant = computed(() => {
+	if (!props.printEnabled) return "gray";
+	return props.qzConnected ? "green" : "red";
+});
+
+const printerTitle = computed(() => {
+	if (!props.printEnabled) return __("Printing off — click to open Settings");
+	return props.qzConnected
+		? __("Printer: Connected")
+		: __("Printer: Disconnected — click to connect");
 });
 
 // Cache status helpers
