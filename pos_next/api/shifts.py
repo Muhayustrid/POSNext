@@ -76,6 +76,9 @@ def get_opening_dialog_data():
 		# Set currency from pos profile
 		for mode in data["payments_method"]:
 			mode["currency"] = frappe.get_cached_value("POS Profile", mode["parent"], "currency")
+			# Cash-ness comes from Mode of Payment.type: only Cash may carry an
+			# opening balance (the dialog locks non-cash inputs at 0).
+			mode["mode_type"] = frappe.db.get_value("Mode of Payment", mode["mode_of_payment"], "type")
 	else:
 		data["payments_method"] = []
 
@@ -176,10 +179,18 @@ def create_opening_shift(pos_profile, company, balance_details):
 	)
 
 	# Add balance details - map opening_amount to amount
+	# Only Cash-type Modes of Payment may carry an opening balance: a non-cash
+	# opening amount double-counts the previous shift's takings. Forcing to 0
+	# (instead of throwing) keeps older clients working while the trust
+	# boundary still guarantees a clean opening drawer.
 	formatted_balance_details = []
 	for detail in balance_details:
+		mode = detail.get("mode_of_payment")
+		opening_amount = flt(detail.get("opening_amount", 0))
+		if opening_amount and frappe.db.get_value("Mode of Payment", mode, "type") != "Cash":
+			opening_amount = 0
 		formatted_balance_details.append(
-			{"mode_of_payment": detail.get("mode_of_payment"), "amount": detail.get("opening_amount", 0)}
+			{"mode_of_payment": mode, "amount": opening_amount}
 		)
 
 	new_pos_opening.set("balance_details", formatted_balance_details)

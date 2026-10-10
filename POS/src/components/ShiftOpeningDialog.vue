@@ -112,17 +112,24 @@
 									<label class="text-sm font-medium text-gray-700">
 										{{ method.mode_of_payment }}
 									</label>
+									<p
+										v-if="!isCashMethod(method)"
+										class="text-xs text-gray-500"
+									>
+										{{ __("Hanya Cash yang punya saldo awal") }}
+									</p>
 								</div>
 								<div class="w-32">
 									<!-- native input: Vue drives the value so the thousand
 										separators appear while typing (frappe-ui Input only
 										syncs the formatted value back on blur) -->
 									<input
-										class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
-										:value="openingBalances[method.mode_of_payment]"
+										class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 disabled:bg-gray-100 disabled:text-gray-400"
+										:value="isCashMethod(method) ? openingBalances[method.mode_of_payment] : '0'"
 										inputmode="decimal"
 										autocomplete="off"
 										placeholder="0"
+										:disabled="!isCashMethod(method)"
 										@input="
 											openingBalances[method.mode_of_payment] =
 												formatAmountInput($event.target.value)
@@ -333,6 +340,12 @@ const paymentMethods = computed(() => {
 		(method) => method.parent === selectedProfile.value.name,
 	)
 })
+
+// Only Cash-type modes of payment may carry an opening balance; non-cash
+// (QRIS, debit, ...) stays locked at 0 so it can't double-count a shift.
+function isCashMethod(method) {
+	return method.mode_type === "Cash"
+}
 
 // Watch dialog open state.
 // Reset happens when the dialog OPENS (inside initDialog), never on close:
