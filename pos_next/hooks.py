@@ -230,6 +230,7 @@ doc_events = {
 scheduler_events = {
 	"daily": [
 		"pos_next.tasks.cleanup_expired_promotions.cleanup_expired_promotions",
+		"pos_next.tasks.reject_overdue.notify_overdue_drafts",
 	],
 }
 

@@ -534,6 +534,10 @@ def finish_production(work_order, good_qty, loss_qty=0, notes=None, batch_picks=
 			"items_used": snapshot,
 		}
 	)
+	# reload: the Manufacture entry just moved the aggregates/status
+	wo = frappe.get_doc("Work Order", wo.name)
+	if wo.status == "Completed":
+		result["reject_request"] = _ensure_loss_request(wo)
 	return result
 
 
@@ -604,6 +608,7 @@ def close_production(work_order, writeoff=False, notes=None):
 	wo.notify_update()
 
 	result = _wo_payload(frappe.get_doc("Work Order", wo.name))
+	result["reject_request"] = _ensure_loss_request(frappe.get_doc("Work Order", wo.name))
 	result["material_issue"] = None
 	if writeoff:
 		issue = _make_material_issue(wo, notes)
@@ -1000,6 +1005,19 @@ def _make_material_issue(wo, notes=None):
 	se.insert()
 	se.submit()
 	return se
+
+
+def _ensure_loss_request(wo):
+	"""Draft the Production Loss request for a terminal Work Order's
+	unproduced remainder. Failures never block the production itself: the
+	loss is already recorded natively, the draft can be filed later."""
+	try:
+		from pos_next.services.reject_request import ensure_production_loss_request
+
+		return ensure_production_loss_request(wo)
+	except Exception:
+		frappe.log_error(title="Production Loss draft creation failed")
+		return None
 
 
 def _wo_payload(wo):

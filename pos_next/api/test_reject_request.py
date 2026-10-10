@@ -1,8 +1,19 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import uuid
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import add_days, flt, today
+
+from pos_next.api.test_production import (
+	InvoiceTypeAmbientMixin,
+	_make_test_item,
+	_seed_stock,
+)
+from pos_next.api.production import create_production, start_production, finish_production, close_production
+from pos_next.services import reject_request
 
 SCHEMA = {
 	"POS Reject Settings": (
@@ -157,6 +168,117 @@ class RejectRequestTest(FrappeTestCase):
 			}
 		).insert(ignore_permissions=True)
 		return email
+
+
+class TestProductionLoss(InvoiceTypeAmbientMixin, RejectRequestTest):
+	"""System-generated Production Loss drafts from Work Orders (anti-manipulation)."""
+
+	def setUp(self):
+		super().setUp()
+		self.fg = _make_test_item()
+		self.mat = _make_test_item()
+		self.recipe = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"PL {uuid.uuid4().hex[:6]}",
+				"production_item": self.fg,
+				"output_qty": 1,
+				"items": [{"item_code": self.mat, "qty": 2}],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+
+	def _produce(self, qty, good, loss=0):
+		_seed_stock(self.mat, self.warehouse, qty * 2)
+		return create_production(
+			recipe=self.recipe.name, qty=qty, good_qty=good, loss_qty=loss, pos_profile=self.pos_profile
+		)
+
+	def _drafts(self, work_order):
+		return frappe.get_all(
+			"POS Reject Request",
+			filters={"work_order": work_order},
+			fields=["name", "owner", "purpose", "is_system_generated", "reason"],
+		)
+
+	def test_finish_with_loss_creates_draft(self):
+		operator = self._user(["POSNext Manager"], prefix="pl-op")
+		frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.pos_profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": operator,
+				"default": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.clear_cache(user=operator)
+		_seed_stock(self.mat, self.warehouse, 20)
+		with _as_user(operator):
+			wo = frappe.get_doc("Work Order", start_production(self.recipe.name, 10, self.pos_profile)["work_order"])
+			wo.db_set("posa_operator", operator)
+			frappe.db.commit()
+		result = finish_production(wo.name, good_qty=8, loss_qty=2)
+		drafts = self._drafts(result["work_order"])
+		self.assertEqual(len(drafts), 1)
+		draft = frappe.get_doc("POS Reject Request", drafts[0].name)
+		self.assertEqual(draft.purpose, "Production Loss")
+		self.assertTrue(draft.is_system_generated)
+		self.assertEqual(draft.owner, operator)
+		self.assertEqual(draft.status, "Draft")
+		self.assertEqual(draft.reason, f"Auto: production loss on {result['work_order']}")
+		self.assertEqual(len(draft.items), 1)
+		self.assertEqual(draft.items[0].item_code, self.fg)
+		self.assertEqual(flt(draft.items[0].qty), 2)
+
+	def test_finish_without_loss_creates_nothing(self):
+		result = self._produce(5, good=5)
+		self.assertEqual(self._drafts(result["work_order"]), [])
+
+	def test_close_after_partial_creates_single_request(self):
+		_seed_stock(self.mat, self.warehouse, 20)
+		started = start_production(self.recipe.name, 10, self.pos_profile)
+		finish_production(started["work_order"], good_qty=4)
+		closed = close_production(started["work_order"])
+		drafts = self._drafts(started["work_order"])
+		self.assertEqual(len(drafts), 1)
+		draft = frappe.get_doc("POS Reject Request", drafts[0].name)
+		self.assertEqual(flt(draft.items[0].qty), 6)
+		# the second path (close after finish) stays idempotent
+		self.assertEqual(closed.get("reject_request"), drafts[0].name)
+
+	def test_crew_cannot_shrink_system_qty(self):
+		result = self._produce(10, good=8, loss=2)
+		draft = frappe.get_doc("POS Reject Request", self._drafts(result["work_order"])[0].name)
+		draft.items[0].qty = 1
+		self.assertRaises(frappe.ValidationError, draft.save)
+		draft.reload()
+		draft.purpose = "Unsold"
+		self.assertRaises(frappe.ValidationError, draft.save)
+
+	def test_submit_requires_own_reason(self):
+		result = self._produce(10, good=8, loss=2)
+		draft = frappe.get_doc("POS Reject Request", self._drafts(result["work_order"])[0].name)
+		self._evidence(draft)
+		draft = frappe.get_doc("POS Reject Request", draft.name)
+		self.assertRaises(frappe.ValidationError, draft.submit)
+		self.assertEqual(frappe.db.get_value("POS Reject Request", draft.name, "docstatus"), 0)
+
+	def test_overdue_draft_notified_once(self):
+		from pos_next.tasks.reject_overdue import notify_overdue_drafts
+
+		approver = self._user(["POSNext Reject Approver"], prefix="pl-appr")
+		result = self._produce(10, good=8, loss=2)
+		name = self._drafts(result["work_order"])[0].name
+		frappe.db.set_value("POS Reject Request", name, "deadline_date", add_days(today(), -1))
+		self.assertEqual(notify_overdue_drafts(), 1)
+		self.assertEqual(notify_overdue_drafts(), 0)
+		self.assertTrue(
+			frappe.db.exists(
+				"Notification Log", {"for_user": approver, "document_type": "POS Reject Request", "document_name": name}
+			)
+		)
 
 
 class TestUnsoldSubmit(RejectRequestTest):

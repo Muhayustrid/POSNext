@@ -25,6 +25,7 @@ ISSUE_REMARK_PREFIX = "POS Reject write-off: "
 APPROVER_ROLE = "POSNext Reject Approver"
 MAX_EVIDENCE = 5
 DECISIONS = ("Write Off", "Charge Crew", "Rejected")
+AUTO_REASON_PREFIX = "Auto: production loss on "
 
 
 def validate_request(doc):
@@ -49,6 +50,9 @@ def validate_request(doc):
 	if doc.video_link and not doc.video_link.lower().startswith(("http://", "https://")):
 		frappe.throw(_("Video link must start with http:// or https://"))
 
+	if doc.is_system_generated:
+		_validate_system_generated(doc)
+
 	if doc._action != "submit":
 		return
 
@@ -62,6 +66,9 @@ def validate_request(doc):
 	)
 	if not 1 <= evidence <= MAX_EVIDENCE:
 		frappe.throw(_("Attach 1 to {0} evidence photos").format(MAX_EVIDENCE))
+
+	if doc.is_system_generated and (doc.reason or "").startswith(AUTO_REASON_PREFIX):
+		frappe.throw(_("Describe what happened to the lost quantity before submitting"))
 
 	doc.is_late = 1 if getdate(today()) > getdate(doc.deadline_date) else 0
 	limit = flt(settings.monthly_limit_amount)
@@ -84,8 +91,67 @@ def _price_items(doc, warehouse):
 	doc.total_amount = total
 
 
-def _month_total(doc, incident):
-	return flt(
+def _validate_system_generated(doc):
+	"""Anti-manipulation guard for drafts born from a Work Order: the loss is
+	what the WO says it is — the crew can add a reason and evidence, nothing
+	else. purpose/work_order/pos_profile may never be repurposed."""
+	wo = frappe.db.get_value(
+		"Work Order", doc.work_order, ["qty", "produced_qty", "production_item"], as_dict=True
+	)
+	if not wo:
+		frappe.throw(_("Work Order {0} does not exist").format(doc.work_order))
+
+	if not doc.is_new():
+		stored = frappe.db.get_value(
+			"POS Reject Request", doc.name, ["purpose", "work_order", "pos_profile"], as_dict=True
+		)
+		if stored and (
+			stored.purpose != doc.purpose
+			or stored.work_order != doc.work_order
+			or stored.pos_profile != doc.pos_profile
+		):
+			frappe.throw(_("A system-generated Production Loss request cannot be repurposed"))
+
+	if len(doc.items) != 1 or doc.items[0].item_code != wo.production_item:
+		frappe.throw(_("A system-generated request holds exactly the production item of its Work Order"))
+	loss = flt(wo.qty) - flt(wo.produced_qty)
+	if flt(doc.items[0].qty) != loss:
+		frappe.throw(
+			_("The lost quantity is fixed at {0} by the Work Order and cannot be changed").format(loss)
+		)
+
+
+def ensure_production_loss_request(wo):
+	"""Draft a Production Loss request for the unproduced remainder of a
+	terminal Work Order (status Completed/Closed). Returns the draft name,
+	or None when nothing was lost. Idempotent per Work Order."""
+	loss = flt(wo.qty) - flt(wo.produced_qty)
+	if loss <= 0:
+		return None
+
+	existing = frappe.db.get_value(
+		"POS Reject Request", {"work_order": wo.name, "docstatus": ["!=", 2]}, "name"
+	)
+	if existing:
+		return existing
+
+	doc = frappe.new_doc("POS Reject Request")
+	doc.purpose = "Production Loss"
+	doc.pos_profile = wo.posa_pos_profile
+	doc.incident_date = today()
+	doc.reason = f"{AUTO_REASON_PREFIX}{wo.name}"
+	doc.work_order = wo.name
+	doc.is_system_generated = 1
+	doc.append("items", {"item_code": wo.production_item, "qty": loss})
+	doc.flags.ignore_permissions = True
+	doc.insert()
+	# insert stamps the session user as owner; the operator who ran the WO
+	# owns the draft so they are the one who must account for the loss.
+	doc.db_set("owner", wo.posa_operator or frappe.session.user)
+	return doc.name
+
+
+def _month_total(doc, incident):	return flt(
 		frappe.db.sql(
 			"""select sum(total_amount) from `tabPOS Reject Request`
 			where pos_profile = %s and docstatus = 1 and name != %s
