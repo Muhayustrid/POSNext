@@ -263,6 +263,49 @@ def _classify_charge(account_head) -> str:
 	return "tax"
 
 
+def _configured_payment_methods(pos_profile):
+	"""Every Mode of Payment on the shift's POS Profile, in profile order —
+	the same configured-method list the sales recap service reports, so a
+	method with no transactions still prints (at 0) on the EOD sheet."""
+	if not pos_profile or not frappe.db.exists("POS Profile", pos_profile):
+		return []
+	return frappe.get_all(
+		"POS Payment Method",
+		filters={"parent": pos_profile, "parenttype": "POS Profile"},
+		fields=["mode_of_payment"],
+		order_by="idx asc",
+		pluck="mode_of_payment",
+	)
+
+
+def _merge_payment_methods(methods, configured):
+	"""Configured methods first (profile order, zero-filled); methods already
+	kept keep their amount and is_cash. Methods used on the shift but no
+	longer on the profile follow, so no taking disappears from the sheet."""
+	by_mode = {}
+	for method in methods:
+		by_mode.setdefault(method["mode_of_payment"], method)
+
+	merged = []
+	seen = set()
+	for mode in configured:
+		seen.add(mode)
+		if mode in by_mode:
+			merged.append(by_mode[mode])
+		else:
+			merged.append(
+				{
+					"mode_of_payment": mode,
+					"amount": 0.0,
+					"is_cash": _is_cash_mode(mode),
+				}
+			)
+	for mode, method in by_mode.items():
+		if mode not in seen:
+			merged.append(method)
+	return merged
+
+
 def get_sales_recap(doc) -> dict:
 	closing_doc = _as_closing_doc(doc)
 	transactions = closing_doc.get("pos_transactions") or []
@@ -286,6 +329,10 @@ def get_sales_recap(doc) -> dict:
 			cash_in_hand = flt(cash_in_hand + flt(row.get("closing_amount")), 2)
 		else:
 			total_non_cash = flt(total_non_cash + amount, 2)
+
+	payment_methods = _merge_payment_methods(
+		payment_methods, _configured_payment_methods(closing_doc.get("pos_profile"))
+	)
 
 	service_charge = tax_total = 0.0
 	for row in closing_doc.get("taxes") or []:

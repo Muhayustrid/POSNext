@@ -262,17 +262,17 @@ ${body.join("\n")}
 
 /**
  * Print a recap through the EOD lane of the print transport (imin -> qz ->
- * browser, per POS Settings). When every driver refuses, the same sheet is
- * rendered to a PDF and downloaded instead, so the cashier always gets a
- * copy. A sheet that already came out (postPrint) is never duplicated.
+ * browser, per POS Settings). On driver failure there is NO automatic
+ * fallback: the caller shows the retry panel (Print Ulang / Export PDF /
+ * Tutup) and can produce the PDF on demand via downloadRecapPDF().
+ * A sheet that already came out (postPrint) is never re-printed.
  *
  * The print stack (transport, drivers, offline caches) is loaded on demand:
  * the summary view itself never needs it.
  *
- * @returns {Promise<"printed"|"pdf">} which path produced the recap
+ * @returns {Promise<"printed"|"failed">} whether the sheet came out
  */
 export async function printSalesRecap(summary, { posProfile = null } = {}) {
-	const html = buildRecapHTML(summary)
 	const reference = summary.opening_shift
 		? {
 				reference_doctype: "POS Opening Shift",
@@ -280,6 +280,7 @@ export async function printSalesRecap(summary, { posProfile = null } = {}) {
 			}
 		: { reference_doctype: "POS Profile", reference_name: summary.pos_profile }
 	try {
+		const html = buildRecapHTML(summary)
 		const { silentPrintHTML } = await import("@/utils/printInvoice")
 		await silentPrintHTML(html, {
 			posProfile,
@@ -289,21 +290,29 @@ export async function printSalesRecap(summary, { posProfile = null } = {}) {
 		return "printed"
 	} catch (error) {
 		if (error?.postPrint) throw error
-		await downloadRecapPDF(html, `${__("Sales Recap")} ${reference.reference_name}.pdf`)
-		return "pdf"
+		return "failed"
 	}
+}
+
+/** Default download name for a summary's PDF export (see downloadRecapPDF). */
+export function recapPDFFilename(summary) {
+	const reference = summary.opening_shift || summary.pos_profile || "recap"
+	return `${__("Sales Recap")} ${reference}.pdf`
 }
 
 /** Render the sheet server-side (wkhtmltopdf) and hand it to the browser. */
 export async function downloadRecapPDF(html, filename) {
-	const response = await fetch("/api/method/frappe.utils.print_format.report_to_pdf", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded",
-			"X-Frappe-CSRF-Token": window.csrf_token || "",
+	const response = await fetch(
+		"/api/method/frappe.utils.print_format.report_to_pdf",
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded",
+				"X-Frappe-CSRF-Token": window.csrf_token || "",
+			},
+			body: new URLSearchParams({ html, orientation: "Portrait" }),
 		},
-		body: new URLSearchParams({ html, orientation: "Portrait" }),
-	})
+	)
 	if (!response.ok) throw new Error(__("Could not create the sales recap PDF"))
 	const url = URL.createObjectURL(await response.blob())
 	const link = document.createElement("a")

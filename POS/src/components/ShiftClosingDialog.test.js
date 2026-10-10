@@ -97,7 +97,10 @@ vi.mock("../stores/posCart", async () => {
 	}
 })
 
-vi.mock("../utils/printEod", () => ({ printEODReport }))
+vi.mock("../utils/printEod", () => ({
+	printEODReport,
+	downloadEodPDF: vi.fn().mockResolvedValue(undefined),
+}))
 
 // Provide a trivial global translation helper the way printEod.test does.
 globalThis.__ = (message, replacements = []) => {
@@ -145,24 +148,7 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 			],
 			pos_transactions: [],
 		})
-		printEODReport.mockResolvedValue({ method: "silent", success: true })
-	})
-
-	it("submitClosing consumes printEODReport's lane: info toast for printview", async () => {
-		printEODReport.mockResolvedValue({ method: "printview", success: true })
-		const wrapper = await mountOpenDialog()
-
-		await wrapper.vm.submitClosing()
-		await flushPromises()
-
-		expect(printEODReport).toHaveBeenCalledWith(CLOSING_SHIFT_NAME, POS_PROFILE)
-		expect(toastSpies.showInfo).toHaveBeenCalledTimes(1)
-		expect(toastSpies.showInfo).toHaveBeenCalledWith(
-			"Direct print was not detected. The EOD report was opened in a print preview window instead.",
-		)
-		expect(toastSpies.showSuccess).not.toHaveBeenCalled()
-		// Normal mode still finishes the close even when only the preview opened.
-		expect(wrapper.emitted("shift-closed")).toHaveLength(1)
+		printEODReport.mockResolvedValue({ method: "silent", success: true, printed: true })
 	})
 
 	it("submitClosing stays quiet on the silent lane", async () => {
@@ -197,8 +183,13 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 		expect(wrapper.vm.showSuccessReport).toBe(true)
 	})
 
-	it("print-failure state hides reconciliation inputs and shows Reprint/Done", async () => {
-		printEODReport.mockRejectedValue(new Error("No print driver available"))
+	it("print-failure state hides reconciliation inputs and shows the retry panel", async () => {
+		printEODReport.mockResolvedValue({
+			method: "silent",
+			success: false,
+			printed: false,
+			error: new Error("No print driver available"),
+		})
 		// Mount with slot-rendering stubs so body/footer templates actually
 		// render (the default null stub never mounts slot content).
 		const rendered = mount(ShiftClosingDialog, {
@@ -229,15 +220,17 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 		expect(rendered.html()).not.toContain("Enter actual amount for")
 		expect(rendered.html()).toContain("The EOD report has not been printed yet.")
 
-		// Footer shows Reprint + Done, not the mixed-signal texts
+		// Footer shows the 3-button retry panel, no automatic fallback
 		const text = rendered.text()
-		expect(text).toContain("Reprint EOD Report")
-		expect(text).toContain("Done")
+		expect(text).toContain("Print Ulang")
+		expect(text).toContain("Export PDF")
+		expect(text).toContain("Tutup")
 		expect(text).not.toContain("EOD report pending print")
 		expect(text).not.toContain("Cancel")
 	})
 
-	it("retryEodPrint reports success only for the silent lane", async () => {
+	it("retryEodPrint closes the dialog after a successful print", async () => {
+		printEODReport.mockResolvedValue({ method: "silent", success: true, printed: true })
 		const wrapper = await mountOpenDialog()
 		wrapper.vm.eodPrintFailed = { closingShiftName: CLOSING_SHIFT_NAME }
 
@@ -252,22 +245,36 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 		expect(wrapper.emitted("update:modelValue")).toContainEqual([false])
 	})
 
-	it("retryEodPrint points at the preview window for the printview lane", async () => {
-		printEODReport.mockResolvedValue({ method: "printview", success: true })
+	it("retryEodPrint keeps the retry panel up when the print fails again", async () => {
+		printEODReport.mockResolvedValue({
+			method: "silent",
+			success: false,
+			printed: false,
+			error: new Error("No print driver available"),
+		})
 		const wrapper = await mountOpenDialog()
 		wrapper.vm.eodPrintFailed = { closingShiftName: CLOSING_SHIFT_NAME }
 
 		await wrapper.vm.retryEodPrint()
 
-		expect(toastSpies.showInfo).toHaveBeenCalledTimes(1)
-		expect(toastSpies.showInfo).toHaveBeenCalledWith(
-			"The EOD report was opened in a print preview window.",
+		expect(toastSpies.showWarning).toHaveBeenCalledWith(
+			"EOD report did not print. Retry, or check the printer.",
+			"Print failed",
 		)
 		expect(toastSpies.showSuccess).not.toHaveBeenCalled()
-		expect(wrapper.emitted("update:modelValue")).toContainEqual([false])
+		expect(wrapper.emitted("update:modelValue")).toBeUndefined()
 	})
 
-	it("retryEodPrint warns without closing the dialog when the print throws", async () => {
+	it("downloadEodReportPDF downloads the EOD PDF from the retry panel", async () => {
+		const { downloadEodPDF } = await import("../utils/printEod")
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.eodPrintFailed = { closingShiftName: CLOSING_SHIFT_NAME }
+
+		await wrapper.vm.downloadEodReportPDF()
+		expect(downloadEodPDF).toHaveBeenCalledWith(CLOSING_SHIFT_NAME)
+	})
+
+	it("retryEodPrint warns without closing the dialog when the print fails", async () => {
 		printEODReport.mockRejectedValue(new Error("No print driver available"))
 		const wrapper = await mountOpenDialog()
 		wrapper.vm.eodPrintFailed = { closingShiftName: CLOSING_SHIFT_NAME }

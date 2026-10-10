@@ -172,7 +172,34 @@
 				</div>
 				<div class="flex-shrink-0 flex flex-col items-end gap-1">
 					<div class="flex items-center gap-1">
+						<!-- Print-failure panel: Print Ulang / Export PDF / Tutup, no automatic fallback -->
+						<div
+							v-if="printFailed"
+							class="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1"
+						>
+							<span class="text-xs text-amber-800">{{ __("Cetak gagal") }}</span>
+							<Button
+								variant="ghost"
+								size="sm"
+								:loading="printing"
+								@click="print"
+							>
+								{{ __("Print Ulang") }}
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								:loading="exportingPdf"
+								@click="exportRecapPDF"
+							>
+								{{ __("Export PDF") }}
+							</Button>
+							<Button variant="ghost" size="sm" @click="printFailed = false">
+								{{ __("Tutup") }}
+							</Button>
+						</div>
 						<Button
+							v-else
 							variant="subtle"
 							:loading="printing"
 							@click="print"
@@ -611,14 +638,19 @@ import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
-import { periodRange, printSalesRecap } from "@/utils/salesRecap"
+import {
+	periodRange,
+	printSalesRecap,
+	buildRecapHTML,
+	downloadRecapPDF,
+	recapPDFFilename,
+} from "@/utils/salesRecap"
 import { downloadXlsx } from "@/utils/downloadXlsx"
 import { Button, createResource, FeatherIcon } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
 const { formatDate, formatTime } = useFormatters()
 const { showSuccess, showError } = useToast()
-
 
 const props = defineProps({
 	openingShift: { type: String, default: "" },
@@ -651,9 +683,7 @@ const range = computed(() =>
 
 // Chip options mirror the old select: shift only when there is one open.
 const periodOptions = computed(() => [
-	...(props.openingShift
-		? [{ value: "shift", label: __("This Shift") }]
-		: []),
+	...(props.openingShift ? [{ value: "shift", label: __("This Shift") }] : []),
 	{ value: "today", label: __("Today") },
 	{ value: "yesterday", label: __("Yesterday") },
 	{ value: "last7", label: __("Last 7 Days") },
@@ -665,6 +695,21 @@ const periodOptions = computed(() => [
 const stale = ref(false)
 const printing = ref(false)
 const exporting = ref(false)
+const printFailed = ref(false)
+const exportingPdf = ref(false)
+
+async function exportRecapPDF() {
+	if (!summary.value || exportingPdf.value) return
+	exportingPdf.value = true
+	try {
+		const html = buildRecapHTML(summary.value)
+		await downloadRecapPDF(html, recapPDFFilename(summary.value))
+	} catch (error) {
+		showError(error?.message || __("Could not create the sales recap PDF"))
+	} finally {
+		exportingPdf.value = false
+	}
+}
 
 async function exportExcel() {
 	if (exporting.value) return
@@ -674,7 +719,11 @@ async function exportExcel() {
 			"pos_next.api.shifts.export_sales_recap",
 			isShiftMode.value
 				? { opening_shift: props.openingShift }
-				: { pos_profile: props.posProfile, from_date: range.value?.from, to_date: range.value?.to },
+				: {
+						pos_profile: props.posProfile,
+						from_date: range.value?.from,
+						to_date: range.value?.to,
+					},
 		)
 	} catch (error) {
 		showError(error?.message || __("Export failed"))
@@ -749,18 +798,20 @@ async function print() {
 		const via = await printSalesRecap(summary.value, {
 			posProfile: props.posProfile || summary.value.pos_profile,
 		})
-		showSuccess(
-			via === "pdf"
-				? __("Printer unavailable — sales recap downloaded as PDF")
-				: __("Sales recap sent to the printer"),
-		)
+		if (via === "failed") {
+			// no automatic fallback: offer the retry panel instead
+			printFailed.value = true
+			showError(__("Cetak gagal. Gunakan Print Ulang atau Export PDF."))
+		} else {
+			printFailed.value = false
+			showSuccess(__("Sales recap sent to the printer"))
+		}
 	} catch (error) {
 		showError(error?.message || __("Could not print the sales recap"))
 	} finally {
 		printing.value = false
 	}
 }
-
 
 // Label and numbers come from the same response, so a window that is still
 // loading never shows the new dates over the old figures.

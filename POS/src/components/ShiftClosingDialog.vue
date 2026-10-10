@@ -20,7 +20,6 @@
 						{{ __("The EOD report has not been printed yet.") }}
 					</p>
 				</div>
-
 				<div v-else-if="closingDataResource.loading" class="text-center py-8 md:py-12">
 					<div
 						class="inline-block animate-spin rounded-full h-12 w-12 md:h-16 md:w-16 border-b-4 border-blue-600"
@@ -945,20 +944,24 @@
 			<div
 				class="flex flex-col sm:flex-row justify-between w-full items-stretch sm:items-center gap-2 sm:gap-0"
 			>
-				<!-- Print-failure state: neutral Done + solid Reprint, no mixed signals -->
+				<!-- Print-failure state: Print Ulang / Export PDF / Tutup, no automatic fallback -->
 				<template v-if="isPrintFailureState">
-					<Button variant="subtle" @click="closeDialog" class="order-2 sm:order-1">
-						{{ __("Done") }}
-					</Button>
-					<Button
-						variant="solid"
-						theme="blue"
-						class="order-1 sm:order-2"
-						@click="retryEodPrint"
-						:loading="retryPrintLoading"
+					<div
+						class="flex flex-col items-stretch justify-center gap-2 order-2 sm:flex-row sm:order-2 w-full sm:w-auto"
 					>
-						{{ __("Reprint EOD Report") }}
-					</Button>
+						<Button variant="solid" theme="blue" @click="retryEodPrint" :loading="retryPrintLoading">
+							{{ __("Print Ulang") }}
+						</Button>
+						<Button
+							variant="subtle"
+							theme="gray"
+							@click="downloadEodReportPDF"
+							:loading="eodPdfLoading"
+						>
+							{{ __("Export PDF") }}
+						</Button>
+						<Button variant="ghost" @click="closeDialog">{{ __("Tutup") }}</Button>
+					</div>
 				</template>
 
 				<template v-else>
@@ -1021,7 +1024,7 @@ import { usePOSSettingsStore } from "../stores/posSettings"
 import { usePOSShiftStore } from "../stores/posShift"
 import { usePOSSyncStore } from "../stores/posSync"
 import { usePOSCartStore } from "../stores/posCart"
-import { printEODReport } from "../utils/printEod"
+import { printEODReport, downloadEodPDF } from "../utils/printEod"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
 
 const props = defineProps({
@@ -1046,7 +1049,7 @@ const open = computed({
 const { getClosingShiftData, submitClosingShift } = useShift()
 const { formatCurrency, formatQuantity, formatDateTime, formatTime } =
 	useFormatters()
-const { showInfo, showSuccess, showWarning } = useToast()
+const { showInfo, showSuccess, showWarning, showError } = useToast()
 const posSettingsStore = usePOSSettingsStore()
 const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 
@@ -1060,8 +1063,8 @@ const cartStore = usePOSCartStore()
 const syncBlockMessage = computed(() =>
 	__(
 		"{0} invoice(s) are still pending sync — sync them before closing so the shift totals are complete.",
-		[syncStore.pendingInvoicesCount]
-	)
+		[syncStore.pendingInvoicesCount],
+	),
 )
 
 const closingData = ref(null)
@@ -1076,6 +1079,7 @@ const showSuccessReport = ref(false) // Track if shift is closed and showing rep
 const errorMessage = ref("") // User-friendly error message
 const eodPrintFailed = ref(null)
 const retryPrintLoading = ref(false)
+const eodPdfLoading = ref(false)
 const showIdleWarning = ref(false)
 let _idleWarningTimer = null
 
@@ -1142,16 +1146,18 @@ async function loadClosingData() {
 			// the cashier only edits the rows that really differ — but blind
 			// entry mode must NOT leak the expected value, so it stays empty.
 			const autoFill = !hideExpectedAmount.value
-			data.payment_reconciliation = data.payment_reconciliation.map((payment) => {
-				const expected = Number.parseFloat(payment.expected_amount) || 0
-				return reactive({
-					...payment,
-					closing_amount: autoFill ? expected : (payment.closing_amount ?? 0),
-					closing_text: autoFill ? formatAmountInput(expected) : "",
-					difference: 0,
-					_touched: true,
-				})
-			})
+			data.payment_reconciliation = data.payment_reconciliation.map(
+				(payment) => {
+					const expected = Number.parseFloat(payment.expected_amount) || 0
+					return reactive({
+						...payment,
+						closing_amount: autoFill ? expected : (payment.closing_amount ?? 0),
+						closing_text: autoFill ? formatAmountInput(expected) : "",
+						difference: 0,
+						_touched: true,
+					})
+				},
+			)
 
 			// Calculate initial differences
 			data.payment_reconciliation.forEach((payment) => {
@@ -1231,13 +1237,11 @@ async function submitClosing() {
 					closingShiftName,
 					closingData.value?.pos_profile,
 				)
-				eodPrintFailed.value = null
-				if (result?.method === "printview") {
-					showInfo(
-						__(
-							"Direct print was not detected. The EOD report was opened in a print preview window instead.",
-						),
-					)
+				if (result?.printed) {
+					eodPrintFailed.value = null
+					showSuccess(__("EOD report printed successfully"))
+				} else {
+					throw result?.error || new Error(__("EOD report did not print"))
 				}
 			} catch (err) {
 				console.warn("[eod] print failed", err)
@@ -1281,13 +1285,13 @@ async function retryEodPrint() {
 			closingShiftName,
 			closingData.value?.pos_profile,
 		)
-		eodPrintFailed.value = null
-		if (result?.method === "printview") {
-			showInfo(__("The EOD report was opened in a print preview window."))
-		} else {
+		if (result?.printed) {
+			eodPrintFailed.value = null
 			showSuccess(__("EOD report printed successfully"))
+			closeDialog()
+		} else {
+			throw result?.error || new Error(__("EOD report did not print"))
 		}
-		closeDialog()
 	} catch (err) {
 		console.warn("[eod] retry print failed", err)
 		showWarning(
@@ -1296,6 +1300,20 @@ async function retryEodPrint() {
 		)
 	} finally {
 		retryPrintLoading.value = false
+	}
+}
+
+async function downloadEodReportPDF() {
+	const closingShiftName = eodPrintFailed.value?.closingShiftName
+	if (!closingShiftName) return
+	eodPdfLoading.value = true
+	try {
+		await downloadEodPDF(closingShiftName)
+	} catch (err) {
+		console.warn("[eod] pdf export failed", err)
+		showError(err?.message || __("Could not create the EOD report PDF"))
+	} finally {
+		eodPdfLoading.value = false
 	}
 }
 

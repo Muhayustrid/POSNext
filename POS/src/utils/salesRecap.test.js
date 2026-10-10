@@ -263,9 +263,13 @@ describe("buildRecapHTML", () => {
 			{ printedAt },
 		)
 		// category name is its own bold line, items follow underneath
-		expect(html).toContain('<div class="category"><div class="category-name">Makanan</div>')
+		expect(html).toContain(
+			'<div class="category"><div class="category-name">Makanan</div>',
+		)
 		expect(html).toContain('<div class="category-name">Minuman</div>')
-		expect(html).toMatch(/Makanan<\/div>.*12x &lt;b&gt;Kopi&lt;\/b&gt; &amp; Susu/s)
+		expect(html).toMatch(
+			/Makanan<\/div>.*12x &lt;b&gt;Kopi&lt;\/b&gt; &amp; Susu/s,
+		)
 		expect(html).toMatch(/Minuman<\/div>.*25\.5x Es Teh/s)
 		expect(html).toContain("Top 2 of 25 categories")
 	})
@@ -279,7 +283,14 @@ describe("buildRecapHTML", () => {
 						category: "Makanan",
 						qty: 30,
 						base_net_amount: 3500000,
-						items: [{ item_code: "I1", item_name: "Kopi", qty: 12, base_net_amount: 240000 }],
+						items: [
+							{
+								item_code: "I1",
+								item_name: "Kopi",
+								qty: 12,
+								base_net_amount: 240000,
+							},
+						],
 						items_shown: 1,
 						items_truncated: true,
 					},
@@ -294,7 +305,9 @@ describe("buildRecapHTML", () => {
 		const html = buildRecapHTML(
 			{
 				...PERIOD_SUMMARY,
-				categories: [{ category: "Makanan", qty: 30, base_net_amount: 3500000 }],
+				categories: [
+					{ category: "Makanan", qty: 30, base_net_amount: 3500000 },
+				],
 			},
 			{ printedAt },
 		)
@@ -319,24 +332,32 @@ describe("buildRecapHTML", () => {
 	})
 })
 
-describe("printSalesRecap PDF fallback", () => {
-	it("downloads a PDF when every printer driver refuses", async () => {
+describe("printSalesRecap no-fallback behavior", () => {
+	it('resolves "failed" when every printer driver refuses (no automatic PDF)', async () => {
 		vi.resetModules()
 		vi.doMock("@/utils/printInvoice", () => ({
 			silentPrintHTML: vi.fn().mockRejectedValue(new Error("no driver")),
 		}))
-		const fetchMock = vi.fn().mockResolvedValue({
-			ok: true,
-			blob: async () => new Blob(["%PDF"]),
-		})
+		const fetchMock = vi.fn()
 		vi.stubGlobal("fetch", fetchMock)
-		URL.createObjectURL = vi.fn(() => "blob:x")
-		URL.revokeObjectURL = vi.fn()
 		const { printSalesRecap } = await import("./salesRecap")
 
-		await expect(printSalesRecap(PERIOD_SUMMARY)).resolves.toBe("pdf")
-		expect(fetchMock.mock.calls[0][0]).toContain("report_to_pdf")
+		// NO automatic fallback anymore: the caller shows the retry panel and
+		// exports the PDF on demand via downloadRecapPDF().
+		await expect(printSalesRecap(PERIOD_SUMMARY)).resolves.toBe("failed")
+		expect(fetchMock).not.toHaveBeenCalled()
 		vi.unstubAllGlobals()
+	})
+
+	it("recapPDFFilename names the sheet after the shift or profile", async () => {
+		vi.resetModules()
+		const { recapPDFFilename } = await import("./salesRecap")
+		expect(recapPDFFilename({ opening_shift: "POS-OS-0001" })).toBe(
+			"Sales Recap POS-OS-0001.pdf",
+		)
+		expect(recapPDFFilename({ pos_profile: "Outlet" })).toBe(
+			"Sales Recap Outlet.pdf",
+		)
 	})
 
 	it("never falls back after a sheet already printed", async () => {
