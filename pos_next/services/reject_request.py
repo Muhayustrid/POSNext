@@ -2,7 +2,8 @@
 # For license information, please see license.txt
 
 """POS Reject Request lifecycle: submit (Unsold), validation, deadline, limit,
-stock transfer to the reject warehouse and notifications.
+stock transfer to the reject warehouse, Head Office decisions (segregation of
+duties), closing with destruction proof and notifications.
 
 Design: docs/superpowers/specs/2026-10-11-pos-reject-request-design.md
 """
@@ -13,18 +14,25 @@ from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import make_notification_logs
-from frappe.utils import add_days, flt, get_first_day, get_last_day, get_url_to_form, getdate, today
+from frappe.utils import add_days, flt, get_first_day, get_last_day, get_url_to_form, getdate, now, today
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
 from pos_next.services.production import _pick_batch, _resolve_profile, _stock_qty
 
 # Canonical English, never translated: cancel matches on it.
 TRANSFER_REMARK_PREFIX = "POS Reject transfer: "
+ISSUE_REMARK_PREFIX = "POS Reject write-off: "
 APPROVER_ROLE = "POSNext Reject Approver"
 MAX_EVIDENCE = 5
+DECISIONS = ("Write Off", "Charge Crew", "Rejected")
 
 
 def validate_request(doc):
+	from pos_next.api.packages import _assert_profile_access
+
+	if frappe.session.user != "Administrator" and not doc.flags.ignore_permissions:
+		_assert_profile_access(doc.pos_profile)
+
 	doc.company, warehouse = _resolve_profile(doc.pos_profile)
 	_price_items(doc, warehouse)
 
@@ -80,7 +88,7 @@ def _month_total(doc, incident):
 	return flt(
 		frappe.db.sql(
 			"""select sum(total_amount) from `tabPOS Reject Request`
-			where pos_profile = %s and docstatus != 2 and name != %s
+			where pos_profile = %s and docstatus = 1 and name != %s
 				and incident_date between %s and %s""",
 			(doc.pos_profile, doc.name or "", get_first_day(incident), get_last_day(incident)),
 		)[0][0]
@@ -91,7 +99,10 @@ def on_submit_request(doc):
 	doc.db_set("status", "Pending")
 	if doc.purpose == "Unsold":
 		_transfer_to_reject_warehouse(doc)
-	# Task 3: Strict + is_late -> apply_decision(doc, "Charge Crew", ...) goes here.
+	if doc.is_late and frappe.db.get_single_value("POS Reject Settings", "late_mode") == "Strict":
+		return apply_decision(
+			doc, "Charge Crew", _("Auto: past deadline (Strict mode)"), system=True
+		)
 	notify(approver_users(), _("New reject request {0}").format(doc.name), doc)
 	doc.add_comment("Comment", text=_("Submitted, waiting for a decision"))
 
@@ -162,16 +173,19 @@ def notify(users, subject, doc):
 	addresses in POS Reject Settings (best effort: never blocks the request).
 	Logs are written inline: the enqueued variant is a background job."""
 	if users:
-		make_notification_logs(
-			frappe._dict(
-				type="Alert",
-				subject=subject,
-				document_type=doc.doctype,
-				document_name=doc.name,
-				from_user=frappe.session.user,
-			),
-			users,
-		)
+		try:
+			make_notification_logs(
+				frappe._dict(
+					type="Alert",
+					subject=subject,
+					document_type=doc.doctype,
+					document_name=doc.name,
+					from_user=frappe.session.user,
+				),
+				users,
+			)
+		except Exception:
+			frappe.log_error(title="POS Reject Request notification failed")
 	if set(users) != set(approver_users()):
 		return
 	emails = frappe.db.get_single_value("POS Reject Settings", "notify_emails") or ""
@@ -188,3 +202,125 @@ def notify(users, subject, doc):
 		)
 	except Exception:
 		frappe.log_error(title="POS Reject Request email failed")
+
+
+def apply_decision(doc, decision, notes=None, system=False):
+	"""Head Office verdict on a Pending request (segregation of duties).
+
+	The row is locked for update first: a double click loses the race and the
+	second call throws instead of creating a second Stock Entry.
+	"""
+	frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
+	if frappe.db.get_value("POS Reject Request", doc.name, "status") != "Pending":
+		frappe.throw(_("Only a Pending reject request can be decided"))
+
+	decision = (decision or "").strip()
+	if decision not in DECISIONS:
+		frappe.throw(_("Decision must be one of {0}").format(", ".join(DECISIONS)))
+	if decision == "Rejected" and doc.purpose != "Unsold":
+		frappe.throw(_("Rejected only applies to an Unsold request"))
+	notes = (notes or "").strip()
+	if decision in ("Charge Crew", "Rejected") and not notes:
+		frappe.throw(_("Notes are required for {0}").format(decision))
+
+	decided_by = "Administrator" if system else frappe.session.user
+	if not system:
+		if APPROVER_ROLE not in frappe.get_roles(decided_by):
+			frappe.throw(
+				_("Only {0} can decide a reject request").format(APPROVER_ROLE), frappe.PermissionError
+			)
+		if decided_by == doc.owner:
+			frappe.throw(_("You cannot decide your own request"), frappe.PermissionError)
+
+	if decision == "Rejected":
+		_return_to_outlet(doc)
+		status = "Rejected"
+	else:
+		status = "Approved"
+
+	doc.db_set("decision", decision)
+	doc.db_set("decision_notes", notes or None)
+	doc.db_set("decided_by", decided_by)
+	doc.db_set("decided_on", now())
+	doc.db_set("status", status)
+	doc.add_comment("Comment", text=_("Decision: {0}").format(decision))
+	notify([doc.owner], _("Reject request {0}: {1}").format(doc.name, decision), doc)
+	return _payload(doc)
+
+
+def close_request(doc):
+	"""Close an Approved request once destruction proof is attached.
+
+	Unsold stock leaves the reject warehouse via a Material Issue to the
+	company's stock adjustment account; Production Loss never touched stock.
+	"""
+	if doc.status != "Approved":
+		frappe.throw(_("Only an Approved reject request can be closed"))
+	if not frappe.db.count(
+		"File",
+		{
+			"attached_to_doctype": doc.doctype,
+			"attached_to_name": doc.name,
+			"attached_to_field": "destruction",
+		},
+	):
+		frappe.throw(_("Attach at least one destruction photo"))
+
+	if doc.purpose == "Unsold" and not doc.issue_entry:
+		doc.db_set("issue_entry", _write_off_reject_stock(doc).name)
+	doc.db_set("status", "Closed")
+	doc.db_set("closed_on", now())
+	doc.add_comment("Comment", text=_("Closed with destruction proof"))
+	return _payload(doc)
+
+
+def _return_to_outlet(doc):
+	"""Rejected: the outlet takes the goods back (mirrors the outbound transfer)."""
+	source = get_effective_pos_setting(doc.pos_profile, "reject_warehouse")
+	target = _resolve_profile(doc.pos_profile)[1]
+	return _make_stock_entry(
+		doc, "Material Transfer", source, target, TRANSFER_REMARK_PREFIX + doc.name + " return"
+	)
+
+
+def _write_off_reject_stock(doc):
+	"""Material Issue from the reject warehouse to the stock adjustment account."""
+	source = get_effective_pos_setting(doc.pos_profile, "reject_warehouse")
+	account = frappe.db.get_value("Company", doc.company, "stock_adjustment_account")
+	if not account:
+		frappe.throw(_("Company {0} has no Stock Adjustment Account for the write-off").format(doc.company))
+	return _make_stock_entry(doc, "Material Issue", source, None, ISSUE_REMARK_PREFIX + doc.name, account)
+
+
+def _make_stock_entry(doc, purpose, source, target, remarks, expense_account=None):
+	se = frappe.new_doc("Stock Entry")
+	se.company = doc.company
+	se.purpose = purpose
+	se.set_stock_entry_type()
+	se.remarks = remarks
+	for row in doc.items:
+		line = {
+			"item_code": row.item_code,
+			"qty": row.qty,
+			"s_warehouse": source,
+			"t_warehouse": target,
+			"use_serial_batch_fields": 1,
+		}
+		if expense_account:
+			line["expense_account"] = expense_account
+		if frappe.db.get_value("Item", row.item_code, "has_batch_no"):
+			line["batch_no"] = _pick_batch(row.item_code, source, flt(row.qty))
+		se.append("items", line)
+	se.flags.ignore_permissions = True
+	se.insert()
+	se.submit()
+	return se
+
+
+def _payload(doc):
+	return {
+		"name": doc.name,
+		"status": frappe.db.get_value("POS Reject Request", doc.name, "status"),
+		"decision": frappe.db.get_value("POS Reject Request", doc.name, "decision"),
+		"issue_entry": frappe.db.get_value("POS Reject Request", doc.name, "issue_entry"),
+	}
