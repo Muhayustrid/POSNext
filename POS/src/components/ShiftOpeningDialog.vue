@@ -43,11 +43,19 @@
 											🕒 {{ hhmm(profile.pos_schedule_start) }} – {{ hhmm(profile.pos_schedule_end) }}
 										</p>
 									</div>
-									<span
-										class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded"
-									>
-										{{ profile.currency }}
-									</span>
+									<div class="flex flex-col items-end gap-1">
+										<span
+											class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded"
+										>
+											{{ profile.currency }}
+										</span>
+										<span
+											v-if="profile.active_shift"
+											class="text-xs font-medium text-green-700 bg-green-100 px-2 py-1 rounded text-end"
+										>
+											{{ __("Active") }} · {{ profile.active_shift.user_name }}
+										</span>
+									</div>
 								</div>
 							</div>
 						</div>
@@ -135,9 +143,6 @@
 						<p class="text-sm text-red-800">{{ serverErrorMessage(dialogDataResource.error) }}</p>
 					</div>
 
-					<div v-if="createShiftResource.error" class="rounded-md bg-red-50 p-4">
-						<p class="text-sm text-red-800">{{ serverErrorMessage(createShiftResource.error) }}</p>
-					</div>
 				</div>
 
 				<!-- Step 3: Resume or Open New -->
@@ -245,66 +250,89 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- Refusal popup: profile held by another cashier, or open-shift error -->
+	<Dialog
+		v-model="showBlocked"
+		:options="{ title: blockedTitle, size: 'md' }"
+	>
+		<template #body-content>
+			<TranslatedHTML
+				:key="blockedMessage"
+				tag="p"
+				class="text-sm text-gray-700 text-start"
+				:inner="blockedMessage"
+			/>
+		</template>
+		<template #actions>
+			<div class="flex justify-end w-full">
+				<Button variant="solid" theme="blue" @click="showBlocked = false">
+					{{ __("OK") }}
+				</Button>
+			</div>
+		</template>
+	</Dialog>
 </template>
 
 <script setup>
-import { Button, Dialog, createResource } from "frappe-ui";
-import { computed, ref, watch } from "vue";
-import { useShift } from "../composables/useShift";
-import { useFormatters } from "../composables/useFormatters";
-import { useToast } from "../composables/useToast";
-import { formatAmountInput, parseAmountInput } from "../utils/amountInput";
-import { serverErrorMessage } from "../utils/apiWrapper";
-import TranslatedHTML from "./common/TranslatedHTML.vue";
+import { Button, Dialog, createResource } from "frappe-ui"
+import { computed, ref, watch } from "vue"
+import { useShift } from "../composables/useShift"
+import { useFormatters } from "../composables/useFormatters"
+import { useToast } from "../composables/useToast"
+import { formatAmountInput, parseAmountInput } from "../utils/amountInput"
+import { serverErrorMessage } from "../utils/apiWrapper"
+import TranslatedHTML from "./common/TranslatedHTML.vue"
 
 const props = defineProps({
 	modelValue: Boolean,
-});
+})
 
 const emit = defineEmits([
 	"update:modelValue",
 	"shift-opened",
 	"dialog-closed",
 	"close-existing-shift",
-]);
+])
 
 const open = computed({
 	get: () => props.modelValue,
 	set: (value) => emit("update:modelValue", value),
-});
+})
 
-const { createOpeningShift, getOpeningDialogData, checkOpeningShift } = useShift();
-const { formatDateTime } = useFormatters();
-const { showInfo } = useToast();
+const { createOpeningShift, getOpeningDialogData, checkOpeningShift } =
+	useShift()
+const { formatDateTime } = useFormatters()
+const { showInfo } = useToast()
 
-const step = ref(1);
-const selectedProfile = ref(null);
-const openingBalances = ref({});
-const existingShift = ref(null);
+const step = ref(1)
+const selectedProfile = ref(null)
+const openingBalances = ref({})
+const existingShift = ref(null)
 
 // Get POS Profiles
 const profilesResource = createResource({
 	url: "pos_next.api.pos_profile.get_pos_profiles",
 	auto: false,
-});
+})
 
 // Get dialog data (payment methods)
 const dialogDataResource = createResource({
 	url: "pos_next.api.shifts.get_opening_dialog_data",
 	auto: false,
-});
+})
 
 // Create shift resource
-const createShiftResource = createOpeningShift;
+const createShiftResource = createOpeningShift
 
 // Computed payment methods for selected profile
 const paymentMethods = computed(() => {
-	if (!dialogDataResource.data || !selectedProfile.value) return [];
+	if (!dialogDataResource.data || !selectedProfile.value) return []
 
 	return (dialogDataResource.data.payments_method || []).filter(
-		(method) => method.parent === selectedProfile.value.name
-	);
-});
+		(method) => method.parent === selectedProfile.value.name,
+	)
+})
 
 // Watch dialog open state.
 // Reset happens when the dialog OPENS (inside initDialog), never on close:
@@ -318,76 +346,103 @@ watch(
 	open,
 	(isOpen) => {
 		if (isOpen) {
-			initDialog();
+			initDialog()
 		}
 	},
 	{ immediate: true },
-);
+)
 
 async function initDialog() {
 	// Reset first, then fetch — a reopen must not inherit the previous
 	// session's step/profile/errors, and the fetch must repopulate a
 	// clean resource.
-	resetDialog();
+	resetDialog()
 
 	try {
 		// Await profile fetch to ensure data is loaded before proceeding
-		await profilesResource.fetch();
+		await profilesResource.fetch()
 
 		// Check if user already has an open shift
-		const checkResult = await checkOpeningShift.fetch();
+		const checkResult = await checkOpeningShift.fetch()
 		if (checkResult) {
-			existingShift.value = checkResult;
-			step.value = 3;
+			existingShift.value = checkResult
+			step.value = 3
 		}
 	} catch (error) {
-		console.error("Error initializing shift dialog:", error);
+		console.error("Error initializing shift dialog:", error)
 		// Error will be displayed via profilesResource.error in the UI
 	}
 }
 
 function resetDialog() {
-	step.value = 1;
-	selectedProfile.value = null;
-	openingBalances.value = {};
-	existingShift.value = null;
-	profilesResource.reset();
-	dialogDataResource.reset();
-	createShiftResource.reset();
+	step.value = 1
+	selectedProfile.value = null
+	openingBalances.value = {}
+	existingShift.value = null
+	profilesResource.reset()
+	dialogDataResource.reset()
+	createShiftResource.reset()
 }
 
 // Time fields arrive as "8:00:00" (serialized timedelta) → "08:00"
 function hhmm(time) {
-	const [h, m] = String(time).split(":");
-	return `${h.padStart(2, "0")}:${m}`;
+	const [h, m] = String(time).split(":")
+	return `${h.padStart(2, "0")}:${m}`
 }
 
 function selectPosProfile(profile) {
-	selectedProfile.value = profile;
+	selectedProfile.value = profile
+}
+
+const showBlocked = ref(false)
+const blockedTitle = ref("")
+const blockedMessage = ref("")
+
+function showBlockedPopup(title, message) {
+	blockedTitle.value = title
+	blockedMessage.value = message
+	showBlocked.value = true
 }
 
 async function nextStep() {
 	if (step.value === 1 && selectedProfile.value) {
-		await dialogDataResource.fetch();
-		step.value = 2;
+		// Refuse up front instead of letting the cashier fill balances first;
+		// the server still re-checks under lock in create_opening_shift.
+		const profile = selectedProfile.value
+		if (profile.locked) {
+			const s = profile.active_shift
+			const bold = (v) => `<strong>${v}</strong>`
+			showBlockedPopup(
+				__("POS Profile Is Active"),
+				__(
+					"POS Profile {0} is still active on shift {1}, opened by {2} since {3}. Only one shift can be open per POS Profile. Ask {2} or a POS Manager to close that shift first.",
+					[bold(profile.name), bold(s.name), bold(s.user_name), s.since],
+				),
+			)
+			return
+		}
+		await dialogDataResource.fetch()
+		step.value = 2
 	}
 }
 
 async function openShift() {
-	if (!selectedProfile.value) return;
+	if (!selectedProfile.value) return
 
 	// Prepare balance details
 	const balance_details = paymentMethods.value.map((method) => ({
 		mode_of_payment: method.mode_of_payment,
-		opening_amount: parseAmountInput(openingBalances.value[method.mode_of_payment]),
-	}));
+		opening_amount: parseAmountInput(
+			openingBalances.value[method.mode_of_payment],
+		),
+	}))
 
 	try {
 		await createShiftResource.submit({
 			pos_profile: selectedProfile.value.name,
 			company: selectedProfile.value.company,
 			balance_details,
-		});
+		})
 
 		// manager on a profile that is already active: the server joined the
 		// running shift instead of opening a second drawer
@@ -396,36 +451,41 @@ async function openShift() {
 				__("POS Profile {0} is already active. Resumed shift {1}.", [
 					selectedProfile.value.name,
 					createShiftResource.data.pos_opening_shift?.name,
-				])
-			);
+				]),
+			)
 		}
-		emit("shift-opened");
-		closeDialog("shift-opened");
+		emit("shift-opened")
+		closeDialog("shift-opened")
 	} catch (error) {
-		console.error("Error opening shift:", error);
+		console.error("Error opening shift:", error)
+		// race: someone took the profile after the list loaded
+		showBlockedPopup(
+			__("Open Shift"),
+			serverErrorMessage(createShiftResource.error || error),
+		)
 	}
 }
 
 function resumeShift() {
-	emit("shift-opened");
-	closeDialog("resumed");
+	emit("shift-opened")
+	closeDialog("resumed")
 }
 
 function closeAndOpenNew() {
 	if (!existingShift.value?.pos_opening_shift?.name) {
-		return;
+		return
 	}
 
 	// The page-level ShiftClosingDialog (POSSale.vue) owns closing the stale
 	// shift — the shared checkOpeningShift already mirrored it into
 	// shiftStore.currentShift, so the page dialog has the right opening shift.
 	// handleShiftClosed there reopens this dialog once the close settles.
-	emit("close-existing-shift", existingShift.value.pos_opening_shift.name);
-	closeDialog("close-and-open-new");
+	emit("close-existing-shift", existingShift.value.pos_opening_shift.name)
+	closeDialog("close-and-open-new")
 }
 
 function closeDialog(reason) {
-	open.value = false;
-	emit("dialog-closed", { reason });
+	open.value = false
+	emit("dialog-closed", { reason })
 }
 </script>

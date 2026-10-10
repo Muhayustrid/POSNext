@@ -65,6 +65,37 @@ def get_pos_profiles():
 		as_dict=1,
 	)
 
+	# Mark profiles already held by an open shift so the opening dialog can
+	# show it up front and refuse before the balance step. Plain read — the
+	# authoritative locked check stays in create_opening_shift.
+	if pos_profiles:
+		from frappe.utils import format_datetime, get_fullname
+
+		shifts = frappe.get_all(
+			"POS Opening Shift",
+			filters={
+				"pos_profile": ["in", [p.name for p in pos_profiles]],
+				"docstatus": 1,
+				"status": "Open",
+				"pos_closing_shift": ["is", "not set"],
+			},
+			fields=["name", "user", "period_start_date", "pos_profile"],
+			order_by="period_start_date desc",
+		)
+		# desc + overwrite = the oldest open shift wins, like get_active_profile_shift
+		active = {s.pos_profile: s for s in shifts}
+		can_join = is_management_user()
+		for p in pos_profiles:
+			s = active.get(p.name)
+			p.active_shift = s and {
+				"name": s.name,
+				"user": s.user,
+				"user_name": get_fullname(s.user),
+				"since": format_datetime(s.period_start_date, "dd-MM-yyyy HH:mm"),
+			}
+			# locked = opening would be refused (someone else's shift, not a manager)
+			p.locked = bool(s and s.user != frappe.session.user and not can_join)
+
 	return pos_profiles
 
 

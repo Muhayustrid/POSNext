@@ -222,3 +222,34 @@ describe("ShiftOpeningDialog close-existing-shift handoff", () => {
 		expect(wrapper.emitted("update:modelValue")).toBeUndefined()
 	})
 })
+
+describe("ShiftOpeningDialog refuses a profile held by another cashier", () => {
+	it("pops up at Next and stays on step 1 when the profile is locked", async () => {
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = {
+			...PROFILES[0],
+			locked: true,
+			active_shift: { name: "POPEN-1", user_name: "Jalu", since: "10-10-2026 05:35" },
+		}
+
+		await wrapper.vm.nextStep()
+
+		expect(wrapper.vm.step).toBe(1)
+		expect(wrapper.vm.showBlocked).toBe(true)
+		expect(wrapper.vm.blockedMessage).toContain("Jalu")
+		const dialogData = resources.instances.find(
+			(r) => r.url === "pos_next.api.shifts.get_opening_dialog_data"
+		)
+		expect(dialogData.fetch).not.toHaveBeenCalled()
+	})
+
+	it("proceeds to balances for an unlocked profile", async () => {
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+
+		await wrapper.vm.nextStep()
+
+		expect(wrapper.vm.step).toBe(2)
+		expect(wrapper.vm.showBlocked).toBe(false)
+	})
+})
