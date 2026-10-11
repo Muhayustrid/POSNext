@@ -172,6 +172,17 @@
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
 					/>
+					<RejectRequestDialog
+						v-else-if="activeView === 'reject-request'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						:company="company"
+						:currency="currency"
+						class="h-full"
+						v-bind="$attrs"
+						@update:model-value="closeIfHidden"
+					/>
 					<PurchaseOrderDialog
 						v-else-if="activeView === 'purchase-order'"
 						embedded
@@ -210,6 +221,7 @@ import SessionSummary from "@/components/sale/SessionSummary.vue"
 import ShiftDashboard from "@/components/sale/ShiftDashboard.vue"
 import ProductsView from "@/components/sale/ProductsView.vue"
 import ProductionDialog from "@/components/pos/ProductionDialog.vue"
+import RejectRequestDialog from "@/components/pos/RejectRequestDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
 

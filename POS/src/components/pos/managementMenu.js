@@ -60,6 +60,13 @@ export const MANAGEMENT_MENU = [
 		requiresProduction: true,
 	},
 	{
+		id: "reject-request",
+		icon: "alert-triangle",
+		label: __("Reject Requests"),
+		group: "stock",
+		requiresOnline: true,
+	},
+	{
 		id: "promotions",
 		icon: "tag",
 		label: __("Promotions"),
