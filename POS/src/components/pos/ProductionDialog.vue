@@ -354,6 +354,24 @@
 										{{ historyStamp(p) }}<template v-if="p.operator">, {{ p.operator }}</template>
 									</span>
 								</div>
+								<!-- Production Loss draft tracking: badge only when a
+								     system reject request exists for this Work Order -->
+								<div v-if="p.reject_request" class="flex items-center gap-2 mt-1.5">
+									<span
+										class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
+										:class="rejectStatusClass(p.reject_status)"
+									>
+										{{ rejectLabel(p.reject_status) }}
+									</span>
+									<button
+										v-if="p.reject_status === 'Draft'"
+										type="button"
+										class="text-xs text-blue-600 hover:underline"
+										@click="emit('open-reject-request', p.reject_request)"
+									>
+										{{ __("Submit report") }}
+									</button>
+								</div>
 							</div>
 						</div>
 						<div v-if="historyHasMore" class="mt-3 flex justify-center">
@@ -679,7 +697,7 @@ const props = defineProps({
 	embedded: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(["update:modelValue", "production-created"])
+const emit = defineEmits(["update:modelValue", "production-created", "open-reject-request"])
 
 const { showSuccess, showError } = useToast()
 
@@ -999,6 +1017,22 @@ function statusClass(posStatus) {
 	if (posStatus === "In Progress") return "bg-blue-100 text-blue-700"
 	if (posStatus === "Failed") return "bg-red-100 text-red-700"
 	return "bg-gray-100 text-gray-600"
+}
+
+// Same palette as RejectRequestDialog's status chips, so the same reject
+// status reads identically across the two dialogs.
+function rejectStatusClass(status) {
+	if (status === "Pending") return "bg-blue-100 text-blue-700"
+	if (status === "Approved") return "bg-green-100 text-green-700"
+	if (status === "Rejected") return "bg-red-100 text-red-700"
+	if (status === "Closed") return "bg-gray-100 text-gray-600"
+	return "bg-yellow-100 text-yellow-700" // Draft
+}
+
+function rejectLabel(status) {
+	if (status === "Draft") return __("Not submitted")
+	if (status === "Pending") return __("Waiting for HO")
+	return __(status || "Not submitted")
 }
 
 // "2026-09-27 19:23:42.123456" → "2026-09-27 19:23": calm and locale-free.

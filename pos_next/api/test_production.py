@@ -1126,6 +1126,22 @@ class TestGetProductionHistory(InvoiceTypeAmbientMixin, FrappeTestCase):
 		rows = self._rows_by_wo(get_production_history(self.pos_profile))
 		self.assertEqual(rows[result["work_order"]]["pos_status"], "Cancelled")
 
+	def test_history_includes_reject_status(self):
+		from pos_next.install import ensure_reject_purposes
+
+		ensure_reject_purposes()
+		with_loss = self._start(5, seed=10)
+		finish_production(with_loss["work_order"], good_qty=3)
+		result = close_production(with_loss["work_order"])
+		without_loss = self._start(2, seed=10)
+		finish_production(without_loss["work_order"], good_qty=2)
+		rows = self._rows_by_wo(get_production_history(self.pos_profile))
+		loss_row = rows[with_loss["work_order"]]
+		self.assertEqual(loss_row["reject_request"], result["reject_request"])
+		self.assertEqual(loss_row["reject_status"], "Draft")
+		self.assertIsNone(rows[without_loss["work_order"]]["reject_request"])
+		self.assertIsNone(rows[without_loss["work_order"]]["reject_status"])
+
 	def test_history_pagination_slices_newest_first(self):
 		mine = []
 		for _ in range(3):

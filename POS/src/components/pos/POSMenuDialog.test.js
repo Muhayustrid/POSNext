@@ -40,7 +40,15 @@ const viewStubs = {
 		template: `<div data-testid="view-dashboard" />`,
 	},
 	ProductsView: { template: `<div data-testid="view-products" />` },
-	ProductionDialog: { template: `<div data-testid="view-production" />` },
+	ProductionDialog: {
+		name: "ProductionDialog",
+		template: `<div data-testid="view-production" />`,
+	},
+	RejectRequestDialog: {
+		name: "RejectRequestDialog",
+		props: ["posProfile", "initialRequest"],
+		template: `<div data-testid="view-reject-request" />`,
+	},
 	PurchaseOrderDialog: { template: `<div data-testid="view-purchase-order" />` },
 }
 
@@ -188,6 +196,40 @@ describe("POSMenuDialog menu", () => {
 		await nextTick()
 		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
 		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("open-reject-request from production switches to the reject view with the request", async () => {
+		const wrapper = mountShell({
+			open: true,
+			initialView: "production",
+			canProduction: true,
+		})
+		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(true)
+
+		const production = wrapper.findComponent({ name: "ProductionDialog" })
+		await production.vm.$emit("open-reject-request", "PRJ-2601-0001")
+		await nextTick()
+		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="view-reject-request"]').exists()).toBe(true)
+		const reject = wrapper.findComponent({ name: "RejectRequestDialog" })
+		expect(reject.props("initialRequest")).toBe("PRJ-2601-0001")
+
+		// leaving the reject view clears the one-shot deep link
+		await wrapper
+			.find('[data-testid="pos-menu-sidebar"]')
+			.findAll("button")
+			.find((b) => b.text() === "Invoice Management")
+			.trigger("click")
+		await nextTick()
+		await wrapper
+			.find('[data-testid="pos-menu-sidebar"]')
+			.findAll("button")
+			.find((b) => b.text() === "Reject Requests")
+			.trigger("click")
+		await nextTick()
+		const reopened = wrapper.findComponent({ name: "RejectRequestDialog" })
+		expect(reopened.props("initialRequest")).toBeNull()
 		wrapper.unmount()
 	})
 })

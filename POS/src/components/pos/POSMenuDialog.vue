@@ -170,6 +170,7 @@
 						:currency="currency"
 						class="h-full"
 						v-bind="$attrs"
+						@open-reject-request="openRejectRequest"
 						@update:model-value="closeIfHidden"
 					/>
 					<RejectRequestDialog
@@ -177,6 +178,7 @@
 						embedded
 						:model-value="true"
 						:pos-profile="posProfile"
+						:initial-request="rejectInitialRequest"
 						class="h-full"
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
@@ -244,6 +246,10 @@ const props = defineProps({
 const emit = defineEmits(["update:open", "menu-selected"])
 
 const activeView = ref(null)
+// One-shot deep link: ProductionDialog's "Submit report" jumps into the
+// reject view with a specific request; cleared on leave so the reject menu
+// reopens on the list.
+const rejectInitialRequest = ref(null)
 // < md the shell has no sidebar: the burger opens a full-page menu list and
 // the back arrow steps view -> list -> POS. md+ ignores it (sidebar visible).
 const mobileList = ref(false)
@@ -310,6 +316,16 @@ function selectItem(itemId) {
 	activeView.value = itemId
 	emit("menu-selected", itemId)
 }
+
+function openRejectRequest(name) {
+	rejectInitialRequest.value = name
+	activeView.value = "reject-request"
+	emit("menu-selected", "reject-request")
+}
+
+watch(activeView, (view) => {
+	if (view !== "reject-request") rejectInitialRequest.value = null
+})
 
 function close() {
 	emit("update:open", false)
