@@ -385,13 +385,14 @@ def _write_liabilities(doc, rows):
 	# validate always clears the table, this is belt-and-braces for direct
 	# service calls on stale rows
 	frappe.db.delete("POS Reject Liability", {"parent": doc.name, "parentfield": "liabilities"})
-	for row in rows:
+	for idx, row in enumerate(rows, start=1):
 		frappe.get_doc(
 			{
 				"doctype": "POS Reject Liability",
 				"parent": doc.name,
 				"parenttype": doc.doctype,
 				"parentfield": "liabilities",
+				"idx": idx,
 				**row,
 			}
 		).db_insert()

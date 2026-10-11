@@ -1023,11 +1023,15 @@ class TestDecision(RejectRequestTest):
 		rows = frappe.get_all(
 			"POS Reject Liability",
 			filters={"parent": doc.name, "parentfield": "liabilities"},
-			fields=["user", "amount"],
+			fields=["user", "amount", "idx"],
+			order_by="idx asc",
 		)
 		self.assertEqual(len(rows), 2)
 		self.assertEqual({r.user for r in rows}, {crew, self.approver})
 		self.assertEqual(flt(sum(flt(r.amount) for r in rows)), total)
+		# stored rows keep the input order (idx 1..n) for Desk rendering
+		self.assertEqual([r.idx for r in rows], [1, 2])
+		self.assertEqual([r.user for r in rows], [crew, self.approver])
 
 	def test_reject_split_rounding_accepted(self):
 		crew = self._user(["POSNext Cashier"], prefix="rej-rnd")
