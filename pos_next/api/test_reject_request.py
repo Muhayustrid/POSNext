@@ -163,6 +163,7 @@ class RejectRequestTest(FrappeTestCase):
 		# in_import skips the throttle but also skips _set_defaults, so enabled
 		# (a read-only, default-1 field) must be set explicitly or the user is
 		# created disabled and drops out of approver_users()/notify()
+		was_in_import = frappe.flags.in_import
 		frappe.flags.in_import = True
 		try:
 			frappe.get_doc(
@@ -176,7 +177,7 @@ class RejectRequestTest(FrappeTestCase):
 				}
 			).insert(ignore_permissions=True)
 		finally:
-			frappe.flags.in_import = False
+			frappe.flags.in_import = was_in_import
 		return email
 
 
@@ -502,14 +503,11 @@ class TestRejectApi(RejectRequestTest):
 	@staticmethod
 	def _b64file(name, kind):
 		import base64
-		import json as _json
 
-		return _json.dumps([{"file_name": name, "filedata": base64.b64encode(kind).decode()}])
+		return json.dumps([{"file_name": name, "filedata": base64.b64encode(kind).decode()}])
 
 	def _payload(self, **extra):
-		import json as _json
-
-		return _json.dumps(
+		return json.dumps(
 			{
 				"purpose": "Unsold",
 				"pos_profile": self.pos_profile,
@@ -636,10 +634,26 @@ class TestRejectApi(RejectRequestTest):
 				json.dumps({"name": doc.name, "reason": "rewrite"}),
 			)
 			# purpose from the client is never trusted — new rows are always Unsold
-			forged = save_reject_request(self._payload(purpose="Production Loss"))
-			self.assertEqual(frappe.db.get_value("POS Reject Request", forged["name"], "purpose"), "Unsold")
-			self.assertEqual(frappe.db.get_value("POS Reject Request", forged["name"], "is_system_generated"), 0)
-			self.assertEqual(frappe.db.get_value("POS Reject Request", forged["name"], "work_order"), None)
+			forged = save_reject_request(
+				self._payload(
+					purpose="Production Loss",
+					is_system_generated=1,
+					work_order="WO-BOGUS-0001",
+					owner="attacker@example.com",
+					status="Approved",
+				)
+			)
+			values = frappe.db.get_value(
+				"POS Reject Request",
+				forged["name"],
+				["purpose", "is_system_generated", "work_order", "owner", "status"],
+				as_dict=True,
+			)
+			self.assertEqual(values.purpose, "Unsold")
+			self.assertEqual(values.is_system_generated, 0)
+			self.assertEqual(values.work_order, None)
+			self.assertEqual(values.status, "Draft")
+			self.assertNotEqual(values.owner, "attacker@example.com")
 
 	def test_get_reject_request_gates_other_outlets(self):
 		from pos_next.api.reject_request import get_reject_request
@@ -660,6 +674,97 @@ class TestRejectApi(RejectRequestTest):
 		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Cancelled")
 		with _as_user(approver):
 			self.assertRaises(frappe.ValidationError, decide_reject_request, doc.name, "Write Off")
+
+	def test_cancel_refused_when_approved(self):
+		from pos_next.api.reject_request import cancel_reject_request, decide_reject_request
+
+		crew = self._crew("api-cxl2")
+		approver = self._user(["POSNext Reject Approver"], prefix="api-cxap2")
+		doc = self._submitted(1)
+		with _as_user(approver):
+			decide_reject_request(doc.name, "Write Off")
+		with _as_user(crew):
+			self.assertRaises(frappe.ValidationError, cancel_reject_request, doc.name)
+		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Approved")
+
+	def test_endpoints_gate_foreign_profile_crew_actions(self):
+		from pos_next.api.reject_request import (
+			attach_reject_files,
+			cancel_reject_request,
+			close_reject_request,
+			save_reject_request,
+		)
+
+		outsider = self._user(["POSNext Cashier"], prefix="api-out3")
+		doc = self._submitted(1)
+		with _as_user(outsider):
+			self.assertRaises(
+				frappe.PermissionError, attach_reject_files, doc.name, "evidence", self._b64file("e.txt", b"e")
+			)
+			self.assertRaises(frappe.PermissionError, cancel_reject_request, doc.name)
+			self.assertRaises(frappe.PermissionError, close_reject_request, doc.name)
+			self.assertRaises(
+				frappe.PermissionError,
+				save_reject_request,
+				json.dumps({"name": doc.name, "reason": "hijack"}),
+			)
+
+	def test_save_system_draft_ignores_incident_and_items(self):
+		from pos_next.api.reject_request import save_reject_request
+
+		crew = self._crew("api-sys")
+		recipe = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"Sys Draft {uuid.uuid4().hex[:6]}",
+				"production_item": self.item,
+				"output_qty": 1,
+				"items": [{"item_code": _make_test_item(), "qty": 1}],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+		recipe.reload()
+		wo = frappe.get_doc(
+			{
+				"doctype": "Work Order",
+				"company": self.company,
+				"production_item": self.item,
+				"qty": 1,
+				"bom_no": next(
+					r.bom_no for r in recipe.companies if r.company == self.company and r.bom_no
+				),
+				"wip_warehouse": self.warehouse,
+				"fg_warehouse": self.warehouse,
+			}
+		).insert(ignore_permissions=True)
+		doc = self._doc(1, is_system_generated=1, work_order=wo.name)
+		with _as_user(crew):
+			save_reject_request(
+				json.dumps(
+					{
+						"name": doc.name,
+						"incident_date": add_days(today(), -10),
+						"items": [{"item_code": self.item, "qty": 9}],
+					}
+				)
+			)
+		values = frappe.db.get_value(
+			"POS Reject Request", doc.name, ["incident_date", "total_amount"], as_dict=True
+		)
+		self.assertEqual(str(values.incident_date), str(doc.incident_date))
+		self.assertEqual(flt(values.total_amount), flt(doc.total_amount))
+
+	def test_decide_endpoint_keeps_permission_error(self):
+		from pos_next.api.reject_request import decide_reject_request
+
+		owner = self._user(["POSNext Cashier"], prefix="api-own")
+		doc = self._submitted(1)
+		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
+		with _as_user(owner):
+			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
+		other = self._user(["POSNext Cashier"], prefix="api-non")
+		with _as_user(other):
+			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
 
 
 class TestDecision(RejectRequestTest):

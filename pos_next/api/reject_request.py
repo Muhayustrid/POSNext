@@ -75,14 +75,15 @@ def get_reject_requests(pos_profile, status=None, limit=30, offset=0):
 		filters = [["pos_profile", "=", pos_profile]]
 		if status:
 			filters.append(["status", "=", status])
-		limit = cint(limit) or 30
+		limit = min(max(cint(limit), 1), 100)
+		offset = max(cint(offset), 0)
 		rows = frappe.get_list(
 			"POS Reject Request",
 			filters=filters,
 			fields=LIST_FIELDS,
 			order_by="creation desc",
 			limit_page_length=limit + 1,
-			start=cint(offset),
+			start=offset,
 		)
 		has_more = len(rows) > limit
 		counts = _file_counts([r.name for r in rows])
@@ -90,7 +91,7 @@ def get_reject_requests(pos_profile, status=None, limit=30, offset=0):
 			row.evidence_count = counts.get((row.name, "evidence"), 0)
 			row.destruction_count = counts.get((row.name, "destruction"), 0)
 		return {"requests": rows[:limit], "has_more": has_more}
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Reject Requests Error")
@@ -127,11 +128,24 @@ def get_reject_request(name):
 		payload["evidence"] = _attached("evidence", name)
 		payload["destruction"] = _attached("destruction", name)
 		return payload
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Reject Request Error")
 		frappe.throw(_("Error fetching reject request: {0}").format(str(e)))
+
+
+def _item_rows(value):
+	"""Validated item payload rows; refuses non-dict entries cleanly."""
+	rows = _parse(value, [])
+	if not isinstance(rows, list):
+		frappe.throw(_("items must be a list"), ValidationError)
+	out = []
+	for row in rows:
+		if not isinstance(row, dict):
+			frappe.throw(_("Each item must be an object with item_code and qty"), ValidationError)
+		out.append({"item_code": row.get("item_code"), "qty": flt(row.get("qty"))})
+	return out
 
 
 @frappe.whitelist()
@@ -144,31 +158,31 @@ def save_reject_request(data, submit=0):
 	"""
 	data = _parse(data, {}) or {}
 	name = data.get("name")
-	if name:
-		doc = _doc(name)
-		_assert_profile_access(doc.pos_profile)
-		if doc.docstatus != 0:
-			frappe.throw(_("Only a Draft reject request can be edited"))
-		doc.reason = data.get("reason", doc.reason)
-		doc.video_link = data.get("video_link", doc.video_link)
-		if "incident_date" in data and not doc.is_system_generated:
-			doc.incident_date = data.get("incident_date")
-		if "items" in data and not doc.is_system_generated:
-			doc.set("items", [])
-			for row in _parse(data.get("items"), []):
-				doc.append("items", {"item_code": row.get("item_code"), "qty": flt(row.get("qty"))})
-	else:
-		pos_profile = data.get("pos_profile")
-		_assert_profile_access(pos_profile)
-		doc = frappe.new_doc("POS Reject Request")
-		doc.purpose = "Unsold"
-		doc.pos_profile = pos_profile
-		doc.incident_date = data.get("incident_date")
-		doc.reason = data.get("reason")
-		doc.video_link = data.get("video_link")
-		for row in _parse(data.get("items"), []):
-			doc.append("items", {"item_code": row.get("item_code"), "qty": flt(row.get("qty"))})
 	try:
+		if name:
+			doc = _doc(name)
+			_assert_profile_access(doc.pos_profile)
+			if doc.docstatus != 0:
+				frappe.throw(_("Only a Draft reject request can be edited"))
+			doc.reason = data.get("reason", doc.reason)
+			doc.video_link = data.get("video_link", doc.video_link)
+			if "incident_date" in data and not doc.is_system_generated:
+				doc.incident_date = data.get("incident_date")
+			if "items" in data and not doc.is_system_generated:
+				doc.set("items", [])
+				for row in _item_rows(data.get("items")):
+					doc.append("items", row)
+		else:
+			pos_profile = data.get("pos_profile")
+			_assert_profile_access(pos_profile)
+			doc = frappe.new_doc("POS Reject Request")
+			doc.purpose = "Unsold"
+			doc.pos_profile = pos_profile
+			doc.incident_date = data.get("incident_date")
+			doc.reason = data.get("reason")
+			doc.video_link = data.get("video_link")
+			for row in _item_rows(data.get("items")):
+				doc.append("items", row)
 		if name:
 			doc.save()
 		else:
@@ -176,7 +190,7 @@ def save_reject_request(data, submit=0):
 		if cint(submit):
 			doc.submit()
 		return _summary(doc)
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Save Reject Request Error")
@@ -232,9 +246,8 @@ def attach_reject_files(name, kind, files):
 					"decode": 1,
 				}
 			).insert(ignore_permissions=True)
-		frappe.db.commit()
 		return {"evidence_count": _count_files(name, "evidence"), "destruction_count": _count_files(name, "destruction")}
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Attach Reject Files Error")
@@ -250,7 +263,7 @@ def cancel_reject_request(name):
 		doc.flags.ignore_permissions = True
 		doc.cancel()
 		return _summary(doc)
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Cancel Reject Request Error")
@@ -264,7 +277,7 @@ def close_reject_request(name):
 	_assert_profile_access(doc.pos_profile)
 	try:
 		return reject_request.close_request(doc)
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Close Reject Request Error")
@@ -277,7 +290,7 @@ def decide_reject_request(name, decision, notes=None):
 	service (apply_decision), the outlet never sees this form."""
 	try:
 		return reject_request.apply_decision(_doc(name), decision, notes)
-	except ValidationError:
+	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Decide Reject Request Error")
