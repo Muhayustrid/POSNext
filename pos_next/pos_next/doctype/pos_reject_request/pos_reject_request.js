@@ -5,7 +5,6 @@ frappe.ui.form.on("POS Reject Request", {
 	refresh(frm) {
 		pos_next_reject.indicators(frm);
 		pos_next_reject.decide_buttons(frm);
-		pos_next_reject.video_link(frm);
 	},
 });
 
@@ -20,7 +19,7 @@ pos_next_reject.decide_buttons = function (frm) {
 		return;
 	}
 	const group = __("Decide");
-	frm.add_custom_button(__("Approved"), () => pos_next_reject.decide(frm, "Approved"), group);
+	frm.add_custom_button(__("Approved"), () => pos_next_reject.approved_dialog(frm), group);
 	frm.add_custom_button(__("Rejected"), () => pos_next_reject.rejected_dialog(frm), group);
 };
 
@@ -33,7 +32,24 @@ pos_next_reject.decide = function (frm, decision, notes, liabilities) {
 		.then(() => frm.reload_doc());
 };
 
+pos_next_reject.approved_dialog = function (frm) {
+	frappe.prompt(
+		[
+			{
+				fieldname: "notes",
+				fieldtype: "Small Text",
+				label: __("Notes"),
+				description: __("Optional explanation for the crew"),
+			},
+		],
+		(values) => pos_next_reject.decide(frm, "Approved", values.notes),
+		__("Approve"),
+		__("Approve")
+	);
+};
+
 pos_next_reject.rejected_dialog = function (frm) {
+	let manually_edited = false;
 	const dialog = new frappe.ui.Dialog({
 		title: __("Decide: {0}", [__("Rejected")]),
 		fields: [
@@ -54,6 +70,10 @@ pos_next_reject.rejected_dialog = function (frm) {
 				get_data() {
 					return dialog.get_value("liabilities");
 				},
+				// grid's own Add Row; programmatic changes never fire this
+				on_add_row() {
+					if (!manually_edited) pos_next_reject.redistribute(dialog, frm);
+				},
 			},
 			{
 				fieldname: "total_html",
@@ -68,39 +88,40 @@ pos_next_reject.rejected_dialog = function (frm) {
 		},
 	});
 
-	// running total vs total_amount; "Split Evenly" puts rounding on the last row
-	const $total = dialog.$body.find('[data-fieldname="total_html"]');
-	const fmt = (v) => format_currency(v, frappe.defaults.get_global_default("currency"));
-	const rows = () => dialog.get_value("liabilities") || [];
-	const show_total = () => {
-		const sum = rows().reduce((s, r) => s + (flt(r.amount) || 0), 0);
-		$total.html(`<div class="text-right">${__("Total {0} / {1}", [fmt(sum), fmt(frm.doc.total_amount)])}</div>`);
-	};
-	dialog.$body.on("change", show_total);
-	dialog.fields_dict.liabilities.grid.add_custom_button(__("Split Evenly"), () => {
-		const data = rows();
-		if (!data.length) return;
-		const share = frm.doc.total_amount / data.length;
-		data.forEach((r, i) => {
-			r.amount = i === data.length - 1 ? frm.doc.total_amount - share * (data.length - 1) : share;
-		});
-		dialog.fields_dict.liabilities.grid.refresh();
-		show_total();
+	// user keystrokes bubble a change event; programmatic grid edits do not
+	dialog.$body.on("change", 'input[data-fieldname="amount"]', () => {
+		manually_edited = true;
+		pos_next_reject.show_total(dialog, frm);
 	});
 
 	dialog.show();
-	show_total();
+	pos_next_reject.show_total(dialog, frm);
 };
 
-pos_next_reject.video_link = function (frm) {
-	const url = frm.doc.video_link;
-	if (!url || !frm.fields_dict.video_link) return;
-	// Desk does not autolink URL Data fields in read-only view
-	const safe = frappe.utils.escape_html(url);
-	const $el = frm.fields_dict.video_link.$wrapper;
-	$el.find(".control-value").html(
-		`<a href="${safe}" target="_blank" rel="noopener">${safe}</a>`
-	);
+pos_next_reject.show_total = function (dialog, frm) {
+	const rows = dialog.get_value("liabilities") || [];
+	const sum = rows.reduce((s, r) => s + (flt(r.amount) || 0), 0);
+	const fmt = (v) => format_currency(v, frappe.defaults.get_global_default("currency"));
+	dialog.$body
+		.find('[data-fieldname="total_html"]')
+		.html(`<div class="text-right">${__("Total {0} / {1}", [fmt(sum), fmt(frm.doc.total_amount)])}</div>`);
+};
+
+pos_next_reject.redistribute = function (dialog, frm) {
+	const rows = dialog.get_value("liabilities") || [];
+	const n = rows.length;
+	if (!n) return;
+	const precision = frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency_precision != null
+		? flt(frappe.boot.sysdefaults.currency_precision)
+		: 2;
+	const total = frm.doc.total_amount;
+	const share = flt(total / n, precision);
+	rows.forEach((r, i) => {
+		// last row absorbs rounding
+		r.amount = i === n - 1 ? total - share * (n - 1) : share;
+	});
+	dialog.fields_dict.liabilities.grid.refresh();
+	pos_next_reject.show_total(dialog, frm);
 };
 
 pos_next_reject.indicators = function (frm) {
