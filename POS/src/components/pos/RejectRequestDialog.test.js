@@ -81,6 +81,7 @@ const SAVE_URL = "pos_next.api.reject_request.save_reject_request"
 const ATTACH_URL = "pos_next.api.reject_request.attach_reject_files"
 const CANCEL_URL = "pos_next.api.reject_request.cancel_reject_request"
 const CLOSE_URL = "pos_next.api.reject_request.close_reject_request"
+const PURPOSES_URL = "pos_next.api.reject_request.get_reject_purposes"
 const ITEMS_URL = "pos_next.api.items.get_items"
 
 const ROW = (name, extra = {}) => ({
@@ -154,6 +155,27 @@ const APPROVED_DETAIL = {
 	],
 	evidence: [{ name: "File-1", file_name: "a.jpg", file_url: "/f/1" }],
 	destruction: [],
+	liabilities: [],
+}
+
+const REJECTED_DETAIL = {
+	...UNSOLD_DETAIL,
+	name: "PRJ-2601-0005",
+	status: "Rejected",
+	docstatus: 1,
+	reason: "rusak",
+	video_link: "https://youtu.be/x",
+	decision: "Rejected",
+	decision_notes: "kru yang menanggung",
+	items: [
+		{ item_code: "ICED-LATTE", item_name: "Iced Latte", qty: 2, uom: "Nos" },
+	],
+	evidence: [{ name: "File-1", file_name: "a.jpg", file_url: "/f/1" }],
+	destruction: [],
+	liabilities: [
+		{ user: "kru1@example.com", amount: 3000 },
+		{ user: "kru2@example.com", amount: 2000 },
+	],
 }
 
 const APPROVED_DECIDED = {
@@ -224,6 +246,9 @@ describe("RejectRequestDialog", () => {
 		window.confirm = vi.fn(() => true)
 		mockCall(LIST_URL, () => Promise.resolve(ROWS))
 		mockCall(DETAIL_URL, () => Promise.resolve(UNSOLD_DETAIL))
+		mockCall(PURPOSES_URL, () =>
+			Promise.resolve(["Unsold", "Damaged"]),
+		)
 		mockCall(ITEMS_URL, () =>
 			Promise.resolve([
 				{ item_code: "ICED-LATTE", item_name: "Iced Latte" },
@@ -605,5 +630,151 @@ describe("RejectRequestDialog", () => {
 		expect(wrapper.text()).toContain("stock habis")
 		expect(wrapper.text()).toContain("rusak")
 		expect(wrapper.text()).toContain("https://youtu.be/x")
+	})
+
+	it("purpose select lists API purposes and defaults to the first", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		const select = wrapper.find('select[data-testid="purpose-select"]')
+		expect(select.exists()).toBe(true)
+		const options = select.findAll("option")
+		expect(options.map((o) => o.element.value)).toEqual(["Unsold", "Damaged"])
+		// default = first item of the list
+		expect(select.element.value).toBe("Unsold")
+
+		await select.setValue("Damaged")
+		await wrapper.find("textarea").setValue("expired stock")
+		await searchItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
+
+		mockCall(SAVE_URL, (params) =>
+			Promise.resolve({
+				name: JSON.parse(params.data).name || "PRJ-2601-0002",
+				status: "Pending",
+				docstatus: 1,
+			}),
+		)
+		mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 1, destruction_count: 0 }),
+		)
+		await findButton(wrapper, "Submit").trigger("click")
+		await flushPromises()
+
+		const firstSave = JSON.parse(
+			handlers.calls[SAVE_URL].mock.calls[0][0].data,
+		)
+		expect(firstSave.purpose).toBe("Damaged")
+	})
+
+	it("Rejected detail shows each liability user and amount, Approved shows none", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({
+				requests: [ROW("PRJ-2601-0005")],
+				has_more: false,
+			}),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(REJECTED_DETAIL))
+		let wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0005").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("kru1@example.com")
+		expect(wrapper.text()).toContain("kru2@example.com")
+		expect(wrapper.text()).toContain("3000")
+		expect(wrapper.text()).toContain("2000")
+		// subtitle for the crew-borne decision
+		expect(wrapper.text()).toContain("Borne by crew")
+
+		// Approved detail: no liability block, subtitle "Borne by company"
+		mockCall(LIST_URL, () =>
+			Promise.resolve({
+				requests: [ROW("PRJ-2601-0004")],
+				has_more: false,
+			}),
+		)
+		mockCall(DETAIL_URL, () =>
+			Promise.resolve({ ...APPROVED_DETAIL, decision: "Approved" }),
+		)
+		wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("Borne by company")
+		expect(wrapper.text()).not.toContain("kru1@example.com")
+	})
+
+	it("draft video link shows an anchor only for a valid http(s) URL", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0002")], has_more: false }),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0002").trigger("click")
+		await flushPromises()
+
+		const input = wrapper.find('input[type="text"]:not([placeholder])')
+		// invalid first — no anchor
+		await input.setValue("javascript:alert(1)")
+		expect(wrapper.find('a[target="_blank"]').exists()).toBe(false)
+
+		await input.setValue("https://youtu.be/x")
+		const anchor = wrapper.find('a[target="_blank"]')
+		expect(anchor.exists()).toBe(true)
+		expect(anchor.attributes("href")).toBe("https://youtu.be/x")
+		expect(anchor.attributes("rel")).toBe("noopener")
+	})
+
+	it("close step enabled for Rejected status", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({
+				requests: [ROW("PRJ-2601-0005", { status: "Rejected" })],
+				has_more: false,
+			}),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(REJECTED_DETAIL))
+		const closeCall = mockCall(CLOSE_URL, () =>
+			Promise.resolve({ status: "Closed" }),
+		)
+		mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 0, destruction_count: 1 }),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0005").trigger("click")
+		await flushPromises()
+
+		let close = findButton(wrapper, "Close")
+		expect(close).toBeDefined()
+		expect(close.attributes("disabled")).toBeDefined()
+
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["d.png"])
+		await findButton(wrapper, "Close").trigger("click")
+		await flushPromises()
+		expect(closeCall).toHaveBeenCalledWith({ name: "PRJ-2601-0005" })
+	})
+
+	it("initialRequest prop opens that request's detail", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(PENDING_DETAIL))
+		const wrapper = mount(RejectRequestDialog, {
+			props: {
+				modelValue: true,
+				posProfile: "POS-1",
+				initialRequest: "PRJ-2601-0001",
+			},
+			global: {
+				config: { globalProperties: { __: globalThis.__ } },
+			},
+		})
+		await flushPromises()
+
+		expect(handlers.calls[DETAIL_URL]).toHaveBeenCalledWith({
+			name: "PRJ-2601-0001",
+		})
+		expect(wrapper.text()).toContain("PRJ-2601-0001")
 	})
 })

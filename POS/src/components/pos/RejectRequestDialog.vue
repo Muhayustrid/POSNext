@@ -81,8 +81,19 @@
 				</div>
 			</template>
 
-			<!-- NEW REQUEST (Unsold only) -->
+			<!-- NEW REQUEST (crew purposes) -->
 			<template v-else-if="view === 'new'">
+				<label class="block text-sm font-medium text-gray-700 mb-1">
+					{{ __("Purpose") }}
+				</label>
+				<select
+					v-model="form.purpose"
+					data-testid="purpose-select"
+					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+				>
+					<option v-for="p in purposes" :key="p" :value="p">{{ __(p) }}</option>
+				</select>
+
 				<label class="block text-sm font-medium text-gray-700 mb-1">
 					{{ __("Incident Date") }}
 				</label>
@@ -263,11 +274,37 @@
 						<template v-if="detail.decision">
 							<div class="flex gap-2">
 								<dt class="text-gray-500 shrink-0 w-36">{{ __("Decision") }}</dt>
-								<dd class="font-medium text-gray-900">{{ __(detail.decision) }}</dd>
+								<dd class="font-medium text-gray-900">
+									{{ __(detail.decision) }}
+									<span class="block text-xs font-normal text-gray-500">
+										{{
+											detail.decision === "Approved"
+												? __("Borne by company")
+												: detail.decision === "Rejected"
+													? __("Borne by crew")
+													: ""
+										}}
+									</span>
+								</dd>
 							</div>
 							<div v-if="detail.decision_notes" class="flex gap-2">
 								<dt class="text-gray-500 shrink-0 w-36">{{ __("Decision Notes") }}</dt>
 								<dd class="text-gray-900 whitespace-pre-line">{{ detail.decision_notes }}</dd>
+							</div>
+							<div
+								v-if="detail.decision === 'Rejected' && detail.liabilities?.length"
+								class="flex gap-2"
+							>
+								<dt class="text-gray-500 shrink-0 w-36">{{ __("Liability") }}</dt>
+								<dd class="min-w-0">
+									<div
+										v-for="l in detail.liabilities"
+										:key="l.user"
+										class="text-gray-900 tabular-nums"
+									>
+										{{ l.user }} · {{ l.amount }}
+									</div>
+								</dd>
 							</div>
 						</template>
 					</dl>
@@ -294,6 +331,14 @@
 							type="text"
 							class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
 						/>
+						<a
+							v-if="detail.video_link && videoLinkOk"
+							:href="detail.video_link"
+							target="_blank"
+							rel="noopener"
+							class="block mb-3 text-sm text-blue-600 hover:underline break-all"
+							>{{ detail.video_link }}</a
+						>
 						<p v-if="detail.video_link && !videoLinkOk" class="text-xs text-red-600 mb-3">
 							{{ __("Video link must start with http:// or https://") }}
 						</p>
@@ -336,8 +381,8 @@
 						</div>
 					</template>
 
-					<!-- Approved: upload destruction proof, then close -->
-					<template v-else-if="detail.status === 'Approved'">
+					<!-- Approved/Rejected: upload destruction proof, then close -->
+					<template v-else-if="detail.status === 'Approved' || detail.status === 'Rejected'">
 						<label class="block text-sm font-medium text-gray-700 mb-1">
 							{{ __("Destruction Photos") }}
 						</label>
@@ -390,6 +435,7 @@ const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
 	embedded: { type: Boolean, default: false },
+	initialRequest: { type: String, default: null },
 })
 
 const emit = defineEmits(["update:modelValue"])
@@ -450,11 +496,28 @@ const uploadedDestruction = ref(0)
 
 const form = ref({
 	incident_date: "",
+	purpose: "",
 	reason: "",
 	video_link: "",
 	items: [],
 	files: [],
 })
+
+// enabled non-system purposes for the crew dropdown; a Production Loss
+// draft keeps its purpose read-only since it is not in this list
+const purposes = ref([])
+
+async function loadPurposes() {
+	try {
+		purposes.value =
+			(await call("pos_next.api.reject_request.get_reject_purposes")) || []
+		// the New form may already be open while purposes were loading
+		if (!form.value.purpose && purposes.value.length)
+			form.value.purpose = purposes.value[0]
+	} catch (err) {
+		showError(errMsg(err, "Failed to load reject purposes"))
+	}
+}
 
 function statusClass(status) {
 	if (status === "Pending") return "bg-blue-100 text-blue-700"
@@ -467,7 +530,12 @@ function statusClass(status) {
 
 const videoLinkOk = computed(() => {
 	const link = (view.value === "detail" ? detail.value?.video_link : form.value.video_link) || ""
-	return !link || /^(https?:\/\/)/.test(link)
+	if (!link) return true
+	try {
+		return ["http:", "https:"].includes(new URL(link).protocol)
+	} catch {
+		return false
+	}
 })
 
 const destructionCount = computed(
@@ -553,6 +621,8 @@ function localDate() {
 function openNew() {
 	form.value = {
 		incident_date: localDate(),
+		// default = first purpose of the list; empty until loadPurposes lands
+		purpose: purposes.value[0] || "",
 		reason: "",
 		video_link: "",
 		items: [],
@@ -562,6 +632,7 @@ function openNew() {
 	itemResults.value = []
 	draftName.value = null
 	uploadedEvidence.value = 0
+	if (!purposes.value.length) loadPurposes()
 	view.value = "new"
 }
 
@@ -675,6 +746,7 @@ async function submitNew() {
 		const buildData = () => ({
 			pos_profile: props.posProfile,
 			incident_date: form.value.incident_date,
+			purpose: form.value.purpose || undefined,
 			reason: form.value.reason.trim(),
 			video_link: form.value.video_link.trim() || null,
 			items: form.value.items.map((i) => ({ item_code: i.item_code, qty: i.qty })),
@@ -810,4 +882,15 @@ if (props.modelValue) {
 	view.value = "list"
 	loadList()
 }
+
+// Task 6 deep link: when the dialog opens with a request name, jump
+// straight into its detail view. Declared last so `view` exists before
+// the immediate callback can touch it.
+watch(
+	[() => props.initialRequest, show],
+	([name, open]) => {
+		if (name && open) openDetail(name)
+	},
+	{ immediate: true },
+)
 </script>
