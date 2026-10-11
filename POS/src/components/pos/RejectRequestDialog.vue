@@ -30,7 +30,7 @@
 				</div>
 
 				<div class="flex justify-end mb-3">
-					<Button variant="solid" :disabled="acting" @click="openNew">
+					<Button variant="solid" @click="openNew">
 						{{ __("New Request") }}
 					</Button>
 				</div>
@@ -167,17 +167,13 @@
 				<label class="block text-sm font-medium text-gray-700 mb-1">
 					{{ __("Evidence Photos (1-5)") }}
 				</label>
-				<input
-					data-testid="evidence-input"
-					type="file"
-					multiple
-					:accept="ATTACHMENT_ACCEPT"
-					class="mb-1 text-sm"
-					@change="onEvidencePicked"
+				<PurchaseAttachments
+					editable
+					:pending="form.files"
+					:label="__('Evidence Photos')"
+					@add="addEvidence(form.files, $event)"
+					@remove="(row) => form.files.splice(form.files.indexOf(row), 1)"
 				/>
-				<p v-if="form.files.length" class="text-xs text-gray-500 mb-3">
-					{{ __("{0} photo(s) selected", [form.files.length]) }}
-				</p>
 
 				<div class="mt-4 flex justify-end gap-2">
 					<Button variant="subtle" :disabled="submitting" @click="view = 'list'">
@@ -234,15 +230,52 @@
 							<tbody>
 								<tr v-for="row in detail.items" :key="row.item_code" class="border-t border-gray-100">
 									<td class="py-1.5 pe-2">{{ row.item_name || row.item_code }}</td>
-									<td class="py-1.5 pe-2 tabular-nums">{{ row.qty }}</td>
+									<td class="py-1.5 pe-2 tabular-nums" data-testid="item-qty">{{ row.qty }}</td>
 									<td class="py-1.5 pe-2 tabular-nums">{{ row.amount }}</td>
 								</tr>
 							</tbody>
 						</table>
 					</div>
 
-					<!-- Crew-editable fields on a Draft: reason (+ video link, and
-					     items only when not system-generated) -->
+					<!-- Read-only facts for submitted requests: crew sees the reason,
+					     video link, evidence count and the Head Office verdict. -->
+					<dl v-if="detail.docstatus !== 0" class="grid grid-cols-1 gap-1.5 text-sm mb-3">
+						<div class="flex gap-2">
+							<dt class="text-gray-500 shrink-0 w-36">{{ __("Reason") }}</dt>
+							<dd class="text-gray-900 whitespace-pre-line">{{ detail.reason || "—" }}</dd>
+						</div>
+						<div v-if="detail.video_link" class="flex gap-2">
+							<dt class="text-gray-500 shrink-0 w-36">{{ __("Video Link") }}</dt>
+							<dd class="min-w-0">
+								<a
+									:href="detail.video_link"
+									target="_blank"
+									rel="noopener"
+									class="text-blue-600 hover:underline break-all"
+									>{{ detail.video_link }}</a
+								>
+							</dd>
+						</div>
+						<div class="flex gap-2">
+							<dt class="text-gray-500 shrink-0 w-36">{{ __("Evidence Photos") }}</dt>
+							<dd class="text-gray-900 tabular-nums">{{ detail.evidence.length }}</dd>
+						</div>
+						<template v-if="detail.decision">
+							<div class="flex gap-2">
+								<dt class="text-gray-500 shrink-0 w-36">{{ __("Decision") }}</dt>
+								<dd class="font-medium text-gray-900">{{ __(detail.decision) }}</dd>
+							</div>
+							<div v-if="detail.decision_notes" class="flex gap-2">
+								<dt class="text-gray-500 shrink-0 w-36">{{ __("Decision Notes") }}</dt>
+								<dd class="text-gray-900 whitespace-pre-line">{{ detail.decision_notes }}</dd>
+							</div>
+						</template>
+					</dl>
+
+					<!-- Crew-editable fields on a Draft: reason + video link + photos.
+					     Items are never editable here — qty on a system Production Loss
+					     is locked server-side, and a new Unsold request picks items in
+					     the New form. -->
 					<template v-if="detail.docstatus === 0">
 						<label class="block text-sm font-medium text-gray-700 mb-1">
 							{{ __("Reason") }}
@@ -265,59 +298,23 @@
 							{{ __("Video link must start with http:// or https://") }}
 						</p>
 
-						<!-- New items only for crew Unsold drafts; a system Production
-						     Loss draft is locked to what the Work Order recorded. -->
-						<template v-if="!detail.is_system_generated">
-							<input
-								v-model="itemSearch"
-								type="text"
-								:placeholder="__('Search item...')"
-								class="w-full px-3 py-2 mb-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-								@input="searchItems"
-							/>
-							<div
-								v-if="itemResults.length"
-								class="flex flex-col gap-1 mb-2 max-h-40 overflow-y-auto"
-							>
-								<button
-									v-for="i in itemResults"
-									:key="i.item_code"
-									type="button"
-									class="text-start px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
-									@click="addDetailItem(i)"
-								>
-									{{ i.item_name || i.item_code }}
-								</button>
-							</div>
-						</template>
-
 						<label class="block text-sm font-medium text-gray-700 mb-1">
 							{{ __("Evidence Photos (1-5)") }}
 						</label>
-						<input
-							data-testid="evidence-input"
-							type="file"
-							multiple
-							:accept="ATTACHMENT_ACCEPT"
-							class="mb-1 text-sm"
-							@change="onEvidencePicked"
+						<PurchaseAttachments
+							:attached="detail.evidence"
+							:label="__('Evidence Photos')"
 						/>
-						<p class="text-xs text-gray-500 mb-3">
-							{{
-								__("{0} evidence photo(s) attached", [detail.evidence.length + newEvidence.length])
-							}}
-						</p>
+						<PurchaseAttachments
+							editable
+							:pending="newEvidence"
+							:label="__('Add Evidence Photos')"
+							@add="addEvidence(newEvidence, $event)"
+							@remove="(row) => newEvidence.splice(newEvidence.indexOf(row), 1)"
+						/>
 
 						<div class="mt-2 flex justify-end gap-2">
 							<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-							<Button
-								variant="subtle"
-								theme="red"
-								:loading="acting"
-								@click="doCancel"
-							>
-								{{ __("Cancel") }}
-							</Button>
 							<Button
 								variant="solid"
 								:loading="submitting"
@@ -344,17 +341,17 @@
 						<label class="block text-sm font-medium text-gray-700 mb-1">
 							{{ __("Destruction Photos") }}
 						</label>
-						<input
-							data-testid="destruction-input"
-							type="file"
-							multiple
-							:accept="ATTACHMENT_ACCEPT"
-							class="mb-1 text-sm"
-							@change="onDestructionPicked"
+						<PurchaseAttachments
+							:attached="detail.destruction"
+							:label="__('Destruction Photos')"
 						/>
-						<p class="text-xs text-gray-500 mb-3">
-							{{ __("{0} destruction photo(s) attached", [detail.destruction.length + newDestruction.length]) }}
-						</p>
+						<PurchaseAttachments
+							editable
+							:pending="newDestruction"
+							:label="__('Add Destruction Photos')"
+							@add="addDestruction($event)"
+							@remove="(row) => newDestruction.splice(newDestruction.indexOf(row), 1)"
+						/>
 
 						<div class="mt-2 flex justify-end gap-2">
 							<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
@@ -376,29 +373,22 @@
 					</template>
 				</template>
 			</template>
-
-			<div v-if="errorMessage" class="mt-3 text-sm text-red-600">{{ errorMessage }}</div>
 		</template>
 	</DialogHost>
 </template>
 
 <script setup>
-import { Button, call, FeatherIcon } from "frappe-ui"
+import { Button, call } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
+import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useToast } from "@/composables/useToast"
-import {
-	ATTACHMENT_ACCEPT,
-	fileToBase64,
-	sanitizePickedFiles,
-} from "@/utils/attachments"
+import { fileToBase64, sanitizePickedFiles } from "@/utils/attachments"
 
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
-	company: String,
-	currency: { type: String, default: "" },
 	embedded: { type: Boolean, default: false },
 })
 
@@ -429,7 +419,6 @@ const requests = ref([])
 const hasMore = ref(false)
 const loading = ref(false)
 const loadingDetail = ref(false)
-const errorMessage = ref("")
 
 const statusTabs = [
 	{ value: "", label: __("All") },
@@ -450,6 +439,10 @@ const newDestruction = ref([])
 
 const itemSearch = ref("")
 const itemResults = ref([])
+
+// name of the draft created by a first submit attempt — kept across retries
+// so a failed submit updates the same draft instead of inserting a duplicate
+const draftName = ref(null)
 
 const form = ref({
 	incident_date: "",
@@ -473,12 +466,6 @@ const videoLinkOk = computed(() => {
 	return !link || /^(https?:\/\/)/.test(link)
 })
 
-const evidenceCount = computed(() =>
-	view.value === "detail"
-		? (detail.value?.evidence?.length || 0) + newEvidence.value.length
-		: form.value.files.length,
-)
-
 const destructionCount = computed(
 	() => (detail.value?.destruction?.length || 0) + newDestruction.value.length,
 )
@@ -489,16 +476,16 @@ const canSubmit = computed(
 		!!form.value.reason.trim() &&
 		form.value.items.length > 0 &&
 		form.value.items.every((i) => i.qty > 0) &&
-		evidenceCount.value >= 1 &&
-		evidenceCount.value <= MAX_EVIDENCE &&
+		form.value.files.length >= 1 &&
+		form.value.files.length <= MAX_EVIDENCE &&
 		videoLinkOk.value,
 )
 
 const canSubmitDetail = computed(
 	() =>
 		!!detail.value?.reason?.trim() &&
-		evidenceCount.value >= 1 &&
-		evidenceCount.value <= MAX_EVIDENCE &&
+		(detail.value?.evidence?.length || 0) + newEvidence.value.length >= 1 &&
+		(detail.value?.evidence?.length || 0) + newEvidence.value.length <= MAX_EVIDENCE &&
 		videoLinkOk.value,
 )
 
@@ -507,10 +494,10 @@ const canSubmitDetail = computed(
 // ---------------------------------------------------------------------------
 
 async function loadList(reset = true) {
-	if (!props.posProfile || loading.value) return
+	if (!props.posProfile) return
+	if (!reset && loading.value) return // Load More waits for the page in flight
 	const offset = reset ? 0 : requests.value.length
 	loading.value = true
-	errorMessage.value = ""
 	try {
 		const data = await call("pos_next.api.reject_request.get_reject_requests", {
 			pos_profile: props.posProfile,
@@ -529,6 +516,8 @@ async function loadList(reset = true) {
 	}
 }
 
+// A filter click during a load must not be swallowed — reset loads always
+// re-run with the latest filter.
 function setStatusFilter(value) {
 	if (statusFilter.value === value) return
 	statusFilter.value = value
@@ -539,9 +528,18 @@ function setStatusFilter(value) {
 // New request
 // ---------------------------------------------------------------------------
 
+// local date string for <input type="date"> — toISOString would shift a day
+// for any timezone east of UTC
+function localDate() {
+	const d = new Date()
+	const m = String(d.getMonth() + 1).padStart(2, "0")
+	const day = String(d.getDate()).padStart(2, "0")
+	return `${d.getFullYear()}-${m}-${day}`
+}
+
 function openNew() {
 	form.value = {
-		incident_date: new Date().toISOString().slice(0, 10),
+		incident_date: localDate(),
 		reason: "",
 		video_link: "",
 		items: [],
@@ -549,12 +547,14 @@ function openNew() {
 	}
 	itemSearch.value = ""
 	itemResults.value = []
-	errorMessage.value = ""
+	draftName.value = null
 	view.value = "new"
 }
 
 let searchTimer = null
-let lastSearchTerm = ""
+let searchSeq = 0
+// trailing-only debounce: one request per settled term; stale responses and
+// in-flight searches after a selection are discarded via the sequence guard
 function searchItems() {
 	clearTimeout(searchTimer)
 	const term = itemSearch.value.trim()
@@ -562,25 +562,21 @@ function searchItems() {
 		itemResults.value = []
 		return
 	}
-	// search immediately, then debounced while the user keeps typing
-	if (term !== lastSearchTerm) doSearchItems()
-	lastSearchTerm = term
-	searchTimer = setTimeout(() => {
-		if (itemSearch.value.trim() === lastSearchTerm) doSearchItems()
-	}, 400)
+	searchTimer = setTimeout(() => doSearchItems(term), 350)
 }
 
-async function doSearchItems() {
+async function doSearchItems(term) {
+	const seq = ++searchSeq
 	try {
 		const rows = await call("pos_next.api.items.get_items", {
 			pos_profile: props.posProfile,
-			search_term: itemSearch.value,
+			search_term: term,
 			start: 0,
 			limit: 10,
 		})
-		itemResults.value = rows || []
+		if (seq === searchSeq) itemResults.value = rows || []
 	} catch (err) {
-		showError(errMsg(err, "Failed to search items"))
+		if (seq === searchSeq) showError(errMsg(err, "Failed to search items"))
 	}
 }
 
@@ -588,32 +584,28 @@ function addItem(item) {
 	if (!form.value.items.some((r) => r.item_code === item.item_code)) {
 		form.value.items.push({ item_code: item.item_code, item_name: item.item_name || item.item_code, qty: 1 })
 	}
+	// invalidate any in-flight search so a late response can't repopulate
+	searchSeq++
+	clearTimeout(searchTimer)
 	itemSearch.value = ""
 	itemResults.value = []
 }
 
-function addDetailItem(item) {
-	if (!detail.value.items.some((r) => r.item_code === item.item_code)) {
-		detail.value.items.push({ item_code: item.item_code, item_name: item.item_name || item.item_code, qty: 1 })
+function addEvidence(list, files) {
+	const { ok, tooBig } = sanitizePickedFiles(files)
+	if (tooBig.length) showError(__("Some files exceed the 10 MB limit"))
+	const room = Math.max(0, MAX_EVIDENCE - list.length)
+	const accepted = ok.slice(0, room)
+	if (ok.length > room) {
+		showError(__("At most {0} evidence photos are allowed", [MAX_EVIDENCE]))
 	}
-	itemSearch.value = ""
-	itemResults.value = []
+	list.push(...accepted)
 }
 
-async function onEvidencePicked(e) {
-	const { ok, tooBig } = sanitizePickedFiles(e.target.files)
+function addDestruction(files) {
+	const { ok, tooBig } = sanitizePickedFiles(files)
 	if (tooBig.length) showError(__("Some files exceed the 10 MB limit"))
-	const picked = ok.slice(0, MAX_EVIDENCE)
-	if (view.value === "detail") newEvidence.value = picked
-	else form.value.files = picked
-	e.target.value = ""
-}
-
-async function onDestructionPicked(e) {
-	const { ok, tooBig } = sanitizePickedFiles(e.target.files)
-	if (tooBig.length) showError(__("Some files exceed the 10 MB limit"))
-	newDestruction.value = ok
-	e.target.value = ""
+	newDestruction.value.push(...ok)
 }
 
 async function toPayloads(files) {
@@ -631,32 +623,50 @@ async function attachFiles(name, kind, files) {
 	})
 }
 
-/** Controller flow: draft save → attach evidence → submit save. */
-async function submitRequest(data, files) {
-	const draft = await call("pos_next.api.reject_request.save_reject_request", {
-		data: JSON.stringify(data),
-		submit: 0,
-	})
-	await attachFiles(draft.name, "evidence", files)
+/**
+ * Draft save → attach evidence → submit save. On any failure the draft name
+ * is kept, so a retry updates the same draft instead of inserting another.
+ * Pending files are cleared right after a successful attach so retries
+ * never re-upload them. `getPending()` returns the pending files and clears
+ * them when called with true.
+ */
+async function submitRequest(buildData, draftNameRef, getPending) {
+	if (!draftNameRef.value) {
+		const draft = await call("pos_next.api.reject_request.save_reject_request", {
+			data: JSON.stringify(buildData()),
+			submit: 0,
+		})
+		draftNameRef.value = draft.name
+	}
+	const name = draftNameRef.value
+	const pending = getPending()
+	await attachFiles(name, "evidence", pending)
+	getPending(true)
 	return call("pos_next.api.reject_request.save_reject_request", {
-		data: JSON.stringify({ ...data, name: draft.name }),
+		data: JSON.stringify({ ...buildData(), name }),
 		submit: 1,
 	})
 }
-
 async function submitNew() {
 	if (!canSubmit.value || submitting.value) return
-	errorMessage.value = ""
 	submitting.value = true
 	try {
-		const data = {
+		const buildData = () => ({
 			pos_profile: props.posProfile,
 			incident_date: form.value.incident_date,
 			reason: form.value.reason.trim(),
 			video_link: form.value.video_link.trim() || null,
 			items: form.value.items.map((i) => ({ item_code: i.item_code, qty: i.qty })),
-		}
-		await submitRequest(data, form.value.files)
+		})
+		await submitRequest(
+			buildData,
+			draftName,
+			(clear) => {
+				const files = form.value.files
+				if (clear) form.value.files = []
+				return files
+			},
+		)
 		showSuccess(__("Reject request submitted"))
 		view.value = "list"
 		loadList()
@@ -672,9 +682,9 @@ async function submitNew() {
 // ---------------------------------------------------------------------------
 
 async function openDetail(name) {
-	errorMessage.value = ""
 	view.value = "detail"
 	loadingDetail.value = true
+	draftName.value = null
 	newEvidence.value = []
 	newDestruction.value = []
 	itemSearch.value = ""
@@ -698,21 +708,23 @@ function backToList() {
 
 async function submitDetail() {
 	if (!canSubmitDetail.value || submitting.value || !detail.value) return
-	errorMessage.value = ""
 	submitting.value = true
 	try {
-		const data = {
+		const buildData = () => ({
 			name: detail.value.name,
 			reason: detail.value.reason.trim(),
 			video_link: detail.value.video_link || null,
-		}
-		if (!detail.value.is_system_generated) {
-			data.items = detail.value.items.map((i) => ({
-				item_code: i.item_code,
-				qty: i.qty,
-			}))
-		}
-		await submitRequest(data, newEvidence.value)
+		})
+		// the draft already exists — reuse its name, never insert again
+		await submitRequest(
+			buildData,
+			draftName,
+			(clear) => {
+				const files = newEvidence.value
+				if (clear) newEvidence.value = []
+				return files
+			},
+		)
 		showSuccess(__("Reject request submitted"))
 		backToList()
 	} catch (err) {
@@ -724,8 +736,8 @@ async function submitDetail() {
 
 async function doCancel() {
 	if (acting.value || !detail.value) return
+	if (!window.confirm(__("Cancel this reject request?"))) return
 	acting.value = true
-	errorMessage.value = ""
 	try {
 		await call("pos_next.api.reject_request.cancel_reject_request", {
 			name: detail.value.name,
@@ -741,10 +753,12 @@ async function doCancel() {
 
 async function doClose() {
 	if (acting.value || !detail.value) return
+	if (!window.confirm(__("Close this reject request after destruction?"))) return
 	acting.value = true
-	errorMessage.value = ""
 	try {
 		await attachFiles(detail.value.name, "destruction", newDestruction.value)
+		// clear before closing: a failed close retry must not re-upload
+		newDestruction.value = []
 		await call("pos_next.api.reject_request.close_reject_request", {
 			name: detail.value.name,
 		})
