@@ -1,6 +1,7 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import json
 import uuid
 
 import frappe
@@ -158,15 +159,24 @@ class RejectRequestTest(FrappeTestCase):
 
 	def _user(self, roles, prefix="rej"):
 		email = f"{prefix}-{frappe.generate_hash(length=6)}@example.com"
-		frappe.get_doc(
-			{
-				"doctype": "User",
-				"email": email,
-				"first_name": prefix.title(),
-				"send_welcome_email": 0,
-				"roles": [{"role": r} for r in roles],
-			}
-		).insert(ignore_permissions=True)
+		# test users flood User creation and trip frappe's throttle (60/60 days);
+		# in_import skips the throttle but also skips _set_defaults, so enabled
+		# (a read-only, default-1 field) must be set explicitly or the user is
+		# created disabled and drops out of approver_users()/notify()
+		frappe.flags.in_import = True
+		try:
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": email,
+					"first_name": prefix.title(),
+					"enabled": 1,
+					"send_welcome_email": 0,
+					"roles": [{"role": r} for r in roles],
+				}
+			).insert(ignore_permissions=True)
+		finally:
+			frappe.flags.in_import = False
 		return email
 
 
@@ -469,6 +479,187 @@ def _as_user(email):
 		yield
 	finally:
 		frappe.set_user("Administrator")
+
+
+class TestRejectApi(RejectRequestTest):
+	"""Whitelisted crew endpoints: profile gate, save/submit, attachments."""
+
+	def _crew(self, prefix="api-crew"):
+		email = self._user(["POSNext Cashier"], prefix=prefix)
+		frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.pos_profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": email,
+				"default": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.clear_cache(user=email)
+		return email
+
+	@staticmethod
+	def _b64file(name, kind):
+		import base64
+		import json as _json
+
+		return _json.dumps([{"file_name": name, "filedata": base64.b64encode(kind).decode()}])
+
+	def _payload(self, **extra):
+		import json as _json
+
+		return _json.dumps(
+			{
+				"purpose": "Unsold",
+				"pos_profile": self.pos_profile,
+				"incident_date": today(),
+				"reason": "unsold bread",
+				"items": [{"item_code": self.item, "qty": 1}],
+				**extra,
+			}
+		)
+
+	def test_endpoints_gate_foreign_profile(self):
+		from pos_next.api.reject_request import get_reject_requests, save_reject_request
+
+		outsider = self._user(["POSNext Cashier"], prefix="api-out")
+		with _as_user(outsider):
+			self.assertRaises(frappe.PermissionError, get_reject_requests, self.pos_profile)
+			self.assertRaises(
+				frappe.PermissionError, save_reject_request, self._payload(pos_profile=self.pos_profile)
+			)
+
+	def test_save_submit_roundtrip(self):
+		from pos_next.api.reject_request import (
+			attach_reject_files,
+			get_reject_request,
+			get_reject_requests,
+			save_reject_request,
+		)
+
+		crew = self._crew()
+		with _as_user(crew):
+			draft = save_reject_request(self._payload())
+			name = draft["name"]
+			self.assertEqual(frappe.db.get_value("POS Reject Request", name, "docstatus"), 0)
+			attach_reject_files(name, "evidence", self._b64file("ev.txt", b"e1"))
+			result = save_reject_request(json.dumps({"name": name, "reason": "day-old bread"}), submit=1)
+			self.assertEqual(result["status"], "Pending")
+
+			rows = get_reject_requests(self.pos_profile)["requests"]
+			row = next(r for r in rows if r["name"] == name)
+			self.assertEqual(row["status"], "Pending")
+			self.assertEqual(row["evidence_count"], 1)
+			self.assertEqual(row["purpose"], "Unsold")
+
+			detail = get_reject_request(name)
+			self.assertEqual(len(detail["evidence"]), 1)
+			self.assertEqual(detail["destruction"], [])
+			self.assertEqual(len(detail["items"]), 1)
+
+	def test_destruction_attach_only_when_approved(self):
+		from pos_next.api.reject_request import (
+			attach_reject_files,
+			close_reject_request,
+			decide_reject_request,
+		)
+
+		crew = self._crew("api-des")
+		approver = self._user(["POSNext Reject Approver"], prefix="api-appr")
+		doc = self._submitted(1)
+		with _as_user(crew):
+			self.assertRaises(
+				frappe.ValidationError, attach_reject_files, doc.name, "destruction", self._b64file("d.txt", b"d")
+			)
+			self.assertRaises(
+				frappe.ValidationError, attach_reject_files, doc.name, "bogus", self._b64file("x.txt", b"x")
+			)
+		with _as_user(approver):
+			decide_reject_request(doc.name, "Write Off")
+		with _as_user(crew):
+			attach_reject_files(doc.name, "destruction", self._b64file("d.txt", b"d"))
+			result = close_reject_request(doc.name)
+		self.assertEqual(result["status"], "Closed")
+
+	def test_evidence_attach_caps_at_five(self):
+		from pos_next.api.reject_request import attach_reject_files
+
+		crew = self._crew("api-cap")
+		doc = self._doc(1)
+		with _as_user(crew):
+			# 5 in one call fills the cap, the 6th is refused
+			attach_reject_files(
+				doc.name,
+				"evidence",
+				json.dumps([{"file_name": f"ev{i}.txt", "filedata": "ZQ=="} for i in range(5)]),
+			)
+			self.assertEqual(
+				frappe.db.count(
+					"File",
+					{"attached_to_name": doc.name, "attached_to_field": "evidence"},
+				),
+				5,
+			)
+			self.assertRaises(
+				frappe.ValidationError,
+				attach_reject_files,
+				doc.name,
+				"evidence",
+				self._b64file("ev6.txt", b"e"),
+			)
+
+	def test_evidence_only_on_draft(self):
+		from pos_next.api.reject_request import attach_reject_files
+
+		crew = self._crew("api-evd")
+		doc = self._submitted(1)
+		with _as_user(crew):
+			self.assertRaises(
+				frappe.ValidationError,
+				attach_reject_files,
+				doc.name,
+				"evidence",
+				self._b64file("ev.txt", b"e"),
+			)
+
+	def test_crew_cannot_edit_submitted_or_forge_fields(self):
+		from pos_next.api.reject_request import save_reject_request
+
+		crew = self._crew("api-sec")
+		doc = self._submitted(1)
+		with _as_user(crew):
+			# submitted: no edits at all
+			self.assertRaises(
+				frappe.ValidationError,
+				save_reject_request,
+				json.dumps({"name": doc.name, "reason": "rewrite"}),
+			)
+			# purpose from the client is never trusted — new rows are always Unsold
+			forged = save_reject_request(self._payload(purpose="Production Loss"))
+			self.assertEqual(frappe.db.get_value("POS Reject Request", forged["name"], "purpose"), "Unsold")
+			self.assertEqual(frappe.db.get_value("POS Reject Request", forged["name"], "is_system_generated"), 0)
+			self.assertEqual(frappe.db.get_value("POS Reject Request", forged["name"], "work_order"), None)
+
+	def test_get_reject_request_gates_other_outlets(self):
+		from pos_next.api.reject_request import get_reject_request
+
+		outsider = self._user(["POSNext Cashier"], prefix="api-out2")
+		doc = self._doc(1)
+		with _as_user(outsider):
+			self.assertRaises(frappe.PermissionError, get_reject_request, doc.name)
+
+	def test_cancel_only_pending(self):
+		from pos_next.api.reject_request import cancel_reject_request, decide_reject_request
+
+		crew = self._crew("api-cxl")
+		approver = self._user(["POSNext Reject Approver"], prefix="api-cxap")
+		doc = self._submitted(1)
+		with _as_user(crew):
+			cancel_reject_request(doc.name)
+		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Cancelled")
+		with _as_user(approver):
+			self.assertRaises(frappe.ValidationError, decide_reject_request, doc.name, "Write Off")
 
 
 class TestDecision(RejectRequestTest):
