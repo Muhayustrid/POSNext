@@ -53,16 +53,18 @@ def validate_request(doc):
 	):
 		frappe.throw(_("Production Loss requests can only be created by the system from a Work Order"))
 
-	# server-owned lifecycle fields: a client save never sets them
+	# server-owned lifecycle fields: a client save or plain submit (Desk/REST,
+	# docstatus already 1 before validate) never sets them; the service layer
+	# writes them via db_set only, so validate can always clear them
+	doc.decision = None
+	doc.decision_notes = None
+	doc.decided_by = None
+	doc.decided_on = None
+	doc.transfer_entry = None
+	doc.issue_entry = None
+	doc.closed_on = None
 	if doc.docstatus == 0:
 		doc.status = "Draft"
-		doc.decision = None
-		doc.decision_notes = None
-		doc.decided_by = None
-		doc.decided_on = None
-		doc.transfer_entry = None
-		doc.issue_entry = None
-		doc.closed_on = None
 
 	if doc.video_link and not doc.video_link.lower().startswith(("http://", "https://")):
 		frappe.throw(_("Video link must start with http:// or https://"))

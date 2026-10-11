@@ -6,7 +6,7 @@ import uuid
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, flt, today
+from frappe.utils import add_days, flt, now, today
 
 from pos_next.api.test_production import (
 	InvoiceTypeAmbientMixin,
@@ -136,6 +136,19 @@ class RejectRequestTest(FrappeTestCase):
 		self._evidence(doc)
 		doc.submit()
 		return doc
+
+	def _stock_entry(self):
+		"""A real draft Stock Entry name, so forged link fields pass link validation."""
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"company": self.company,
+				"purpose": "Material Receipt",
+				"stock_entry_type": "Material Receipt",
+				"items": [{"item_code": self.item, "qty": 1, "t_warehouse": self.warehouse}],
+			}
+		).insert(ignore_permissions=True)
+		return se.name
 
 	def _transfers(self, doc=None):
 		filters = {"remarks": ["like", "POS Reject transfer: %"]}
@@ -982,17 +995,56 @@ class TestDecision(RejectRequestTest):
 		doc = self._doc(1)
 		doc.status = "Approved"
 		doc.decision = "Write Off"
+		doc.decision_notes = "forged"
 		doc.decided_by = "Administrator"
+		doc.decided_on = now()
+		doc.transfer_entry = self._stock_entry()
+		doc.issue_entry = self._stock_entry()
+		doc.closed_on = now()
 		doc.save(ignore_permissions=True)
 		values = frappe.db.get_value(
 			"POS Reject Request",
 			doc.name,
-			["status", "transfer_entry", "issue_entry", "decision", "decided_by"],
+			["status", "transfer_entry", "issue_entry", "decision", "decision_notes", "decided_by", "decided_on", "closed_on"],
 			as_dict=True,
 		)
 		self.assertEqual(values.status, "Draft")
 		self.assertIsNone(values.decision)
+		self.assertIsNone(values.decision_notes)
 		self.assertIsNone(values.decided_by)
+		self.assertIsNone(values.decided_on)
+		self.assertIsNone(values.transfer_entry)
+		self.assertIsNone(values.issue_entry)
+		self.assertIsNone(values.closed_on)
+
+	def test_submit_clears_forged_server_fields(self):
+		"""C1: docstatus is already 1 when validate runs on submit, so a crew
+		member who forges issue_entry/decision fields on a draft and submits via
+		the standard Frappe path (Desk/REST savedocs) still gets them cleared."""
+		crew = self._user(["POSNext Cashier"], prefix="rej-sub")
+		doc = self._doc(1)
+		frappe.db.set_value("POS Reject Request", doc.name, "owner", crew)
+		self._evidence(doc)
+		doc.reload()
+		doc.decision = "Write Off"
+		doc.decided_by = "Administrator"
+		doc.transfer_entry = forged = self._stock_entry()
+		doc.issue_entry = self._stock_entry()
+		with _as_user(crew):
+			doc.submit()
+		values = frappe.db.get_value(
+			"POS Reject Request",
+			doc.name,
+			["status", "decision", "decided_by", "transfer_entry", "issue_entry"],
+			as_dict=True,
+		)
+		self.assertEqual(values.status, "Pending")
+		self.assertIsNone(values.decision)
+		self.assertIsNone(values.decided_by)
+		self.assertIsNone(values.issue_entry)
+		# transfer_entry was re-set legitimately by on_submit_request, not the forged link
+		self.assertNotEqual(values.transfer_entry, forged)
+		self.assertEqual(frappe.db.get_value("Stock Entry", values.transfer_entry, "remarks"), f"POS Reject transfer: {doc.name}")
 
 	def test_double_close_raises_and_makes_one_issue(self):
 		"""I1: close_request locks the row; the second close throws and no
@@ -1022,4 +1074,16 @@ class TestDecision(RejectRequestTest):
 		)
 		f = frappe.get_doc("File", file_name)
 		self.assertRaises(frappe.ValidationError, f.delete)
+
+	def test_decide_endpoint_keeps_permission_error(self):
+		from pos_next.api.reject_request import decide_reject_request
+
+		owner = self._user(["POSNext Cashier"], prefix="api-own")
+		doc = self._submitted(1)
+		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
+		with _as_user(owner):
+			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
+		other = self._user(["POSNext Cashier"], prefix="api-non")
+		with _as_user(other):
+			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
 
