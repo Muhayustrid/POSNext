@@ -49,7 +49,7 @@ def _backfill_terminal_work_orders():
 			continue
 		if frappe.db.exists(
 			"POS Reject Request",
-			{"work_order": row.name, "is_system_generated": 1, "docstatus": ["!=", 2]},
+			{"work_order": row.name, "is_system_generated": 1},
 		):
 			continue
 		try:

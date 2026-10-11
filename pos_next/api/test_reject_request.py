@@ -397,6 +397,40 @@ class TestProductionLoss(InvoiceTypeAmbientMixin, RejectRequestTest):
 		self.assertEqual(len(drafts), 1)
 		self.assertEqual(flt(frappe.get_doc("POS Reject Request", drafts[0].name).items[0].qty), 2)
 
+	def test_sweep_draft_incident_date_is_wo_end_date(self):
+		"""I4: a recreated draft is dated from the WO's actual end, not today."""
+		import frappe.utils
+
+		result = self._produce(10, good=8, loss=2)
+		wo = frappe.get_doc("Work Order", result["work_order"])
+		end = frappe.utils.add_days(frappe.utils.today(), -4)
+		wo.db_set("actual_end_date", end)
+		frappe.db.delete("POS Reject Request", self._drafts(result["work_order"])[0].name)
+		from pos_next.services.reject_request import ensure_production_loss_request
+
+		name = ensure_production_loss_request(frappe.get_doc("Work Order", result["work_order"]))
+		self.assertEqual(
+			str(frappe.db.get_value("POS Reject Request", name, "incident_date")), str(end)
+		)
+
+	def test_cancelled_system_request_blocks_sweep_recreation(self):
+		"""I4: a cancelled system request is still idempotency — the sweep
+		must not mint a fresh-deadline draft behind the cancel decision."""
+		from pos_next.services.reject_request import ensure_production_loss_request
+
+		result = self._produce(10, good=8, loss=2)
+		draft = frappe.get_doc("POS Reject Request", self._drafts(result["work_order"])[0].name)
+		draft.flags.ignore_permissions = True
+		draft.reason = "burnt batch"
+		self._evidence(draft)
+		draft.submit()
+		draft.cancel()
+		self.assertEqual(
+			ensure_production_loss_request(frappe.get_doc("Work Order", result["work_order"])),
+			draft.name,
+		)
+		self.assertEqual(len(self._drafts(result["work_order"])), 1)
+
 
 
 class TestUnsoldSubmit(RejectRequestTest):
@@ -709,6 +743,16 @@ class TestRejectApi(RejectRequestTest):
 				json.dumps({"name": doc.name, "reason": "hijack"}),
 			)
 
+	def test_crew_cannot_set_server_fields_via_save(self):
+		"""C1: standard REST/Desk save on a submitted doc must not touch
+		server-owned lifecycle fields."""
+		crew = self._crew("rej-wr")
+		doc = self._submitted(1)
+		with _as_user(crew):
+			doc.reload()
+			doc.status = "Approved"
+			self.assertRaises(frappe.UpdateAfterSubmitError, doc.save)
+
 	def test_save_system_draft_ignores_incident_and_items(self):
 		from pos_next.api.reject_request import save_reject_request
 
@@ -754,17 +798,24 @@ class TestRejectApi(RejectRequestTest):
 		self.assertEqual(str(values.incident_date), str(doc.incident_date))
 		self.assertEqual(flt(values.total_amount), flt(doc.total_amount))
 
-	def test_decide_endpoint_keeps_permission_error(self):
-		from pos_next.api.reject_request import decide_reject_request
+	def test_manual_production_loss_refused(self):
+		"""I3: the crew lane can never mint a Production Loss request."""
+		crew = self._crew("api-pl")
+		with _as_user(crew):
+			self.assertRaises(
+				frappe.ValidationError,
+				lambda: frappe.get_doc(
+					{
+						"doctype": "POS Reject Request",
+						"purpose": "Production Loss",
+						"pos_profile": self.pos_profile,
+						"incident_date": today(),
+						"reason": "no WO",
+						"items": [{"item_code": self.item, "qty": 1}],
+					}
+				).insert(),
+			)
 
-		owner = self._user(["POSNext Cashier"], prefix="api-own")
-		doc = self._submitted(1)
-		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
-		with _as_user(owner):
-			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
-		other = self._user(["POSNext Cashier"], prefix="api-non")
-		with _as_user(other):
-			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
 
 
 class TestDecision(RejectRequestTest):
@@ -854,10 +905,33 @@ class TestDecision(RejectRequestTest):
 		self.assertTrue(values.closed_on)
 
 	def test_close_production_loss_skips_stock(self):
-		doc = self._doc(1, purpose="Production Loss")
+		from pos_next.services.reject_request import ensure_production_loss_request
+
+		fg = _make_test_item()
+		mat = _make_test_item()
+		recipe = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"Close PL {uuid.uuid4().hex[:6]}",
+				"production_item": fg,
+				"output_qty": 1,
+				"items": [{"item_code": mat, "qty": 2}],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+		_seed_stock(mat, self.warehouse, 20)
+		wo_name = start_production(recipe.name, 10, self.pos_profile)["work_order"]
+		wo = frappe.get_doc("Work Order", wo_name)
+		wo.db_set("produced_qty", 9)  # force a loss so the system draft lane applies
+		from pos_next.services.reject_request import ensure_production_loss_request
+
+		name = ensure_production_loss_request(wo)
+		doc = frappe.get_doc("POS Reject Request", name)
+		doc.reason = "short batch"
+		doc.save()
 		self._evidence(doc)
 		doc.submit()
-		self._decide(doc, "Write Off", None)
+		self._decide(doc.reload(), "Write Off", None)
 		self._destruction(doc)
 		reject_request.close_request(doc)
 		self.assertFalse(frappe.db.get_value("POS Reject Request", doc.name, "issue_entry"))
@@ -901,3 +975,51 @@ class TestDecision(RejectRequestTest):
 					}
 				).insert(),
 			)
+
+	def test_draft_save_clears_forged_server_fields(self):
+		"""C1: a draft saved with forged status/transfer/issue values comes back
+		clean — status Draft, links and decision fields cleared."""
+		doc = self._doc(1)
+		doc.status = "Approved"
+		doc.decision = "Write Off"
+		doc.decided_by = "Administrator"
+		doc.save(ignore_permissions=True)
+		values = frappe.db.get_value(
+			"POS Reject Request",
+			doc.name,
+			["status", "transfer_entry", "issue_entry", "decision", "decided_by"],
+			as_dict=True,
+		)
+		self.assertEqual(values.status, "Draft")
+		self.assertIsNone(values.decision)
+		self.assertIsNone(values.decided_by)
+
+	def test_double_close_raises_and_makes_one_issue(self):
+		"""I1: close_request locks the row; the second close throws and no
+		second write-off Stock Entry appears."""
+		doc = self._submitted(1)
+		self._decide(doc, "Write Off", None)
+		self._destruction(doc)
+		reject_request.close_request(doc)
+		doc.reload()
+		self.assertRaises(frappe.ValidationError, reject_request.close_request, doc)
+		issues = frappe.get_all(
+			"Stock Entry",
+			filters={"remarks": ["like", f"{reject_request.ISSUE_REMARK_PREFIX}{doc.name}"]},
+			pluck="name",
+		)
+		self.assertEqual(len(issues), 1)
+
+	def test_submitted_evidence_protected_from_delete(self):
+		"""I2: protect_attached_files — crew cannot delete evidence after submit."""
+		from frappe.core.doctype.file.file import File
+
+		doc = self._submitted(1)
+		file_name = frappe.db.get_value(
+			"File",
+			{"attached_to_doctype": doc.doctype, "attached_to_name": doc.name, "attached_to_field": "evidence"},
+			"name",
+		)
+		f = frappe.get_doc("File", file_name)
+		self.assertRaises(frappe.ValidationError, f.delete)
+

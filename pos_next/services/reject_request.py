@@ -47,6 +47,23 @@ def validate_request(doc):
 		days = settings.production_loss_deadline_days
 	doc.deadline_date = add_days(incident, days or 0)
 
+	if doc.purpose == "Production Loss" and not (
+		doc.is_system_generated
+		or frappe.db.get_value("POS Reject Request", doc.name, "is_system_generated")
+	):
+		frappe.throw(_("Production Loss requests can only be created by the system from a Work Order"))
+
+	# server-owned lifecycle fields: a client save never sets them
+	if doc.docstatus == 0:
+		doc.status = "Draft"
+		doc.decision = None
+		doc.decision_notes = None
+		doc.decided_by = None
+		doc.decided_on = None
+		doc.transfer_entry = None
+		doc.issue_entry = None
+		doc.closed_on = None
+
 	if doc.video_link and not doc.video_link.lower().startswith(("http://", "https://")):
 		frappe.throw(_("Video link must start with http:// or https://"))
 
@@ -150,7 +167,7 @@ def ensure_production_loss_request(wo):
 
 	existing = frappe.db.get_value(
 		"POS Reject Request",
-		{"work_order": wo.name, "is_system_generated": 1, "docstatus": ["!=", 2]},
+		{"work_order": wo.name, "is_system_generated": 1},
 		"name",
 	)
 	if existing:
@@ -159,7 +176,7 @@ def ensure_production_loss_request(wo):
 	doc = frappe.new_doc("POS Reject Request")
 	doc.purpose = "Production Loss"
 	doc.pos_profile = wo.posa_pos_profile
-	doc.incident_date = today()
+	doc.incident_date = getdate(wo.actual_end_date) if wo.actual_end_date else getdate(wo.modified)
 	doc.reason = f"{AUTO_REASON_PREFIX}{wo.name}"
 	doc.work_order = wo.name
 	doc.is_system_generated = 1
@@ -176,7 +193,7 @@ def _month_total(doc, incident):
 	return flt(
 		frappe.db.sql(
 			"""select sum(total_amount) from `tabPOS Reject Request`
-			where pos_profile = %s and docstatus = 1 and name != %s
+			where pos_profile = %s and docstatus = 1 and status != 'Rejected' and name != %s
 				and incident_date between %s and %s""",
 			(doc.pos_profile, doc.name or "", get_first_day(incident), get_last_day(incident)),
 		)[0][0]
@@ -289,8 +306,8 @@ def apply_decision(doc, decision, notes=None, system=False):
 		if decided_by == doc.owner:
 			frappe.throw(_("You cannot decide your own request"), frappe.PermissionError)
 
-	frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
-	if frappe.db.get_value("POS Reject Request", doc.name, "status") != "Pending":
+	status = frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
+	if status != "Pending":
 		frappe.throw(_("Only a Pending reject request can be decided"))
 
 	decision = (decision or "").strip()
@@ -324,8 +341,9 @@ def close_request(doc):
 	Unsold stock leaves the reject warehouse via a Material Issue to the
 	company's stock adjustment account; Production Loss never touched stock.
 	"""
-	frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
-	status, issue_entry = frappe.db.get_value("POS Reject Request", doc.name, ["status", "issue_entry"])
+	status, issue_entry = frappe.db.get_value(
+		"POS Reject Request", doc.name, ["status", "issue_entry"], for_update=True
+	)
 	if status != "Approved":
 		frappe.throw(_("Only an Approved reject request can be closed"))
 	if not frappe.db.count(
@@ -348,8 +366,13 @@ def close_request(doc):
 
 def _return_to_outlet(doc):
 	"""Rejected: the outlet takes the goods back (mirrors the outbound transfer)."""
-	source = get_effective_pos_setting(doc.pos_profile, "reject_warehouse")
 	target = _resolve_profile(doc.pos_profile)[1]
+	rows = frappe.db.get_all(
+		"Stock Entry Detail",
+		filters={"parent": doc.transfer_entry, "parenttype": "Stock Entry"},
+		fields=["s_warehouse", "t_warehouse"],
+	)
+	source = next((r.t_warehouse for r in rows if r.t_warehouse), target)
 	return _make_stock_entry(
 		doc, "Material Transfer", source, target, TRANSFER_REMARK_PREFIX + doc.name + " return"
 	)
@@ -357,7 +380,14 @@ def _return_to_outlet(doc):
 
 def _write_off_reject_stock(doc):
 	"""Material Issue from the reject warehouse to the stock adjustment account."""
-	source = get_effective_pos_setting(doc.pos_profile, "reject_warehouse")
+	rows = frappe.db.get_all(
+		"Stock Entry Detail",
+		filters={"parent": doc.transfer_entry, "parenttype": "Stock Entry"},
+		fields=["t_warehouse"],
+	)
+	source = next((r.t_warehouse for r in rows if r.t_warehouse), None)
+	if not source:
+		frappe.throw(_("The original transfer entry has no target warehouse"))
 	account = frappe.db.get_value("Company", doc.company, "stock_adjustment_account")
 	if not account:
 		frappe.throw(_("Company {0} has no Stock Adjustment Account for the write-off").format(doc.company))
