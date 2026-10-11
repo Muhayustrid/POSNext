@@ -42,6 +42,15 @@ vi.mock("frappe-ui", async () => {
 	}
 })
 
+// capture toasts so cap/validation messages can be asserted
+const toasts = vi.hoisted(() => ({ log: [] }))
+vi.mock("@/composables/useToast", () => ({
+	useToast: () => ({
+		showSuccess: (m) => toasts.log.push(m),
+		showError: (m) => toasts.log.push(m),
+	}),
+}))
+
 vi.mock("@/utils/attachments", async (importOriginal) => {
 	const actual = await importOriginal()
 	return {
@@ -211,6 +220,7 @@ describe("RejectRequestDialog", () => {
 	beforeEach(() => {
 		handlers.map = {}
 		handlers.calls = {}
+		toasts.log = []
 		window.confirm = vi.fn(() => true)
 		mockCall(LIST_URL, () => Promise.resolve(ROWS))
 		mockCall(DETAIL_URL, () => Promise.resolve(UNSOLD_DETAIL))
@@ -285,7 +295,7 @@ describe("RejectRequestDialog", () => {
 		)
 	})
 
-	it("a failed submit reuses the draft on retry: one insert, no re-upload", async () => {
+	it("a failed submit keeps the button enabled and retry reuses the draft", async () => {
 		let submitFails = true
 		const saveCall = mockCall(SAVE_URL, (params) => {
 			if (params.submit && submitFails) {
@@ -294,8 +304,8 @@ describe("RejectRequestDialog", () => {
 			}
 			return Promise.resolve({
 				name: JSON.parse(params.data).name || "PRJ-DRAFT-1",
-				status: "Draft",
-				docstatus: 0,
+				status: "Pending",
+				docstatus: 1,
 			})
 		})
 		const attachCall = mockCall(ATTACH_URL, (_params) =>
@@ -313,19 +323,61 @@ describe("RejectRequestDialog", () => {
 
 		await findButton(wrapper, "Submit").trigger("click")
 		await flushPromises()
-		expect(wrapper.text()).not.toContain("boom on submit") // surfaced via toast
 
-		// retry with the same draft still showing
-		await findButton(wrapper, "Submit").trigger("click")
+		// the failed final save must NOT disable the button
+		const submitBtn = findButton(wrapper, "Submit")
+		expect(submitBtn.attributes("disabled")).toBeUndefined()
+
+		// retry: same draft, no re-attach
+		await submitBtn.trigger("click")
 		await flushPromises()
 
 		const inserts = saveCall.mock.calls.filter(
 			([p]) => !JSON.parse(p.data).name,
 		)
-		expect(inserts).toHaveLength(1) // no duplicate draft
-		expect(attachCall).toHaveBeenCalledTimes(1) // no re-upload
-		const submitSave = saveCall.mock.calls.find(([p]) => p.submit)
-		expect(JSON.parse(submitSave[0].data).name).toBe("PRJ-DRAFT-1")
+		expect(inserts).toHaveLength(1) // exactly one insert overall
+		expect(attachCall).toHaveBeenCalledTimes(1) // no re-upload on retry
+		const submitSaves = saveCall.mock.calls.filter(([p]) => p.submit)
+		expect(submitSaves).toHaveLength(2) // both attempts submitted
+		expect(JSON.parse(submitSaves[1][0].data).name).toBe("PRJ-DRAFT-1")
+		expect(submitSaves[1][0].submit).toBe(1)
+	})
+
+	it("a failed close keeps the button enabled and retry does not re-attach", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(APPROVED_DETAIL))
+		let closeFails = true
+		const closeCall = mockCall(CLOSE_URL, () => {
+			if (closeFails) {
+				closeFails = false
+				return Promise.reject(new Error("boom on close"))
+			}
+			return Promise.resolve({ status: "Closed" })
+		})
+		const attachCall = mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 1, destruction_count: 1 }),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
+		await flushPromises()
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["d.png"])
+
+		const closeBtn = findButton(wrapper, "Close")
+		await closeBtn.trigger("click")
+		await flushPromises()
+
+		// failed close must NOT disable the button
+		expect(findButton(wrapper, "Close").attributes("disabled")).toBeUndefined()
+
+		// retry: close again, no re-attach
+		await findButton(wrapper, "Close").trigger("click")
+		await flushPromises()
+
+		expect(closeCall).toHaveBeenCalledTimes(2)
+		expect(attachCall).toHaveBeenCalledTimes(1) // no re-upload on retry
 	})
 
 	it("production loss draft shows qty read-only", async () => {
@@ -472,6 +524,8 @@ describe("RejectRequestDialog", () => {
 			"1.png", "2.png", "3.png", "4.png", "5.png", "6.png", "7.png",
 		])
 		expect(wrapper.findAll('[data-test="attachment-list"] li')).toHaveLength(5)
+		// the cap truncation must be surfaced
+		expect(toasts.log).toContain("At most 5 evidence photos are allowed")
 	})
 
 	it("searches items with a trailing debounce and ignores stale responses", async () => {
@@ -493,15 +547,33 @@ describe("RejectRequestDialog", () => {
 		calls = handlers.calls[ITEMS_URL].mock.calls.length
 		expect(calls).toBe(1) // single trailing request
 
-		// a stale response arriving after addItem must not repopulate results
+		// resolve the FIRST (now stale) request
 		resolveA([{ item_code: "STALE", item_name: "Stale" }])
 		await flushPromises()
-		await findButton(wrapper, "Stale").trigger("click")
+
+		// a NEW request starts (never resolved yet)
+		let resolveB
+		mockCall(ITEMS_URL, () => new Promise((r) => resolveB = r))
+		await searchItem(wrapper, "milk")
+
+		// the OLD request (latte2) resolves LAST — it must not repopulate
+		resolveA([{ item_code: "STALE-2", item_name: "Stale 2" }])
 		await flushPromises()
-		// results cleared after adding; a late duplicate response can't return them
-		resolveA([{ item_code: "STALE", item_name: "Stale" }])
+		expect(findButton(wrapper, "Stale 2")).toBeUndefined()
+
+		// the new request resolves and DOES show its results
+		resolveB([{ item_code: "MILK", item_name: "Milk" }])
+		await flushPromises()
+		await findButton(wrapper, "Milk").trigger("click")
+		await flushPromises()
+
+		// after addItem the results are cleared and no late response repopulates
+		resolveA([{ item_code: "STALE-3", item_name: "Stale 3" }])
+		resolveB([{ item_code: "MILK-2", item_name: "Milk 2" }])
 		await flushPromises()
 		expect(wrapper.find('input[placeholder="Search item..."]').element.value).toBe("")
+		expect(findButton(wrapper, "Stale 3")).toBeUndefined()
+		expect(findButton(wrapper, "Milk 2")).toBeUndefined()
 	})
 
 	it("status filter change reloads with the new filter even while loading", async () => {

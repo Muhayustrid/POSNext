@@ -443,6 +443,10 @@ const itemResults = ref([])
 // name of the draft created by a first submit attempt — kept across retries
 // so a failed submit updates the same draft instead of inserting a duplicate
 const draftName = ref(null)
+// files already uploaded in this session — retries after a failed final
+// save/close must not be blocked by gates that only count pending files
+const uploadedEvidence = ref(0)
+const uploadedDestruction = ref(0)
 
 const form = ref({
 	incident_date: "",
@@ -467,7 +471,10 @@ const videoLinkOk = computed(() => {
 })
 
 const destructionCount = computed(
-	() => (detail.value?.destruction?.length || 0) + newDestruction.value.length,
+	() =>
+		(detail.value?.destruction?.length || 0) +
+		newDestruction.value.length +
+		uploadedDestruction.value,
 )
 
 const canSubmit = computed(
@@ -476,16 +483,22 @@ const canSubmit = computed(
 		!!form.value.reason.trim() &&
 		form.value.items.length > 0 &&
 		form.value.items.every((i) => i.qty > 0) &&
-		form.value.files.length >= 1 &&
-		form.value.files.length <= MAX_EVIDENCE &&
+		form.value.files.length + uploadedEvidence.value >= 1 &&
+		form.value.files.length + uploadedEvidence.value <= MAX_EVIDENCE &&
 		videoLinkOk.value,
 )
 
 const canSubmitDetail = computed(
 	() =>
 		!!detail.value?.reason?.trim() &&
-		(detail.value?.evidence?.length || 0) + newEvidence.value.length >= 1 &&
-		(detail.value?.evidence?.length || 0) + newEvidence.value.length <= MAX_EVIDENCE &&
+		(detail.value?.evidence?.length || 0) +
+			newEvidence.value.length +
+			uploadedEvidence.value >=
+			1 &&
+		(detail.value?.evidence?.length || 0) +
+			newEvidence.value.length +
+			uploadedEvidence.value <=
+			MAX_EVIDENCE &&
 		videoLinkOk.value,
 )
 
@@ -548,6 +561,7 @@ function openNew() {
 	itemSearch.value = ""
 	itemResults.value = []
 	draftName.value = null
+	uploadedEvidence.value = 0
 	view.value = "new"
 }
 
@@ -559,6 +573,8 @@ function searchItems() {
 	clearTimeout(searchTimer)
 	const term = itemSearch.value.trim()
 	if (!term) {
+		// invalidate in-flight searches when the field is cleared
+		searchSeq++
 		itemResults.value = []
 		return
 	}
@@ -566,7 +582,7 @@ function searchItems() {
 }
 
 async function doSearchItems(term) {
-	const seq = ++searchSeq
+	const seq = ++searchSeq // starting a request invalidates older ones
 	try {
 		const rows = await call("pos_next.api.items.get_items", {
 			pos_profile: props.posProfile,
@@ -594,7 +610,11 @@ function addItem(item) {
 function addEvidence(list, files) {
 	const { ok, tooBig } = sanitizePickedFiles(files)
 	if (tooBig.length) showError(__("Some files exceed the 10 MB limit"))
-	const room = Math.max(0, MAX_EVIDENCE - list.length)
+	const attached =
+		view.value === "detail"
+			? (detail.value?.evidence?.length || 0) + uploadedEvidence.value
+			: 0
+	const room = Math.max(0, MAX_EVIDENCE - attached - list.length)
 	const accepted = ok.slice(0, room)
 	if (ok.length > room) {
 		showError(__("At most {0} evidence photos are allowed", [MAX_EVIDENCE]))
@@ -615,12 +635,13 @@ async function toPayloads(files) {
 }
 
 async function attachFiles(name, kind, files) {
-	if (!files.length) return
+	if (!files.length) return 0
 	await call("pos_next.api.reject_request.attach_reject_files", {
 		name,
 		kind,
 		files: JSON.stringify(await toPayloads(files)),
 	})
+	return files.length
 }
 
 /**
@@ -640,7 +661,7 @@ async function submitRequest(buildData, draftNameRef, getPending) {
 	}
 	const name = draftNameRef.value
 	const pending = getPending()
-	await attachFiles(name, "evidence", pending)
+	uploadedEvidence.value += await attachFiles(name, "evidence", pending)
 	getPending(true)
 	return call("pos_next.api.reject_request.save_reject_request", {
 		data: JSON.stringify({ ...buildData(), name }),
@@ -685,6 +706,8 @@ async function openDetail(name) {
 	view.value = "detail"
 	loadingDetail.value = true
 	draftName.value = null
+	uploadedEvidence.value = 0
+	uploadedDestruction.value = 0
 	newEvidence.value = []
 	newDestruction.value = []
 	itemSearch.value = ""
@@ -756,7 +779,11 @@ async function doClose() {
 	if (!window.confirm(__("Close this reject request after destruction?"))) return
 	acting.value = true
 	try {
-		await attachFiles(detail.value.name, "destruction", newDestruction.value)
+		uploadedDestruction.value += await attachFiles(
+			detail.value.name,
+			"destruction",
+			newDestruction.value,
+		)
 		// clear before closing: a failed close retry must not re-upload
 		newDestruction.value = []
 		await call("pos_next.api.reject_request.close_reject_request", {

@@ -177,8 +177,6 @@
 						embedded
 						:model-value="true"
 						:pos-profile="posProfile"
-						:company="company"
-						:currency="currency"
 						class="h-full"
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
