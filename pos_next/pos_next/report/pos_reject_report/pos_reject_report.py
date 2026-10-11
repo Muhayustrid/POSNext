@@ -17,6 +17,9 @@ def execute(filters=None):
 	filters = frappe._dict(filters or {})
 	requests = get_requests(filters)
 	liabilities = get_liabilities([r.name for r in requests])
+	if filters.get("user"):
+		# liable-crew filter: keep only requests where that user carries a row
+		requests = [r for r in requests if any(l.parent == r.name and l.user == filters.user for l in liabilities)]
 	liab_rows = liability_rows(requests, liabilities)
 	per_liability = filters.view == "Per Liability"
 	if per_liability and filters.get("user"):
@@ -47,21 +50,6 @@ def get_requests(filters):
 		params,
 		as_dict=True,
 	)
-	if filters.get("user"):
-		# liable-crew filter: keep only requests where that user carries a row
-		names = [r.name for r in rows]
-		with_liab = (
-			set(
-				frappe.get_all(
-					"POS Reject Liability",
-					filters={"parent": ["in", names], "user": filters.user},
-					pluck="parent",
-				)
-			)
-			if names
-			else set()
-		)
-		rows = [r for r in rows if r.name in with_liab]
 	return rows
 
 
@@ -120,7 +108,7 @@ def get_columns(per_liability):
 		return [
 			{"fieldname": "request", "label": _("Request"), "fieldtype": "Link", "options": "POS Reject Request", "width": 180},
 			{"fieldname": "incident_date", "label": _("Incident Date"), "fieldtype": "Date", "width": 100},
-			{"fieldname": "pos_profile", "label": _("Outlet"), "fieldtype": "Link", "options": "Company", "width": 160},
+			{"fieldname": "pos_profile", "label": _("Outlet"), "fieldtype": "Link", "options": "POS Profile", "width": 160},
 			{"fieldname": "purpose", "label": _("Purpose"), "fieldtype": "Link", "options": "POS Reject Purpose", "width": 130},
 			{"fieldname": "decision", "label": _("Decision"), "fieldtype": "Data", "width": 90},
 			{"fieldname": "bearer", "label": _("Bearer"), "fieldtype": "Data", "width": 200},
@@ -129,7 +117,7 @@ def get_columns(per_liability):
 	return [
 		{"fieldname": "request", "label": _("Request"), "fieldtype": "Link", "options": "POS Reject Request", "width": 180},
 		{"fieldname": "incident_date", "label": _("Incident Date"), "fieldtype": "Date", "width": 100},
-		{"fieldname": "pos_profile", "label": _("Outlet"), "fieldtype": "Link", "options": "Company", "width": 160},
+		{"fieldname": "pos_profile", "label": _("Outlet"), "fieldtype": "Link", "options": "POS Profile", "width": 160},
 		{"fieldname": "purpose", "label": _("Purpose"), "fieldtype": "Link", "options": "POS Reject Purpose", "width": 130},
 		{"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 90},
 		{"fieldname": "decision", "label": _("Decision"), "fieldtype": "Data", "width": 90},
