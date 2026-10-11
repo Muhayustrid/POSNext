@@ -670,6 +670,19 @@ describe("RejectRequestDialog", () => {
 		expect(firstSave.purpose).toBe("Damaged")
 	})
 
+	it("submit stays disabled when no purpose is available", async () => {
+		mockCall(PURPOSES_URL, () => Promise.resolve([]))
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+		await wrapper.find("textarea").setValue("expired stock")
+		await searchItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
+		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
+	})
+
 	it("Rejected detail shows each liability user and amount, Approved shows none", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve({

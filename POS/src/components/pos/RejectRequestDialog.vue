@@ -548,6 +548,7 @@ const destructionCount = computed(
 const canSubmit = computed(
 	() =>
 		!!props.posProfile &&
+		!!form.value.purpose &&
 		!!form.value.reason.trim() &&
 		form.value.items.length > 0 &&
 		form.value.items.every((i) => i.qty > 0) &&
@@ -746,7 +747,7 @@ async function submitNew() {
 		const buildData = () => ({
 			pos_profile: props.posProfile,
 			incident_date: form.value.incident_date,
-			purpose: form.value.purpose || undefined,
+			purpose: form.value.purpose,
 			reason: form.value.reason.trim(),
 			video_link: form.value.video_link.trim() || null,
 			items: form.value.items.map((i) => ({ item_code: i.item_code, qty: i.qty })),
