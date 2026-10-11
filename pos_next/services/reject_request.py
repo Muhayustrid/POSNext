@@ -28,6 +28,12 @@ DECISIONS = ("Write Off", "Charge Crew", "Rejected")
 AUTO_REASON_PREFIX = "Auto: production loss on "
 
 
+def is_system_purpose(purpose):
+	"""True when the purpose is a system purpose (currently Production Loss).
+	Non-existent purposes are never system."""
+	return bool(frappe.db.get_value("POS Reject Purpose", purpose, "is_system"))
+
+
 def validate_request(doc):
 	from pos_next.api.packages import _assert_profile_access
 
@@ -43,11 +49,11 @@ def validate_request(doc):
 
 	settings = frappe.get_doc("POS Reject Settings")
 	days = settings.deadline_days
-	if doc.purpose == "Production Loss" and (settings.production_loss_deadline_days or 0) > 0:
+	if is_system_purpose(doc.purpose) and (settings.production_loss_deadline_days or 0) > 0:
 		days = settings.production_loss_deadline_days
 	doc.deadline_date = add_days(incident, days or 0)
 
-	if doc.purpose == "Production Loss" and not (
+	if is_system_purpose(doc.purpose) and not (
 		doc.is_system_generated
 		or frappe.db.get_value("POS Reject Request", doc.name, "is_system_generated")
 	):
@@ -63,6 +69,7 @@ def validate_request(doc):
 	doc.transfer_entry = None
 	doc.issue_entry = None
 	doc.closed_on = None
+	doc.set("liabilities", [])
 	if doc.docstatus == 0:
 		doc.status = "Draft"
 
@@ -204,7 +211,7 @@ def _month_total(doc, incident):
 
 def on_submit_request(doc):
 	doc.db_set("status", "Pending")
-	if doc.purpose == "Unsold":
+	if not is_system_purpose(doc.purpose):
 		_transfer_to_reject_warehouse(doc)
 	if doc.is_late and frappe.db.get_single_value("POS Reject Settings", "late_mode") == "Strict":
 		return apply_decision(
@@ -358,7 +365,7 @@ def close_request(doc):
 	):
 		frappe.throw(_("Attach at least one destruction photo"))
 
-	if doc.purpose == "Unsold" and not issue_entry:
+	if not is_system_purpose(doc.purpose) and not issue_entry:
 		doc.db_set("issue_entry", _write_off_reject_stock(doc).name)
 	doc.db_set("status", "Closed")
 	doc.db_set("closed_on", now())

@@ -25,7 +25,7 @@ SCHEMA = {
 		"purpose", "pos_profile", "company", "incident_date", "deadline_date", "reason",
 		"video_link", "work_order", "is_system_generated", "items", "total_amount",
 		"is_late", "over_limit", "status", "decision", "decision_notes", "decided_by",
-		"decided_on", "transfer_entry", "issue_entry", "closed_on",
+		"decided_on", "transfer_entry", "issue_entry", "closed_on", "liabilities",
 	),
 	"POS Reject Request Item": (
 		"item_code", "item_name", "qty", "uom", "valuation_rate", "amount",
@@ -50,6 +50,9 @@ from pos_next.api.test_production import _make_test_item, _seed_stock
 
 class RejectRequestTest(FrappeTestCase):
 	def setUp(self):
+		from pos_next.install import ensure_reject_purposes
+
+		ensure_reject_purposes()
 		self.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
 		if not self.pos_profile:
 			self.skipTest("no POS Profile on this site")
@@ -829,6 +832,51 @@ class TestRejectApi(RejectRequestTest):
 				).insert(),
 			)
 
+
+
+class TestPurposeMaster(RejectRequestTest):
+	def test_seed_purposes(self):
+		from pos_next.install import ensure_reject_purposes
+
+		ensure_reject_purposes()
+		self.assertEqual(
+			frappe.db.get_value("POS Reject Purpose", "Unsold", "is_system"), 0
+		)
+		self.assertEqual(
+			frappe.db.get_value("POS Reject Purpose", "Production Loss", "is_system"), 1
+		)
+		ensure_reject_purposes()
+		self.assertEqual(
+			frappe.db.count("POS Reject Purpose", {"purpose_name": ["in", ["Unsold", "Production Loss"]]}), 2
+		)
+
+	def test_system_purpose_not_deletable(self):
+		p = frappe.get_doc("POS Reject Purpose", "Production Loss")
+		self.assertRaises(frappe.ValidationError, p.delete)
+
+	def test_system_flag_cannot_be_cleared(self):
+		p = frappe.get_doc("POS Reject Purpose", "Production Loss")
+		p.is_system = 0
+		self.assertRaises(frappe.ValidationError, p.save)
+
+	def test_forged_liabilities_cleared(self):
+		crew = self._user(["POSNext Cashier"], prefix="rej-liab")
+		doc = self._doc(1)
+		doc.append("liabilities", {"user": crew, "amount": 1})
+		doc.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.count("POS Reject Liability", {"parent": doc.name}), 0)
+		self._evidence(doc)
+		doc.reload()
+		doc.append("liabilities", {"user": crew, "amount": 1})
+		doc.submit()
+		self.assertEqual(frappe.db.count("POS Reject Liability", {"parent": doc.name}), 0)
+
+	def test_is_system_purpose_helper(self):
+		from pos_next.services.reject_request import is_system_purpose
+
+		self.assertTrue(is_system_purpose("Production Loss"))
+		self.assertFalse(is_system_purpose("Unsold"))
+		self.assertFalse(is_system_purpose("Nope"))
 
 
 class TestDecision(RejectRequestTest):
