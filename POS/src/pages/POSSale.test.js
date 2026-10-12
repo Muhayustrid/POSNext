@@ -655,6 +655,20 @@ describe("header printer icon", () => {
 		expect(menu.attributes("data-open")).toBe("true")
 		expect(menu.attributes("data-view")).toBe("settings")
 	})
+
+	it("passes the connecting state to the header while reconnecting", async () => {
+		await mountPOS({
+			POSHeader: defineComponent({
+				name: "POSHeader",
+				emits: ["printer-click"],
+				props: { printerConnecting: Boolean },
+				template: `<button data-test="printer" :data-connecting="printerConnecting" @click="$emit('printer-click')"></button>`,
+			}),
+			POSMenuDialog: POSMenuDialogProbe,
+		})
+		const printer = wrapper.find('[data-test="printer"]')
+		expect(printer.attributes("data-connecting")).toBe("false")
+	})
 })
 
 describe("close-existing-shift handoff (step 3 Close & Open New)", () => {

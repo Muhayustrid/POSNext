@@ -37,7 +37,7 @@
 						<div class="min-w-24 flex-shrink overflow-hidden">
 						<div class="flex items-center gap-1 sm:gap-2">
 							<h1
-								class="text-xs sm:text-base font-bold text-gray-900 truncate flex-shrink"
+								class="hidden md:block text-xs sm:text-base font-bold text-gray-900 truncate flex-shrink"
 							>
 								{{ __("POS Next") }}
 							</h1>
@@ -318,16 +318,23 @@
 						</div>
 					</div>
 
-					<!-- Printer - Visible only while shift is open.
+					<!-- Printer - Visible only while shift is open (all sizes).
 					     Doubles as a connection indicator: green = connected,
 					     red = disconnected. Clicking attempts to reconnect. -->
-					<div v-if="hasOpenShift" class="hidden md:block relative">
+					<div v-if="hasOpenShift" class="relative flex items-center">
 						<ActionButton
 							:icon="printerIcon"
 							:variant="printerVariant"
 							:title="printerTitle"
+							:class="printerConnecting ? 'animate-spin' : ''"
 							@click="$emit('printer-click')"
 						/>
+						<span
+							v-if="printerConnecting"
+							class="hidden md:inline text-xs text-gray-600 whitespace-nowrap ms-1"
+						>
+							{{ __("Connecting printer…") }}
+						</span>
 					</div>
 
 					<!-- Refresh -->
@@ -472,6 +479,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	printerConnecting: {
+		type: Boolean,
+		default: false,
+	},
 });
 
 // Printer indicator: green when connected, red when disconnected.
@@ -482,6 +493,7 @@ const printerVariant = computed(() => {
 });
 
 const printerTitle = computed(() => {
+	if (props.printerConnecting) return __("Connecting printer…");
 	if (!props.printEnabled) return __("Printing off — click to open Settings");
 	return props.qzConnected
 		? __("Printer: Connected")

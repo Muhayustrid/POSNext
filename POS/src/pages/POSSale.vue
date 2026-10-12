@@ -24,6 +24,7 @@
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
 				:qz-connected="posSettingsStore.printDriver === 'imin' ? iminReady : qzConnected"
+				:printer-connecting="printerReconnecting"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
 				@printer-click="handlePrinterClick"
@@ -1159,7 +1160,7 @@ const {
 } = usePOSEvents();
 
 // Initialize toast
-const { showSuccess, showError, showWarning } = useToast();
+const { showSuccess, showError, showWarning, showInfo } = useToast();
 
 // Initialize logger
 const log = logger.create("POSSale");
@@ -2759,9 +2760,9 @@ function openHistoryDialog() {
  *                       - failure: toast + open Settings so the user can fix it
  *  - already connected -> toast only
  */
-let printerReconnecting = false;
+const printerReconnecting = ref(false);
 async function handlePrinterClick() {
-	if (!canAccessShiftActions.value || printerReconnecting) {
+	if (!canAccessShiftActions.value || printerReconnecting.value) {
 		return;
 	}
 
@@ -2780,7 +2781,12 @@ async function handlePrinterClick() {
 	}
 
 	let ok = false;
-	printerReconnecting = true;
+	printerReconnecting.value = true;
+	// The inline "Connecting printer…" label next to the icon is md+ only, so
+	// on small screens surface the progress as a toast instead.
+	if (!uiStore.isDesktop) {
+		showInfo(__("Connecting printer…"));
+	}
 	try {
 		if (isImin) {
 			await probeImin();
@@ -2791,7 +2797,7 @@ async function handlePrinterClick() {
 	} catch (err) {
 		log.warn("Printer reconnect failed:", err?.message || err);
 	} finally {
-		printerReconnecting = false;
+		printerReconnecting.value = false;
 	}
 
 	if (ok) {
