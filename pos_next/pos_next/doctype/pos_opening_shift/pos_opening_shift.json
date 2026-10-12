@@ -189,14 +189,15 @@
   {
    "allow_on_submit": 1,
    "fieldname": "pos_closing_shift",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "label": "POS Closing Shift",
+   "options": "POS Closing Shift",
    "read_only_depends_on": "eval:doc.docstatus==1"
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-23 01:26:42.295794",
+ "modified": "2026-10-12 14:10:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Opening Shift",
