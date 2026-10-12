@@ -64,7 +64,11 @@ pos_next_reject.rejected_dialog = function (frm) {
 				fieldname: "liabilities",
 				fieldtype: "Table",
 				label: __("Liabilities"),
-				options: "POS Reject Liability",
+				// inline fields: the form's per-doc docfield copy breaks options-based grid meta
+				fields: [
+					{ fieldname: "user", fieldtype: "Link", options: "User", label: __("User"), reqd: 1, in_list_view: 1 },
+					{ fieldname: "amount", fieldtype: "Currency", label: __("Amount"), reqd: 1, in_list_view: 1 },
+				],
 				reqd: 1,
 				data: [{ user: frm.doc.owner, amount: frm.doc.total_amount }],
 				get_data() {
