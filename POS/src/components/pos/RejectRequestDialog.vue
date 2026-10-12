@@ -2,432 +2,555 @@
 	<DialogHost
 		v-model:show="show"
 		:embedded="embedded"
-		:options="{ title: __('Reject Requests'), size: '4xl' }"
+		:options="{ title: dialogTitle, size: '4xl' }"
 	>
 		<template #body-content>
-			<!-- LIST LEVEL -->
-			<template v-if="view === 'list'">
-				<div class="flex items-end gap-2 mb-4 border-b border-gray-200">
-					<nav class="flex gap-5 overflow-x-auto" role="tablist">
-						<button
-							v-for="tab in statusTabs"
-							:key="tab.value"
-							type="button"
-							role="tab"
-							:aria-selected="statusFilter === tab.value"
-							class="-mb-px pb-2.5 pt-1 border-b-2 text-sm font-medium whitespace-nowrap transition-colors"
-							:class="
-								statusFilter === tab.value
-									? 'border-gray-900 text-gray-900'
-									: 'border-transparent text-gray-500 hover:text-gray-800'
-							"
-							@click="setStatusFilter(tab.value)"
-						>
-							{{ tab.label }}
-						</button>
-					</nav>
-					<RefreshButton class="ms-auto mb-1.5" :loading="loading" @click="loadList()" />
+			<!-- LIST -->
+			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<p class="text-sm text-gray-500">
+						{{ __("Report unsold or damaged stock for Head Office review") }}
+					</p>
+					<div class="flex items-center gap-2">
+						<RefreshButton :loading="loading" @click="loadList()" />
+						<Button variant="solid" @click="openNew">
+							<template #prefix>
+								<FeatherIcon name="plus" class="h-4 w-4" />
+							</template>
+							{{ __("New Request") }}
+						</Button>
+					</div>
 				</div>
 
-				<div class="flex justify-end mb-3">
-					<Button variant="solid" @click="openNew">
-						{{ __("New Request") }}
-					</Button>
-				</div>
-
-				<div v-if="loading" class="py-10 text-center text-sm text-gray-500">
-					{{ __("Loading...") }}
-				</div>
-				<div
-					v-else-if="!requests.length"
-					class="py-10 text-center text-sm text-gray-500"
-				>
-					{{ __("No reject requests") }}
-				</div>
-				<div v-else class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto">
+				<div class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
-						v-for="r in requests"
-						:key="r.name"
-						class="w-full text-start px-4 py-3 border border-gray-200 rounded-lg hover:border-gray-400 transition-colors"
-						@click="openDetail(r.name)"
+						v-for="tab in statusTabs"
+						:key="tab.value"
+						type="button"
+						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						:class="
+							statusFilter === tab.value
+								? 'border-gray-900 bg-gray-900 text-white'
+								: 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
+						"
+						:aria-pressed="statusFilter === tab.value"
+						@click="setStatusFilter(tab.value)"
 					>
-						<div class="flex items-start justify-between gap-2">
-							<div class="min-w-0">
-								<div class="font-medium text-gray-900 truncate">
-									{{ r.name }}
-									<span
-										v-if="r.is_late"
-										class="ms-2 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700"
-										>{{ __("Late") }}</span
-									>
-								</div>
-								<div class="text-xs text-gray-500 mt-0.5">
-									{{ __(r.purpose) }} · {{ r.incident_date }}
-								</div>
-							</div>
-							<span
-								class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
-								:class="statusClass(r.status)"
-							>
-								{{ __(r.status) }}
-							</span>
-						</div>
+						{{ tab.label }}
 					</button>
 				</div>
-				<div v-if="hasMore" class="mt-3 flex justify-center">
+
+				<div class="rounded-xl border border-gray-200 bg-white">
+					<!-- desktop column header; rows below share the same grid -->
+					<div
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_7rem_8rem_7rem] md:gap-x-3"
+					>
+						<span>{{ __("Request") }}</span>
+						<span>{{ __("Purpose") }}</span>
+						<span>{{ __("Incident Date") }}</span>
+						<span class="text-end">{{ __("Amount") }}</span>
+						<span>{{ __("Status") }}</span>
+					</div>
+
+					<div v-if="loading && !requests.length" class="divide-y divide-gray-100">
+						<span class="sr-only">{{ __("Loading...") }}</span>
+						<div v-for="n in 3" :key="n" class="flex animate-pulse gap-4 px-4 py-3">
+							<div class="h-4 w-28 rounded bg-gray-100"></div>
+							<div class="h-4 flex-1 rounded bg-gray-100"></div>
+							<div class="h-4 w-20 rounded bg-gray-100"></div>
+						</div>
+					</div>
+					<div v-else-if="!requests.length" class="px-4 py-8 text-center">
+						<p class="text-sm font-medium text-gray-900">{{ __("No reject requests") }}</p>
+						<p class="mt-1 text-xs text-gray-500">
+							{{ statusFilter ? __("Try a different status") : __("Create one with New Request") }}
+						</p>
+					</div>
+					<div v-else class="divide-y divide-gray-100">
+						<button
+							v-for="r in requests"
+							:key="r.name"
+							type="button"
+							class="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 text-start transition-colors hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_7rem_8rem_7rem] md:gap-y-0"
+							@click="openDetail(r.name)"
+						>
+							<span class="flex min-w-0 items-center gap-1.5">
+								<span class="truncate text-sm font-semibold text-gray-900">{{ r.name }}</span>
+								<span
+									v-if="r.is_late"
+									class="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200"
+									>{{ __("Late") }}</span
+								>
+							</span>
+							<!-- status sits top-right on cards, in its own column on desktop -->
+							<span class="justify-self-end md:order-last md:justify-self-start">
+								<span :class="statusPill(r.status)">{{ __(r.status) }}</span>
+							</span>
+							<span class="truncate text-sm text-gray-700">{{ __(r.purpose) }}</span>
+							<span class="text-xs text-gray-500 md:text-sm md:text-gray-700">
+								{{ formatDate(r.incident_date) }}
+							</span>
+							<span class="col-span-2 text-sm tabular-nums text-gray-900 md:col-span-1 md:text-end">
+								{{ formatCurrency(r.total_amount) }}
+							</span>
+						</button>
+					</div>
+				</div>
+				<div v-if="hasMore" class="flex justify-center">
 					<Button variant="subtle" size="sm" :loading="loading" @click="loadList(false)">
 						{{ __("Load More") }}
 					</Button>
 				</div>
-			</template>
+			</div>
 
 			<!-- NEW REQUEST (crew purposes) -->
-			<template v-else-if="view === 'new'">
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Purpose") }}
-				</label>
-				<select
-					v-model="form.purpose"
-					data-testid="purpose-select"
-					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-				>
-					<option v-for="p in purposes" :key="p" :value="p">{{ __(p) }}</option>
-				</select>
-
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Incident Date") }}
-				</label>
-				<input
-					v-model="form.incident_date"
-					type="date"
-					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-				/>
-
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Items") }}
-				</label>
-				<input
-					v-model="itemSearch"
-					type="text"
-					:placeholder="__('Search item...')"
-					class="w-full px-3 py-2 mb-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-					@input="searchItems"
-				/>
-				<div
-					v-if="itemResults.length"
-					class="flex flex-col gap-1 mb-2 max-h-40 overflow-y-auto"
-				>
+			<div v-else-if="view === 'new'" class="mx-auto flex w-full max-w-6xl flex-col gap-4">
+				<div class="flex items-center gap-2">
 					<button
-						v-for="i in itemResults"
-						:key="i.item_code"
 						type="button"
-						class="text-start px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
-						@click="addItem(i)"
+						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						:aria-label="__('Back')"
+						:title="__('Back')"
+						:disabled="submitting"
+						@click="view = 'list'"
 					>
-						{{ i.item_name || i.item_code }}
+						<FeatherIcon name="arrow-left" class="h-4 w-4" />
 					</button>
+					<h3 class="truncate text-base font-semibold text-gray-900">{{ __("New Reject Request") }}</h3>
 				</div>
-				<table v-if="form.items.length" class="w-full text-sm mb-3">
-					<tbody>
-						<tr v-for="(row, idx) in form.items" :key="row.item_code" class="border-t border-gray-100">
-							<td class="py-1.5 pe-2">{{ row.item_name }}</td>
-							<td class="py-1.5 pe-2 w-28">
-								<input
-									v-model.number="row.qty"
-									type="number"
-									min="0"
-									step="any"
-									class="w-full px-2 py-1 text-sm border border-gray-300 rounded-lg"
-								/>
-							</td>
-							<td class="py-1.5 w-8 text-end">
-								<button
-									type="button"
-									class="text-gray-400 hover:text-red-600"
-									:aria-label="__('Remove item')"
-									@click="form.items.splice(idx, 1)"
-								>
-									×
-								</button>
-							</td>
-						</tr>
-					</tbody>
-				</table>
 
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Reason") }}
-				</label>
-				<textarea
-					v-model="form.reason"
-					rows="3"
-					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-				/>
+				<section class="rounded-xl border border-gray-200 bg-white p-4">
+					<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Request Information") }}</h4>
+					<div class="grid gap-3 sm:grid-cols-2">
+						<div>
+							<label for="rr-purpose" class="mb-1 block text-xs font-medium text-gray-700">
+								{{ __("Purpose") }} <span class="text-red-500">*</span>
+							</label>
+							<select
+								id="rr-purpose"
+								v-model="form.purpose"
+								data-testid="purpose-select"
+								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							>
+								<option v-for="p in purposes" :key="p" :value="p">{{ __(p) }}</option>
+							</select>
+						</div>
+						<div>
+							<label for="rr-incident-date" class="mb-1 block text-xs font-medium text-gray-700">
+								{{ __("Incident Date") }} <span class="text-red-500">*</span>
+							</label>
+							<input
+								id="rr-incident-date"
+								v-model="form.incident_date"
+								type="date"
+								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							/>
+						</div>
+					</div>
+					<p v-if="posProfile" class="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
+						{{ __("Outlet") }}: <b class="font-medium text-gray-700">{{ posProfile }}</b>
+					</p>
+				</section>
 
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Video Link") }}
-				</label>
-				<input
-					v-model="form.video_link"
-					type="text"
-					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-				/>
-				<p v-if="form.video_link && !videoLinkOk" class="text-xs text-red-600 mb-3">
-					{{ __("Video link must start with http:// or https://") }}
-				</p>
-
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Evidence Photos (1-5)") }}
-				</label>
-				<PurchaseAttachments
-					editable
-					:pending="form.files"
-					:label="__('Evidence Photos')"
-					@add="addEvidence(form.files, $event)"
-					@remove="(row) => form.files.splice(form.files.indexOf(row), 1)"
-				/>
-
-				<div class="mt-4 flex justify-end gap-2">
-					<Button variant="subtle" :disabled="submitting" @click="view = 'list'">
-						{{ __("Back") }}
-					</Button>
-					<Button
-						variant="solid"
-						:loading="submitting"
-						:disabled="!canSubmit"
-						@click="submitNew"
+				<!-- items: ERPNext-style grid, the search row sits below the table -->
+				<section class="rounded-xl border border-gray-200 bg-white">
+					<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">
+						{{ __("Items") }} <span class="text-red-500">*</span>
+					</h4>
+					<div
+						class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_7rem_2rem] md:gap-3"
 					>
-						{{ __("Submit") }}
-					</Button>
+						<span>#</span>
+						<span>{{ __("Item") }}</span>
+						<span>{{ __("Qty") }}</span>
+						<span></span>
+					</div>
+					<div
+						v-for="(row, idx) in form.items"
+						:key="row.item_code"
+						class="grid grid-cols-[minmax(0,1fr)_6rem_2rem] items-center gap-2 border-b border-gray-100 px-4 py-2 hover:bg-gray-50 md:grid-cols-[2rem_minmax(0,1fr)_7rem_2rem] md:gap-3 md:py-1.5"
+					>
+						<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
+						<div class="min-w-0">
+							<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name }}</p>
+							<p v-if="row.item_name !== row.item_code" class="truncate text-xs text-gray-400">
+								{{ row.item_code }}
+							</p>
+						</div>
+						<input
+							v-model.number="row.qty"
+							type="number"
+							min="0"
+							step="any"
+							inputmode="decimal"
+							:aria-label="`${row.item_name} — ${__('Qty')}`"
+							class="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							:class="row.qty > 0 ? 'border-gray-300' : 'border-red-400 bg-red-50'"
+						/>
+						<button
+							type="button"
+							class="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+							:aria-label="__('Remove item')"
+							:title="__('Remove item')"
+							@click="form.items.splice(idx, 1)"
+						>
+							<FeatherIcon name="x" class="h-4 w-4" />
+						</button>
+					</div>
+					<div class="relative px-4 py-3">
+						<div class="relative">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="itemSearch"
+							type="text"
+							:placeholder="__('Search item...')"
+							:aria-label="__('Add item')"
+							class="w-full rounded-lg border border-dashed border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							@input="searchItems"
+						/>
+						</div>
+						<div
+							v-if="itemResults.length"
+							class="absolute inset-x-4 top-[3.25rem] z-10 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+						>
+							<button
+								v-for="i in itemResults"
+								:key="i.item_code"
+								type="button"
+								class="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none"
+								@click="addItem(i)"
+							>
+								<span class="truncate text-gray-900">{{ i.item_name || i.item_code }}</span>
+								<span v-if="i.item_name && i.item_name !== i.item_code" class="shrink-0 text-xs text-gray-400">
+									{{ i.item_code }}
+								</span>
+							</button>
+						</div>
+						<p v-if="!form.items.length" class="mt-2 text-xs text-gray-400">
+							{{ __("Search and pick the rejected items. Picking the same item twice keeps one row.") }}
+						</p>
+					</div>
+				</section>
+
+				<div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
+					<section class="order-2 rounded-xl border border-gray-200 bg-white p-4 md:order-1">
+						<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Reason & Evidence") }}</h4>
+						<label for="rr-reason" class="mb-1 block text-xs font-medium text-gray-700">
+							{{ __("Reason") }} <span class="text-red-500">*</span>
+						</label>
+						<textarea
+							id="rr-reason"
+							v-model="form.reason"
+							rows="3"
+							class="mb-3 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+						/>
+						<label for="rr-video" class="mb-1 block text-xs font-medium text-gray-700">
+							{{ __("Video Link") }}
+						</label>
+						<input
+							id="rr-video"
+							v-model="form.video_link"
+							type="text"
+							inputmode="url"
+							data-testid="video-link"
+							class="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							:class="form.video_link && !videoLinkOk ? 'border-red-400' : 'border-gray-300'"
+						/>
+						<p v-if="form.video_link && !videoLinkOk" class="mt-1 text-xs text-red-600">
+							{{ __("Video link must start with http:// or https://") }}
+						</p>
+						<div class="mt-3">
+							<PurchaseAttachments
+								editable
+								:pending="form.files"
+								:label="__('Evidence Photos (1-5)')"
+								@add="addEvidence(form.files, $event)"
+								@remove="(row) => form.files.splice(form.files.indexOf(row), 1)"
+							/>
+						</div>
+					</section>
+
+					<!-- what Submit still waits for, so a disabled button is never a mystery -->
+					<section class="order-1 rounded-xl border border-gray-200 bg-gray-50 p-4 md:order-2 md:self-start" data-testid="new-summary">
+						<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Before you submit") }}</h4>
+						<ul class="space-y-2 text-sm">
+							<li v-for="c in newChecklist" :key="c.label" class="flex items-center justify-between gap-3">
+								<span class="flex items-center gap-2" :class="c.ok ? 'text-gray-900' : 'text-gray-500'">
+									<FeatherIcon
+										:name="c.ok ? 'check-circle' : 'circle'"
+										class="h-4 w-4 shrink-0"
+										:class="c.ok ? 'text-green-600' : 'text-gray-300'"
+									/>
+									{{ c.label }}
+								</span>
+								<span class="tabular-nums text-xs text-gray-500">{{ c.value }}</span>
+							</li>
+						</ul>
+					</section>
 				</div>
-			</template>
+			</div>
 
 			<!-- DETAIL -->
-			<template v-else>
+			<div v-else class="mx-auto flex w-full max-w-6xl flex-col gap-4">
 				<div v-if="loadingDetail" class="py-10 text-center text-sm text-gray-500">
 					{{ __("Loading...") }}
 				</div>
 				<template v-else-if="detail">
-					<div class="flex items-start justify-between gap-2 mb-3">
-						<div>
-							<div class="font-medium text-gray-900">
-								{{ detail.name }}
-								<span
-									v-if="detail.is_late"
-									class="ms-2 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700"
-									>{{ __("Late") }}</span
-								>
-							</div>
-							<div class="text-xs text-gray-500 mt-0.5">
-								{{ __(detail.purpose) }} · {{ detail.incident_date }}
-							</div>
-						</div>
-						<span
-							class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
-							:class="statusClass(detail.status)"
+					<div class="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+							:aria-label="__('Back')"
+							:title="__('Back')"
+							@click="backToList"
 						>
-							{{ __(detail.status) }}
-						</span>
+							<FeatherIcon name="arrow-left" class="h-4 w-4" />
+						</button>
+						<h3 class="truncate text-base font-semibold text-gray-900">{{ detail.name }}</h3>
+						<span :class="statusPill(detail.status)">{{ __(detail.status) }}</span>
+						<span
+							v-if="detail.is_late"
+							class="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200"
+							>{{ __("Late") }}</span
+						>
 					</div>
 
-					<div class="overflow-x-auto -mx-1 px-1 mb-3">
-						<table class="w-full text-sm">
-							<thead>
-								<tr class="text-start text-xs text-gray-500 uppercase">
-									<th class="py-1 text-start">{{ __("Item") }}</th>
-									<th class="py-1 text-start">{{ __("Qty") }}</th>
-									<th class="py-1 text-start">{{ __("Amount") }}</th>
-								</tr>
-							</thead>
-							<tbody>
-								<tr v-for="row in detail.items" :key="row.item_code" class="border-t border-gray-100">
-									<td class="py-1.5 pe-2">{{ row.item_name || row.item_code }}</td>
-									<td class="py-1.5 pe-2 tabular-nums" data-testid="item-qty">{{ row.qty }}</td>
-									<td class="py-1.5 pe-2 tabular-nums">{{ row.amount }}</td>
-								</tr>
-							</tbody>
-						</table>
-					</div>
+					<div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
+						<div class="flex min-w-0 flex-col gap-4">
+							<section class="rounded-xl border border-gray-200 bg-white">
+								<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
+								<div
+									class="grid grid-cols-[minmax(0,1fr)_4rem_7rem] gap-3 border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500"
+								>
+									<span>{{ __("Item") }}</span>
+									<span class="text-end">{{ __("Qty") }}</span>
+									<span class="text-end">{{ __("Amount") }}</span>
+								</div>
+								<div
+									v-for="row in detail.items"
+									:key="row.item_code"
+									class="grid grid-cols-[minmax(0,1fr)_4rem_7rem] items-center gap-3 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0"
+								>
+									<span class="truncate text-gray-900">{{ row.item_name || row.item_code }}</span>
+									<span class="text-end tabular-nums" data-testid="item-qty">{{ row.qty }}</span>
+									<span class="text-end tabular-nums text-gray-700">{{ formatCurrency(row.amount) }}</span>
+								</div>
+								<p v-if="!detail.items?.length" class="px-4 py-4 text-center text-sm text-gray-500">
+									{{ __("No items") }}
+								</p>
+							</section>
 
-					<!-- Read-only facts for submitted requests: crew sees the reason,
-					     video link, evidence count and the Head Office verdict. -->
-					<dl v-if="detail.docstatus !== 0" class="grid grid-cols-1 gap-1.5 text-sm mb-3">
-						<div class="flex gap-2">
-							<dt class="text-gray-500 shrink-0 w-36">{{ __("Reason") }}</dt>
-							<dd class="text-gray-900 whitespace-pre-line">{{ detail.reason || "—" }}</dd>
-						</div>
-						<div v-if="detail.video_link" class="flex gap-2">
-							<dt class="text-gray-500 shrink-0 w-36">{{ __("Video Link") }}</dt>
-							<dd class="min-w-0">
+							<!-- Draft: crew-editable reason + video link + photos. Items are never
+							     editable here — qty on a system Production Loss is locked
+							     server-side, and a new Unsold request picks items in the New form. -->
+							<section v-if="detail.docstatus === 0" class="rounded-xl border border-gray-200 bg-white p-4">
+								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Reason & Evidence") }}</h4>
+								<label for="rr-detail-reason" class="mb-1 block text-xs font-medium text-gray-700">
+									{{ __("Reason") }} <span class="text-red-500">*</span>
+								</label>
+								<textarea
+									id="rr-detail-reason"
+									v-model="detail.reason"
+									rows="3"
+									class="mb-3 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+								/>
+								<label for="rr-detail-video" class="mb-1 block text-xs font-medium text-gray-700">
+									{{ __("Video Link") }}
+								</label>
+								<input
+									id="rr-detail-video"
+									v-model="detail.video_link"
+									type="text"
+									inputmode="url"
+									data-testid="video-link"
+									class="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									:class="detail.video_link && !videoLinkOk ? 'border-red-400' : 'border-gray-300'"
+								/>
 								<a
+									v-if="detail.video_link && videoLinkOk"
 									:href="detail.video_link"
 									target="_blank"
 									rel="noopener"
-									class="text-blue-600 hover:underline break-all"
+									class="mt-1 block break-all text-xs text-blue-600 hover:underline"
 									>{{ detail.video_link }}</a
 								>
-							</dd>
-						</div>
-						<div class="flex gap-2">
-							<dt class="text-gray-500 shrink-0 w-36">{{ __("Evidence Photos") }}</dt>
-							<dd class="text-gray-900 tabular-nums">{{ detail.evidence.length }}</dd>
-						</div>
-						<template v-if="detail.decision">
-							<div class="flex gap-2">
-								<dt class="text-gray-500 shrink-0 w-36">{{ __("Decision") }}</dt>
-								<dd class="font-medium text-gray-900">
-									{{ __(detail.decision) }}
-									<span class="block text-xs font-normal text-gray-500">
-										{{
-											detail.decision === "Approved"
-												? __("Borne by company")
-												: detail.decision === "Rejected"
-													? __("Borne by crew")
-													: ""
-										}}
-									</span>
-								</dd>
-							</div>
-							<div v-if="detail.decision_notes" class="flex gap-2">
-								<dt class="text-gray-500 shrink-0 w-36">{{ __("Decision Notes") }}</dt>
-								<dd class="text-gray-900 whitespace-pre-line">{{ detail.decision_notes }}</dd>
-							</div>
-							<div
-								v-if="detail.decision === 'Rejected' && detail.liabilities?.length"
-								class="flex gap-2"
-							>
-								<dt class="text-gray-500 shrink-0 w-36">{{ __("Liability") }}</dt>
-								<dd class="min-w-0">
-									<div
-										v-for="l in detail.liabilities"
-										:key="l.user"
-										class="text-gray-900 tabular-nums"
-									>
-										{{ l.user }} · {{ l.amount }}
+								<p v-if="detail.video_link && !videoLinkOk" class="mt-1 text-xs text-red-600">
+									{{ __("Video link must start with http:// or https://") }}
+								</p>
+								<div class="mt-3 flex flex-col gap-2">
+									<PurchaseAttachments :attached="detail.evidence" :label="__('Evidence Photos (1-5)')" />
+									<PurchaseAttachments
+										editable
+										:pending="newEvidence"
+										:label="__('Add Evidence Photos')"
+										@add="addEvidence(newEvidence, $event)"
+										@remove="(row) => newEvidence.splice(newEvidence.indexOf(row), 1)"
+									/>
+								</div>
+							</section>
+
+							<!-- submitted: read-only reason, video link and evidence -->
+							<section v-else class="rounded-xl border border-gray-200 bg-white p-4">
+								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Reason & Evidence") }}</h4>
+								<dl class="space-y-2 text-sm">
+									<div>
+										<dt class="text-xs text-gray-500">{{ __("Reason") }}</dt>
+										<dd class="whitespace-pre-line text-gray-900">{{ detail.reason || "—" }}</dd>
 									</div>
-								</dd>
-							</div>
-						</template>
-					</dl>
+									<div v-if="detail.video_link">
+										<dt class="text-xs text-gray-500">{{ __("Video Link") }}</dt>
+										<dd>
+											<a
+												:href="detail.video_link"
+												target="_blank"
+												rel="noopener"
+												class="break-all text-blue-600 hover:underline"
+												>{{ detail.video_link }}</a
+											>
+										</dd>
+									</div>
+								</dl>
+								<div class="mt-3">
+									<PurchaseAttachments :attached="detail.evidence" :label="__('Evidence Photos')" />
+								</div>
+							</section>
 
-					<!-- Crew-editable fields on a Draft: reason + video link + photos.
-					     Items are never editable here — qty on a system Production Loss
-					     is locked server-side, and a new Unsold request picks items in
-					     the New form. -->
-					<template v-if="detail.docstatus === 0">
-						<label class="block text-sm font-medium text-gray-700 mb-1">
-							{{ __("Reason") }}
-						</label>
-						<textarea
-							v-model="detail.reason"
-							rows="3"
-							class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-						/>
-
-						<label class="block text-sm font-medium text-gray-700 mb-1">
-							{{ __("Video Link") }}
-						</label>
-						<input
-							v-model="detail.video_link"
-							type="text"
-							class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-						/>
-						<a
-							v-if="detail.video_link && videoLinkOk"
-							:href="detail.video_link"
-							target="_blank"
-							rel="noopener"
-							class="block mb-3 text-sm text-blue-600 hover:underline break-all"
-							>{{ detail.video_link }}</a
-						>
-						<p v-if="detail.video_link && !videoLinkOk" class="text-xs text-red-600 mb-3">
-							{{ __("Video link must start with http:// or https://") }}
-						</p>
-
-						<label class="block text-sm font-medium text-gray-700 mb-1">
-							{{ __("Evidence Photos (1-5)") }}
-						</label>
-						<PurchaseAttachments
-							:attached="detail.evidence"
-							:label="__('Evidence Photos')"
-						/>
-						<PurchaseAttachments
-							editable
-							:pending="newEvidence"
-							:label="__('Add Evidence Photos')"
-							@add="addEvidence(newEvidence, $event)"
-							@remove="(row) => newEvidence.splice(newEvidence.indexOf(row), 1)"
-						/>
-
-						<div class="mt-2 flex justify-end gap-2">
-							<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-							<Button
-								variant="solid"
-								:loading="submitting"
-								:disabled="!canSubmitDetail"
-								@click="submitDetail"
+							<!-- Approved/Rejected: upload destruction proof, then close -->
+							<section
+								v-if="detail.status === 'Approved' || detail.status === 'Rejected'"
+								class="rounded-xl border border-gray-200 bg-white p-4"
 							>
-								{{ __("Submit") }}
-							</Button>
+								<h4 class="mb-1 text-sm font-semibold text-gray-900">{{ __("Destruction Photos") }}</h4>
+								<p class="mb-3 text-xs text-gray-500">
+									{{ __("Upload proof the stock was destroyed, then close the request.") }}
+								</p>
+								<div class="flex flex-col gap-2">
+									<PurchaseAttachments :attached="detail.destruction" :label="__('Destruction Photos')" />
+									<PurchaseAttachments
+										editable
+										:pending="newDestruction"
+										:label="__('Add Destruction Photos')"
+										@add="addDestruction($event)"
+										@remove="(row) => newDestruction.splice(newDestruction.indexOf(row), 1)"
+									/>
+								</div>
+							</section>
 						</div>
-					</template>
 
-					<!-- Pending: the crew can still withdraw the request -->
-					<template v-else-if="detail.status === 'Pending'">
-						<div class="mt-2 flex justify-end gap-2">
-							<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-							<Button variant="subtle" theme="red" :loading="acting" @click="doCancel">
-								{{ __("Cancel") }}
-							</Button>
-						</div>
-					</template>
+						<div class="flex flex-col gap-4">
+							<section class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Summary") }}</h4>
+								<dl class="space-y-2 text-sm">
+									<div class="flex justify-between gap-3">
+										<dt class="text-gray-500">{{ __("Purpose") }}</dt>
+										<dd class="text-end font-medium text-gray-900">{{ __(detail.purpose) }}</dd>
+									</div>
+									<div class="flex justify-between gap-3">
+										<dt class="text-gray-500">{{ __("Incident Date") }}</dt>
+										<dd class="font-medium text-gray-900">{{ formatDate(detail.incident_date) }}</dd>
+									</div>
+									<div v-if="detail.deadline_date" class="flex justify-between gap-3">
+										<dt class="text-gray-500">{{ __("Deadline") }}</dt>
+										<dd class="font-medium text-gray-900">{{ formatDate(detail.deadline_date) }}</dd>
+									</div>
+									<div class="flex justify-between gap-3">
+										<dt class="text-gray-500">{{ __("Evidence Photos") }}</dt>
+										<dd class="font-medium tabular-nums text-gray-900">{{ detail.evidence.length }}</dd>
+									</div>
+									<div class="flex justify-between gap-3 border-t border-gray-200 pt-2">
+										<dt class="text-gray-500">{{ __("Total Amount") }}</dt>
+										<dd class="font-semibold tabular-nums text-gray-900">{{ formatCurrency(detail.total_amount) }}</dd>
+									</div>
+								</dl>
+							</section>
 
-					<!-- Approved/Rejected: upload destruction proof, then close -->
-					<template v-else-if="detail.status === 'Approved' || detail.status === 'Rejected'">
-						<label class="block text-sm font-medium text-gray-700 mb-1">
-							{{ __("Destruction Photos") }}
-						</label>
-						<PurchaseAttachments
-							:attached="detail.destruction"
-							:label="__('Destruction Photos')"
-						/>
-						<PurchaseAttachments
-							editable
-							:pending="newDestruction"
-							:label="__('Add Destruction Photos')"
-							@add="addDestruction($event)"
-							@remove="(row) => newDestruction.splice(newDestruction.indexOf(row), 1)"
-						/>
-
-						<div class="mt-2 flex justify-end gap-2">
-							<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-							<Button
-								variant="solid"
-								:loading="acting"
-								:disabled="!destructionCount"
-								@click="doClose"
+							<!-- Head Office verdict: who bears the loss -->
+							<section
+								v-if="detail.decision"
+								class="rounded-xl border p-4"
+								:class="detail.decision === 'Rejected' ? 'border-red-200 bg-red-50/40' : 'border-green-200 bg-green-50/40'"
 							>
-								{{ __("Close") }}
-							</Button>
+								<h4 class="text-sm font-semibold text-gray-900">{{ __("Decision") }}: {{ __(detail.decision) }}</h4>
+								<p class="mt-0.5 text-xs text-gray-600">
+									{{
+										detail.decision === "Approved"
+											? __("Borne by company")
+											: detail.decision === "Rejected"
+												? __("Borne by crew")
+												: ""
+									}}
+								</p>
+								<p v-if="detail.decision_notes" class="mt-3 whitespace-pre-line text-sm text-gray-900">
+									{{ detail.decision_notes }}
+								</p>
+								<ul
+									v-if="detail.decision === 'Rejected' && detail.liabilities?.length"
+									class="mt-3 divide-y divide-red-100 border-t border-red-100 text-sm"
+								>
+									<li v-for="l in detail.liabilities" :key="l.user" class="flex justify-between gap-3 py-1.5">
+										<span class="min-w-0 truncate text-gray-700">{{ l.user }}</span>
+										<span class="shrink-0 font-medium tabular-nums text-gray-900">{{ formatCurrency(l.amount) }}</span>
+									</li>
+								</ul>
+							</section>
 						</div>
-					</template>
-
-					<template v-else>
-						<div class="mt-2 flex justify-end">
-							<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-						</div>
-					</template>
+					</div>
 				</template>
-			</template>
+			</div>
+		</template>
+
+		<template #actions>
+			<div v-if="view === 'new'" class="mx-auto flex w-full max-w-6xl justify-between gap-2">
+				<Button variant="subtle" :disabled="submitting" @click="view = 'list'">{{ __("Back") }}</Button>
+				<Button variant="solid" :loading="submitting" :disabled="!canSubmit" @click="submitNew">
+					{{ __("Submit") }}
+				</Button>
+			</div>
+			<div v-else-if="view === 'detail' && detail && !loadingDetail" class="mx-auto flex w-full max-w-6xl justify-between gap-2">
+				<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
+				<Button
+					v-if="detail.docstatus === 0"
+					variant="solid"
+					:loading="submitting"
+					:disabled="!canSubmitDetail"
+					@click="submitDetail"
+				>
+					{{ __("Submit") }}
+				</Button>
+				<!-- Pending: the crew can still withdraw the request -->
+				<Button
+					v-else-if="detail.status === 'Pending'"
+					variant="subtle"
+					theme="red"
+					:loading="acting"
+					@click="doCancel"
+				>
+					{{ __("Cancel") }}
+				</Button>
+				<Button
+					v-else-if="detail.status === 'Approved' || detail.status === 'Rejected'"
+					variant="solid"
+					:loading="acting"
+					:disabled="!destructionCount"
+					@click="doClose"
+				>
+					{{ __("Close") }}
+				</Button>
+			</div>
 		</template>
 	</DialogHost>
 </template>
 
 <script setup>
-import { Button, call } from "frappe-ui"
+import { Button, FeatherIcon, call } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
+import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { fileToBase64, sanitizePickedFiles } from "@/utils/attachments"
 
@@ -441,6 +564,7 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue"])
 
 const { showSuccess, showError } = useToast()
+const { formatCurrency, formatDate } = useFormatters()
 
 const show = ref(props.modelValue)
 watch(
@@ -519,14 +643,25 @@ async function loadPurposes() {
 	}
 }
 
-function statusClass(status) {
-	if (status === "Pending") return "bg-blue-100 text-blue-700"
-	if (status === "Approved") return "bg-green-100 text-green-700"
-	if (status === "Rejected") return "bg-red-100 text-red-700"
-	if (status === "Cancelled") return "bg-red-100 text-red-700"
-	if (status === "Closed") return "bg-gray-100 text-gray-600"
-	return "bg-yellow-100 text-yellow-700"
+const STATUS_TONES = {
+	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
+	Pending: "bg-blue-50 text-blue-700 ring-blue-200",
+	Approved: "bg-green-50 text-green-700 ring-green-200",
+	Rejected: "bg-red-50 text-red-700 ring-red-200",
+	Closed: "bg-gray-100 text-gray-600 ring-gray-200",
+	Cancelled: "bg-gray-50 text-gray-500 ring-gray-200",
 }
+
+function statusPill(status) {
+	return [
+		"inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		STATUS_TONES[status] || "bg-gray-50 text-gray-700 ring-gray-200",
+	]
+}
+
+const dialogTitle = computed(() =>
+	view.value === "new" ? __("New Reject Request") : __("Reject Requests"),
+)
 
 const videoLinkOk = computed(() => {
 	const link = (view.value === "detail" ? detail.value?.video_link : form.value.video_link) || ""
@@ -556,6 +691,18 @@ const canSubmit = computed(
 		form.value.files.length + uploadedEvidence.value <= MAX_EVIDENCE &&
 		videoLinkOk.value,
 )
+
+// mirrors canSubmit item by item so the summary card explains a disabled Submit
+const newChecklist = computed(() => {
+	const photos = form.value.files.length + uploadedEvidence.value
+	const items = form.value.items
+	return [
+		{ label: __("Items"), value: items.length, ok: items.length > 0 && items.every((i) => i.qty > 0) },
+		{ label: __("Reason"), value: "", ok: !!form.value.reason.trim() },
+		{ label: __("Evidence Photos"), value: `${photos}/${MAX_EVIDENCE}`, ok: photos >= 1 && photos <= MAX_EVIDENCE },
+		{ label: __("Video Link"), value: form.value.video_link ? "" : __("Optional"), ok: !!form.value.video_link && videoLinkOk.value },
+	]
+})
 
 const canSubmitDetail = computed(
 	() =>

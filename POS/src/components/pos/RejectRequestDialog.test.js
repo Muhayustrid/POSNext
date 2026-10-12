@@ -14,7 +14,8 @@ vi.mock("frappe-ui", async () => {
 		name: "DialogStub",
 		props: ["modelValue", "options"],
 		setup(_, { slots }) {
-			return () => slots["body-content"]?.()
+			// the real Dialog renders the footer actions slot too
+			return () => [slots["body-content"]?.(), slots.actions?.()]
 		},
 	})
 	const Button = defineComponent({
@@ -533,7 +534,7 @@ describe("RejectRequestDialog", () => {
 			findButton(wrapper, "Submit").attributes("disabled"),
 		).toBeUndefined()
 
-		await wrapper.find('input[type="text"]:not([placeholder])').setValue("ftp://nope")
+		await wrapper.find('[data-testid="video-link"]').setValue("ftp://nope")
 		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
 		expect(wrapper.text()).toContain(
 			"Video link must start with http:// or https://",
@@ -697,8 +698,9 @@ describe("RejectRequestDialog", () => {
 
 		expect(wrapper.text()).toContain("kru1@example.com")
 		expect(wrapper.text()).toContain("kru2@example.com")
-		expect(wrapper.text()).toContain("3000")
-		expect(wrapper.text()).toContain("2000")
+		// amounts are currency-formatted (id-ID grouping)
+		expect(wrapper.text()).toContain("3.000")
+		expect(wrapper.text()).toContain("2.000")
 		// subtitle for the crew-borne decision
 		expect(wrapper.text()).toContain("Borne by crew")
 
@@ -728,7 +730,7 @@ describe("RejectRequestDialog", () => {
 		await findButton(wrapper, "PRJ-2601-0002").trigger("click")
 		await flushPromises()
 
-		const input = wrapper.find('input[type="text"]:not([placeholder])')
+		const input = wrapper.find('[data-testid="video-link"]')
 		// invalid first — no anchor
 		await input.setValue("javascript:alert(1)")
 		expect(wrapper.find('a[target="_blank"]').exists()).toBe(false)
