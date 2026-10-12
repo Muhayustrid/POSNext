@@ -4,8 +4,47 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "tab_general",
+  "section_break_profile",
   "pos_profile",
+  "column_break_profile",
   "enabled",
+  "invoice_type",
+  "tab_sales",
+  "section_break_general",
+  "allow_user_to_edit_additional_discount",
+  "allow_user_to_edit_item_discount",
+  "use_percentage_discount",
+  "max_discount_allowed",
+  "column_break_general",
+  "allow_user_to_edit_rate",
+  "price_replay_audit_only",
+  "decimal_precision",
+  "tax_inclusive",
+  "section_break_payments",
+  "allow_credit_sale",
+  "allow_customer_credit_payment",
+  "column_break_payments",
+  "allow_partial_payment",
+  "use_exact_amount",
+  "section_break_returns",
+  "allow_return",
+  "require_refund_code",
+  "return_validity_days",
+  "column_break_returns",
+  "allow_return_without_invoice",
+  "allow_free_batch_return",
+  "section_break_operations",
+  "allow_sales_order",
+  "allow_select_sales_order",
+  "column_break_operations",
+  "create_only_sales_order",
+  "allow_customer_purchase_order",
+  "section_break_customer",
+  "allow_duplicate_customer_names",
+  "fetch_coupon",
+  "column_break_customer",
+  "enable_sales_persons",
   "section_break_wallet",
   "enable_loyalty_program",
   "default_loyalty_program",
@@ -13,105 +52,96 @@
   "column_break_wallet",
   "auto_create_wallet",
   "loyalty_to_wallet",
-  "section_break_general",
-  "allow_user_to_edit_additional_discount",
-  "allow_user_to_edit_item_discount",
-  "allow_user_to_edit_rate",
-  "price_replay_audit_only",
-  "use_percentage_discount",
-  "max_discount_allowed",
-  "column_break_general",
-  "allow_credit_sale",
-  "allow_customer_credit_payment",
-  "allow_return",
-  "require_refund_code",
-  "allow_partial_payment",
-  "use_exact_amount",
-  "enable_sales_persons",
+  "section_break_delivery",
+  "use_delivery_charges",
+  "column_break_delivery",
+  "auto_set_delivery_charges",
+  "tab_display",
   "section_break_display",
   "default_card_view",
   "display_item_code",
-  "show_customer_balance",
+  "show_variants_as_items",
+  "input_qty",
   "column_break_display",
-  "hide_expected_amount",
   "display_discount_percentage",
   "display_discount_amount",
-  "show_variants_as_items",
-  "section_break_operations",
-  "allow_sales_order",
-  "allow_select_sales_order",
-  "create_only_sales_order",
-  "column_break_operations",
-  "allow_return_without_invoice",
-  "return_validity_days",
-  "allow_free_batch_return",
-  "allow_print_draft_invoices",
-  "section_break_pricing",
-  "decimal_precision",
-  "tax_inclusive",
-  "section_break_customer",
-  "allow_customer_purchase_order",
-  "allow_duplicate_customer_names",
-  "fetch_coupon",
+  "show_customer_balance",
+  "hide_expected_amount",
+  "section_break_misc",
+  "use_limit_search",
+  "column_break_misc",
+  "search_limit",
+  "tab_printing",
   "section_break_printing",
-  "allow_print_last_invoice",
-  "silent_print",
-  "print_mode",
   "print_driver",
+  "print_mode",
+  "silent_print",
+  "column_break_printing",
+  "allow_print_last_invoice",
+  "allow_print_draft_invoices",
+  "print_fallback_enabled",
+  "enable_pos_queue",
+  "section_break_imin",
   "imin_paper_width",
   "imin_custom_dots",
   "imin_cut_paper",
   "imin_print_copies",
   "imin_copy_delay_ms",
-  "imin_feed_dots",
-  "imin_tail_dots",
+  "imin_crew_slip_enabled",
+  "imin_queue_gap",
+  "column_break_imin",
   "imin_font_scale",
   "imin_crew_font_scale",
-  "imin_crew_slip_enabled",
   "imin_line_spacing",
+  "imin_feed_dots",
+  "imin_tail_dots",
   "imin_side_margin",
   "imin_top_margin",
-  "enable_pos_queue",
-  "imin_queue_gap",
+  "section_break_imin_eod",
   "imin_eod_print_copies",
   "imin_eod_copy_delay_ms",
-  "imin_eod_feed_dots",
-  "imin_eod_tail_dots",
   "imin_eod_font_scale",
   "imin_eod_line_spacing",
+  "column_break_imin_eod",
+  "imin_eod_feed_dots",
+  "imin_eod_tail_dots",
   "imin_eod_side_margin",
   "imin_eod_top_margin",
-  "print_fallback_enabled",
-  "section_break_delivery",
-  "use_delivery_charges",
-  "auto_set_delivery_charges",
-  "section_break_advanced",
-  "use_limit_search",
-  "search_limit",
-  "column_break_advanced",
-  "allow_submissions_in_background_job",
-  "allow_delete_offline_invoice",
-  "allow_change_posting_date",
-  "section_break_misc",
-  "input_qty",
+  "tab_system",
   "section_break_security",
   "enable_session_lock",
+  "column_break_security",
   "session_lock_timeout",
+  "section_break_advanced",
+  "allow_submissions_in_background_job",
+  "allow_delete_offline_invoice",
+  "column_break_advanced",
+  "allow_change_posting_date",
+  "tab_purchasing",
   "section_break_purchase_order",
   "po_default_supplier",
   "po_default_warehouse",
+  "column_break_purchase_order",
   "po_default_price_list",
   "po_receive_requires_delivery_note",
-  "barcode_tab",
-  "barcode_rules",
-  "invoice_type",
   "section_break_production",
   "production_source_warehouse",
   "column_break_production",
   "production_fg_warehouse",
-  "reject_warehouse"
+  "reject_warehouse",
+  "barcode_tab",
+  "barcode_rules"
  ],
  "fields": [
+  {
+   "fieldname": "tab_general",
+   "fieldtype": "Tab Break",
+   "label": "General"
+  },
+  {
+   "fieldname": "section_break_profile",
+   "fieldtype": "Section Break"
+  },
   {
    "fieldname": "pos_profile",
    "fieldtype": "Link",
@@ -122,11 +152,247 @@
    "unique": 1
   },
   {
+   "fieldname": "column_break_profile",
+   "fieldtype": "Column Break"
+  },
+  {
    "default": "1",
    "description": "Enable custom POS settings for this profile",
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled"
+  },
+  {
+   "default": "POS Invoice",
+   "description": "Hidden placeholder: ERPNext v16 core validates POS Settings.invoice_type on POS Invoice, Sales Invoice and POS Closing Entry. The live value lives on POS Next Global Settings.",
+   "fieldname": "invoice_type",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Invoice Type Created via POS Screen",
+   "options": "Sales Invoice\nPOS Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tab_sales",
+   "fieldtype": "Tab Break",
+   "label": "Sales"
+  },
+  {
+   "fieldname": "section_break_general",
+   "fieldtype": "Section Break",
+   "label": "Discounts & Pricing"
+  },
+  {
+   "default": "0",
+   "description": "Enable cart-wide discount",
+   "fieldname": "allow_user_to_edit_additional_discount",
+   "fieldtype": "Check",
+   "label": "Allow Additional Discount"
+  },
+  {
+   "default": "1",
+   "description": "Enable item-level discount in edit dialog",
+   "fieldname": "allow_user_to_edit_item_discount",
+   "fieldtype": "Check",
+   "label": "Allow Item Discount"
+  },
+  {
+   "default": "0",
+   "description": "Show discounts as percentages",
+   "fieldname": "use_percentage_discount",
+   "fieldtype": "Check",
+   "label": "Use Percentage Discount"
+  },
+  {
+   "default": "0",
+   "description": "Maximum discount percentage (enforced in UI)",
+   "fieldname": "max_discount_allowed",
+   "fieldtype": "Float",
+   "label": "Max Discount Percentage Allowed",
+   "precision": "2"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Allow user to edit item rate in cart. Rate editing is automatically disabled when promotional offers are applied to an item.",
+   "fieldname": "allow_user_to_edit_rate",
+   "fieldtype": "Check",
+   "label": "Allow User To Edit Rate"
+  },
+  {
+   "default": "0",
+   "description": "Audit-only mode for the server-side offer price replay (SEC-23): magnitude mismatches between the submitted rate and the server-replayed offer rate are logged instead of rejected. Leave unchecked (default) to enforce and reject manipulated submissions.",
+   "fieldname": "price_replay_audit_only",
+   "fieldtype": "Check",
+   "label": "Price Replay Audit Only"
+  },
+  {
+   "default": "2",
+   "description": "Number of decimal places for amounts",
+   "fieldname": "decimal_precision",
+   "fieldtype": "Select",
+   "label": "Decimal Precision",
+   "options": "2\n3\n4\n5\n6"
+  },
+  {
+   "default": "0",
+   "description": "Automatically set taxes as included in item prices. When enabled, displayed prices include tax amounts.",
+   "fieldname": "tax_inclusive",
+   "fieldtype": "Check",
+   "label": "Tax Inclusive"
+  },
+  {
+   "fieldname": "section_break_payments",
+   "fieldtype": "Section Break",
+   "label": "Payments"
+  },
+  {
+   "default": "0",
+   "description": "Allow customers to buy on credit (negative balance/debt)",
+   "fieldname": "allow_credit_sale",
+   "fieldtype": "Check",
+   "label": "Allow Credit Sale"
+  },
+  {
+   "default": "0",
+   "description": "Allow customers to use their positive credit balance (from returns/overpayments) as payment",
+   "fieldname": "allow_customer_credit_payment",
+   "fieldtype": "Check",
+   "label": "Allow Customer Credit Payment"
+  },
+  {
+   "fieldname": "column_break_payments",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Enable partial payment for invoices",
+   "fieldname": "allow_partial_payment",
+   "fieldtype": "Check",
+   "label": "Allow Partial Payment"
+  },
+  {
+   "default": "0",
+   "description": "When enabled, non-cash payments (card, bank transfer) require exact amount. Cash payments can still have change. Cannot be used with Credit Sale or Partial Payment.",
+   "fieldname": "use_exact_amount",
+   "fieldtype": "Check",
+   "label": "Use Exact Amount for Non-Cash"
+  },
+  {
+   "fieldname": "section_break_returns",
+   "fieldtype": "Section Break",
+   "label": "Returns"
+  },
+  {
+   "default": "0",
+   "description": "Enable product returns",
+   "fieldname": "allow_return",
+   "fieldtype": "Check",
+   "label": "Allow Return"
+  },
+  {
+   "default": "1",
+   "description": "Refunds require a POS Discount Confirmation Code from head office (managed under Offers & Coupons)",
+   "fieldname": "require_refund_code",
+   "fieldtype": "Check",
+   "insert_after": "allow_return",
+   "label": "Require Code for Refund"
+  },
+  {
+   "default": "0",
+   "depends_on": "allow_return",
+   "description": "Number of days allowed for invoice returns. Set to 0 for unlimited returns.",
+   "fieldname": "return_validity_days",
+   "fieldtype": "Int",
+   "label": "Return Validity Days"
+  },
+  {
+   "fieldname": "column_break_returns",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Process returns without invoice reference",
+   "fieldname": "allow_return_without_invoice",
+   "fieldtype": "Check",
+   "label": "Allow Return Without Invoice"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_free_batch_return",
+   "fieldtype": "Check",
+   "label": "Allow Free Batch Return"
+  },
+  {
+   "fieldname": "section_break_operations",
+   "fieldtype": "Section Break",
+   "label": "Sales Orders"
+  },
+  {
+   "default": "0",
+   "description": "Enable sales order creation",
+   "fieldname": "allow_sales_order",
+   "fieldtype": "Check",
+   "label": "Allow Create Sales Order"
+  },
+  {
+   "default": "0",
+   "description": "Select from existing sales orders",
+   "fieldname": "allow_select_sales_order",
+   "fieldtype": "Check",
+   "label": "Allow Select Sales Order"
+  },
+  {
+   "fieldname": "column_break_operations",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Don't create invoices, only orders",
+   "fieldname": "create_only_sales_order",
+   "fieldtype": "Check",
+   "label": "Create Only Sales Order"
+  },
+  {
+   "default": "0",
+   "description": "Accept customer purchase orders",
+   "fieldname": "allow_customer_purchase_order",
+   "fieldtype": "Check",
+   "label": "Allow Customer Purchase Order"
+  },
+  {
+   "fieldname": "section_break_customer",
+   "fieldtype": "Section Break",
+   "label": "Customers"
+  },
+  {
+   "default": "0",
+   "description": "Permit duplicate customer names",
+   "fieldname": "allow_duplicate_customer_names",
+   "fieldtype": "Check",
+   "label": "Allow Duplicate Customer Names"
+  },
+  {
+   "default": "0",
+   "description": "Automatically apply eligible coupons",
+   "fieldname": "fetch_coupon",
+   "fieldtype": "Check",
+   "label": "Auto Fetch Coupon Gifts"
+  },
+  {
+   "fieldname": "column_break_customer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Disabled",
+   "description": "Disabled: No sales person selection. Single: Select one sales person (100%). Multiple: Select multiple with allocation percentages.",
+   "fieldname": "enable_sales_persons",
+   "fieldtype": "Select",
+   "label": "Sales Persons Selection",
+   "options": "Disabled\nSingle\nMultiple"
   },
   {
    "fieldname": "section_break_wallet",
@@ -181,113 +447,37 @@
    "read_only_depends_on": "enable_loyalty_program"
   },
   {
-   "fieldname": "section_break_general",
+   "fieldname": "section_break_delivery",
    "fieldtype": "Section Break",
-   "label": "General Settings"
+   "label": "Delivery"
   },
   {
    "default": "0",
-   "description": "Enable cart-wide discount",
-   "fieldname": "allow_user_to_edit_additional_discount",
+   "description": "Enable delivery fee calculation",
+   "fieldname": "use_delivery_charges",
    "fieldtype": "Check",
-   "label": "Allow Additional Discount"
+   "label": "Use Delivery Charges"
   },
   {
-   "default": "1",
-   "description": "Enable item-level discount in edit dialog",
-   "fieldname": "allow_user_to_edit_item_discount",
-   "fieldtype": "Check",
-   "label": "Allow Item Discount"
-  },
-  {
-   "default": "0",
-   "description": "Allow user to edit item rate in cart. Rate editing is automatically disabled when promotional offers are applied to an item.",
-   "fieldname": "allow_user_to_edit_rate",
-   "fieldtype": "Check",
-   "label": "Allow User To Edit Rate"
-  },
-  {
-   "default": "0",
-   "description": "Audit-only mode for the server-side offer price replay (SEC-23): magnitude mismatches between the submitted rate and the server-replayed offer rate are logged instead of rejected. Leave unchecked (default) to enforce and reject manipulated submissions.",
-   "fieldname": "price_replay_audit_only",
-   "fieldtype": "Check",
-   "label": "Price Replay Audit Only"
-  },
-  {
-   "default": "0",
-   "description": "Show discounts as percentages",
-   "fieldname": "use_percentage_discount",
-   "fieldtype": "Check",
-   "label": "Use Percentage Discount"
-  },
-  {
-   "default": "0",
-   "description": "Maximum discount percentage (enforced in UI)",
-   "fieldname": "max_discount_allowed",
-   "fieldtype": "Float",
-   "label": "Max Discount Percentage Allowed",
-   "precision": "2"
-  },
-  {
-   "fieldname": "column_break_general",
+   "fieldname": "column_break_delivery",
    "fieldtype": "Column Break"
   },
   {
    "default": "0",
-   "description": "Allow customers to buy on credit (negative balance/debt)",
-   "fieldname": "allow_credit_sale",
+   "description": "Automatically calculate delivery fee",
+   "fieldname": "auto_set_delivery_charges",
    "fieldtype": "Check",
-   "label": "Allow Credit Sale"
+   "label": "Auto Set Delivery Charges"
   },
   {
-   "default": "0",
-   "description": "Allow customers to use their positive credit balance (from returns/overpayments) as payment",
-   "fieldname": "allow_customer_credit_payment",
-   "fieldtype": "Check",
-   "label": "Allow Customer Credit Payment"
+   "fieldname": "tab_display",
+   "fieldtype": "Tab Break",
+   "label": "Display"
   },
   {
-   "default": "0",
-   "description": "Enable product returns",
-   "fieldname": "allow_return",
-   "fieldtype": "Check",
-   "label": "Allow Return"
-  },
-  {
-   "default": "1",
-   "description": "Refunds require a POS Discount Confirmation Code from head office (managed under Offers & Coupons)",
-   "fieldname": "require_refund_code",
-   "fieldtype": "Check",
-   "insert_after": "allow_return",
-   "label": "Require Code for Refund"
-  },
-  {
-   "default": "0",
-   "description": "Enable partial payment for invoices",
-   "fieldname": "allow_partial_payment",
-   "fieldtype": "Check",
-   "label": "Allow Partial Payment"
-  },
-  {
-   "default": "0",
-   "description": "When enabled, non-cash payments (card, bank transfer) require exact amount. Cash payments can still have change. Cannot be used with Credit Sale or Partial Payment.",
-   "fieldname": "use_exact_amount",
-   "fieldtype": "Check",
-   "label": "Use Exact Amount for Non-Cash"
-  },
-  {
-   "default": "Disabled",
-   "description": "Disabled: No sales person selection. Single: Select one sales person (100%). Multiple: Select multiple with allocation percentages.",
-   "fieldname": "enable_sales_persons",
-   "fieldtype": "Select",
-   "label": "Sales Persons Selection",
-   "options": "Disabled\nSingle\nMultiple"
-  },
-  {
-   "collapsible": 1,
    "fieldname": "section_break_display",
    "fieldtype": "Section Break",
-   "label": "Display Settings"
+   "label": "Item Display"
   },
   {
    "default": "0",
@@ -305,21 +495,21 @@
   },
   {
    "default": "0",
-   "description": "Display customer balance on screen",
-   "fieldname": "show_customer_balance",
+   "description": "Show item variants directly in the item grid instead of their template items. When disabled, template items are shown and variants are selected via a variant selector.",
+   "fieldname": "show_variants_as_items",
    "fieldtype": "Check",
-   "label": "Show Customer Balance"
+   "label": "Show Variants as Items"
+  },
+  {
+   "default": "0",
+   "description": "Show quantity input field",
+   "fieldname": "input_qty",
+   "fieldtype": "Check",
+   "label": "Use QTY Input"
   },
   {
    "fieldname": "column_break_display",
    "fieldtype": "Column Break"
-  },
-  {
-   "default": "0",
-   "description": "Hide expected cash amount in closing",
-   "fieldname": "hide_expected_amount",
-   "fieldtype": "Check",
-   "label": "Hide Expected Amount"
   },
   {
    "default": "0",
@@ -337,137 +527,58 @@
   },
   {
    "default": "0",
-   "description": "Show item variants directly in the item grid instead of their template items. When disabled, template items are shown and variants are selected via a variant selector.",
-   "fieldname": "show_variants_as_items",
+   "description": "Display customer balance on screen",
+   "fieldname": "show_customer_balance",
    "fieldtype": "Check",
-   "label": "Show Variants as Items"
+   "label": "Show Customer Balance"
   },
   {
-   "collapsible": 1,
-   "fieldname": "section_break_operations",
+   "default": "0",
+   "description": "Hide expected cash amount in closing",
+   "fieldname": "hide_expected_amount",
+   "fieldtype": "Check",
+   "label": "Hide Expected Amount"
+  },
+  {
+   "fieldname": "section_break_misc",
    "fieldtype": "Section Break",
-   "label": "Operations"
+   "label": "Search"
   },
   {
    "default": "0",
-   "description": "Enable sales order creation",
-   "fieldname": "allow_sales_order",
+   "description": "Limit search results for performance",
+   "fieldname": "use_limit_search",
    "fieldtype": "Check",
-   "label": "Allow Create Sales Order"
+   "label": "Use Limit Search"
   },
   {
-   "default": "0",
-   "description": "Select from existing sales orders",
-   "fieldname": "allow_select_sales_order",
-   "fieldtype": "Check",
-   "label": "Allow Select Sales Order"
-  },
-  {
-   "default": "0",
-   "description": "Don't create invoices, only orders",
-   "fieldname": "create_only_sales_order",
-   "fieldtype": "Check",
-   "label": "Create Only Sales Order"
-  },
-  {
-   "fieldname": "column_break_operations",
+   "fieldname": "column_break_misc",
    "fieldtype": "Column Break"
   },
   {
-   "default": "0",
-   "description": "Process returns without invoice reference",
-   "fieldname": "allow_return_without_invoice",
-   "fieldtype": "Check",
-   "label": "Allow Return Without Invoice"
-  },
-  {
-   "default": "0",
-   "depends_on": "allow_return",
-   "description": "Number of days allowed for invoice returns. Set to 0 for unlimited returns.",
-   "fieldname": "return_validity_days",
+   "default": "1000",
+   "description": "Maximum number of search results",
+   "fieldname": "search_limit",
    "fieldtype": "Int",
-   "label": "Return Validity Days"
+   "label": "Search Limit Number"
   },
   {
-   "default": "0",
-   "fieldname": "allow_free_batch_return",
-   "fieldtype": "Check",
-   "label": "Allow Free Batch Return"
+   "fieldname": "tab_printing",
+   "fieldtype": "Tab Break",
+   "label": "Printing"
   },
   {
-   "default": "0",
-   "description": "Print invoices before submission",
-   "fieldname": "allow_print_draft_invoices",
-   "fieldtype": "Check",
-   "label": "Allow Print Draft Invoices"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "section_break_pricing",
-   "fieldtype": "Section Break",
-   "label": "Pricing & Display"
-  },
-  {
-   "default": "2",
-   "description": "Number of decimal places for amounts",
-   "fieldname": "decimal_precision",
-   "fieldtype": "Select",
-   "label": "Decimal Precision",
-   "options": "2\n3\n4\n5\n6"
-  },
-  {
-   "default": "0",
-   "description": "Automatically set taxes as included in item prices. When enabled, displayed prices include tax amounts.",
-   "fieldname": "tax_inclusive",
-   "fieldtype": "Check",
-   "label": "Tax Inclusive"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "section_break_customer",
-   "fieldtype": "Section Break",
-   "label": "Customer Settings"
-  },
-  {
-   "default": "0",
-   "description": "Accept customer purchase orders",
-   "fieldname": "allow_customer_purchase_order",
-   "fieldtype": "Check",
-   "label": "Allow Customer Purchase Order"
-  },
-  {
-   "default": "0",
-   "description": "Permit duplicate customer names",
-   "fieldname": "allow_duplicate_customer_names",
-   "fieldtype": "Check",
-   "label": "Allow Duplicate Customer Names"
-  },
-  {
-   "default": "0",
-   "description": "Automatically apply eligible coupons",
-   "fieldname": "fetch_coupon",
-   "fieldtype": "Check",
-   "label": "Auto Fetch Coupon Gifts"
-  },
-  {
-   "collapsible": 1,
    "fieldname": "section_break_printing",
    "fieldtype": "Section Break",
    "label": "Printing"
   },
   {
-   "default": "0",
-   "description": "Reprint the last invoice",
-   "fieldname": "allow_print_last_invoice",
-   "fieldtype": "Check",
-   "label": "Allow Print Last Invoice"
-  },
-  {
-   "default": "0",
-   "description": "Print without dialog",
-   "fieldname": "silent_print",
-   "fieldtype": "Check",
-   "label": "Enable Silent Print"
+   "default": "browser",
+   "description": "Driver used for silent printing",
+   "fieldname": "print_driver",
+   "fieldtype": "Select",
+   "label": "Print Driver",
+   "options": "browser\nqz\nimin"
   },
   {
    "default": "Manual",
@@ -478,12 +589,49 @@
    "options": "Off\nManual\nAuto"
   },
   {
-   "default": "browser",
-   "description": "Driver used for silent printing",
-   "fieldname": "print_driver",
-   "fieldtype": "Select",
-   "label": "Print Driver",
-   "options": "browser\nqz\nimin"
+   "default": "0",
+   "description": "Print without dialog",
+   "fieldname": "silent_print",
+   "fieldtype": "Check",
+   "label": "Enable Silent Print"
+  },
+  {
+   "fieldname": "column_break_printing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Reprint the last invoice",
+   "fieldname": "allow_print_last_invoice",
+   "fieldtype": "Check",
+   "label": "Allow Print Last Invoice"
+  },
+  {
+   "default": "0",
+   "description": "Print invoices before submission",
+   "fieldname": "allow_print_draft_invoices",
+   "fieldtype": "Check",
+   "label": "Allow Print Draft Invoices"
+  },
+  {
+   "default": "1",
+   "description": "On failure, fall back down the chain (iMin → QZ → Browser)",
+   "fieldname": "print_fallback_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Print Fallback"
+  },
+  {
+   "default": "0",
+   "description": "Print a daily queue number on receipts from this outlet. Numbers are counted per company per day.",
+   "fieldname": "enable_pos_queue",
+   "fieldtype": "Check",
+   "label": "Enable POS Queue Number"
+  },
+  {
+   "fieldname": "section_break_imin",
+   "fieldtype": "Section Break",
+   "label": "iMin Receipt",
+   "depends_on": "eval:doc.print_driver==='imin'"
   },
   {
    "default": "58mm",
@@ -525,20 +673,24 @@
    "label": "Delay Between Copies (ms)"
   },
   {
-   "default": "160",
+   "default": "0",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Paper advance after each copy so the receipt clears the tear bar (dots = mm×8, e.g. 100≈12mm)",
-   "fieldname": "imin_feed_dots",
-   "fieldtype": "Int",
-   "label": "Advance Paper (dots)"
+   "description": "Print one crew slip after the customer copies, independent of the copy count.",
+   "fieldname": "imin_crew_slip_enabled",
+   "fieldtype": "Check",
+   "label": "Print Crew Slip"
   },
   {
-   "default": "24",
+   "default": "40",
    "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "White space appended inside the bitmap so the last line clears the tear bar (dots = mm×8, e.g. 24≈3mm). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
-   "fieldname": "imin_tail_dots",
+   "description": "Gap between the queue number and the content below it, in dots (dots = mm x 8, e.g. 40 = 5 mm). Applies to the customer receipt and the crew slip alike. 0-128.",
+   "fieldname": "imin_queue_gap",
    "fieldtype": "Int",
-   "label": "Tail Spacer (dots)"
+   "label": "Queue Number Gap (dots)"
+  },
+  {
+   "fieldname": "column_break_imin",
+   "fieldtype": "Column Break"
   },
   {
    "default": "100",
@@ -557,20 +709,28 @@
    "label": "Crew Copy Font Scale (%)"
   },
   {
-   "default": "0",
-   "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Print one crew slip after the customer copies, independent of the copy count.",
-   "fieldname": "imin_crew_slip_enabled",
-   "fieldtype": "Check",
-   "label": "Print Crew Slip"
-  },
-  {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
    "description": "Vertical density of the printed receipt and crew copy (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50–150.",
    "fieldname": "imin_line_spacing",
    "fieldtype": "Int",
    "label": "Line Spacing (%)"
+  },
+  {
+   "default": "160",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Paper advance after each copy so the receipt clears the tear bar (dots = mm×8, e.g. 100≈12mm)",
+   "fieldname": "imin_feed_dots",
+   "fieldtype": "Int",
+   "label": "Advance Paper (dots)"
+  },
+  {
+   "default": "24",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "White space appended inside the bitmap so the last line clears the tear bar (dots = mm×8, e.g. 24≈3mm). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
+   "fieldname": "imin_tail_dots",
+   "fieldtype": "Int",
+   "label": "Tail Spacer (dots)"
   },
   {
    "default": "16",
@@ -589,19 +749,10 @@
    "label": "Top Margin (dots)"
   },
   {
-   "default": "0",
-   "description": "Print a daily queue number on receipts from this outlet. Numbers are counted per company per day.",
-   "fieldname": "enable_pos_queue",
-   "fieldtype": "Check",
-   "label": "Enable POS Queue Number"
-  },
-  {
-   "default": "40",
-   "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Gap between the queue number and the content below it, in dots (dots = mm x 8, e.g. 40 = 5 mm). Applies to the customer receipt and the crew slip alike. 0-128.",
-   "fieldname": "imin_queue_gap",
-   "fieldtype": "Int",
-   "label": "Queue Number Gap (dots)"
+   "fieldname": "section_break_imin_eod",
+   "fieldtype": "Section Break",
+   "label": "iMin End of Day",
+   "depends_on": "eval:doc.print_driver==='imin'"
   },
   {
    "default": "1",
@@ -620,22 +771,6 @@
    "label": "EOD Delay Between Copies (ms)"
   },
   {
-   "default": "160",
-   "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "Paper advance after the EOD receipt so it clears the tear bar (dots = mm×8, e.g. 160≈20mm). 8–500.",
-   "fieldname": "imin_eod_feed_dots",
-   "fieldtype": "Int",
-   "label": "EOD Advance Paper (dots)"
-  },
-  {
-   "default": "24",
-   "depends_on": "eval:doc.print_driver==='imin'",
-   "description": "White space appended inside the EOD bitmap so the last line clears the tear bar (dots = mm×8). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
-   "fieldname": "imin_eod_tail_dots",
-   "fieldtype": "Int",
-   "label": "EOD Tail Spacer (dots)"
-  },
-  {
    "default": "100",
    "depends_on": "eval:doc.print_driver==='imin'",
    "description": "Font scale for the EOD receipt (percent), same 96 DPI authoring as the sales receipt; 100 = as authored. The EOD list is longer, so lower values fit more lines per page. 60–250.",
@@ -650,6 +785,26 @@
    "fieldname": "imin_eod_line_spacing",
    "fieldtype": "Int",
    "label": "EOD Line Spacing (%)"
+  },
+  {
+   "fieldname": "column_break_imin_eod",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "160",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "Paper advance after the EOD receipt so it clears the tear bar (dots = mm×8, e.g. 160≈20mm). 8–500.",
+   "fieldname": "imin_eod_feed_dots",
+   "fieldtype": "Int",
+   "label": "EOD Advance Paper (dots)"
+  },
+  {
+   "default": "24",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "White space appended inside the EOD bitmap so the last line clears the tear bar (dots = mm×8). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
+   "fieldname": "imin_eod_tail_dots",
+   "fieldtype": "Int",
+   "label": "EOD Tail Spacer (dots)"
   },
   {
    "default": "16",
@@ -668,55 +823,38 @@
    "label": "EOD Top Margin (dots)"
   },
   {
-   "default": "1",
-   "description": "On failure, fall back down the chain (iMin → QZ → Browser)",
-   "fieldname": "print_fallback_enabled",
-   "fieldtype": "Check",
-   "label": "Enable Print Fallback"
+   "fieldname": "tab_system",
+   "fieldtype": "Tab Break",
+   "label": "System"
   },
   {
-   "collapsible": 1,
-   "fieldname": "section_break_delivery",
+   "fieldname": "section_break_security",
    "fieldtype": "Section Break",
-   "label": "Delivery"
+   "label": "Security"
   },
   {
    "default": "0",
-   "description": "Enable delivery fee calculation",
-   "fieldname": "use_delivery_charges",
+   "description": "Lock the POS screen after a period of inactivity or when the browser tab loses focus",
+   "fieldname": "enable_session_lock",
    "fieldtype": "Check",
-   "label": "Use Delivery Charges"
+   "label": "Enable Session Lock"
   },
   {
-   "default": "0",
-   "description": "Automatically calculate delivery fee",
-   "fieldname": "auto_set_delivery_charges",
-   "fieldtype": "Check",
-   "label": "Auto Set Delivery Charges"
+   "fieldname": "column_break_security",
+   "fieldtype": "Column Break"
   },
   {
-   "collapsible": 1,
+   "default": "5",
+   "depends_on": "enable_session_lock",
+   "description": "Minutes of inactivity before the session is locked",
+   "fieldname": "session_lock_timeout",
+   "fieldtype": "Int",
+   "label": "Session Lock Timeout (minutes)"
+  },
+  {
    "fieldname": "section_break_advanced",
    "fieldtype": "Section Break",
-   "label": "Advanced Settings"
-  },
-  {
-   "default": "0",
-   "description": "Limit search results for performance",
-   "fieldname": "use_limit_search",
-   "fieldtype": "Check",
-   "label": "Use Limit Search"
-  },
-  {
-   "default": "1000",
-   "description": "Maximum number of search results",
-   "fieldname": "search_limit",
-   "fieldtype": "Int",
-   "label": "Search Limit Number"
-  },
-  {
-   "fieldname": "column_break_advanced",
-   "fieldtype": "Column Break"
+   "label": "Offline & Sync"
   },
   {
    "default": "0",
@@ -733,6 +871,10 @@
    "label": "Allow Delete Offline Invoice"
   },
   {
+   "fieldname": "column_break_advanced",
+   "fieldtype": "Column Break"
+  },
+  {
    "default": "0",
    "description": "Modify invoice posting date",
    "fieldname": "allow_change_posting_date",
@@ -740,38 +882,9 @@
    "label": "Allow Change Posting Date"
   },
   {
-   "collapsible": 1,
-   "fieldname": "section_break_misc",
-   "fieldtype": "Section Break",
-   "label": "Miscellaneous"
-  },
-  {
-   "default": "0",
-   "description": "Show quantity input field",
-   "fieldname": "input_qty",
-   "fieldtype": "Check",
-   "label": "Use QTY Input"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "section_break_security",
-   "fieldtype": "Section Break",
-   "label": "Security"
-  },
-  {
-   "default": "0",
-   "description": "Lock the POS screen after a period of inactivity or when the browser tab loses focus",
-   "fieldname": "enable_session_lock",
-   "fieldtype": "Check",
-   "label": "Enable Session Lock"
-  },
-  {
-   "default": "5",
-   "depends_on": "enable_session_lock",
-   "description": "Minutes of inactivity before the session is locked",
-   "fieldname": "session_lock_timeout",
-   "fieldtype": "Int",
-   "label": "Session Lock Timeout (minutes)"
+   "fieldname": "tab_purchasing",
+   "fieldtype": "Tab Break",
+   "label": "Purchasing & Production"
   },
   {
    "fieldname": "section_break_purchase_order",
@@ -793,6 +906,10 @@
    "options": "Warehouse"
   },
   {
+   "fieldname": "column_break_purchase_order",
+   "fieldtype": "Column Break"
+  },
+  {
    "description": "Buying price list for POS Purchase Orders (empty = the supplier's default price list applies)",
    "fieldname": "po_default_price_list",
    "fieldtype": "Link",
@@ -805,27 +922,6 @@
    "fieldname": "po_receive_requires_delivery_note",
    "fieldtype": "Check",
    "label": "Receive Requires Delivery Note"
-  },
-  {
-   "fieldname": "barcode_tab",
-   "fieldtype": "Tab Break",
-   "label": "Barcode"
-  },
-  {
-   "fieldname": "barcode_rules",
-   "fieldtype": "Table",
-   "label": "Barcode Rules",
-   "options": "POS Barcode Rules"
-  },
-  {
-   "default": "POS Invoice",
-   "description": "Hidden placeholder: ERPNext v16 core validates POS Settings.invoice_type on POS Invoice, Sales Invoice and POS Closing Entry. The live value lives on POS Next Global Settings.",
-   "fieldname": "invoice_type",
-   "fieldtype": "Select",
-   "hidden": 1,
-   "label": "Invoice Type Created via POS Screen",
-   "options": "Sales Invoice\nPOS Invoice",
-   "read_only": 1
   },
   {
    "fieldname": "section_break_production",
@@ -856,11 +952,22 @@
    "fieldtype": "Link",
    "label": "Reject Warehouse",
    "options": "Warehouse"
+  },
+  {
+   "fieldname": "barcode_tab",
+   "fieldtype": "Tab Break",
+   "label": "Barcode"
+  },
+  {
+   "fieldname": "barcode_rules",
+   "fieldtype": "Table",
+   "label": "Barcode Rules",
+   "options": "POS Barcode Rules"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-23 01:26:43.295794",
+ "modified": "2026-10-12 14:30:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
