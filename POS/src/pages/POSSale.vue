@@ -2755,9 +2755,10 @@ function openHistoryDialog() {
 /**
  * Printer icon in the header is a pure status indicator + reconnect button.
  * Click behavior:
- *  - not connected  -> attempt to reconnect (QZ Tray or iMin)
+ *  - not connected  -> attempt to reconnect (QZ Tray or iMin), which also
+ *                       raises the driver's access prompt
  *                       - success: toast "Printer connected"
- *                       - failure: toast + open Settings so the user can fix it
+ *                       - failure: toast only (Settings stays closed)
  *  - already connected -> toast only
  */
 const printerReconnecting = ref(false);
@@ -2800,11 +2801,12 @@ async function handlePrinterClick() {
 		printerReconnecting.value = false;
 	}
 
+	// No auto-jump to Settings on failure: it would cover the QZ/iMin
+	// permission prompt the reconnect just raised.
 	if (ok) {
 		showSuccess(__("Printer connected"));
 	} else {
 		showError(__("Printer not connected. Open Print Settings to configure it."));
-		openPOSMenu("settings");
 	}
 }
 

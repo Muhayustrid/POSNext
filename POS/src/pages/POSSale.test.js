@@ -638,7 +638,7 @@ describe("View Shift with active shift", () => {
 })
 
 describe("header printer icon", () => {
-	it("opens Settings when the reconnect attempt fails", async () => {
+	it("keeps Settings closed when the reconnect attempt fails", async () => {
 		await mountPOS({
 			POSHeader: defineComponent({
 				name: "POSHeader",
@@ -652,8 +652,7 @@ describe("header printer icon", () => {
 		await flushPromises()
 
 		const menu = wrapper.find('[data-test="pos-menu"]')
-		expect(menu.attributes("data-open")).toBe("true")
-		expect(menu.attributes("data-view")).toBe("settings")
+		expect(menu.attributes("data-open")).not.toBe("true")
 	})
 
 	it("passes the connecting state to the header while reconnecting", async () => {
