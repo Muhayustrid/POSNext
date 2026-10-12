@@ -24,8 +24,14 @@ TRANSFER_REMARK_PREFIX = "POS Reject transfer: "
 ISSUE_REMARK_PREFIX = "POS Reject write-off: "
 APPROVER_ROLE = "POSNext Reject Approver"
 MAX_EVIDENCE = 5
-DECISIONS = ("Write Off", "Charge Crew", "Rejected")
+DECISIONS = ("Approved", "Rejected")
 AUTO_REASON_PREFIX = "Auto: production loss on "
+
+
+def is_system_purpose(purpose):
+	"""True when the purpose is a system purpose (currently Production Loss).
+	Non-existent purposes are never system."""
+	return bool(frappe.db.get_value("POS Reject Purpose", purpose, "is_system"))
 
 
 def validate_request(doc):
@@ -43,15 +49,21 @@ def validate_request(doc):
 
 	settings = frappe.get_doc("POS Reject Settings")
 	days = settings.deadline_days
-	if doc.purpose == "Production Loss" and (settings.production_loss_deadline_days or 0) > 0:
+	if is_system_purpose(doc.purpose) and (settings.production_loss_deadline_days or 0) > 0:
 		days = settings.production_loss_deadline_days
 	doc.deadline_date = add_days(incident, days or 0)
 
-	if doc.purpose == "Production Loss" and not (
+	if is_system_purpose(doc.purpose) and not (
 		doc.is_system_generated
 		or frappe.db.get_value("POS Reject Request", doc.name, "is_system_generated")
 	):
 		frappe.throw(_("Production Loss requests can only be created by the system from a Work Order"))
+
+	if doc._action == "submit" and doc.purpose and not is_system_purpose(doc.purpose):
+		# a Draft whose purpose got disabled (or was never a real non-system
+		# purpose) must not reach Pending — the system lane never re-checks
+		if not frappe.db.get_value("POS Reject Purpose", doc.purpose, "enabled"):
+			frappe.throw(_("Purpose {0} is disabled").format(doc.purpose))
 
 	# server-owned lifecycle fields: a client save or plain submit (Desk/REST,
 	# docstatus already 1 before validate) never sets them; the service layer
@@ -63,6 +75,7 @@ def validate_request(doc):
 	doc.transfer_entry = None
 	doc.issue_entry = None
 	doc.closed_on = None
+	doc.set("liabilities", [])
 	if doc.docstatus == 0:
 		doc.status = "Draft"
 
@@ -195,7 +208,7 @@ def _month_total(doc, incident):
 	return flt(
 		frappe.db.sql(
 			"""select sum(total_amount) from `tabPOS Reject Request`
-			where pos_profile = %s and docstatus = 1 and status != 'Rejected' and name != %s
+			where pos_profile = %s and docstatus = 1 and name != %s
 				and incident_date between %s and %s""",
 			(doc.pos_profile, doc.name or "", get_first_day(incident), get_last_day(incident)),
 		)[0][0]
@@ -204,11 +217,11 @@ def _month_total(doc, incident):
 
 def on_submit_request(doc):
 	doc.db_set("status", "Pending")
-	if doc.purpose == "Unsold":
+	if not is_system_purpose(doc.purpose):
 		_transfer_to_reject_warehouse(doc)
 	if doc.is_late and frappe.db.get_single_value("POS Reject Settings", "late_mode") == "Strict":
 		return apply_decision(
-			doc, "Charge Crew", _("Auto: past deadline (Strict mode)"), system=True
+			doc, "Rejected", _("Auto: past deadline (Strict mode)"), system=True
 		)
 	notify(approver_users(), _("New reject request {0}").format(doc.name), doc)
 	doc.add_comment("Comment", text=_("Submitted, waiting for a decision"))
@@ -293,11 +306,13 @@ def notify(users, subject, doc):
 		frappe.log_error(title="POS Reject Request email failed")
 
 
-def apply_decision(doc, decision, notes=None, system=False):
+def apply_decision(doc, decision, notes=None, liabilities=None, system=False):
 	"""Head Office verdict on a Pending request (segregation of duties).
 
-	The row is locked for update first: a double click loses the race and the
-	second call throws instead of creating a second Stock Entry.
+	Approved = the company bears the loss; Rejected = the crew bears it via
+	liability rows (defaults to the requester at full amount). The row is
+	locked for update first: a double click loses the race and the second call
+	throws instead of writing a second decision.
 	"""
 	decided_by = "Administrator" if system else frappe.session.user
 	if not system:
@@ -308,6 +323,7 @@ def apply_decision(doc, decision, notes=None, system=False):
 		if decided_by == doc.owner:
 			frappe.throw(_("You cannot decide your own request"), frappe.PermissionError)
 
+	# I1: the locked read's own result is used below — never re-read plain
 	status = frappe.db.get_value("POS Reject Request", doc.name, "status", for_update=True)
 	if status != "Pending":
 		frappe.throw(_("Only a Pending reject request can be decided"))
@@ -315,39 +331,86 @@ def apply_decision(doc, decision, notes=None, system=False):
 	decision = (decision or "").strip()
 	if decision not in DECISIONS:
 		frappe.throw(_("Decision must be one of {0}").format(", ".join(DECISIONS)))
-	if decision == "Rejected" and doc.purpose != "Unsold":
-		frappe.throw(_("Rejected only applies to an Unsold request"))
 	notes = (notes or "").strip()
-	if decision in ("Charge Crew", "Rejected") and not notes:
-		frappe.throw(_("Notes are required for {0}").format(decision))
+	if decision == "Rejected" and not notes:
+		frappe.throw(_("Notes are required for Rejected"))
 
-	if decision == "Rejected":
-		_return_to_outlet(doc)
-		status = "Rejected"
-	else:
-		status = "Approved"
-
+	liability_rows = _resolve_liabilities(doc, decision, liabilities)
 	doc.db_set("decision", decision)
 	doc.db_set("decision_notes", notes or None)
 	doc.db_set("decided_by", decided_by)
 	doc.db_set("decided_on", now())
-	doc.db_set("status", status)
+	doc.db_set("status", decision)
+	_write_liabilities(doc, liability_rows)
 	doc.add_comment("Comment", text=_("Decision: {0}").format(decision))
 	notify([doc.owner], _("Reject request {0}: {1}").format(doc.name, decision), doc)
 	return _payload(doc)
 
 
-def close_request(doc):
-	"""Close an Approved request once destruction proof is attached.
+def _resolve_liabilities(doc, decision, liabilities):
+	"""Validate and shape the liability rows for this decision."""
+	if decision == "Approved":
+		if liabilities:
+			frappe.throw(_("Approved requests cannot have crew liabilities"))
+		return []
+	if liabilities is None:
+		return [{"user": doc.owner, "amount": flt(doc.total_amount)}]
+	rows = []
+	seen = set()
+	for row in liabilities:
+		user = (row.get("user") or "").strip()
+		amount = flt(row.get("amount"))
+		if not user or not frappe.db.get_value("User", user, "enabled"):
+			frappe.throw(_("Liability user {0} must be an enabled user").format(user or "?"))
+		if amount <= 0:
+			frappe.throw(_("Liability amount must be greater than zero"))
+		if user in seen:
+			frappe.throw(_("Liability user {0} appears more than once").format(user))
+		seen.add(user)
+		rows.append({"user": user, "amount": amount})
+	if not rows:
+		return [{"user": doc.owner, "amount": flt(doc.total_amount)}]
+	precision = doc.precision("total_amount") or 2
+	if abs(sum(r["amount"] for r in rows) - flt(doc.total_amount)) > 0.5 * 10 ** -precision:
+		frappe.throw(
+			_("Liability amounts must add up to {0}").format(doc.get_formatted("total_amount"))
+		)
+	return rows
 
-	Unsold stock leaves the reject warehouse via a Material Issue to the
-	company's stock adjustment account; Production Loss never touched stock.
+
+def _write_liabilities(doc, rows):
+	"""Liabilities are server-owned: validate clears the table, so the rows go
+	in directly under ignore_permissions after the decision db_set — no
+	doc.save that could resurrect crew-forged values."""
+	# validate always clears the table, this is belt-and-braces for direct
+	# service calls on stale rows
+	frappe.db.delete("POS Reject Liability", {"parent": doc.name, "parentfield": "liabilities"})
+	for idx, row in enumerate(rows, start=1):
+		frappe.get_doc(
+			{
+				"doctype": "POS Reject Liability",
+				"parent": doc.name,
+				"parenttype": doc.doctype,
+				"parentfield": "liabilities",
+				"idx": idx,
+				**row,
+			}
+		).db_insert()
+
+
+def close_request(doc):
+	"""Close a decided request once destruction proof is attached.
+
+	Both Approved and Rejected hold the goods in the reject warehouse (they
+	are lost either way): a non-system purpose issues them out via a Material
+	Issue to the company's stock adjustment account; a system purpose never
+	touched stock.
 	"""
 	status, issue_entry = frappe.db.get_value(
 		"POS Reject Request", doc.name, ["status", "issue_entry"], for_update=True
 	)
-	if status != "Approved":
-		frappe.throw(_("Only an Approved reject request can be closed"))
+	if status not in DECISIONS:
+		frappe.throw(_("Only an Approved or Rejected reject request can be closed"))
 	if not frappe.db.count(
 		"File",
 		{
@@ -358,26 +421,12 @@ def close_request(doc):
 	):
 		frappe.throw(_("Attach at least one destruction photo"))
 
-	if doc.purpose == "Unsold" and not issue_entry:
+	if not is_system_purpose(doc.purpose) and not issue_entry:
 		doc.db_set("issue_entry", _write_off_reject_stock(doc).name)
 	doc.db_set("status", "Closed")
 	doc.db_set("closed_on", now())
 	doc.add_comment("Comment", text=_("Closed with destruction proof"))
 	return _payload(doc)
-
-
-def _return_to_outlet(doc):
-	"""Rejected: the outlet takes the goods back (mirrors the outbound transfer)."""
-	target = _resolve_profile(doc.pos_profile)[1]
-	rows = frappe.db.get_all(
-		"Stock Entry Detail",
-		filters={"parent": doc.transfer_entry, "parenttype": "Stock Entry"},
-		fields=["s_warehouse", "t_warehouse"],
-	)
-	source = next((r.t_warehouse for r in rows if r.t_warehouse), target)
-	return _make_stock_entry(
-		doc, "Material Transfer", source, target, TRANSFER_REMARK_PREFIX + doc.name + " return"
-	)
 
 
 def _write_off_reject_stock(doc):
@@ -427,4 +476,10 @@ def _payload(doc):
 		"status": frappe.db.get_value("POS Reject Request", doc.name, "status"),
 		"decision": frappe.db.get_value("POS Reject Request", doc.name, "decision"),
 		"issue_entry": frappe.db.get_value("POS Reject Request", doc.name, "issue_entry"),
+		"liabilities": frappe.get_all(
+			"POS Reject Liability",
+			filters={"parent": doc.name, "parenttype": doc.doctype, "parentfield": "liabilities"},
+			fields=["user", "amount"],
+			order_by="idx asc",
+		),
 	}

@@ -148,13 +148,23 @@ def _item_rows(value):
 	return out
 
 
+def _validate_crew_purpose(purpose):
+	"""Crew lane: the purpose must exist, be enabled and non-system."""
+	if not purpose or not frappe.db.get_value("POS Reject Purpose", purpose):
+		frappe.throw(_("A valid reject purpose is required"))
+	if reject_request.is_system_purpose(purpose):
+		frappe.throw(_("Purpose {0} can only be used by the system").format(purpose))
+	if not frappe.db.get_value("POS Reject Purpose", purpose, "enabled"):
+		frappe.throw(_("Purpose {0} is disabled").format(purpose))
+
+
 @frappe.whitelist()
 def save_reject_request(data, submit=0):
 	"""Insert or update a crew draft (docstatus 0), optionally submit it.
 
-	New rows are always purpose Unsold; existing rows may only change
-	reason / video_link / incident_date / items (never system-only fields:
-	is_system_generated, work_order, owner, status).
+	New rows require a non-system, enabled purpose; existing rows may only
+	change purpose / reason / video_link / incident_date / items (never
+	system-only fields: is_system_generated, work_order, owner, status).
 	"""
 	data = _parse(data, {}) or {}
 	name = data.get("name")
@@ -164,6 +174,9 @@ def save_reject_request(data, submit=0):
 			_assert_profile_access(doc.pos_profile)
 			if doc.docstatus != 0:
 				frappe.throw(_("Only a Draft reject request can be edited"))
+			if "purpose" in data and not doc.is_system_generated:
+				_validate_crew_purpose(data.get("purpose"))
+				doc.purpose = data.get("purpose")
 			doc.reason = data.get("reason", doc.reason)
 			doc.video_link = data.get("video_link", doc.video_link)
 			if "incident_date" in data and not doc.is_system_generated:
@@ -175,8 +188,9 @@ def save_reject_request(data, submit=0):
 		else:
 			pos_profile = data.get("pos_profile")
 			_assert_profile_access(pos_profile)
+			_validate_crew_purpose(data.get("purpose"))
 			doc = frappe.new_doc("POS Reject Request")
-			doc.purpose = "Unsold"
+			doc.purpose = data.get("purpose")
 			doc.pos_profile = pos_profile
 			doc.incident_date = data.get("incident_date")
 			doc.reason = data.get("reason")
@@ -230,8 +244,8 @@ def attach_reject_files(name, kind, files):
 				frappe.throw(_("Evidence photos can only be attached to a Draft"))
 			if _count_files(name, "evidence") + len(parsed) > MAX_EVIDENCE:
 				frappe.throw(_("At most {0} evidence photos are allowed").format(MAX_EVIDENCE))
-		elif doc.status != "Approved":
-			frappe.throw(_("Destruction photos can only be attached to an Approved request"))
+		elif doc.status not in reject_request.DECISIONS:
+			frappe.throw(_("Destruction photos can only be attached after a decision"))
 
 		for f in parsed:
 			frappe.get_doc(
@@ -285,13 +299,33 @@ def close_reject_request(name):
 
 
 @frappe.whitelist()
-def decide_reject_request(name, decision, notes=None):
+def decide_reject_request(name, decision, notes=None, liabilities=None):
 	"""Head Office verdict — no profile gate; role/owner checks live in the
-	service (apply_decision), the outlet never sees this form."""
+	service (apply_decision), the outlet never sees this form. `liabilities`
+	is a JSON list of {user, amount} rows."""
 	try:
-		return reject_request.apply_decision(_doc(name), decision, notes)
+		return reject_request.apply_decision(
+			_doc(name), decision, notes, _parse(liabilities, None)
+		)
 	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Decide Reject Request Error")
 		frappe.throw(_("Error deciding reject request: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_reject_purposes():
+	"""Enabled non-system purposes for the POS dropdown."""
+	try:
+		return frappe.get_all(
+			"POS Reject Purpose",
+			filters={"enabled": 1, "is_system": 0},
+			pluck="name",
+			order_by="name asc",
+		)
+	except (ValidationError, frappe.PermissionError):
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Reject Purposes Error")
+		frappe.throw(_("Error fetching reject purposes: {0}").format(str(e)))

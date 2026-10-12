@@ -10,13 +10,6 @@ frappe.ui.form.on("POS Reject Request", {
 
 frappe.provide("pos_next_reject");
 
-pos_next_reject.DECISIONS = [
-	// Write Off needs no notes; the other two are mandatory (service enforces too)
-	{ decision: "Write Off", reqd: false },
-	{ decision: "Charge Crew", reqd: true },
-	{ decision: "Rejected", reqd: true },
-];
-
 pos_next_reject.decide_buttons = function (frm) {
 	if (frm.doc.status !== "Pending" || !frappe.user.has_role("POSNext Reject Approver")) {
 		return;
@@ -26,34 +19,113 @@ pos_next_reject.decide_buttons = function (frm) {
 		return;
 	}
 	const group = __("Decide");
-	for (const { decision, reqd } of pos_next_reject.DECISIONS) {
-		frm.add_custom_button(__(decision), () => pos_next_reject.prompt_decision(frm, decision, reqd), group);
-	}
+	frm.add_custom_button(__("Approved"), () => pos_next_reject.approved_dialog(frm), group);
+	frm.add_custom_button(__("Rejected"), () => pos_next_reject.rejected_dialog(frm), group);
 };
 
-pos_next_reject.prompt_decision = function (frm, decision, reqd) {
+pos_next_reject.decide = function (frm, decision, notes, liabilities) {
+	frappe
+		.call({
+			method: "pos_next.api.reject_request.decide_reject_request",
+			args: { name: frm.doc.name, decision, notes, liabilities },
+		})
+		.then(() => frm.reload_doc());
+};
+
+pos_next_reject.approved_dialog = function (frm) {
 	frappe.prompt(
 		[
 			{
 				fieldname: "notes",
 				fieldtype: "Small Text",
 				label: __("Notes"),
-				reqd: reqd ? 1 : 0,
-				description: reqd
-					? __("Notes are required for {0}", [__(decision)])
-					: __("Optional explanation for the crew"),
+				description: __("Optional explanation for the crew"),
 			},
 		],
-		(values) => {
-			frappe
-				.call({
-					method: "pos_next.api.reject_request.decide_reject_request",
-					args: { name: frm.doc.name, decision: decision, notes: values.notes },
-				})
-				.then(() => frm.reload_doc());
-		},
-		__("Decide: {0}", [__(decision)])
+		(values) => pos_next_reject.decide(frm, "Approved", values.notes),
+		__("Approve"),
+		__("Approve")
 	);
+};
+
+pos_next_reject.rejected_dialog = function (frm) {
+	let manually_edited = false;
+	const dialog = new frappe.ui.Dialog({
+		title: __("Decide: {0}", [__("Rejected")]),
+		fields: [
+			{
+				fieldname: "notes",
+				fieldtype: "Small Text",
+				label: __("Notes"),
+				reqd: 1,
+				description: __("Notes are required for {0}", [__("Rejected")]),
+			},
+			{
+				fieldname: "liabilities",
+				fieldtype: "Table",
+				label: __("Liabilities"),
+				// inline fields: the form's per-doc docfield copy breaks options-based grid meta
+				fields: [
+					{ fieldname: "user", fieldtype: "Link", options: "User", label: __("User"), reqd: 1, in_list_view: 1 },
+					{ fieldname: "amount", fieldtype: "Currency", label: __("Amount"), reqd: 1, in_list_view: 1 },
+				],
+				reqd: 1,
+				data: [{ user: frm.doc.owner, amount: frm.doc.total_amount }],
+				get_data() {
+					return dialog.get_value("liabilities");
+				},
+				// grid's own Add Row; programmatic changes never fire this
+				on_add_row() {
+					if (!manually_edited) pos_next_reject.redistribute(dialog, frm);
+				},
+			},
+			{
+				fieldname: "total_html",
+				fieldtype: "HTML",
+				options: "",
+			},
+		],
+		primary_action_label: __("Decide"),
+		primary_action(values) {
+			pos_next_reject.decide(frm, "Rejected", values.notes, values.liabilities);
+			dialog.hide();
+		},
+	});
+
+	// user keystrokes bubble a change event; programmatic grid edits do not
+	dialog.$body.on("change", 'input[data-fieldname="amount"]', () => {
+		manually_edited = true;
+		pos_next_reject.show_total(dialog, frm);
+	});
+
+	dialog.show();
+	pos_next_reject.show_total(dialog, frm);
+};
+
+pos_next_reject.show_total = function (dialog, frm) {
+	const rows = dialog.get_value("liabilities") || [];
+	const sum = rows.reduce((s, r) => s + (flt(r.amount) || 0), 0);
+	const fmt = (v) => format_currency(v, erpnext.get_currency(frm.doc.company));
+	dialog.$body
+		.find('[data-fieldname="total_html"]')
+		.html(`<div class="text-right">${__("Total {0} / {1}", [fmt(sum), fmt(frm.doc.total_amount)])}</div>`);
+};
+
+pos_next_reject.redistribute = function (dialog, frm) {
+	const rows = dialog.get_value("liabilities") || [];
+	const n = rows.length;
+	if (!n) return;
+	const precision = frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency_precision != null
+		? flt(frappe.boot.sysdefaults.currency_precision)
+		: 2;
+	const total = frm.doc.total_amount;
+	const share = flt(total / n, precision);
+	rows.forEach((r, i) => {
+		// last row absorbs rounding
+		r.amount = i === n - 1 ? total - share * (n - 1) : share;
+	});
+	dialog.fields_dict.liabilities.grid.refresh();
+	pos_next_reject.show_total(dialog, frm);
 };
 
 pos_next_reject.indicators = function (frm) {

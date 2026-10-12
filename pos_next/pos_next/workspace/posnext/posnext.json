@@ -16,7 +16,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Reports",
-   "link_count": 7,
+   "link_count": 8,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -103,9 +103,19 @@
   },
   {
    "hidden": 0,
+   "is_query_report": 1,
+   "label": "POS Reject Report",
+   "link_count": 0,
+   "link_to": "POS Reject Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
    "is_query_report": 0,
    "label": "Configuration",
-   "link_count": 2,
+   "link_count": 4,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -146,6 +156,26 @@
    "label": "Shift Group",
    "link_count": 0,
    "link_to": "POS Profile Group",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "POS Reject Request",
+   "link_count": 0,
+   "link_to": "POS Reject Request",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "POS Reject Purpose",
+   "link_count": 0,
+   "link_to": "POS Reject Purpose",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"

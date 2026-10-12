@@ -676,4 +676,52 @@ describe("ProductionDialog", () => {
 		expect(wrapper.text()).toContain("4.8%")
 		expect(wrapper.text()).toContain("Most produced")
 	})
+
+	// Reject badge: the draft name rides on the row; the label maps status.
+	// Only Draft offers "Submit report" — later states are already in the HO lane.
+	it.each([
+		["Draft", "Not submitted", "Submit report"],
+		["Pending", "Waiting for HO", null],
+		["Approved", "Approved", null],
+		["Rejected", "Rejected", null],
+		["Closed", "Closed", null],
+	])("history badge for %s shows %s", async (status, label, action) => {
+		mockCall(HISTORY_URL, () =>
+			Promise.resolve({
+				...HISTORY,
+				productions: [{ ...HISTORY.productions[0], reject_request: "PRJ-0001", reject_status: status }],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "History").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain(label)
+		const btn = findButton(wrapper, action || "____nope____")
+		expect(btn?.exists() ?? false).toBe(!!action)
+	})
+
+	it("emits open-reject-request with the request name from the Submit report button", async () => {
+		mockCall(HISTORY_URL, () =>
+			Promise.resolve({
+				...HISTORY,
+				productions: [{ ...HISTORY.productions[0], reject_request: "PRJ-0001", reject_status: "Draft" }],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "History").trigger("click")
+		await flushPromises()
+
+		await findButton(wrapper, "Submit report").trigger("click")
+		expect(wrapper.emitted("open-reject-request")).toEqual([["PRJ-0001"]])
+	})
+
+	it("no badge when the history row has no reject_request", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "History").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).not.toContain("Not submitted")
+		expect(wrapper.text()).not.toContain("Submit report")
+	})
 })

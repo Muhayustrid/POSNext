@@ -14,6 +14,7 @@ from pos_next.api.test_production import (
 	_seed_stock,
 )
 from pos_next.api.production import create_production, start_production, finish_production, close_production
+from pos_next.api.reject_request import attach_reject_files, save_reject_request
 from pos_next.services import reject_request
 
 SCHEMA = {
@@ -25,7 +26,7 @@ SCHEMA = {
 		"purpose", "pos_profile", "company", "incident_date", "deadline_date", "reason",
 		"video_link", "work_order", "is_system_generated", "items", "total_amount",
 		"is_late", "over_limit", "status", "decision", "decision_notes", "decided_by",
-		"decided_on", "transfer_entry", "issue_entry", "closed_on",
+		"decided_on", "transfer_entry", "issue_entry", "closed_on", "liabilities",
 	),
 	"POS Reject Request Item": (
 		"item_code", "item_name", "qty", "uom", "valuation_rate", "amount",
@@ -50,6 +51,9 @@ from pos_next.api.test_production import _make_test_item, _seed_stock
 
 class RejectRequestTest(FrappeTestCase):
 	def setUp(self):
+		from pos_next.install import ensure_reject_purposes
+
+		ensure_reject_purposes()
 		self.pos_profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
 		if not self.pos_profile:
 			self.skipTest("no POS Profile on this site")
@@ -169,6 +173,17 @@ class RejectRequestTest(FrappeTestCase):
 					"content": b"d" + bytes([i]),
 				}
 			).insert(ignore_permissions=True)
+
+	def _purpose(self, name, enabled=1, is_system=0):
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Reject Purpose",
+				"purpose_name": name,
+				"enabled": enabled,
+				"is_system": is_system,
+			}
+		).insert(ignore_permissions=True)
+		return doc.name
 
 	def _user(self, roles, prefix="rej"):
 		email = f"{prefix}-{frappe.generate_hash(length=6)}@example.com"
@@ -603,7 +618,7 @@ class TestRejectApi(RejectRequestTest):
 			self.assertEqual(detail["destruction"], [])
 			self.assertEqual(len(detail["items"]), 1)
 
-	def test_destruction_attach_only_when_approved(self):
+	def test_destruction_attach_allowed_when_rejected(self):
 		from pos_next.api.reject_request import (
 			attach_reject_files,
 			close_reject_request,
@@ -621,7 +636,7 @@ class TestRejectApi(RejectRequestTest):
 				frappe.ValidationError, attach_reject_files, doc.name, "bogus", self._b64file("x.txt", b"x")
 			)
 		with _as_user(approver):
-			decide_reject_request(doc.name, "Write Off")
+			decide_reject_request(doc.name, "Rejected", "crew liable")
 		with _as_user(crew):
 			attach_reject_files(doc.name, "destruction", self._b64file("d.txt", b"d"))
 			result = close_reject_request(doc.name)
@@ -680,10 +695,15 @@ class TestRejectApi(RejectRequestTest):
 				save_reject_request,
 				json.dumps({"name": doc.name, "reason": "rewrite"}),
 			)
-			# purpose from the client is never trusted — new rows are always Unsold
+			# purpose from the client is validated: system purposes are refused
+			self.assertRaises(
+				frappe.ValidationError,
+				save_reject_request,
+				self._payload(purpose="Production Loss"),
+			)
+			# server-only fields are never read from the payload
 			forged = save_reject_request(
 				self._payload(
-					purpose="Production Loss",
 					is_system_generated=1,
 					work_order="WO-BOGUS-0001",
 					owner="attacker@example.com",
@@ -720,7 +740,7 @@ class TestRejectApi(RejectRequestTest):
 			cancel_reject_request(doc.name)
 		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Cancelled")
 		with _as_user(approver):
-			self.assertRaises(frappe.ValidationError, decide_reject_request, doc.name, "Write Off")
+			self.assertRaises(frappe.ValidationError, decide_reject_request, doc.name, "Approved")
 
 	def test_cancel_refused_when_approved(self):
 		from pos_next.api.reject_request import cancel_reject_request, decide_reject_request
@@ -729,7 +749,7 @@ class TestRejectApi(RejectRequestTest):
 		approver = self._user(["POSNext Reject Approver"], prefix="api-cxap2")
 		doc = self._submitted(1)
 		with _as_user(approver):
-			decide_reject_request(doc.name, "Write Off")
+			decide_reject_request(doc.name, "Approved")
 		with _as_user(crew):
 			self.assertRaises(frappe.ValidationError, cancel_reject_request, doc.name)
 		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Approved")
@@ -829,6 +849,110 @@ class TestRejectApi(RejectRequestTest):
 				).insert(),
 			)
 
+	def test_save_with_system_purpose_throws(self):
+		crew = self._crew("api-sv1")
+		with _as_user(crew):
+			self.assertRaises(
+				frappe.ValidationError, save_reject_request, self._payload(purpose="Production Loss")
+			)
+
+	def test_save_with_disabled_purpose_throws(self):
+		self._purpose(f"Off {uuid.uuid4().hex[:4]}", enabled=0)
+		disabled = frappe.get_all(
+			"POS Reject Purpose", filters={"enabled": 0, "is_system": 0}, pluck="name", limit=1
+		)[0]
+		crew = self._crew("api-sv2")
+		with _as_user(crew):
+			self.assertRaises(
+				frappe.ValidationError, save_reject_request, self._payload(purpose=disabled)
+			)
+
+	def test_submit_with_disabled_purpose_throws(self):
+		crew = self._crew("api-sv3")
+		with _as_user(crew):
+			draft = save_reject_request(self._payload())
+		name = draft["name"]
+		frappe.db.set_value("POS Reject Purpose", "Unsold", "enabled", 0)
+		try:
+			doc = frappe.get_doc("POS Reject Request", name)
+			doc.reason = "late reason"
+			self._evidence(doc)
+			self.assertRaises(frappe.ValidationError, doc.submit)
+			self.assertEqual(frappe.db.get_value("POS Reject Request", name, "docstatus"), 0)
+		finally:
+			frappe.db.set_value("POS Reject Purpose", "Unsold", "enabled", 1)
+
+	def test_save_custom_purpose_moves_stock(self):
+		self._purpose("Rusak")
+		crew = self._crew("api-sv4")
+		with _as_user(crew):
+			draft = save_reject_request(self._payload(purpose="Rusak", reason="rusak jalur produksi"))
+			name = draft["name"]
+			attach_reject_files(name, "evidence", self._b64file("ev.txt", b"e1"))
+			result = save_reject_request(json.dumps({"name": name, "reason": "rusak jalur produksi"}), submit=1)
+		self.assertEqual(result["status"], "Pending")
+		doc = frappe.get_doc("POS Reject Request", name)
+		self.assertEqual(doc.purpose, "Rusak")
+		self.assertTrue(doc.transfer_entry)
+		self.assertEqual(self._bin(self.reject_wh), 1)
+		self.assertEqual(self._bin(self.warehouse), 9)
+
+
+
+class TestPurposeMaster(RejectRequestTest):
+	def test_seed_purposes(self):
+		from pos_next.install import ensure_reject_purposes
+
+		ensure_reject_purposes()
+		self.assertEqual(
+			frappe.db.get_value("POS Reject Purpose", "Unsold", "is_system"), 0
+		)
+		self.assertEqual(
+			frappe.db.get_value("POS Reject Purpose", "Production Loss", "is_system"), 1
+		)
+		ensure_reject_purposes()
+		self.assertEqual(
+			frappe.db.count("POS Reject Purpose", {"purpose_name": ["in", ["Unsold", "Production Loss"]]}), 2
+		)
+
+	def test_system_purpose_not_deletable(self):
+		p = frappe.get_doc("POS Reject Purpose", "Production Loss")
+		self.assertRaises(frappe.ValidationError, p.delete)
+
+	def test_system_flag_cannot_be_cleared(self):
+		p = frappe.get_doc("POS Reject Purpose", "Production Loss")
+		p.is_system = 0
+		self.assertRaises(frappe.ValidationError, p.save)
+
+	def test_get_reject_purposes_excludes_system_and_disabled(self):
+		from pos_next.api.reject_request import get_reject_purposes
+
+		self._purpose(f"Arch {uuid.uuid4().hex[:4]}", enabled=0)
+		purposes = get_reject_purposes()
+		self.assertIn("Unsold", purposes)
+		self.assertNotIn("Production Loss", purposes)
+		for p in purposes:
+			self.assertEqual(frappe.db.get_value("POS Reject Purpose", p, "enabled"), 1)
+			self.assertEqual(frappe.db.get_value("POS Reject Purpose", p, "is_system"), 0)
+
+	def test_forged_liabilities_cleared(self):
+		crew = self._user(["POSNext Cashier"], prefix="rej-liab")
+		doc = self._doc(1)
+		doc.append("liabilities", {"user": crew, "amount": 1})
+		doc.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.count("POS Reject Liability", {"parent": doc.name}), 0)
+		self._evidence(doc)
+		doc.reload()
+		doc.append("liabilities", {"user": crew, "amount": 1})
+		doc.submit()
+		self.assertEqual(frappe.db.count("POS Reject Liability", {"parent": doc.name}), 0)
+
+	def test_is_system_purpose_helper(self):
+		from pos_next.services.reject_request import is_system_purpose
+
+		self.assertTrue(is_system_purpose("Production Loss"))
+		self.assertFalse(is_system_purpose("Unsold"))
+		self.assertFalse(is_system_purpose("Nope"))
 
 
 class TestDecision(RejectRequestTest):
@@ -836,76 +960,275 @@ class TestDecision(RejectRequestTest):
 		super().setUp()
 		self.approver = self._user(["POSNext Reject Approver"], prefix="rej-dec")
 
-	def _decide(self, doc, decision, notes=None):
+	def _decide(self, doc, decision, notes=None, liabilities=None):
 		with _as_user(self.approver):
-			return reject_request.apply_decision(doc, decision, notes)
+			return reject_request.apply_decision(doc, decision, notes, liabilities)
 
 	def test_owner_cannot_decide_own_request(self):
 		owner = self._user(["POSNext Cashier", "POSNext Reject Approver"], prefix="rej-own")
 		doc = self._submitted(1)
 		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
 		with _as_user(owner):
-			self.assertRaises(frappe.PermissionError, reject_request.apply_decision, doc.reload() or doc, "Write Off", None)
+			self.assertRaises(frappe.PermissionError, reject_request.apply_decision, doc.reload() or doc, "Approved", None)
 
 	def test_non_approver_cannot_decide(self):
 		other = self._user(["POSNext Cashier"], prefix="rej-non")
 		doc = self._submitted(1)
 		with _as_user(other):
-			self.assertRaises(frappe.PermissionError, reject_request.apply_decision, doc, "Write Off", None)
+			self.assertRaises(frappe.PermissionError, reject_request.apply_decision, doc, "Approved", None)
 
-	def test_reject_returns_stock_and_needs_notes(self):
+	def test_approve_no_notes_ok(self):
 		doc = self._submitted(3)
-		self.assertRaises(frappe.ValidationError, self._decide, doc, "Rejected", None)
-		self.assertEqual(self._transfers(doc), 1)
-		self._decide(doc, "Rejected", "wrong batch")
-		self.assertEqual(self._bin(self.warehouse), 10)
-		self.assertEqual(self._bin(self.reject_wh), 0)
-		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Rejected")
-		self.assertEqual(self._transfers(doc), 2)
-
-	def test_double_decision_fails(self):
-		doc = self._submitted(1)
-		self._decide(doc, "Write Off", None)
-		before = self._transfers(doc)
-		self.assertRaises(frappe.ValidationError, self._decide, doc, "Rejected", "twice")
-		self.assertEqual(self._transfers(doc), before)
-
-	def test_charge_crew_requires_notes(self):
-		doc = self._submitted(1)
-		self.assertRaises(frappe.ValidationError, self._decide, doc, "Charge Crew", None)
-		self._decide(doc, "Charge Crew", "crew negligence")
+		payload = self._decide(doc, "Approved")
+		self.assertEqual(payload["status"], "Approved")
 		values = frappe.db.get_value("POS Reject Request", doc.name, ["decision", "status"], as_dict=True)
-		self.assertEqual(values.decision, "Charge Crew")
+		self.assertEqual(values.decision, "Approved")
 		self.assertEqual(values.status, "Approved")
+		self.assertEqual(payload["liabilities"], [])
 
-	def test_strict_late_auto_charges_crew(self):
+	def test_approve_with_liabilities_throws(self):
+		doc = self._submitted(1)
+		self.assertRaises(
+			frappe.ValidationError,
+			self._decide,
+			doc,
+			"Approved",
+			None,
+			[{"user": self.approver, "amount": 100}],
+		)
+
+	def test_reject_requires_notes(self):
+		doc = self._submitted(1)
+		self.assertRaises(frappe.ValidationError, self._decide, doc, "Rejected", None)
+
+	def test_reject_default_liability_owner(self):
+		owner = self._user(["POSNext Cashier"], prefix="rej-def")
+		doc = self._submitted(1)
+		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
+		self._decide(doc.reload(), "Rejected", "crew liable")
+		rows = frappe.get_all(
+			"POS Reject Liability",
+			filters={"parent": doc.name, "parentfield": "liabilities"},
+			fields=["user", "amount"],
+		)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0].user, owner)
+		self.assertEqual(flt(rows[0].amount), flt(doc.total_amount))
+
+	def test_reject_split_two_users(self):
+		crew = self._user(["POSNext Cashier"], prefix="rej-spl")
+		doc = self._submitted(2)
+		total = flt(doc.total_amount)
+		self._decide(doc, "Rejected", "split", [{"user": crew, "amount": total / 2}, {"user": self.approver, "amount": total / 2}])
+		rows = frappe.get_all(
+			"POS Reject Liability",
+			filters={"parent": doc.name, "parentfield": "liabilities"},
+			fields=["user", "amount", "idx"],
+			order_by="idx asc",
+		)
+		self.assertEqual(len(rows), 2)
+		self.assertEqual({r.user for r in rows}, {crew, self.approver})
+		self.assertEqual(flt(sum(flt(r.amount) for r in rows)), total)
+		# stored rows keep the input order (idx 1..n) for Desk rendering
+		self.assertEqual([r.idx for r in rows], [1, 2])
+		self.assertEqual([r.user for r in rows], [crew, self.approver])
+
+	def test_reject_split_rounding_accepted(self):
+		crew = self._user(["POSNext Cashier"], prefix="rej-rnd")
+		_seed_stock(self.item, self.warehouse, 10000)  # rate 10 → qty 10000 = 100000
+		doc = self._doc(10000)
+		self.assertEqual(flt(doc.total_amount), 100000.0)
+		self._evidence(doc)
+		doc.submit()
+		self._decide(
+			doc.reload(),
+			"Rejected",
+			"three ways",
+			[
+				{"user": crew, "amount": 33333.33},
+				{"user": self.approver, "amount": 33333.33},
+				{"user": "Administrator", "amount": 33333.34},
+			],
+		)
+		rows = frappe.get_all(
+			"POS Reject Liability",
+			filters={"parent": doc.name, "parentfield": "liabilities"},
+			fields=["user", "amount"],
+		)
+		self.assertEqual(len(rows), 3)
+		self.assertEqual(flt(sum(flt(r.amount) for r in rows)), 100000.0)
+
+	def test_reject_split_sum_mismatch_throws(self):
+		crew = self._user(["POSNext Cashier"], prefix="rej-mm")
+		_seed_stock(self.item, self.warehouse, 200)
+		doc = self._submitted(200)  # total 2000
+		self.assertRaises(
+			frappe.ValidationError,
+			self._decide,
+			doc,
+			"Rejected",
+			"bad split",
+			[{"user": crew, "amount": 1000}],  # off by 1000
+		)
+		self.assertEqual(
+			frappe.db.get_value("POS Reject Request", doc.name, "status"), "Pending"
+		)
+
+	def test_reject_duplicate_user_throws(self):
+		doc = self._submitted(2)
+		total = flt(doc.total_amount)
+		self.assertRaises(
+			frappe.ValidationError,
+			self._decide,
+			doc,
+			"Rejected",
+			"dup",
+			[
+				{"user": self.approver, "amount": total / 2},
+				{"user": self.approver, "amount": total / 2},
+			],
+		)
+
+	def test_reject_liability_disabled_user_throws(self):
+		crew = self._user(["POSNext Cashier"], prefix="rej-dis")
+		frappe.db.set_value("User", crew, "enabled", 0)
+		doc = self._submitted(1)
+		self.assertRaises(
+			frappe.ValidationError,
+			self._decide,
+			doc,
+			"Rejected",
+			"disabled user",
+			[{"user": crew, "amount": flt(doc.total_amount)}],
+		)
+
+	def test_reject_liability_nonpositive_throws(self):
+		doc = self._submitted(1)
+		self.assertRaises(
+			frappe.ValidationError,
+			self._decide,
+			doc,
+			"Rejected",
+			"zero",
+			[{"user": self.approver, "amount": 0}],
+		)
+
+	def test_close_from_approved_issues_stock(self):
+		doc = self._submitted(3)
+		self._decide(doc, "Approved")
+		self._destruction(doc)
+		reject_request.close_request(doc)
+		issue = frappe.db.get_value("POS Reject Request", doc.name, "issue_entry")
+		self.assertTrue(issue)
+		self.assertEqual(frappe.db.get_value("Stock Entry", issue, "docstatus"), 1)
+		self.assertEqual(frappe.db.get_value("Stock Entry", issue, "purpose"), "Material Issue")
+		self.assertEqual(self._bin(self.reject_wh), 0)
+		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Closed")
+
+	def test_close_from_rejected_issues_stock(self):
+		doc = self._submitted(3)
+		self._decide(doc, "Rejected", "crew liable")
+		self._destruction(doc)
+		reject_request.close_request(doc)
+		issue = frappe.db.get_value("POS Reject Request", doc.name, "issue_entry")
+		self.assertTrue(issue)
+		self.assertEqual(frappe.db.get_value("Stock Entry", issue, "docstatus"), 1)
+		self.assertEqual(frappe.db.get_value("Stock Entry", issue, "purpose"), "Material Issue")
+		self.assertEqual(frappe.db.get_value("Stock Entry", issue, "remarks"), f"POS Reject write-off: {doc.name}")
+		self.assertEqual(self._bin(self.reject_wh), 0)
+		values = frappe.db.get_value("POS Reject Request", doc.name, ["status", "closed_on"], as_dict=True)
+		self.assertEqual(values.status, "Closed")
+		self.assertTrue(values.closed_on)
+
+	def test_month_total_counts_rejected(self):
+		frappe.db.set_single_value("POS Reject Settings", "monthly_limit_amount", 50)
+		# an isolated month (test_over_limit_counts_only_submitted uses -190)
+		incident = add_days(today(), -220)
+		prior = self._doc(3, incident_date=incident)
+		self._evidence(prior)
+		doc = self._submitted(3, incident_date=incident)
+		self.assertEqual(doc.over_limit, 0)
+		self._decide(doc.reload(), "Rejected", "counted")
+		prior.submit()
+		# the Rejected request counts toward the limit like Approved does
+		self.assertEqual(self._submitted(1, incident_date=incident).over_limit, 1)
+
+	def test_strict_auto_rejected_owner_liability(self):
 		frappe.db.set_single_value("POS Reject Settings", "late_mode", "Strict")
 		owner = self._user(["POSNext Cashier"], prefix="rej-late")
 		doc = self._doc(1, incident_date=add_days(today(), -5))
 		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
 		self._evidence(doc)
 		doc.reload().submit()
-		self.assertEqual(doc.reload().status, "Approved")
+		self.assertEqual(doc.reload().status, "Rejected")
 		values = frappe.db.get_value(
 			"POS Reject Request", doc.name, ["decision", "decided_by", "decision_notes"], as_dict=True
 		)
-		self.assertEqual(values.decision, "Charge Crew")
+		self.assertEqual(values.decision, "Rejected")
 		self.assertEqual(values.decided_by, "Administrator")
 		self.assertTrue(values.decision_notes)
+		rows = frappe.get_all(
+			"POS Reject Liability",
+			filters={"parent": doc.name, "parentfield": "liabilities"},
+			fields=["user", "amount"],
+		)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0].user, owner)
+		self.assertEqual(flt(rows[0].amount), flt(doc.total_amount))
 		self.assertTrue(
 			frappe.db.exists(
 				"Notification Log", {"for_user": owner, "document_type": doc.doctype, "document_name": doc.name}
 			)
 		)
 
+	def test_production_loss_can_be_rejected(self):
+		fg = _make_test_item(valuation_rate=5)
+		mat = _make_test_item()
+		recipe = frappe.get_doc(
+			{
+				"doctype": "POS Production Recipe",
+				"recipe_name": f"Rej PL {uuid.uuid4().hex[:6]}",
+				"production_item": fg,
+				"output_qty": 1,
+				"items": [{"item_code": mat, "qty": 2}],
+				"companies": [{"company": self.company, "enabled": 1}],
+			}
+		).insert(ignore_permissions=True)
+		_seed_stock(mat, self.warehouse, 20)
+		wo_name = start_production(recipe.name, 10, self.pos_profile)["work_order"]
+		wo = frappe.get_doc("Work Order", wo_name)
+		wo.db_set("produced_qty", 9)
+		from pos_next.services.reject_request import ensure_production_loss_request
+
+		name = ensure_production_loss_request(wo)
+		doc = frappe.get_doc("POS Reject Request", name)
+		doc.reason = "short batch"
+		doc.save()
+		self._evidence(doc)
+		doc.submit()
+		crew = self._user(["POSNext Cashier"], prefix="rej-plc")
+		self._decide(doc.reload(), "Rejected", "operator loss", [{"user": crew, "amount": flt(doc.total_amount)}])
+		rows = frappe.get_all(
+			"POS Reject Liability",
+			filters={"parent": doc.name, "parentfield": "liabilities"},
+			fields=["user"],
+		)
+		self.assertEqual([r.user for r in rows], [crew])
+		self._destruction(doc)
+		reject_request.close_request(doc)
+		# system purpose never touched stock: no transfer, no issue
+		self.assertFalse(frappe.db.get_value("POS Reject Request", doc.name, "transfer_entry"))
+		self.assertFalse(frappe.db.get_value("POS Reject Request", doc.name, "issue_entry"))
+		self.assertEqual(frappe.db.get_value("POS Reject Request", doc.name, "status"), "Closed")
+
 	def test_close_requires_destruction_photo(self):
 		doc = self._submitted(1)
-		self._decide(doc, "Write Off", None)
+		self._decide(doc, "Approved", None)
 		self.assertRaises(frappe.ValidationError, reject_request.close_request, doc)
 
 	def test_close_writes_off_reject_stock(self):
 		doc = self._submitted(3)
-		self._decide(doc, "Write Off", None)
+		self._decide(doc, "Approved", None)
 		self._destruction(doc)
 		reject_request.close_request(doc)
 		self.assertEqual(self._bin(self.reject_wh), 0)
@@ -944,7 +1267,7 @@ class TestDecision(RejectRequestTest):
 		doc.save()
 		self._evidence(doc)
 		doc.submit()
-		self._decide(doc.reload(), "Write Off", None)
+		self._decide(doc.reload(), "Approved", None)
 		self._destruction(doc)
 		reject_request.close_request(doc)
 		self.assertFalse(frappe.db.get_value("POS Reject Request", doc.name, "issue_entry"))
@@ -954,7 +1277,7 @@ class TestDecision(RejectRequestTest):
 		owner = self._user(["POSNext Cashier"], prefix="rej-own2")
 		doc = self._submitted(1)
 		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
-		self._decide(doc.reload(), "Write Off", None)
+		self._decide(doc.reload(), "Approved", None)
 		self.assertTrue(
 			frappe.db.exists(
 				"Notification Log", {"for_user": owner, "document_type": doc.doctype, "document_name": doc.name}
@@ -994,7 +1317,7 @@ class TestDecision(RejectRequestTest):
 		clean — status Draft, links and decision fields cleared."""
 		doc = self._doc(1)
 		doc.status = "Approved"
-		doc.decision = "Write Off"
+		doc.decision = "Approved"
 		doc.decision_notes = "forged"
 		doc.decided_by = "Administrator"
 		doc.decided_on = now()
@@ -1026,7 +1349,7 @@ class TestDecision(RejectRequestTest):
 		frappe.db.set_value("POS Reject Request", doc.name, "owner", crew)
 		self._evidence(doc)
 		doc.reload()
-		doc.decision = "Write Off"
+		doc.decision = "Approved"
 		doc.decided_by = "Administrator"
 		doc.transfer_entry = forged = self._stock_entry()
 		doc.issue_entry = self._stock_entry()
@@ -1050,7 +1373,7 @@ class TestDecision(RejectRequestTest):
 		"""I1: close_request locks the row; the second close throws and no
 		second write-off Stock Entry appears."""
 		doc = self._submitted(1)
-		self._decide(doc, "Write Off", None)
+		self._decide(doc, "Approved", None)
 		self._destruction(doc)
 		reject_request.close_request(doc)
 		doc.reload()
@@ -1082,8 +1405,8 @@ class TestDecision(RejectRequestTest):
 		doc = self._submitted(1)
 		frappe.db.set_value("POS Reject Request", doc.name, "owner", owner)
 		with _as_user(owner):
-			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
+			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Approved")
 		other = self._user(["POSNext Cashier"], prefix="api-non")
 		with _as_user(other):
-			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Write Off")
+			self.assertRaises(frappe.PermissionError, decide_reject_request, doc.name, "Approved")
 

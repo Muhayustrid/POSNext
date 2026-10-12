@@ -469,6 +469,19 @@ def register_default_log_clearing(quiet=False):
 		log_message("POS Next: registering log clearing failed (see Error Log)", level="warning")
 
 
+def ensure_reject_purposes():
+	"""Idempotently seed the two standard reject purposes (install + migrate)."""
+	frappe.db.bulk_insert(
+		"POS Reject Purpose",
+		["name", "purpose_name", "enabled", "is_system"],
+		[
+			["Unsold", "Unsold", 1, 0],
+			["Production Loss", "Production Loss", 1, 1],
+		],
+		ignore_duplicates=True,
+	)
+
+
 def after_install():
 	"""Hook that runs after app installation"""
 	try:
@@ -480,6 +493,7 @@ def after_install():
 		sync_custom_fields()
 		ensure_price_group_custom_fields()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
+		ensure_reject_purposes()
 		ensure_site_indexes()
 		register_default_log_clearing()
 
@@ -510,6 +524,7 @@ def after_migrate():
 		sync_custom_fields(quiet=True)
 		ensure_price_group_custom_fields(quiet=True)
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
+		ensure_reject_purposes()
 		ensure_site_indexes()
 		register_default_log_clearing(quiet=True)
 

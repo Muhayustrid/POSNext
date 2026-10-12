@@ -775,6 +775,18 @@ def get_production_history(pos_profile, limit=30, offset=0):
 			fields=["name", "recipe_name"],
 		)
 	}
+	# System loss draft per terminal WO; at most one non-cancelled row exists
+	# per WO (cancel blocks re-creation), but prefer it when duplicates appear.
+	rejects = {
+		r.work_order: r
+		for r in frappe.get_all(
+			"POS Reject Request",
+			filters={"work_order": ["in", [r.name for r in rows]], "is_system_generated": 1},
+			fields=["name", "work_order", "status"],
+			order_by="modified desc",
+		)
+		if r.status != "Cancelled"
+	}
 	return {
 		"pos_profile": pos_profile,
 		"company": company,
@@ -793,6 +805,8 @@ def get_production_history(pos_profile, limit=30, offset=0):
 				"operator": r.posa_operator,
 				"started_at": _started_at_epoch(r.actual_start_date or r.planned_start_date),
 				"created_at": r.creation,
+				"reject_request": rejects.get(r.name, {}).get("name"),
+				"reject_status": rejects.get(r.name, {}).get("status"),
 			}
 			for r in rows
 		],

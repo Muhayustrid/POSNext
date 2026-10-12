@@ -197,6 +197,18 @@
    "type": "Link"
   },
   {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Reject Request",
+   "link_to": "POS Reject Request",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
    "child": 0,
    "collapsible": 1,
    "icon": "chart-column-big",
@@ -312,6 +324,18 @@
    "label": "Outlet Targets",
    "link_to": "outlet-targets",
    "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Reject Report",
+   "link_to": "POS Reject Report",
+   "link_type": "Report",
    "show_arrow": 0,
    "type": "Link"
   },
@@ -481,6 +505,18 @@
    "type": "Link"
   },
   {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Reject Purpose",
+   "link_to": "POS Reject Purpose",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
    "child": 0,
    "collapsible": 1,
    "icon": "settings",
@@ -516,7 +552,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-08 20:00:00.000000",
+ "modified": "2026-10-12 02:35:44.624795",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
