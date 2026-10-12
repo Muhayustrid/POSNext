@@ -105,7 +105,7 @@ pos_next_reject.rejected_dialog = function (frm) {
 pos_next_reject.show_total = function (dialog, frm) {
 	const rows = dialog.get_value("liabilities") || [];
 	const sum = rows.reduce((s, r) => s + (flt(r.amount) || 0), 0);
-	const fmt = (v) => format_currency(v, frappe.defaults.get_global_default("currency"));
+	const fmt = (v) => format_currency(v, erpnext.get_currency(frm.doc.company));
 	dialog.$body
 		.find('[data-fieldname="total_html"]')
 		.html(`<div class="text-right">${__("Total {0} / {1}", [fmt(sum), fmt(frm.doc.total_amount)])}</div>`);

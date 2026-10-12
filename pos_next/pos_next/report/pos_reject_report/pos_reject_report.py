@@ -29,7 +29,7 @@ def execute(filters=None):
 
 
 def get_requests(filters):
-	conds = ["docstatus = 1", "decision is not null"]
+	conds = ["docstatus = 1", "ifnull(decision, '') != ''"]
 	params = {
 		"from_date": getdate(filters.from_date or nowdate()),
 		"to_date": getdate(filters.to_date or nowdate()),
