@@ -2942,6 +2942,13 @@ async function handleLoadDraft(draft) {
 function handleReturnCreated(returnInvoice) {
 	// Success message is already shown by ReturnInvoiceDialog
 	log.debug("Return invoice created:", returnInvoice.name);
+
+	if (posSettingsStore.isPrintAuto && returnInvoice?.name) {
+		handlePrintInvoice({ name: returnInvoice.name }).catch((error) => {
+			log.error("Auto-print error:", error);
+			showWarning(__("Return {0} created but print failed", [returnInvoice.name]));
+		});
+	}
 }
 
 function handleDiscountApplied(discount) {

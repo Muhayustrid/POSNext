@@ -210,6 +210,7 @@
 "Invoice saved offline. Will sync when online","Faktur telah disimpan secara lokal (offline). Faktur tersebut akan disinkronkan nanti",""
 "Unknown","Tidak diketahui",""
 "Invoice {0} created but print failed","Faktur {0} telah dibuat tetapi pencetakan gagal",""
+"Return {0} created but print failed","Retur {0} telah dibuat tetapi pencetakan gagal",""
 "Invoice {0} created successfully","Faktur {0} berhasil dibuat",""
 "All items removed from cart","Keranjang dikosongkan",""
 "{0} added to cart","{0} telah ditambahkan ke keranjang",""

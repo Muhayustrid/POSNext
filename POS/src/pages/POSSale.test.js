@@ -90,6 +90,13 @@ vi.mock("@/utils/offline/workerClient", () => ({
 
 vi.mock("@/utils/draftManager", () => draftManagerMock)
 
+// Only the print entry point is faked; hydrateLocalOnlyInvoice etc. stay real.
+const printMock = vi.hoisted(() => ({ printWithSilentFallback: vi.fn(async () => ({ method: "silent" })) }))
+vi.mock("@/utils/printInvoice", async (importOriginal) => ({
+	...(await importOriginal()),
+	printWithSilentFallback: printMock.printWithSilentFallback,
+}))
+
 vi.mock("@/utils/apiWrapper", () => ({
 	call: vi.fn(async () => ({})),
 }))
@@ -193,6 +200,7 @@ vi.mock("frappe-ui", async () => {
 
 import { shiftState } from "@/composables/useShift"
 import { usePOSCartStore } from "@/stores/posCart"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import { usePOSPackagesStore } from "@/stores/posPackages"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { usePOSSyncStore } from "@/stores/posSync"
@@ -869,5 +877,39 @@ describe("offline-edit package requote (Fase 3)", () => {
 		expect(cartStore.invoiceItems).toHaveLength(1)
 		expect(cartStore.invoiceItems[0].item_code).toBe("KOPI")
 		expect(cartStore.invoiceItems[0].quantity).toBe(2)
+	})
+})
+
+describe("return invoice auto-print", () => {
+	const ReturnInvoiceDialogStub = defineComponent({
+		name: "ReturnInvoiceDialog",
+		props: { modelValue: { type: Boolean, default: false } },
+		emits: ["return-created"],
+		template: `<button data-test="return-created" @click="$emit('return-created', { name: 'ACC-SINV-RET-1' })"></button>`,
+	})
+
+	async function createReturn(printMode) {
+		await mountPOS({ ReturnInvoiceDialog: ReturnInvoiceDialogStub })
+		// Earlier tests leave components mounted, which can move the global active
+		// pinia: take the store from this wrapper's own pinia, not the global one.
+		usePOSSettingsStore(wrapper.vm.$pinia).settings.print_mode = printMode
+		printMock.printWithSilentFallback.mockClear()
+		await wrapper.find('[data-test="return-created"]').trigger("click")
+		await flushPromises()
+	}
+
+	it("prints the return receipt when print mode is Auto", async () => {
+		await createReturn("Auto")
+
+		// runPrintInvoice awaits hydration before printing, so poll instead of one flush
+		await vi.waitFor(() => expect(printMock.printWithSilentFallback).toHaveBeenCalledTimes(1))
+		expect(printMock.printWithSilentFallback.mock.calls[0][0].name).toBe("ACC-SINV-RET-1")
+	})
+
+	it("does not print the return receipt when print mode is Manual", async () => {
+		await createReturn("Manual")
+		await new Promise((r) => setTimeout(r, 50))
+
+		expect(printMock.printWithSilentFallback).not.toHaveBeenCalled()
 	})
 })
