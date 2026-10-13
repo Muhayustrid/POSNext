@@ -72,3 +72,9 @@ TODO.md
 .omo/
 *.jpeg
 missing.txt
+
+# Local-markdown issue tracker (agent skills)
+.scratch/
+
+# Local project status (see CLAUDE.md)
+/PROJECT_STATE.md
