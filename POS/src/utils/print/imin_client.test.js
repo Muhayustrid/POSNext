@@ -756,6 +756,40 @@ describe("createIminDriver", () => {
 			expect(res).toEqual({ ok: true, code: 0 })
 		}, 10000)
 
+		it("drops a silent open socket so the next status opens a fresh one", async () => {
+			// Socket OPEN but the service never answers (e.g. it was opened before
+			// the operator allowed this origin): reusing it would fail forever.
+			const silent = makeFakePrinter({
+				getPrinterStatus: vi.fn(() => new Promise(() => {})),
+			})
+			const healthy = makeFakePrinter()
+			const factory = vi.fn().mockReturnValueOnce(silent).mockReturnValueOnce(healthy)
+			const d = createIminDriver({ factory, statusReplyMs: 20 })
+
+			expect((await d.getStatus()).ok).toBe(false)
+			expect(silent.close).toHaveBeenCalled()
+			expect((await d.getStatus()).ok).toBe(true)
+			expect(factory).toHaveBeenCalledTimes(2)
+		})
+
+		it("keeps the socket when a status times out during a print", async () => {
+			let releasePrint
+			const p = makeFakePrinter({
+				printSingleBitmap: vi.fn(() => new Promise((r) => (releasePrint = r))),
+				getPrinterStatus: vi.fn(() => new Promise(() => {})),
+			})
+			const d = createIminDriver({ factory: () => p, statusReplyMs: 20 })
+			const printing = d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			})
+			await vi.waitFor(() => expect(releasePrint).toBeTypeOf("function"))
+			await d.getStatus()
+			expect(p.close).not.toHaveBeenCalled()
+			p.getPrinterStatus = vi.fn().mockResolvedValue({ value: 0 })
+			releasePrint(1)
+			await printing
+		})
+
 		it("concurrent getStatus both resolve", async () => {
 			let currentCallback = null
 			const p = makeFakePrinter({

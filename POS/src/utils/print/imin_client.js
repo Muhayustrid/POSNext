@@ -103,6 +103,7 @@ export function createIminDriver(deps = {}) {
 	let printer = null
 	let connecting = null
 	let statusChain = Promise.resolve()
+	let printing = 0
 
 	// The SDK auto-reconnects every 4s by replacing this.ws without re-sending
 	// initPrinter, and close() sets ws=null so send() throws in the gap.
@@ -232,7 +233,21 @@ export function createIminDriver(deps = {}) {
 				const status = await callStatus(p)
 				const code = Number(status?.value)
 				const out = { ok: code === 0, code }
-				if (status?.timedOut) out.message = __("no status reply (device busy?)")
+				if (status?.timedOut) {
+					out.message = __("no status reply (device busy?)")
+					// An OPEN socket that never answers (e.g. opened before the
+					// operator allowed this origin) is dead weight: drop it so the
+					// next probe reconnects. Never mid-print — the busy device
+					// answering late is normal there.
+					if (!printing && printer === p) {
+						try {
+							p.close?.()
+						} catch {
+							// Guarded
+						}
+						printer = null
+					}
+				}
 				return out
 			} catch (err) {
 				return { ok: false, code: -1, message: err.message }
@@ -260,135 +275,12 @@ export function createIminDriver(deps = {}) {
 		 *   copies plus the crew slip when it applied.
 		 */
 		async printHTML(html, opts = {}) {
-			const r = resolvePrintConfig(loadConfig(), opts.config || {}, {
-				kind: opts.kind,
-			})
-			const {
-				paper,
-				customDots,
-				cut,
-				copies,
-				crewSlipEnabled,
-				copyDelayMs,
-				dots,
-				tailDots,
-				feedDots,
-				fontScale,
-				crewFontScale,
-				lineSpacing,
-				sideMarginDots,
-				topMarginDots,
-				queueGapDots,
-			} = r
-			const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
-
-			const p = await ensurePrinter()
-			p.setPageFormat(pageFormatFor(paper, dots))
-
-			// lineSpacing is deliberately NOT per-copy: there is one vertical
-			// density for everything direct printed, receipt and slip alike. The
-			// side/top margins ride the same object for the same reason — they
-			// are a property of the paper, not of which sheet is on it — so the
-			// crew slip inherits them through the spread below.
-			const renderOpts = {
-				paper,
-				customDots,
-				tailDots,
-				fontScale,
-				lineSpacing,
-				sideMarginDots,
-				topMarginDots,
-				queueGapDots,
+			printing++
+			try {
+				return await printSheets(html, opts)
+			} finally {
+				printing--
 			}
-			// The crew slip is gated purely by its own toggle, not by the copy
-			// count: crewSlipEnabled on means exactly one slip after ALL receipt
-			// copies — even for a single-copy job. When it applies the slip
-			// prints at its own font scale and every other sheet prints the
-			// receipt exactly as built — no banner above either sheet, so the
-			// paper looks like N receipts and one order list.
-			const crewApplies = Boolean(opts.crewHTML) && crewSlipEnabled
-			// Every receipt sheet is the same html with the same options, so one
-			// bitmap serves them all; only the slip is a second render. The sheet
-			// list fixes the order: copies identical receipts, slip last.
-			const [bitmap, crewBitmap] = await Promise.all([
-				render(html, renderOpts),
-				crewApplies
-					? render(opts.crewHTML, { ...renderOpts, fontScale: crewFontScale })
-					: null,
-			])
-			const sheets = Array.from({ length: copies }, () => bitmap)
-			if (crewApplies) sheets.push(crewBitmap)
-
-				// COR-FE-10: once the first sheet is queued, any failure below
-				// happens with paper already (partially) out of the printer.
-				// Tag it postPrint so the transport stops the chain instead of
-				// letting the next driver or the browser fallback print the
-				// same receipt a second time.
-				let firstSheetQueued = false
-				for (let i = 0; i < sheets.length; i++) {
-					try {
-						const bmp = sheets[i]
-						const tQueued = Date.now()
-						await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
-						firstSheetQueued = true
-
-						// Resolve above means "queued" — the raster may not be in the print
-						// buffer yet. Reference flows wait before advancing the paper.
-						await new Promise((r) => setTimeout(r, SETTLE_MS))
-
-						// The feed is what makes the receipt physically leave the printer.
-						// Omitting it is what caused the "first run prints nothing, second
-						// run prints the first one" behaviour seen on device.
-						p.printAndFeedPaper(feedDots)
-						if (cut) p.partialCut()
-
-						await waitIdle(p)
-
-					// Tear-off pause before the next SHEET (receipt or slip alike);
-					// never after the final one.
-					//
-					// Measured from QUEUE time, not from here. On device (2026-09-03)
-					// getPrinterStatus() already reports 0 while the head is still
-					// printing, so waitIdle passes instantly and a bare copyDelayMs is
-					// consumed by the copy still coming out: the pause visibly existed
-					// with fontScale 60 (short bitmap) and vanished at fontScale 100
-					// (tall bitmap). Invariant: the gap between two sheets is always
-					// at least copyDelayMs, ON TOP of whatever the pipeline actually
-					// took — the reservation only extends the pause (when status went
-					// idle early) and shrinks to zero when the pipeline overran the
-					// estimate, so slow uploads plus waitIdle polling overshoot can
-					// no longer swallow the configured tear-off window.
-					const elapsed = Date.now() - tQueued
-					const reserveMs = Math.max(
-						0,
-						SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
-					)
-					const isLastSheet = i === sheets.length - 1
-					const pauseMs = isLastSheet ? 0 : reserveMs + copyDelayMs
-					// The reservation is invisible to POS Print Log (it only sees the
-					// whole print), so say per sheet how the wall clock was spent —
-					// this is what makes a swallowed pause on site diagnosable after
-					// the fact. kind tells a swallowed crew slip apart from a copy.
-					log.info("sheet printed", {
-						sheet: i + 1,
-						kind: crewApplies && i === sheets.length - 1 ? "crew" : "receipt",
-						heightDots: bmp.height,
-						elapsedMs: elapsed,
-						reserveMs,
-						pauseMs,
-					})
-					if (!isLastSheet) {
-						await new Promise((r) => setTimeout(r, pauseMs))
-					}
-					} catch (err) {
-						if (firstSheetQueued && err && typeof err === "object") {
-							err.postPrint = true
-						}
-						throw err
-					}
-				}
-
-			return { paper, dots, copies: sheets.length, tailDots }
 		},
 
 		describe() {
@@ -398,5 +290,137 @@ export function createIminDriver(deps = {}) {
 				detail: loadPrinterHost() || "127.0.0.1:8081",
 			}
 		},
+	}
+
+	async function printSheets(html, opts) {
+		const r = resolvePrintConfig(loadConfig(), opts.config || {}, {
+			kind: opts.kind,
+		})
+		const {
+			paper,
+			customDots,
+			cut,
+			copies,
+			crewSlipEnabled,
+			copyDelayMs,
+			dots,
+			tailDots,
+			feedDots,
+			fontScale,
+			crewFontScale,
+			lineSpacing,
+			sideMarginDots,
+			topMarginDots,
+			queueGapDots,
+		} = r
+		const render = opts.render || ((h, o) => renderHTMLToBitmap(h, o))
+
+		const p = await ensurePrinter()
+		p.setPageFormat(pageFormatFor(paper, dots))
+
+		// lineSpacing is deliberately NOT per-copy: there is one vertical
+		// density for everything direct printed, receipt and slip alike. The
+		// side/top margins ride the same object for the same reason — they
+		// are a property of the paper, not of which sheet is on it — so the
+		// crew slip inherits them through the spread below.
+		const renderOpts = {
+			paper,
+			customDots,
+			tailDots,
+			fontScale,
+			lineSpacing,
+			sideMarginDots,
+			topMarginDots,
+			queueGapDots,
+		}
+		// The crew slip is gated purely by its own toggle, not by the copy
+		// count: crewSlipEnabled on means exactly one slip after ALL receipt
+		// copies — even for a single-copy job. When it applies the slip
+		// prints at its own font scale and every other sheet prints the
+		// receipt exactly as built — no banner above either sheet, so the
+		// paper looks like N receipts and one order list.
+		const crewApplies = Boolean(opts.crewHTML) && crewSlipEnabled
+		// Every receipt sheet is the same html with the same options, so one
+		// bitmap serves them all; only the slip is a second render. The sheet
+		// list fixes the order: copies identical receipts, slip last.
+		const [bitmap, crewBitmap] = await Promise.all([
+			render(html, renderOpts),
+			crewApplies
+				? render(opts.crewHTML, { ...renderOpts, fontScale: crewFontScale })
+				: null,
+		])
+		const sheets = Array.from({ length: copies }, () => bitmap)
+		if (crewApplies) sheets.push(crewBitmap)
+
+			// COR-FE-10: once the first sheet is queued, any failure below
+			// happens with paper already (partially) out of the printer.
+			// Tag it postPrint so the transport stops the chain instead of
+			// letting the next driver or the browser fallback print the
+			// same receipt a second time.
+			let firstSheetQueued = false
+			for (let i = 0; i < sheets.length; i++) {
+				try {
+					const bmp = sheets[i]
+					const tQueued = Date.now()
+					await p.printSingleBitmap(bmp.dataURL, 1) // 1 = centre alignment
+					firstSheetQueued = true
+
+					// Resolve above means "queued" — the raster may not be in the print
+					// buffer yet. Reference flows wait before advancing the paper.
+					await new Promise((r) => setTimeout(r, SETTLE_MS))
+
+					// The feed is what makes the receipt physically leave the printer.
+					// Omitting it is what caused the "first run prints nothing, second
+					// run prints the first one" behaviour seen on device.
+					p.printAndFeedPaper(feedDots)
+					if (cut) p.partialCut()
+
+					await waitIdle(p)
+
+				// Tear-off pause before the next SHEET (receipt or slip alike);
+				// never after the final one.
+				//
+				// Measured from QUEUE time, not from here. On device (2026-09-03)
+				// getPrinterStatus() already reports 0 while the head is still
+				// printing, so waitIdle passes instantly and a bare copyDelayMs is
+				// consumed by the copy still coming out: the pause visibly existed
+				// with fontScale 60 (short bitmap) and vanished at fontScale 100
+				// (tall bitmap). Invariant: the gap between two sheets is always
+				// at least copyDelayMs, ON TOP of whatever the pipeline actually
+				// took — the reservation only extends the pause (when status went
+				// idle early) and shrinks to zero when the pipeline overran the
+				// estimate, so slow uploads plus waitIdle polling overshoot can
+				// no longer swallow the configured tear-off window.
+				const elapsed = Date.now() - tQueued
+				const reserveMs = Math.max(
+					0,
+					SETTLE_MS + bitmapPrintMs(bmp.height) - elapsed,
+				)
+				const isLastSheet = i === sheets.length - 1
+				const pauseMs = isLastSheet ? 0 : reserveMs + copyDelayMs
+				// The reservation is invisible to POS Print Log (it only sees the
+				// whole print), so say per sheet how the wall clock was spent —
+				// this is what makes a swallowed pause on site diagnosable after
+				// the fact. kind tells a swallowed crew slip apart from a copy.
+				log.info("sheet printed", {
+					sheet: i + 1,
+					kind: crewApplies && i === sheets.length - 1 ? "crew" : "receipt",
+					heightDots: bmp.height,
+					elapsedMs: elapsed,
+					reserveMs,
+					pauseMs,
+				})
+				if (!isLastSheet) {
+					await new Promise((r) => setTimeout(r, pauseMs))
+				}
+				} catch (err) {
+					if (firstSheetQueued && err && typeof err === "object") {
+						err.postPrint = true
+					}
+					throw err
+				}
+			}
+
+		return { paper, dots, copies: sheets.length, tailDots }
 	}
 }
