@@ -329,4 +329,82 @@ assert.strictEqual(u.fmtCount(12500), "12500");
 u.setNumberAdapter(undefined); // junk adapter arg -> back to fallback
 assert.strictEqual(u.fmtMoney(7, "IDR"), "IDR 7");
 
-console.log("hq_monitoring_utils: 14 groups OK");
+// ---------------------------------------------------------------------------
+// "Compare with" — shift / overlap / fallback / delta helpers
+// ---------------------------------------------------------------------------
+
+// shiftRangeStr: whole block moves; month shift clamps to month end
+assert.deepStrictEqual(u.shiftRangeStr("2026-10-20", "2026-10-31", "last_month"), {
+	from: "2026-09-20",
+	to: "2026-09-30",
+});
+assert.deepStrictEqual(u.shiftRangeStr("2024-02-29", "2024-02-29", "last_month"), {
+	from: "2024-01-29",
+	to: "2024-01-29",
+});
+assert.deepStrictEqual(u.shiftRangeStr("2026-03-30", "2026-03-30", "last_month"), {
+	from: "2026-02-28",
+	to: "2026-02-28",
+});
+assert.deepStrictEqual(u.shiftRangeStr("2026-10-07", "2026-10-13", "last_week"), {
+	from: "2026-09-30",
+	to: "2026-10-06",
+});
+assert.deepStrictEqual(u.shiftRangeStr("2026-10-13", "2026-10-13", "yesterday"), {
+	from: "2026-10-12",
+	to: "2026-10-12",
+});
+// unknown option / bad dates -> null
+assert.strictEqual(u.shiftRangeStr("2026-10-13", "2026-10-13", "nope"), null);
+assert.strictEqual(u.shiftRangeStr("", "2026-10-13", "last_week"), null);
+
+// compareOverlaps: Last 7 Days + Yesterday overlap by one day; the
+// last_week block (09-30..10-06) only touches the range, no overlap
+assert.strictEqual(u.compareOverlaps("2026-10-07", "2026-10-13", "yesterday"), true);
+assert.strictEqual(u.compareOverlaps("2026-10-07", "2026-10-13", "last_week"), false);
+assert.strictEqual(u.compareOverlaps("2026-10-07", "2026-10-13", "last_month"), false);
+// a fully-past one-day range never overlaps its -1 day shift
+assert.strictEqual(u.compareOverlaps("2026-09-01", "2026-09-01", "yesterday"), false);
+// but a two-day range overlaps its own yesterday shift on one day
+assert.strictEqual(u.compareOverlaps("2026-09-01", "2026-09-02", "yesterday"), true);
+// a whole-month range shifted -1 day overlaps by 29 days
+assert.strictEqual(u.compareOverlaps("2026-09-01", "2026-09-30", "yesterday"), true);
+// a one-day range shifted by one day does not overlap itself
+assert.strictEqual(u.compareOverlaps("2026-10-13", "2026-10-13", "yesterday"), false);
+// bad dates -> not disabled
+assert.strictEqual(u.compareOverlaps("", "2026-10-13", "yesterday"), false);
+
+// resolveCompareOption: saved pick wins when valid, else nearest valid
+// (last_week -> last_month -> yesterday), else "none"; junk saved falls back.
+// A whole-month range overlaps last_week (shifted by -7) and yesterday, so
+// only last_month survives there.
+assert.strictEqual(u.resolveCompareOption("last_week", "2026-09-01", "2026-09-30"), "last_month");
+assert.strictEqual(u.resolveCompareOption("yesterday", "2026-09-01", "2026-09-30"), "last_month");
+assert.strictEqual(u.resolveCompareOption("last_week", "2026-08-01", "2026-08-05"), "last_week");
+// a 5-day range shifted -1 day overlaps 4 days -> yesterday falls through
+// to last_week, whose -7 block has no intersection with the range
+assert.strictEqual(u.resolveCompareOption("yesterday", "2026-08-01", "2026-08-05"), "last_week");
+// a fully-past ONE-day range keeps every option valid; saved pick wins
+assert.strictEqual(u.resolveCompareOption("yesterday", "2026-06-01", "2026-06-01"), "yesterday");
+assert.strictEqual(u.resolveCompareOption("last_week", "2026-06-01", "2026-06-01"), "last_week");
+// saved yesterday invalid on Last 7 Days -> falls to last_month (not overwritten here)
+assert.strictEqual(u.resolveCompareOption("yesterday", "2026-10-07", "2026-10-13"), "last_week");
+// every candidate invalid -> none (a 45-day range intersects every shift)
+assert.strictEqual(u.resolveCompareOption("yesterday", "2026-09-01", "2026-10-15"), "none");
+assert.strictEqual(u.resolveCompareOption(undefined, "2026-08-01", "2026-08-05"), "last_week");
+// a saved "No comparison" is honoured, never replaced by a fallback
+assert.strictEqual(u.resolveCompareOption("none", "2026-08-01", "2026-08-05"), "none");
+
+// compareDeltaPct: zero comparison -> null (UI renders em dash, never inf)
+assert.strictEqual(u.compareDeltaPct(150, 100), 50);
+assert.strictEqual(u.compareDeltaPct(100, 0), null);
+assert.strictEqual(u.compareDeltaPct(0, 0), null);
+
+// outletDelta: comparison 0 -> null ("—"); current 0 & prior > 0 -> -100
+assert.strictEqual(u.outletDelta(150, 100), 50);
+assert.strictEqual(u.outletDelta(50, 100), -50);
+assert.strictEqual(u.outletDelta(100, 0), null);
+assert.strictEqual(u.outletDelta(0, 100), -100);
+assert.strictEqual(u.outletDelta(0, 0), 0);
+
+console.log("hq_monitoring_utils: 15 groups OK");

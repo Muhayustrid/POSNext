@@ -38,6 +38,9 @@ test('isEmptyOutlet hides only zero-sales, zero-TC, no-target outlets', () => {
 	assert.equal(utils.isEmptyOutlet({ orders: 0, net_tax_incl: 0, target: { target_sales: 5 } }), false);
 	assert.equal(utils.isEmptyOutlet({ orders: 2, net_tax_incl: 0, target: null }), false);
 	assert.equal(utils.isEmptyOutlet({ orders: 0, net_tax_incl: 3, target: null }), false);
+	// sales only in the comparison period must not be hidden either (−100% row)
+	assert.equal(utils.isEmptyOutlet({ orders: 0, net_tax_incl: 0, target: null, cmp_prior: 500 }), false);
+	assert.equal(utils.isEmptyOutlet({ orders: 0, net_tax_incl: 0, target: null, cmp_prior: 0 }), true);
 });
 
 test('donuts skip empty sets and empty states stay one line', () => {

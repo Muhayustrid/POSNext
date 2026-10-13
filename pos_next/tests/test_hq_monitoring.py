@@ -29,6 +29,7 @@ from pos_next.api.hq_monitoring import (
 	previous_weekday,
 	ratio,
 	set_outlet_target,
+	shift_range,
 )
 from pos_next.api.invoices import submit_invoice
 from pos_next.install import sync_custom_fields
@@ -330,7 +331,9 @@ class TestHQMonitoring(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 
 	@classmethod
-	def _make_invoice(cls, company, profile, cash_mode, rows, paid, is_return=False, currency=None, posting_date=None):
+	def _make_invoice(
+		cls, company, profile, cash_mode, rows, paid, is_return=False, currency=None, posting_date=None, posting_time=None
+	):
 		inv = frappe.new_doc("Sales Invoice")
 		inv.company = company
 		inv.customer = cls.customer
@@ -339,6 +342,8 @@ class TestHQMonitoring(IntegrationTestCase):
 		if posting_date:
 			inv.set_posting_time = 1
 			inv.posting_date = posting_date
+			if posting_time:
+				inv.posting_time = posting_time
 		if currency:
 			# non-site-currency company: keep document currency on the company's
 			# own currency (price list would otherwise pull the site default)
@@ -769,6 +774,239 @@ class TestHQMonitoring(IntegrationTestCase):
 		finally:
 			# Cancel so the shared class fixture stays exact for sibling tests.
 			frappe.get_doc("Sales Invoice", name).cancel()
+
+	# ------------------------------------------------------------------
+	# compare_with (like-for-like shifted range comparison)
+	# ------------------------------------------------------------------
+
+	def test_compare_shift_pure_helper(self):
+		# month shift clamps to month end: 31 Oct -> 30 Sep (not 1 Oct)
+		self.assertEqual(
+			shift_range(date(2026, 10, 20), date(2026, 10, 31), "last_month"),
+			(date(2026, 9, 20), date(2026, 9, 30)),
+		)
+		# leap day shifts into a short month: 29 Feb 2024 -> 29 Jan 2024
+		self.assertEqual(
+			shift_range(date(2024, 2, 29), date(2024, 2, 29), "last_month"),
+			(date(2024, 1, 29), date(2024, 1, 29)),
+		)
+		# 30 Mar -> 28 Feb (no 30 Feb)
+		self.assertEqual(
+			shift_range(date(2026, 3, 30), date(2026, 3, 30), "last_month"),
+			(date(2026, 2, 28), date(2026, 2, 28)),
+		)
+		# day shifts move the whole block
+		self.assertEqual(
+			shift_range(date(2026, 10, 7), date(2026, 10, 13), "last_week"),
+			(date(2026, 9, 30), date(2026, 10, 6)),
+		)
+		self.assertEqual(
+			shift_range(date(2026, 10, 13), date(2026, 10, 13), "yesterday"),
+			(date(2026, 10, 12), date(2026, 10, 12)),
+		)
+
+	def test_compare_includes_today_same_time_cutoff(self):
+		# Range = yesterday..today; compare_with=yesterday -> comparator is
+		# the day-before-yesterday shifted block cut at the same clock time.
+		# An invoice posted that day counts; one "tomorrow-relative" does not
+		# exist, so this also exercises the cutoff path end-to-end.
+		today = frappe.utils.nowdate()
+		day_before = frappe.utils.add_days(today, -2)
+		name = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 700}],
+			paid=700,
+			posting_date=day_before,
+		)
+		try:
+			data = self._payload(
+				from_date=frappe.utils.add_days(today, -1), to_date=today, compare_with="yesterday"
+			)
+			c = data["comparison"]
+			self.assertEqual(c["compare_with"], "yesterday")
+			self.assertEqual(c["from_date"], day_before)
+			self.assertEqual(c["to_date"], frappe.utils.add_days(today, -1))
+			self.assertEqual(c["net_tax_incl"]["by_currency"][self.currency_a], 700.0)
+			self.assertEqual(c["orders"], 1)
+			self.assertEqual(c["apc"]["by_currency"][self.currency_a], 700.0)
+			# per-outlet map keyed by company, outlet currency preserved
+			self.assertEqual(c["outlets"][self.company_a], 700.0)
+		finally:
+			frappe.get_doc("Sales Invoice", name).cancel()
+
+	def test_compare_cutoff_cuts_comparison_day_at_same_clock_time(self):
+		# Range = today only, compare_with=yesterday: yesterday must be cut at
+		# the current clock time, so an invoice posted late yesterday (after
+		# "now") is NOT counted while an early one is.
+		today = frappe.utils.nowdate()
+		yesterday = frappe.utils.add_days(today, -1)
+		early = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 100}],
+			paid=100,
+			posting_date=yesterday,
+			posting_time="00:00:01",
+		)
+		late = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_y, "qty": 1, "rate": 900}],
+			paid=900,
+			posting_date=yesterday,
+			posting_time="23:59:59",
+		)
+		try:
+			c = self._payload(from_date=today, to_date=today, compare_with="yesterday")["comparison"]
+			self.assertIsNotNone(c["cut_at"])
+			self.assertEqual(c["net_tax_incl"]["by_currency"][self.currency_a], 100.0)
+			self.assertEqual(c["orders"], 1)
+			self.assertEqual(c["outlets"][self.company_a], 100.0)
+		finally:
+			for name in (early, late):
+				frappe.get_doc("Sales Invoice", name).cancel()
+
+	def test_compare_past_range_full(self):
+		# A fully-past range is compared in full: two invoices inside the
+		# shifted window both count even though today's clock has moved on.
+		today = frappe.utils.nowdate()
+		past = frappe.utils.add_days(today, -10)
+		name1 = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 300}],
+			paid=300,
+			posting_date=frappe.utils.add_days(past, -7),
+		)
+		name2 = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_y, "qty": 1, "rate": 200}],
+			paid=200,
+			posting_date=past,
+		)
+		try:
+			data = self._payload(from_date=past, to_date=past, compare_with="last_week")
+			c = data["comparison"]
+			# the WHOLE block shifts: a one-day range stays a one-day range
+			self.assertEqual(c["from_date"], frappe.utils.add_days(past, -7))
+			self.assertEqual(c["to_date"], frappe.utils.add_days(past, -7))
+			self.assertIsNone(c["cut_at"])
+			self.assertEqual(c["net_tax_incl"]["by_currency"][self.currency_a], 300.0)
+			self.assertEqual(c["orders"], 1)
+		finally:
+			for name in (name1, name2):
+				frappe.get_doc("Sales Invoice", name).cancel()
+
+	def test_compare_zero_comparison_no_ratio(self):
+		# Comparator window has no sales: totals stay 0 and no fake growth —
+		# the client must render an em dash, never infinity.
+		today = frappe.utils.nowdate()
+		past = frappe.utils.add_days(today, -10)
+		data = self._payload(from_date=past, to_date=past, compare_with="last_week")
+		c = data["comparison"]
+		self.assertEqual(c["net_tax_incl"]["by_currency"].get(self.currency_a, 0), 0)
+		self.assertEqual(c["orders"], 0)
+		self.assertEqual(c["apc"]["default"], 0)
+		# scoped outlets are present with 0, so the client can show deltas
+		self.assertEqual(c["outlets"], {self.company_a: 0})
+
+	def test_compare_cache_key_no_collision(self):
+		from pos_next.api.hq_monitoring import _monitoring_cache_key
+
+		scope = {"companies": [self.company_a], "profiles": [self.profile_a]}
+		frappe.set_user(ADMIN)
+		parts = {"from_date": "2026-10-01", "to_date": "2026-10-13"}
+		keys = {
+			opt: _monitoring_cache_key("comparison", scope, {**parts, "compare_with": opt})
+			for opt in ("yesterday", "last_week", "last_month")
+		}
+		self.assertEqual(len(set(keys.values())), 3)
+		# same option, different dates -> different key
+		self.assertNotEqual(
+			keys["last_week"],
+			_monitoring_cache_key(
+				"comparison", scope, {**parts, "to_date": "2026-10-12", "compare_with": "last_week"}
+			),
+		)
+
+	def test_compare_no_scope_leak(self):
+		# Company B has an invoice in the shifted window; a company-A-scoped
+		# user must never see it in the comparison outlets.
+		today = frappe.utils.nowdate()
+		past = frappe.utils.add_days(today, -10)
+		name = self._make_invoice(
+			self.company_b,
+			self.profile_b,
+			self.cash_b,
+			[{"item": self.item_x, "qty": 1, "rate": 100}],
+			paid=100,
+			currency=self.currency_b,
+			posting_date=past,
+		)
+		try:
+			data = self._payload(
+				user=self.user_co_a, company=None, from_date=past, to_date=past, compare_with="last_week"
+			)
+			self.assertEqual(data["comparison"]["outlets"], {self.company_a: 0})
+			self.assertNotIn(self.company_b, data["comparison"]["outlets"])
+		finally:
+			# user_co_a cannot cancel — restore admin first or the fixture
+			# leaks into every sibling test (class-level transaction).
+			frappe.set_user(ADMIN)
+			frappe.get_doc("Sales Invoice", name).cancel()
+
+	def test_no_compare_with_payload_unchanged(self):
+		# Old callers (no compare_with / compare_with=none) get None — the
+		# legacy payload contract is untouched.
+		data = self._payload()
+		self.assertIsNone(data["comparison"])
+		data = self._payload(compare_with="none")
+		self.assertIsNone(data["comparison"])
+
+	def test_compare_with_invalid_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			self._payload(compare_with="tomorrow")
+
+	def test_compare_mixed_currency_outlets_keep_own_currency(self):
+		# Two companies, two currencies: the per-outlet map never merges them.
+		# Invoices sit inside the SHIFTED window (past - 7), the comparator
+		# of a one-day range at `past`.
+		cmp_day = frappe.utils.add_days(frappe.utils.nowdate(), -17)
+		past = frappe.utils.add_days(frappe.utils.nowdate(), -10)
+		name_a = self._make_invoice(
+			self.company_a,
+			self.profile_a,
+			self.cash_a,
+			[{"item": self.item_x, "qty": 1, "rate": 150}],
+			paid=150,
+			posting_date=cmp_day,
+		)
+		name_b = self._make_invoice(
+			self.company_b,
+			self.profile_b,
+			self.cash_b,
+			[{"item": self.item_x, "qty": 1, "rate": 100}],
+			paid=100,
+			currency=self.currency_b,
+			posting_date=cmp_day,
+		)
+		try:
+			data = self._payload(company=None, from_date=past, to_date=past, compare_with="last_week")
+			c = data["comparison"]
+			self.assertEqual(c["outlets"][self.company_a], 150.0)
+			self.assertEqual(c["outlets"][self.company_b], 100.0)
+			self.assertEqual(c["net_tax_incl"]["by_currency"][self.currency_a], 150.0)
+			self.assertEqual(c["net_tax_incl"]["by_currency"][self.currency_b], 100.0)
+		finally:
+			for name in (name_a, name_b):
+				frappe.get_doc("Sales Invoice", name).cancel()
 
 	def test_targets_available_and_achievement(self):
 		data = self._payload()

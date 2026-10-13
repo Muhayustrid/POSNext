@@ -62,7 +62,16 @@ from datetime import datetime, timedelta
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, get_first_day, get_last_day, getdate, now_datetime, nowdate
+from frappe.utils import (
+	add_months,
+	cint,
+	flt,
+	get_first_day,
+	get_last_day,
+	getdate,
+	now_datetime,
+	nowdate,
+)
 
 from pos_next.hq_scope import (
 	expand_company_descendants,
@@ -90,6 +99,10 @@ HQ_ROLES = ("System Manager", "Accounts Manager", "Sales Manager", "POSNext Mana
 MAX_RANGE_DAYS = 366
 
 MONEY_KEYS = ("gross", "refunds", "net_tax_incl", "net_pretax", "taxes")
+
+# "Compare with" shifts: the selected range is shifted back by this many
+# days, or one calendar month (day clamped to month end, 31 Oct -> 30 Sep).
+COMPARE_SHIFTS = {"yesterday": -1, "last_week": -7, "last_month": "month"}
 
 # Cache-aside TTL for the heavy read-only monitoring aggregates: Redis holds a
 # computed section for at most this long, then the next request recomputes it.
@@ -127,6 +140,19 @@ def previous_weekday(day):
 	while day.weekday() >= 5:  # 5=Sat, 6=Sun
 		day = day - timedelta(days=1)
 	return day
+
+
+def shift_range(from_date, to_date, compare_with):
+	"""Shift the WHOLE selected range back: -1 day, -7 days or -1 calendar
+	month (day clamped to month end, so 31 Oct -> 30 Sep).
+	``add_months`` clamps to the shorter month; ``get_last_day`` keeps a
+	range END at the same relative month end."""
+	from_date = getdate(from_date)
+	to_date = getdate(to_date)
+	if compare_with == "last_month":
+		return add_months(from_date, -1), add_months(to_date, -1)
+	days = COMPARE_SHIFTS[compare_with]
+	return from_date + timedelta(days=days), to_date + timedelta(days=days)
 
 
 def split_by_currency(rows, key, currency_map):
@@ -245,6 +271,7 @@ def get_sales_monitoring(
 	include_descendants=0,
 	category_a=None,
 	category_b=None,
+	compare_with=None,
 ):
 	"""HQ Sales Monitoring summary in a single read-only payload. Detail
 	lists live in their own reports (POS Product Sales Report, POS Return
@@ -260,6 +287,9 @@ def get_sales_monitoring(
 		frappe.throw(_("From Date cannot be after To Date"))
 	if (to_date - from_date).days > MAX_RANGE_DAYS:
 		frappe.throw(_("Date range is limited to {0} days").format(MAX_RANGE_DAYS))
+	compare_with = compare_with or "none"
+	if compare_with not in ("none",) and compare_with not in COMPARE_SHIFTS:
+		frappe.throw(_("Invalid compare option: {0}").format(compare_with))
 
 	scope = _resolve_scope(company, include_descendants)
 	if not scope["companies"] or scope["profiles"] == []:
@@ -319,6 +349,26 @@ def get_sales_monitoring(
 			**range_metrics,
 			"cut_at": window["mtd_cutoff"].strftime("%H:%M") if window["mtd_cutoff"] else None,
 		},
+		"comparison": (
+			_cached_section(
+				"comparison",
+				scope,
+				lambda: _comparison_section(
+					scope,
+					currency_map,
+					default_ccy,
+					from_date,
+					to_date,
+					compare_with,
+					window["mtd_cutoff"],
+				),
+				from_date=from_date,
+				to_date=to_date,
+				compare_with=compare_with,
+			)
+			if compare_with != "none"
+			else None
+		),
 		"daily": _cached_section(
 			"daily", scope, lambda: _daily_section(scope, currency_map, default_ccy, window), to_date=to_date
 		),
@@ -803,6 +853,46 @@ def _metrics_from_totals(rows, currency_map, default_ccy):
 def _metrics_for_window(scope_companies, profiles, start, end, cutoff, currency_map, default_ccy):
 	where, params = _si_window_where(scope_companies, profiles, start, end, cutoff)
 	return _metrics_from_totals(_totals_rows(where, params), currency_map, default_ccy)
+
+
+def _comparison_section(scope, currency_map, default_ccy, from_date, to_date, compare_with, cutoff):
+	"""Like-for-like totals + per-outlet net sales for the shifted range.
+
+	Shift rule: the whole range moves back as one block (see ``shift_range``).
+	When the selected range includes today, the comparison's last day is cut
+	at the same clock time via the ``_si_window_where`` cutoff (posting_time);
+	past ranges are compared in full.
+	Caveat: the cutoff uses posting_date/posting_time, so backdated or
+	offline-synced invoices may deviate slightly.
+	"""
+	cmp_from, cmp_to = shift_range(from_date, to_date, compare_with)
+	# Selected range touches today -> same-clock-time cutoff on the shifted
+	# end; a fully-past range is compared in full.
+	# The cutoff keeps the clock time but moves to the comparison's last day,
+	# otherwise every earlier date passes the date check and nothing is cut.
+	cmp_cutoff = datetime.combine(cmp_to, cutoff.time()) if cutoff and to_date >= getdate(nowdate()) else None
+	metrics = _metrics_for_window(
+		scope["companies"], scope["profiles"], cmp_from, cmp_to, cmp_cutoff, currency_map, default_ccy
+	)
+	where, params = _si_window_where(
+		scope["companies"], scope["profiles"], cmp_from, cmp_to, cmp_cutoff
+	)
+	ranking = _outlet_ranking(where, params, currency_map)
+	# Every scoped company gets a row (0 when quiet) so the client's outlet
+	# table can compute per-outlet deltas without a second request.
+	outlets = {company: 0 for company in scope["companies"]}
+	outlets.update({r["company"]: r["net_tax_incl"] for r in ranking})
+	return {
+		"compare_with": compare_with,
+		"from_date": str(cmp_from),
+		"to_date": str(cmp_to),
+		"cut_at": cmp_cutoff.strftime("%H:%M") if cmp_cutoff else None,
+		"net_tax_incl": metrics["net_tax_incl"],
+		"net_pretax": metrics["net_pretax"],
+		"orders": metrics["orders"],
+		"apc": metrics["apc"],
+		"outlets": outlets,
+	}
 
 
 # ---------------------------------------------------------------------------

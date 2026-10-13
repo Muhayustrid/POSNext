@@ -199,11 +199,14 @@
 	 * An outlet row is "empty" when it had no transactions, no net sales AND
 	 * no monthly target — nothing to monitor, so the outlet table hides it
 	 * until the user asks for everything. An outlet that carries a target is
-	 * never empty (its zero line is the point).
+	 * never empty (its zero line is the point). An outlet with sales in the
+	 * comparison period (cmp_prior > 0) is also never empty: hiding it would
+	 * drop a −100% delta the user asked to see.
 	 */
 	function isEmptyOutlet(row) {
 		if (!row) return false;
 		if (Number(row.orders) > 0 || Number(row.net_tax_incl) > 0) return false;
+		if (Number(row.cmp_prior || 0) > 0) return false;
 		return !row.target || !!row.target.missing;
 	}
 
@@ -278,6 +281,91 @@
 		return lines.join("\n");
 	}
 
+	// ------------------------------------------------------------------
+	// "Compare with" — pure date/option logic shared by the filter selector,
+	// the KPI badges and the outlet delta column. All dates are "YYYY-MM-DD"
+	// strings so the logic is testable without a Date-format shim.
+	// ------------------------------------------------------------------
+
+	const COMPARE_DAYS = { yesterday: -1, last_week: -7 };
+	const COMPARE_ORDER = ["last_week", "last_month", "yesterday"];
+
+	function parseYmd(s) {
+		const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ""));
+		if (!m) return null;
+		const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+		return isNaN(d.getTime()) ? null : d;
+	}
+
+	function ymd(d) {
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+	}
+
+	/** The selected range shifted back as one block (31 Oct -> 30 Sep on month end). */
+	function shiftRangeStr(from, to, option) {
+		const f = parseYmd(from);
+		const t = parseYmd(to);
+		if (!f || !t) return null;
+		if (option === "last_month") {
+			const shift = (d) => {
+				// day clamp: land on the same day-of-month, fall back to the
+				// month end when the previous month is shorter
+				const target = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+				const dom = Math.min(d.getDate(), new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate());
+				return new Date(target.getFullYear(), target.getMonth(), dom);
+			};
+			return { from: ymd(shift(f)), to: ymd(shift(t)) };
+		}
+		const days = COMPARE_DAYS[option];
+		if (days === undefined) return null;
+		const shift = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
+		return { from: ymd(shift(f)), to: ymd(shift(t)) };
+	}
+
+	/** Ranges overlap when the shifted block intersects the selected block. */
+	function compareOverlaps(from, to, option) {
+		const c = shiftRangeStr(from, to, option);
+		if (!c) return false;
+		const f = parseYmd(from);
+		const t = parseYmd(to);
+		const cf = parseYmd(c.from);
+		const ct = parseYmd(c.to);
+		return cf <= t && f <= ct;
+	}
+
+	/**
+	 * Saved comparison option for the current range: the saved pick when it
+	 * is valid, else the nearest valid one (last_week -> last_month ->
+	 * yesterday), else "none". The saved choice itself is NOT overwritten.
+	 */
+	function resolveCompareOption(saved, from, to) {
+		if (saved === "none") return "none";
+		const candidates = saved && COMPARE_ORDER.includes(saved) ? [saved, ...COMPARE_ORDER] : COMPARE_ORDER;
+		for (const opt of candidates) {
+			if (!compareOverlaps(from, to, opt)) return opt;
+		}
+		return "none";
+	}
+
+	/**
+	 * Delta % for a KPI badge: null (render "—") when the comparison is 0 —
+	 * never infinity. Current may be a number or a per-currency value.
+	 */
+	function compareDeltaPct(current, prior) {
+		return growthPct(current, prior);
+	}
+
+	/**
+	 * Outlet delta in the outlet's own currency: number, -100 when only the
+	 * current period is empty, null (render "—") when the comparison is 0.
+	 */
+	function outletDelta(current, prior) {
+		current = Number(current || 0);
+		prior = Number(prior || 0);
+		if (!prior) return current ? null : 0;
+		return ((current - prior) / prior) * 100;
+	}
+
 	return {
 		safeDiv: safeDiv,
 		pctOf: pctOf,
@@ -299,5 +387,13 @@
 		categoryDonutRows: categoryDonutRows,
 		toCsv: toCsv,
 		csvCell: csvCell,
+		parseYmd: parseYmd,
+		ymd: ymd,
+		shiftRangeStr: shiftRangeStr,
+		compareOverlaps: compareOverlaps,
+		resolveCompareOption: resolveCompareOption,
+		compareDeltaPct: compareDeltaPct,
+		outletDelta: outletDelta,
+		COMPARE_ORDER: COMPARE_ORDER,
 	};
 });

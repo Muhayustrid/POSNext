@@ -78,6 +78,11 @@ function _harden_chart(chart, after) {
 // non-sensitive UI choices are stored: hour numbers and Item Group names.
 const HQ_PREFS_KEY = "HQ Sales Monitoring";
 
+// "Compare with" choice is a per-browser preference (localStorage): the
+// comparison option is presentation, not data, so it does not need to
+// survive a device change the way the category picks do.
+const HQ_COMPARE_KEY = "hq_sales_monitoring_compare_with";
+
 frappe.pages["hq-sales-monitoring"].on_page_load = function (wrapper) {
 	const page = frappe.ui.make_app_page({
 		parent: wrapper,
@@ -107,6 +112,10 @@ class HQSalesMonitor {
 		// Outlet-table view toggle: empty outlets (no sales, no TC, no target)
 		// stay hidden until asked for. Session-only, never persisted.
 		this.show_empty_outlets = false;
+		// "Compare with" preference: default Last week; the last choice is
+		// remembered per browser and re-validated against the range on every
+		// refresh (an overlapping pick falls back without being overwritten).
+		this.compare_with = localStorage.getItem(HQ_COMPARE_KEY) || "last_week";
 		this._autofilled = false;
 		// The two independent category-card picks. Defaults are replaced by
 		// the user's last saved choices before the first load.
@@ -151,6 +160,27 @@ class HQSalesMonitor {
 				{ label: __("Custom"), value: "custom" },
 			],
 			change: this._later(() => this._apply_preset()),
+		});
+		// Compare-with selector: shifts the selected range back for the
+		// delta badges and the outlet Δ column. Options whose shifted range
+		// would overlap the selected range are disabled (tooltip explains);
+		// the overlap check runs on every refresh (dates move with today).
+		this.compare_field = this.page.add_field({
+			fieldname: "compare_with",
+			label: __("Compare with"),
+			fieldtype: "Select",
+			default: this.compare_with || "last_week",
+			options: [
+				{ label: __("No comparison"), value: "none" },
+				{ label: __("Yesterday"), value: "yesterday" },
+				{ label: __("Last week"), value: "last_week" },
+				{ label: __("Last month"), value: "last_month" },
+			],
+			change: this._later(() => {
+				this.compare_with = this.compare_field.get_value() || "none";
+				localStorage.setItem(HQ_COMPARE_KEY, this.compare_with);
+				this.refresh();
+			}),
 		});
 		// Custom range: ONE calendar input, two sequential picks — the first
 		// click sets From (applied at once; To stays open-ended and the
@@ -268,6 +298,11 @@ class HQSalesMonitor {
 	}
 
 	_args() {
+		const r = this.range || {};
+		// the API gets the option actually shown, not the saved one that may overlap
+		const compare = r.from_date && r.to_date
+			? HQ_UTILS.resolveCompareOption(this.compare_with, r.from_date, r.to_date)
+			: this.compare_with;
 		return {
 			company: this.company_field.get_value() || "",
 			include_descendants: this.descendants_field.get_value() ? 1 : 0,
@@ -275,7 +310,29 @@ class HQSalesMonitor {
 			to_date: (this.range && this.range.to_date) || "",
 			category_a: this.category_a || "",
 			category_b: this.category_b || "",
+			compare_with: compare || "none",
 		};
+	}
+
+	// A saved compare option that overlaps the current range auto-falls back
+	// (Last week -> Last month -> Yesterday -> none) WITHOUT overwriting the
+	// saved choice — tomorrow the range may have moved past the overlap.
+	_sync_compare_field() {
+		const r = this.range || {};
+		if (!r.from_date || !r.to_date) return;
+		const effective = HQ_UTILS.resolveCompareOption(this.compare_with, r.from_date, r.to_date);
+		const $input = this.compare_field.$input;
+		$input.find("option").each((_, el) => {
+			const opt = el.value;
+			if (opt === "none") return;
+			const disabled = HQ_UTILS.compareOverlaps(r.from_date, r.to_date, opt);
+			el.disabled = disabled;
+			el.title = disabled ? __("Shifted range overlaps the selected range") : "";
+		});
+		if (effective !== this.compare_with) {
+			// display-only fallback: the saved choice stays in localStorage
+			$input.val(effective);
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -411,6 +468,7 @@ class HQSalesMonitor {
 		if (this.preset_field && this._preset() !== "custom") {
 			this.range = this._preset_range(this._preset());
 		}
+		this._sync_compare_field();
 		this._reset_table_pages();
 		return new Promise((resolve) => {
 			frappe.call({
@@ -619,10 +677,23 @@ class HQSalesMonitor {
 		return `<span class="hq-tip hq-tip--cell" title="${safe}" aria-label="${safe}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.2"></circle><line x1="12" y1="10.6" x2="12" y2="16.6"></line><circle cx="12" cy="7.4" r="1.1"></circle></svg></span>`;
 	}
 
-	_signed_pct(value) {
-		if (value === null || value === undefined) return this._na();
-		const n = Number(value);
-		return `<span class="hq-money">${n > 0 ? "+" : ""}${HQ_UTILS.fmtPct(n, 1)}</span>`;
+	// Delta badge for the comparison cards: green up / red down arrow with
+	// the percentage; the small text names the comparison value ("vs Rp 3,7 jt
+	// last week"). Comparison 0 (or current 0 vs 0) renders an em dash —
+	// never infinity. prior == null means no comparison at all.
+	_delta_badge(current, prior, fmt) {
+		if (prior === null || prior === undefined) return "";
+		const pct = HQ_UTILS.compareDeltaPct(current, prior);
+		const vs = `${__("vs")} <span class="hq-money">${fmt(prior)}</span> ${frappe.utils.escape_html(this._cmp_label || "")}`;
+		if (pct === null || pct === undefined) {
+			return `<div class="hq-delta hq-delta--na"><span class="hq-delta-pct">—</span><span class="hq-delta-vs">${vs}</span></div>`;
+		}
+		const up = pct > 0;
+		const flat = pct === 0;
+		const cls = flat ? "hq-delta--flat" : up ? "hq-delta--up" : "hq-delta--down";
+		const arrow = flat ? "→" : up ? "▲" : "▼";
+		const sign = up ? "+" : "";
+		return `<div class="hq-delta ${cls}"><span class="hq-delta-pct">${arrow} ${sign}${HQ_UTILS.fmtPct(pct, 1)}</span><span class="hq-delta-vs">${vs}</span></div>`;
 	}
 
 	// ------------------------------------------------------------------
@@ -638,30 +709,14 @@ class HQSalesMonitor {
 		const t = s.targets || {};
 		const ccy = s.scope.default_currency;
 		const has = !!t.available;
-		const d = s.daily;
-		const w = s.windows || {};
-
-		// Daily rhythm: growth vs the SAME weekday last week (the one
-		// comparison the range filters cannot align automatically). Growth
-		// only — today's absolute figures already live in this card. The
-		// footnote stays hidden on a day with nothing to compare yet (no
-		// orders today NOR last week same weekday) instead of saying N/A
-		// three times.
-		const lw = (d && d.last_week_same) || {};
-		const orders = (d && d.totals && d.totals.orders) || 0;
-		const hasRhythm = !!(d && d.totals && (orders > 0 || lw.orders > 0));
-		const tcGrowth = HQ_UTILS.growthPct(orders, lw.orders);
-		const apcGrowth = HQ_UTILS.growthPct(
-			((d && d.totals && d.totals.apc || {}).by_currency || {})[ccy],
-			((lw.apc || {}).by_currency || {})[ccy]
-		);
-		const rhythm = hasRhythm
-				? `<div class="hq-kpi-sub hq-muted" style="margin-top: 8px">
-					${__("vs")} ${frappe.utils.escape_html(w.last_week_same || "")} (${__("same weekday last week")}): ${__("Sales")} ${this._signed_pct((d.growth_vs_last_week_pct || {})[ccy])}
-					· ${__("TC")} ${this._signed_pct(tcGrowth)} · ${__("Avg Ticket")} ${this._signed_pct(apcGrowth)}
-					· ${__("Growth vs prior weekday")} (${frappe.utils.escape_html(w.prior_weekday || "")}): ${this._signed_pct((d.growth_vs_prior_weekday_pct || {})[ccy])}
-				</div>`
-				: "";
+		// Like-for-like comparison (server shifts the whole range back and
+		// cuts the shifted end at the same clock time when the range includes
+		// today). Badges use the DEFAULT currency only — no FX conversion;
+		// other currencies never merge into the delta.
+		const cmp = s.comparison || null;
+		this._cmp_label = cmp
+			? { yesterday: __("Yesterday"), last_week: __("Last week"), last_month: __("Last month") }[cmp.compare_with] || ""
+			: "";
 
 		// Achievement (MTD aggregate) keeps its progress bar in the row. The
 		// numerator follows the configured monthly target basis (neutral key
@@ -689,19 +744,20 @@ class HQSalesMonitor {
 				<div class="hq-card-title">${__("Total Sales")}
 					<button type="button" class="hq-toggle" data-hq-toggle>${__("incl. taxes & charges")}</button></div>
 			</div>
-			<div class="hq-hero-value hq-sales-incl">${this._metric_text(r.net_tax_incl)}</div>
-			<div class="hq-hero-value hq-sales-pretax" hidden>${this._metric_text(r.net_pretax)}</div>
+			<div class="hq-hero-value hq-sales-incl">${this._metric_text(r.net_tax_incl)}${this._delta_badge((r.net_tax_incl || {}).default, cmp ? (cmp.net_tax_incl || {}).default : null, (v) => HQ_UTILS.fmtMoney(v, ccy))}</div>
+			<div class="hq-hero-value hq-sales-pretax" hidden>${this._metric_text(r.net_pretax)}${this._delta_badge((r.net_pretax || {}).default, cmp ? (cmp.net_pretax || {}).default : null, (v) => HQ_UTILS.fmtMoney(v, ccy))}</div>
 			<div class="hq-kpi-sub">${__("Taxes & charges")}: ${this._metric_text(r.taxes)} · ${__("Refunds")}: ${this._metric_text(r.refunds)}</div>
 			<div class="hq-minis">
 			${slot(
 				__("Total Transactions"),
 				HQ_UTILS.fmtCount(r.orders ?? 0),
-				`${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)} ${this._tip(__("Pax is not recorded on POS invoices"))}`
+				`${__("Refund invoices")}: ${HQ_UTILS.fmtCount(r.refund_orders ?? 0)} ${this._tip(__("Pax is not recorded on POS invoices"))}` +
+					this._delta_badge(r.orders ?? 0, cmp ? cmp.orders : null, (v) => HQ_UTILS.fmtCount(v))
 			)}
 			${slot(
 				`${__("Avg per Transaction")} ${this._tip(`${__("Net incl. tax ÷ orders")} · ${__("per currency, never merged")}`)}`,
 				this._metric_text(r.apc),
-				"&nbsp;"
+				this._delta_badge((r.apc || {}).default, cmp ? (cmp.apc || {}).default : null, (v) => HQ_UTILS.fmtMoney(v, ccy)) || "&nbsp;"
 			)}
 			${`<div class="hq-mini">
 				<div class="hq-kpi-label">${__("Achievement (MTD)")} · ${frappe.utils.escape_html(mlabel)}</div>
@@ -710,7 +766,6 @@ class HQSalesMonitor {
 				<div class="hq-kpi-sub">${achSub}</div>
 			</div>`}
 			</div>
-			${rhythm}
 		</div>`;
 	}
 
@@ -727,6 +782,7 @@ class HQSalesMonitor {
 			monthly[r.company] = r;
 		});
 		const overall = ((s.targets || {}).overall || {}).by_company || {};
+		const cmpOutlets = ((s.comparison || {}).outlets) || null;
 		const ranked = (s.outlet_ranking || []).map((r) => ({
 			...r,
 			target: monthly[r.company] || null,
@@ -735,6 +791,25 @@ class HQSalesMonitor {
 		// Outlets with no sales in the selected range still carry their
 		// targets — append them (zero sales) instead of hiding them.
 		const seen = new Set(ranked.map((r) => r.company));
+		// An outlet that sold only in the comparison period must still show
+		// its −100% delta row, so the comparison map contributes rows too.
+		const cmpOnly = cmpOutlets
+			? Object.keys(cmpOutlets)
+				.filter((c) => !seen.has(c) && !(c in monthly))
+				.sort()
+				.map((c) => ({
+					company: c,
+					currency: (s.scope.currency_map || {})[c],
+					gross: 0,
+					net_tax_incl: 0,
+					orders: 0,
+					apc: null,
+					share_pct: null,
+					profiles: [],
+					target: monthly[c] || null,
+					overall: overall[c] || null,
+				}))
+			: [];
 		const quiet = Object.keys(monthly)
 			.filter((c) => !seen.has(c))
 			.sort()
@@ -752,7 +827,12 @@ class HQSalesMonitor {
 			}));
 		const rows = ranked
 			.concat(quiet)
-			.map((r) => ({ ...r, empty: HQ_UTILS.isEmptyOutlet(r) }));
+			.concat(cmpOnly)
+			.map((r) => {
+				const prior = cmpOutlets ? cmpOutlets[r.company] : undefined;
+				const row = { ...r, cmp_delta: HQ_UTILS.outletDelta(r.net_tax_incl, prior), cmp_prior: cmpOutlets ? prior : undefined };
+				return { ...row, empty: HQ_UTILS.isEmptyOutlet(row) };
+			});
 		// Net sales descending — but currencies never merge into one ranking:
 		// base-currency rows lead, every other currency follows in its own
 		// descending block.
@@ -764,6 +844,18 @@ class HQSalesMonitor {
 			return (Number(b.net_tax_incl) || 0) - (Number(a.net_tax_incl) || 0);
 		});
 		return rows;
+	}
+
+	// Δ Net Sales cell: computed per outlet in its OWN currency. Comparison 0
+	// -> "—" (never infinity); no comparison active -> plain empty cell.
+	_outlet_delta_cell(r) {
+		if (r.cmp_prior === undefined || r.cmp_prior === null) return "";
+		if (r.cmp_delta === null) return `<span class="hq-muted">—</span>`;
+		const up = r.cmp_delta > 0;
+		const flat = r.cmp_delta === 0;
+		const cls = flat ? "hq-delta--flat" : up ? "hq-delta--up" : "hq-delta--down";
+		const arrow = flat ? "→" : up ? "▲" : "▼";
+		return `<span class="${cls}">${arrow} ${up ? "+" : ""}${HQ_UTILS.fmtPct(r.cmp_delta, 1)}</span>`;
 	}
 
 	_outlet_row(r) {
@@ -796,6 +888,7 @@ class HQSalesMonitor {
 		return `<tr data-hq-outlet-row data-hq-idx="${r._idx ?? ""}"${r.empty ? ` data-hq-empty="1" class="hq-row--empty"` : ""} data-hq-company="${frappe.utils.escape_html(r.company)}">
 			<td class="hq-outlet-name" data-sort-col="name" data-sort-value="${frappe.utils.escape_html(r.company)}">${frappe.utils.escape_html(r.company)}</td>
 			<td class="hq-num" data-sort-col="net" data-sort-num="1" data-sort-value="${Number(r.net_tax_incl) || 0}">${money(r.net_tax_incl)}</td>
+			<td class="hq-num" data-sort-col="delta" data-sort-num="1" data-sort-value="${r.cmp_delta === null || r.cmp_delta === undefined ? "" : Number(r.cmp_delta)}">${this._outlet_delta_cell(r)}</td>
 			<td class="hq-num" data-sort-col="tc" data-sort-num="1" data-sort-value="${Number(r.orders) || 0}">${HQ_UTILS.fmtCount(r.orders)}</td>
 			<td class="hq-num" data-sort-col="avg" data-sort-num="1" data-sort-value="${r.apc === null || r.apc === undefined ? "" : Number(r.apc)}">${r.apc === null ? "N/A" : money(r.apc)}</td>
 			<td class="hq-num" data-sort-col="share" data-sort-num="1" data-sort-value="${r.share_pct === null || r.share_pct === undefined ? "" : Number(r.share_pct)}">${HQ_UTILS.fmtPct(r.share_pct)}</td>
@@ -835,13 +928,14 @@ class HQSalesMonitor {
 				<thead><tr>
 					${this._sort_th(__("Outlet (Company)"), "name", t, false)}
 					${this._sort_th(__("Net Sales"), "net", t, true)}
+					${this._sort_th(`${__("Δ Net Sales")} ${this._cell_tip(__("Net sales vs the comparison period, in the outlet's own currency"))}`, "delta", t, true)}
 					${this._sort_th(__("TC"), "tc", t, true)}
 					${this._sort_th(__("Avg Ticket"), "avg", t, true)}
 					${this._sort_th(`${__("Share")} ${this._cell_tip(__("Share of net sales within the same currency"))}`, "share", t, true)}
 					${this._sort_th(`${__("Monthly Progress")} ${monthlyTip}`, "prog", t, true)}
 					${this._sort_th(`${__("Balik Modal")} ${overallTip}`, "overall", t, true)}
 				</tr></thead>
-				<tbody>${rows || `<tr><td colspan="7" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
+				<tbody>${rows || `<tr><td colspan="8" class="hq-muted">${__("No data")}</td></tr>`}</tbody>
 			</table></div>
 			<div data-hq-outlet-pager-host></div>
 		</div>`;

@@ -96,6 +96,35 @@ dikecualikan).
 - **Peak Hour**: grafik batang pesanan per jam dengan label `HH:00` eksplisit
   (jam tanpa penjualan = batang nol; sumbu tidak pernah "…").
 
+#### Comparison ("Compare with")
+
+- Filter **Compare with** (Yesterday | Last week | Last month | No
+  comparison; default **Last week**) membandingkan rentang terpilih dengan
+  rentang yang digeser ke belakang utuh: −1 hari, −7 hari, atau −1 bulan
+  kalender dengan tanggal di-clamp ke akhir bulan (31 Okt → 30 Sep).
+- Bila rentang terpilih memuat hari ini, rentang pembanding dipotong pada
+  jam yang sama (mekanisme cutoff `posting_time` yang sama dengan kartu
+  lain); rentang lampau dibandingkan penuh. Catatan: faktur backdate atau
+  sync offline dapat menyimpang sedikit karena cutoff memakai
+  `posting_date`/`posting_time`.
+- Delta badge (▲ hijau / ▼ merah) tampil di hero (net sales, mengikuti
+  toggle tax-incl/pre-tax), kartu Total Transactions, dan Avg per
+  Transaction; teks kecil di bawah badge menampilkan nilai pembanding
+  ("vs Rp 3,7 jt minggu lalu"). Pembanding 0 → tanda "—", tidak pernah
+  Infinity. Badge hanya memakai mata uang default (tanpa konversi FX).
+- Pilihan yang rentangnya bergeser **tumpang tindih** dengan rentang
+  terpilih dinonaktifkan dengan tooltip (mis. Last 7 Days + Yesterday).
+  Pilihan terakhir diingat per browser (localStorage); bila pilihan
+  tersimpan tidak valid untuk rentang baru, halaman otomatis memakai
+  opsi valid terdekat (Last week → Last month → Yesterday → tanpa
+  perbandingan) **tanpa menimpa** pilihan tersimpan.
+- Tabel Outlet Performance mendapat kolom tambahan **Δ Net Sales** (8 kolom,
+  sortable), dihitung per outlet dalam mata uang outlet itu sendiri:
+  pembanding 0 → "—", outlet kosong di periode terpilih tapi ada di
+  pembanding → −100%. Outlet seperti itu tidak dihitung "kosong" oleh
+  toggle Show empty outlets (hanya outlet kosong di kedua sisi yang
+  disembunyikan). Secara default tanpa perbandingan, kolom kosong.
+
 #### Filter jam Peak Hour (hanya kartu ini)
 
 - Dua pilihan **From / To** di kartu mengatur jendela jam: **From inklusif,

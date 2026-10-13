@@ -342,6 +342,39 @@
 	color: var(--text-muted);
 }
 
+/* "Compare with" delta badges: green up / red down, comparison value as a
+   quiet sub line. The page's semantic accent stays the only other color. */
+.hq-delta {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.hq-delta-pct {
+	font-weight: 600;
+}
+
+.hq-delta-vs {
+	color: var(--text-muted);
+	font-size: 11px;
+}
+
+.hq-delta--up .hq-delta-pct {
+	color: #2e7d54;
+}
+
+.hq-delta--down .hq-delta-pct {
+	color: #b3261e;
+}
+
+.hq-delta--flat .hq-delta-pct,
+.hq-delta--na .hq-delta-pct {
+	color: var(--text-muted);
+}
+
 .hq-empty-toggle {
 	display: inline-flex;
 	align-items: center;
