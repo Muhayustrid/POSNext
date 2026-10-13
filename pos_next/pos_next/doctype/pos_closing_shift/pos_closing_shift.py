@@ -645,6 +645,9 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	base_grand_total = get_base_value(invoice, "grand_total", "base_grand_total", conversion_rate)
 	base_net_total = get_base_value(invoice, "net_total", "base_net_total", conversion_rate)
 
+	# Non-zero rows only: POS Invoices carry a 0-amount row per profile mode.
+	modes_used = ", ".join(dict.fromkeys(p.mode_of_payment for p in invoice.payments if flt(p.amount)))
+
 	# Credit returns with no payment rows were added to customer credit —
 	# no money entered or left the drawer.  Skip entirely.
 	if is_return and not invoice.payments:
@@ -657,6 +660,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 				"transaction_currency": invoice.get("currency") or company_currency,
 				"transaction_amount": flt(invoice.get("grand_total")),
 				"customer": invoice.customer,
+				"mode_of_payment": modes_used,
 				"is_return": is_return,
 				"return_against": invoice.get("return_against"),
 			}
@@ -672,6 +676,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 			"transaction_currency": invoice.get("currency") or company_currency,
 			"transaction_amount": flt(invoice.get("grand_total")),
 			"customer": invoice.customer,
+			"mode_of_payment": modes_used,
 			"is_return": is_return,
 			"return_against": invoice.get("return_against") if is_return else None,
 		}

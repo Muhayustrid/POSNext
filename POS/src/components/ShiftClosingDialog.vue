@@ -300,7 +300,11 @@
 									<div
 										class="flex justify-between items-center text-xs text-gray-600"
 									>
-										<span>{{ invoice.customer }}</span>
+										<span
+											>{{ invoice.customer }}<template v-if="invoice.mode_of_payment">
+												· {{ invoice.mode_of_payment }}</template
+											></span
+										>
 										<span class="text-gray-500">{{
 											formatTime(invoice.posting_time)
 										}}</span>
@@ -337,6 +341,11 @@
 												class="px-6 py-3 text-start text-xs font-medium text-gray-500 uppercase"
 											>
 												{{ __("Customer") }}
+											</th>
+											<th
+												class="px-6 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+											>
+												{{ __("Payment") }}
 											</th>
 											<th
 												class="px-6 py-3 text-start text-xs font-medium text-gray-500 uppercase"
@@ -396,6 +405,11 @@
 												{{ invoice.customer }}
 											</td>
 											<td
+												class="text-start px-6 py-4 whitespace-nowrap text-sm text-gray-600"
+											>
+												{{ invoice.mode_of_payment || "-" }}
+											</td>
+											<td
 												class="text-start px-6 py-4 whitespace-nowrap text-sm text-gray-500"
 											>
 												{{ formatTime(invoice.posting_time) }}
@@ -417,7 +431,7 @@
 									<tfoot class="bg-gray-50">
 										<tr>
 											<td
-												colspan="4"
+												colspan="5"
 												class="px-6 py-4 text-start text-sm font-semibold text-gray-700"
 											>
 												{{ __("Net Total:") }}

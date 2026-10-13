@@ -94,3 +94,11 @@ class TestPreviewTransactionsCarryPostingTime(POSInvoiceModeMixin, FrappeTestCas
 		self.assertTrue(transactions)
 		for txn in transactions:
 			self.assertTrue(txn.get("posting_time"), f"{txn.get('name')} has no posting_time")
+
+	def test_every_pos_transaction_has_mode_of_payment(self):
+		name = submit_invoice(invoice=self._payload()).get("name")
+		self._created.append(name)
+		opening = frappe.get_doc("POS Opening Shift", self.shift.name)
+		preview = make_closing_shift_from_opening(json.dumps(opening.as_dict(), default=str))
+		txn = next(t for t in preview["pos_transactions"] if name in (t.get("pos_invoice"), t.get("sales_invoice")))
+		self.assertEqual(txn.get("mode_of_payment"), self.mode[0])

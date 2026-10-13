@@ -160,6 +160,10 @@ function add_to_pos_transaction(d, frm, base_grand_total) {
 		transaction_currency: d.currency,
 		transaction_amount: flt(d.grand_total),
 		customer: d.customer,
+		// non-zero rows only, same as the server's _process_invoice
+		mode_of_payment: [
+			...new Set((d.payments || []).filter((p) => flt(p.amount)).map((p) => p.mode_of_payment)),
+		].join(", "),
 	};
 	if (d.doctype === "POS Invoice") {
 		child.pos_invoice = d.name;
