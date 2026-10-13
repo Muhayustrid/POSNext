@@ -139,6 +139,16 @@ class TestQueueAPI(FrappeTestCase):
 		self.assertIn("queue_enabled", settings)
 		self.assertIsInstance(settings["queue_enabled"], bool)
 
+	def test_bootstrap_settings_include_print_driver(self):
+		# The header printer icon probes the driver from this preload; without
+		# the key it stays "browser" and an iMin till reads disconnected.
+		from pos_next.api.bootstrap import _get_pos_settings
+
+		name = frappe.db.get_value("POS Settings", {"pos_profile": self.profile}, "name")
+		frappe.db.set_value("POS Settings", name, {"enabled": 1, "print_driver": "imin"})
+		settings = _get_pos_settings(frappe.get_doc("POS Profile", self.profile))
+		self.assertEqual(settings.get("print_driver"), "imin")
+
 	def test_lost_insert_race_retries(self):
 		# First-day insert race: the first insert hits the DB unique index and
 		# frappe's insert path surfaces it as DuplicateEntryError. The retry
