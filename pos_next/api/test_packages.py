@@ -10,8 +10,10 @@ Run inside the container (serial only):
 
 import json
 import unittest
+from unittest.mock import patch
 
 import frappe
+from frappe.utils import add_days, nowdate
 
 from pos_next.api.packages import (
 	COMPONENT_ROLE,
@@ -21,6 +23,7 @@ from pos_next.api.packages import (
 	quote,
 	validate_invoice_packages,
 )
+from pos_next.price_group_ownership import PRICE_LIST_OWNER_FIELD
 from pos_next.tests.price_group_helpers import get_default_customer
 
 PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
@@ -898,6 +901,136 @@ class TestPackageParentCatalogFlag(unittest.TestCase):
 			if frappe.db.exists("Item", self.TWIN):
 				frappe.delete_doc("Item", self.TWIN, ignore_permissions=True, force=True)
 			frappe.db.commit()
+
+
+class TestPriceGroupPackagePrice(unittest.TestCase):
+	"""A Price Group's managed list overrides the package base price; others don't."""
+
+	PG_LIST = "_PNXT_PKG_PG_LIST"
+	PLAIN_LIST = "_PNXT_PKG_PLAIN_LIST"
+	PG_RATE = 8_500_000.0
+
+	@classmethod
+	def setUpClass(cls):
+		_ensure_package()
+		cls.original_list = frappe.db.get_value("POS Profile", PROFILE, "selling_price_list")
+		currency = frappe.db.get_value("Price List", cls.original_list, "currency")
+		for name in (cls.PG_LIST, cls.PLAIN_LIST):
+			if not frappe.db.exists("Price List", name):
+				frappe.get_doc(
+					{
+						"doctype": "Price List",
+						"price_list_name": name,
+						"selling": 1,
+						"enabled": 1,
+						"currency": currency,
+					}
+				).insert(ignore_permissions=True)
+			if not frappe.db.exists("Item Price", {"item_code": PARENT_ITEM, "price_list": name}):
+				frappe.get_doc(
+					{
+						"doctype": "Item Price",
+						"item_code": PARENT_ITEM,
+						"price_list": name,
+						"price_list_rate": cls.PG_RATE,
+					}
+				).insert(ignore_permissions=True)
+		# Ownership marker only: a real Price Group would claim every profile of
+		# _Test Company, which the other package tests share.
+		frappe.db.set_value(
+			"Price List", cls.PG_LIST, PRICE_LIST_OWNER_FIELD, "_PNXT_PKG_FAKE_PG", update_modified=False
+		)
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.db.set_value(
+			"POS Profile", PROFILE, "selling_price_list", cls.original_list, update_modified=False
+		)
+		frappe.db.commit()
+
+	def use_list(self, price_list):
+		frappe.db.set_value("POS Profile", PROFILE, "selling_price_list", price_list, update_modified=False)
+
+	def headphone_choice(self, pkg):
+		return [
+			{
+				"group_key": "accessory",
+				"options": [{"option_id": _option_id(pkg, HEADPHONE), "qty": 1}],
+			}
+		]
+
+	def test_price_group_rate_replaces_base_price(self):
+		self.use_list(self.PG_LIST)
+		pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+		self.assertEqual(pkg["base_price"], self.PG_RATE)
+
+		result = quote(PACKAGE, self.headphone_choice(pkg), PROFILE, allocate=False)
+		self.assertEqual(result["total"], self.PG_RATE + HEADPHONE_ADJ)
+		self.assertEqual(result["lines"][0]["rate"], self.PG_RATE + HEADPHONE_ADJ)
+		self.assertEqual(result["snapshot"]["base_price"], self.PG_RATE)
+
+	def test_invoice_is_repriced_to_the_price_group_rate(self):
+		self.use_list(self.PG_LIST)
+		pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+		snapshot = {
+			"selections": [{"group_key": "accessory", "option_id": _option_id(pkg, HEADPHONE), "qty": 1}]
+		}
+		common = {
+			"discount_amount": 0,
+			"discount_percentage": 0,
+			"pos_package": PACKAGE,
+			"pos_package_instance": "pkg-pg-1",
+		}
+		rows = [
+			frappe._dict(
+				item_code=PARENT_ITEM,
+				qty=1,
+				rate=BASE_PRICE,
+				price_list_rate=BASE_PRICE,
+				pos_package_role=PARENT_ROLE,
+				pos_package_snapshot=json.dumps(snapshot),
+				**common,
+			),
+			frappe._dict(
+				item_code=LAPTOP, qty=1, rate=0, price_list_rate=0, pos_package_role=COMPONENT_ROLE, **common
+			),
+			frappe._dict(
+				item_code=HEADPHONE,
+				qty=1,
+				rate=0,
+				price_list_rate=0,
+				pos_package_role=COMPONENT_ROLE,
+				**common,
+			),
+		]
+		doc = frappe._dict({"is_return": 0, "pos_profile": PROFILE})
+		doc["items"] = rows
+
+		with patch("pos_next.api.packages._package_allocation_enabled", return_value=False):
+			validate_invoice_packages(doc)
+
+		self.assertEqual(rows[0].rate, self.PG_RATE + HEADPHONE_ADJ)
+
+	def test_ordinary_list_keeps_base_price(self):
+		self.use_list(self.PLAIN_LIST)
+		pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+		self.assertEqual(pkg["base_price"], BASE_PRICE)
+
+		result = quote(PACKAGE, self.headphone_choice(pkg), PROFILE, allocate=False)
+		self.assertEqual(result["total"], BASE_PRICE + HEADPHONE_ADJ)
+
+	def test_price_group_without_parent_price_keeps_base_price(self):
+		self.use_list(self.PG_LIST)
+		ip = frappe.db.get_value("Item Price", {"item_code": PARENT_ITEM, "price_list": self.PG_LIST})
+		valid_from = frappe.db.get_value("Item Price", ip, "valid_from")
+		# Not yet valid = no parent price on the list today.
+		frappe.db.set_value("Item Price", ip, "valid_from", add_days(nowdate(), 30), update_modified=False)
+		try:
+			pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+			self.assertEqual(pkg["base_price"], BASE_PRICE)
+		finally:
+			frappe.db.set_value("Item Price", ip, "valid_from", valid_from, update_modified=False)
 
 
 if __name__ == "__main__":
