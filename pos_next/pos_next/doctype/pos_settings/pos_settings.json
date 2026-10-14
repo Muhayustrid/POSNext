@@ -18,6 +18,7 @@
   "max_discount_allowed",
   "column_break_general",
   "allow_user_to_edit_rate",
+  "auto_apply_offers",
   "price_replay_audit_only",
   "decimal_precision",
   "tax_inclusive",
@@ -221,6 +222,13 @@
    "fieldname": "allow_user_to_edit_rate",
    "fieldtype": "Check",
    "label": "Allow User To Edit Rate"
+  },
+  {
+   "default": "1",
+   "description": "Apply eligible offers (Promotional Schemes / Pricing Rules) to the POS cart automatically. When unchecked, the cashier switches each offer on from the Offers dialog.",
+   "fieldname": "auto_apply_offers",
+   "fieldtype": "Check",
+   "label": "Auto Apply Offers"
   },
   {
    "default": "0",
@@ -967,7 +975,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-12 14:30:00.000000",
+ "modified": "2026-10-14 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

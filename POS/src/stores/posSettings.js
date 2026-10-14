@@ -53,6 +53,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_customer_purchase_order: 0,
 		allow_duplicate_customer_names: 0,
 		fetch_coupon: 0,
+		// Offers
+		auto_apply_offers: 1,
 		// Printing
 		allow_print_last_invoice: 0,
 		print_mode: "Manual",
@@ -161,6 +163,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.allow_duplicate_customer_names)
 	);
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon));
+	// Unset (older server, before migrate) keeps the historical behaviour: on.
+	const autoApplyOffers = computed(
+		() => Number(settings.value.auto_apply_offers ?? 1) !== 0
+	);
 
 	// Computed - Queue
 	const queueEnabled = computed(() => Boolean(settings.value.queue_enabled));
@@ -314,6 +320,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_customer_purchase_order: 0,
 			allow_duplicate_customer_names: 0,
 			fetch_coupon: 0,
+			auto_apply_offers: 1,
 			allow_print_last_invoice: 0,
 			print_mode: "Manual",
 			print_driver: "browser",
@@ -445,6 +452,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowCustomerPurchaseOrder,
 		allowDuplicateCustomerNames,
 		fetchCoupon,
+		autoApplyOffers,
 
 		// Computed - Queue
 		queueEnabled,

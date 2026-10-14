@@ -283,40 +283,44 @@
 								</p>
 							</div>
 
-							<!-- Offer Status - Auto-applied/removed based on cart -->
+							<!-- Offer switch: the cashier turns an offer on or off for this cart -->
 							<div class="mt-3">
-								<div
-									v-if="isOfferApplied(offer)"
-									class="w-full py-2 px-4 rounded-lg font-semibold text-sm bg-green-100 text-green-800 border border-green-300 flex items-center justify-center gap-2"
+								<button
+									type="button"
+									role="switch"
+									:aria-checked="isOfferApplied(offer)"
+									:disabled="applyingCode !== null"
+									@click="toggleOffer(offer)"
+									:class="[
+										'w-full py-2 px-4 rounded-lg font-semibold text-sm border flex items-center justify-between gap-2 transition-colors disabled:opacity-60 disabled:cursor-wait',
+										isOfferApplied(offer)
+											? 'bg-green-100 text-green-800 border-green-300 hover:bg-green-200'
+											: 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100',
+									]"
 								>
-									<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-										<path
-											fill-rule="evenodd"
-											d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-											clip-rule="evenodd"
-										/>
-									</svg>
-									{{ __("Applied") }}
-								</div>
-								<div
-									v-else
-									class="w-full py-2 px-4 rounded-lg font-semibold text-sm bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center gap-2"
-								>
-									<svg
-										class="w-4 h-4 animate-pulse"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
+									<span>
+										{{
+											applyingCode === offer.name
+												? __("Processing...")
+												: isOfferApplied(offer)
+													? __("Applied")
+													: __("Apply")
+										}}
+									</span>
+									<span
+										:class="[
+											'relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors',
+											isOfferApplied(offer) ? 'bg-green-600' : 'bg-gray-300',
+										]"
 									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-										/>
-									</svg>
-									{{ __("Will apply when eligible") }}
-								</div>
+										<span
+											:class="[
+												'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all',
+												isOfferApplied(offer) ? 'start-[1.125rem]' : 'start-0.5',
+											]"
+										></span>
+									</span>
+								</button>
 							</div>
 						</div>
 					</div>
@@ -367,7 +371,7 @@ const props = defineProps({
 	},
 });
 
-const emit = defineEmits(["update:modelValue"]);
+const emit = defineEmits(["update:modelValue", "apply-offer", "remove-offer"]);
 
 const show = ref(props.modelValue);
 const appliedOfferCodes = computed(() => {
@@ -386,6 +390,7 @@ watch(
 	() => props.modelValue,
 	(val) => {
 		show.value = val;
+		if (val) resetApplyingState();
 		// No need to load offers - they're already in the store
 	}
 );
@@ -397,6 +402,24 @@ watch(show, (val) => {
 function isOfferApplied(offer) {
 	return appliedOfferCodes.value.has(offer?.name);
 }
+
+// Offer whose switch is being processed (null when idle)
+const applyingCode = ref(null);
+
+function toggleOffer(offer) {
+	if (!offer?.name || applyingCode.value !== null) return;
+	applyingCode.value = offer.name;
+	emit(isOfferApplied(offer) ? "remove-offer" : "apply-offer", offer);
+}
+
+function resetApplyingState() {
+	applyingCode.value = null;
+}
+
+// The applied list changing means the store finished the switch.
+watch(appliedOfferCodes, resetApplyingState);
+
+defineExpose({ resetApplyingState });
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);

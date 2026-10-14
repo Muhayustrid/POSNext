@@ -146,6 +146,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const pendingItem = ref(null);
 	const pendingItemQty = ref(1);
 	const appliedOffers = ref([]);
+	// Offer codes the cashier switched off for the current cart. Auto-apply
+	// skips them until the cart is cleared or the cashier switches them on.
+	const dismissedOfferCodes = ref([]);
 	const appliedCoupon = ref(null);
 	// True while the header additional discount mirrors a server-applied
 	// transaction-scope offer discount (applyHeaderDiscountFromServer) and has
@@ -309,6 +312,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer.value = null;
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
+		dismissedOfferCodes.value = [];
 		appliedCoupon.value = null;
 		headerDiscountFromOffer.value = false;
 		currentDraftId.value = null;
@@ -656,6 +660,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		rebuildIncrementalCache();
 	}
 
+	/** Drop the item-level discounts offers put on rows (rows carrying
+	 * pricing_rules); manual discounts on other rows stay. */
+	function clearOfferItemDiscounts() {
+		invoiceItems.value.forEach((item) => {
+			if (hasPricingRules(item.pricing_rules)) {
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+				item.pricing_rules = [];
+				recalculateItem(item);
+			}
+		});
+		rebuildIncrementalCache();
+	}
+
 	function getAppliedOfferCodes() {
 		return appliedOffers.value.map((entry) => entry.code);
 	}
@@ -681,6 +699,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const offerCode = offer.name;
 		const existingCodes = getAppliedOfferCodes();
 		const alreadyApplied = existingCodes.includes(offerCode);
+		dismissedOfferCodes.value = dismissedOfferCodes.value.filter((code) => code !== offerCode);
 
 		if (alreadyApplied) {
 			return await removeOffer(offerCode, currentProfile, offersDialogRef);
@@ -821,13 +840,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Cancel any pending auto-processing
 		debouncedProcessOffers.cancel();
 
+		// Remember the cashier's choice: auto-apply must not put it back on the
+		// next cart change.
+		const removedCodes = offerCode ? [offerCode] : getAppliedOfferCodes();
+		dismissedOfferCodes.value = [...new Set([...dismissedOfferCodes.value, ...removedCodes])];
+
 		if (!offerCode) {
 			// Remove all offers - immediate operation, no queue needed
 			offerQueue.cancel();
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			clearOfferItemDiscounts();
 			removeDiscount();
+			headerDiscountFromOffer.value = false;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -843,7 +869,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			clearOfferItemDiscounts();
 			removeDiscount();
+			headerDiscountFromOffer.value = false;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1060,8 +1088,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			// Find new offers to apply (both price and product discounts)
+			if (!settingsStore.autoApplyOffers) {
+				return;
+			}
 			const appliedOfferCodes = new Set(appliedOffers.value.map((o) => o.code));
-			const newOffers = eligibleOffers.filter((offer) => !appliedOfferCodes.has(offer.name));
+			const dismissed = new Set(dismissedOfferCodes.value);
+			const newOffers = eligibleOffers.filter(
+				(offer) => !appliedOfferCodes.has(offer.name) && !dismissed.has(offer.name)
+			);
 
 			if (newOffers.length === 0) {
 				return;
@@ -1746,12 +1780,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 			}
 
-			// 2. Identify new eligible offers to apply (client-side check)
-			const allEligibleOffers = offersStore.allEligibleOffers;
+			// 2. Identify new eligible offers to apply (client-side check).
+			// Auto-apply is a POS Settings switch; offers the cashier switched
+			// off for this cart stay off.
 			const currentAppliedCodes = new Set(appliedOffers.value.map((o) => o.code));
-			const newOffers = allEligibleOffers.filter(
-				(offer) => !currentAppliedCodes.has(offer.name)
-			);
+			const dismissed = new Set(dismissedOfferCodes.value);
+			const newOffers = settingsStore.autoApplyOffers
+				? offersStore.allEligibleOffers.filter(
+						(offer) => !currentAppliedCodes.has(offer.name) && !dismissed.has(offer.name)
+					)
+				: [];
 
 			// 3. Determine if we need to call the server
 			// We MUST hit the server if:
@@ -2048,6 +2086,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		pendingItem,
 		pendingItemQty,
 		appliedOffers,
+		dismissedOfferCodes,
 		appliedCoupon,
 		selectionMode,
 		currentDraftId,

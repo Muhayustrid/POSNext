@@ -426,6 +426,58 @@ class TestOfferExemption(unittest.TestCase):
 			with self.assertRaises(frappe.ValidationError):
 				validate_invoice_discounts(doc, "validate")
 
+	def test_percentage_transaction_rule_relayed_as_amount_exempts_header(self):
+		# The POS relays a percentage Transaction offer as discount_amount only
+		# (additional_discount_percentage stays 0). A 100% offer on a 24000
+		# cart must not demand a head-office code.
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				self._rule(
+					"PR-TRANS",
+					apply_on="Transaction",
+					rate_or_discount="Discount Percentage",
+					discount_percentage=100,
+				)
+			]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				pos_applied_offer_rules='["PR-TRANS"]',
+				total=24000,
+				discount_amount=24000,
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			validate_invoice_discounts(doc, "validate")  # must not raise
+
+			mock_db.get_value.assert_not_called()
+
+	def test_percentage_transaction_rule_amount_above_rule_is_gated(self):
+		# The amount must equal the rule's percentage of the basis — a 10%
+		# offer cannot cover a 5000 header discount on a 24000 cart.
+		with DB_PATCH as mock_db, GET_ALL_PATCH as mock_get_all:
+			mock_get_all.return_value = [
+				self._rule(
+					"PR-TRANS",
+					apply_on="Transaction",
+					rate_or_discount="Discount Percentage",
+					discount_percentage=10,
+				)
+			]
+			doc = FakeDoc(
+				is_pos=1,
+				company="Company A",
+				pos_applied_offer_rules='["PR-TRANS"]',
+				total=24000,
+				discount_amount=5000,
+				items=[FakeItem(item_code="IT1")],
+				discount_confirmation_code="",
+			)
+
+			with self.assertRaises(frappe.ValidationError):
+				validate_invoice_discounts(doc, "validate")
+
 	def test_item_claimed_transaction_rule_does_not_exempt_header(self):
 		# R3 keys the header exemption on the INVOICE-level stash only — an
 		# item claiming a Transaction rule must not free the header discount.

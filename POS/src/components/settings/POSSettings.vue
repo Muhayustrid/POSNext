@@ -667,6 +667,15 @@
 												"
 											/>
 											<CheckboxField
+												v-model="settings.auto_apply_offers"
+												:label="__('Auto Apply Offers')"
+												:description="
+													__(
+														'Apply eligible offers to the cart automatically. When disabled, the cashier switches offers on from the Offers dialog.'
+													)
+												"
+											/>
+											<CheckboxField
 												v-model="settings.disable_rounded_total"
 												:label="__('Disable Rounded Total')"
 												:description="
@@ -1718,6 +1727,7 @@ const settings = ref({
 	allow_credit_sale: 0,
 	allow_return: 0,
 	require_refund_code: 1,
+	auto_apply_offers: 1,
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
 	print_mode: "Manual",

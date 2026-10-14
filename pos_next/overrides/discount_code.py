@@ -103,6 +103,9 @@ _PCT_TOLERANCE = 0.5
 # Money slack where values must match near-exactly (ERPNext stamps the doc with
 # the rule's own figure and the honest apply_offers flow relays it unchanged).
 _EXACT_TOLERANCE = 0.01
+# Money slack for a percentage header offer relayed as an amount: the amount
+# is the percentage of the basis rounded to currency precision.
+_HEADER_AMOUNT_TOLERANCE = 1.0
 
 
 # ==========================================================================
@@ -323,11 +326,46 @@ def _header_rule_exempts(rule, doc):
 
 	pct = flt(doc.get("additional_discount_percentage") or 0)
 	if rule.get("rate_or_discount") == "Discount Percentage":
-		return pct > 0 and abs(pct - flt(rule.get("discount_percentage") or 0)) <= _EXACT_TOLERANCE
+		rule_pct = flt(rule.get("discount_percentage") or 0)
+		if pct > 0:
+			return abs(pct - rule_pct) <= _EXACT_TOLERANCE
+		# The POS relays the engine's header stamp as an AMOUNT only
+		# (discount_amount, percentage left at 0) — the honest shape of every
+		# percentage Transaction offer. Reconcile that amount against the
+		# rule's percentage of the pre-discount basis.
+		return _header_amount_matches_pct(doc, rule_pct)
 	if rule.get("rate_or_discount") == "Discount Amount":
 		amount = flt(doc.get("discount_amount") or 0)
 		return amount > 0 and abs(amount - flt(rule.get("discount_amount") or 0)) <= _EXACT_TOLERANCE
 	return False
+
+
+def _header_discount_bases(doc, amount):
+	"""Candidate pre-discount bases the header discount was computed on.
+
+	``doc.total`` (items after item discounts, before the header discount) is
+	the Net Total basis and the only one known before ERPNext computes the
+	totals (update_invoice bootstraps it from the rows). Once totals exist,
+	the grand/net total plus the discount itself rebuild the Grand Total /
+	Net Total basis (exclusive taxes included)."""
+	bases = {flt(doc.get("total") or 0)}
+	for field in ("grand_total", "net_total"):
+		if doc.get(field) is not None:
+			bases.add(flt(doc.get(field)) + amount)
+	return [base for base in bases if base > 0]
+
+
+def _header_amount_matches_pct(doc, rule_pct):
+	"""True when the header discount_amount equals ``rule_pct`` of a
+	pre-discount basis, within one currency unit of rounding (ERPNext rounds
+	the percentage-to-amount conversion to currency precision)."""
+	amount = flt(doc.get("discount_amount") or 0)
+	if amount <= 0 or rule_pct <= 0:
+		return False
+	return any(
+		abs(amount - base * rule_pct / 100.0) <= _HEADER_AMOUNT_TOLERANCE
+		for base in _header_discount_bases(doc, amount)
+	)
 
 
 def verify_transaction_rule_names(rule_names, doc):
