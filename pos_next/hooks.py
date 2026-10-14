@@ -49,8 +49,14 @@ doctype_js = {
 	"Promotional Scheme": "public/js/promotional_scheme.js",
 	"POS Package": "public/js/pos_package.js",
 	"POS Discount Confirmation Code": "public/js/pos_discount_code.js",
+	"POS Refund Code": "public/js/pos_refund_code.js",
 }
-doctype_list_js = {"POS Discount Confirmation Code": "public/js/pos_discount_code_list.js"}
+# NOTE: POS Code Gate Group (like POS Profile Group) needs no doctype_js entry:
+# Frappe auto-loads pos_next/pos_next/doctype/<slug>/<slug>.js on the form.
+doctype_list_js = {
+	"POS Discount Confirmation Code": "public/js/pos_discount_code_list.js",
+	"POS Refund Code": "public/js/pos_refund_code_list.js",
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -183,6 +189,12 @@ doc_events = {
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
 		"validate": "pos_next.shift_schedule.validate_profile_schedule",
+	},
+	"Company": {
+		"validate": [
+			"pos_next.overrides.company_code_switch.guard_code_switches",
+			"pos_next.overrides.code_gate_group.validate_company_group_membership",
+		],
 	},
 	"Promotional Scheme": {
 		"validate": [

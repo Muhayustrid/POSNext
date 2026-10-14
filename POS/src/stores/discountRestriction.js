@@ -23,7 +23,11 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 	const _company = ref("");
 
 	// Getters
-	const applicable = computed(() => status.value.enabled !== false);
+	// The server sends `enabled` (alias of discount_code_required); either
+	// field off means the gate is off. Unknown (fetch failed) = on (fail closed).
+	const applicable = computed(
+		() => status.value.enabled !== false && status.value.discount_code_required !== false,
+	);
 	const hasCode = computed(() => Boolean((code.value || "").trim()));
 
 	/**

@@ -29,3 +29,5 @@ pos_next.patches.v2_16_0.move_company_target_fields_to_buying_tab
 pos_next.patches.v2_16_0.enable_automatic_stock_sync
 pos_next.patches.v2_16_0.drop_monthly_target_transactions
 pos_next.patches.v2_17_0.reorder_pos_settings_fields
+pos_next.patches.v2_18_0.seed_company_code_switches
+pos_next.patches.v2_19_0.seed_code_gate_groups

@@ -59,6 +59,17 @@ CUSTOM_FIELDS = {
 			"description": "HQ discount code entered for this invoice's manual discounts.",
 		},
 		{
+			"fieldname": "refund_confirmation_code",
+			"label": "Refund Confirmation Code",
+			"fieldtype": "Data",
+			"insert_after": "discount_confirmation_code",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "HQ refund code entered for this return (validated against POS Refund Code).",
+		},
+		{
 			"fieldname": "pos_applied_offer_rules",
 			"label": "POS Applied Offer Rules",
 			"fieldtype": "Small Text",
@@ -179,6 +190,17 @@ CUSTOM_FIELDS = {
 			"print_hide": 1,
 			"translatable": 0,
 			"description": "HQ discount code entered for this invoice's manual discounts.",
+		},
+		{
+			"fieldname": "refund_confirmation_code",
+			"label": "Refund Confirmation Code",
+			"fieldtype": "Data",
+			"insert_after": "discount_confirmation_code",
+			"read_only": 1,
+			"no_copy": 1,
+			"print_hide": 1,
+			"translatable": 0,
+			"description": "HQ refund code entered for this return (validated against POS Refund Code).",
 		},
 		{
 			"fieldname": "pos_applied_offer_rules",
@@ -309,6 +331,36 @@ CUSTOM_FIELDS = {
 			"fieldtype": "Date",
 			"insert_after": "pos_overall_sales_target",
 			"description": "Count cumulative sales from this date. Empty = all time.",
+		},
+		# Per-outlet code gate switches (validated by the Company doc_event
+		# guard: only System Manager may change them). NULL/unset = required.
+		{
+			"fieldname": "pos_require_discount_code",
+			"label": "Require Code for Discount",
+			"fieldtype": "Check",
+			"insert_after": "pos_overall_target_from",
+			"default": "1",
+			"description": "Uncheck to let this outlet skip the HQ code",
+		},
+		{
+			"fieldname": "pos_require_refund_code",
+			"label": "Require Code for Refund",
+			"fieldtype": "Check",
+			"insert_after": "pos_require_discount_code",
+			"default": "1",
+			"description": "Uncheck to let this outlet skip the HQ code",
+		},
+		{
+			"fieldname": "pos_code_gate_group",
+			"label": "Code Gate Group",
+			"fieldtype": "Link",
+			"options": "POS Code Gate Group",
+			"insert_after": "pos_require_refund_code",
+			# read-only mirror: membership is authoritative on the Code Gate
+			# Group's Members table (enforced by
+			# validate_company_group_membership)
+			"read_only": 1,
+			"description": "Code Gate Group this outlet belongs to (set from the group's Members table). Saving the group pushes its code switches to every member company.",
 		},
 	],
 	"POS Profile": [

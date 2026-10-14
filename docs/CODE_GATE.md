@@ -1,0 +1,60 @@
+# Discount & Refund Code Gate
+
+Head office (HQ) controls two things at the POS with confirmation codes: manual **discounts** and **refunds (returns)**. Each has its own code pool and its own per-outlet on/off switch.
+
+Design: `docs/superpowers/specs/2026-10-13-separate-refund-code-and-per-company-gate-design.md`.
+
+## Two separate code pools
+
+| | Discount | Refund |
+|---|---|---|
+| Doctype | `POS Discount Confirmation Code` | `POS Refund Code` |
+| Invoice field | `discount_confirmation_code` | `refund_confirmation_code` |
+| Needed when | a sale has a manual discount (item or cart) | an invoice is a return |
+
+A discount code is never accepted on a return, and a refund code is never accepted for a discount. The same string may exist in both pools.
+
+Both doctypes: multi-use until disabled, validity window (`valid_from` / `valid_upto`), outlet scope (All Outlets / Selected Outlets / All Outlets Except), and a "last use" audit (`used_count`, last user, last invoice, last time). Use **View usage** on a code to open the POS Invoice list filtered by that code (the list shows matching invoices; it is not a complete history — drafts, cancelled invoices and usages recorded under the other invoice doctype are included or missing accordingly, while `used_count` counts submits only).
+
+## Per-outlet switches
+
+On the **Company** form: `pos_require_discount_code` and `pos_require_refund_code` (both default on). Uncheck one to let that outlet skip the code for that kind.
+
+- Unset (NULL) means **required** (fail closed).
+- Only a System Manager can change them (enforced on Company save).
+- The server decides the outlet from the invoice's **POS Profile company** when a profile is set (a doc naming both a company and a profile of another company is rejected); without a profile it falls back to the invoice's company value.
+- The old `require_refund_code` checkbox in POS Settings / Global Settings is retired and no longer read.
+
+## Code Gate Groups (template)
+
+`POS Code Gate Group` lets HQ manage the per-Company switches in bulk. Four template groups are seeded by the `v2_19_0.seed_code_gate_groups` patch (idempotent — existing groups are never touched on re-run):
+
+| Group | Discount code | Refund code |
+|---|---|---|
+| Group A | required (1) | skipped (0) |
+| Group B | skipped (0) | required (1) |
+| Group C | skipped (0) | skipped (0) |
+| Group D | required (1) | required (1) |
+
+Behavior:
+
+- Groups seed **without members**; HQ assigns Companies from the group's **Members** table.
+- Saving the group pushes both switches to every member Company via `db.set_value` (not a full Company save, so Company validate hooks do not fire). One member row per group: a Company can belong to only one Code Gate Group.
+- A Company removed from the Members table **keeps its last synced switches** — only the mirror field on the Company (`pos_code_gate_group`) is cleared. Deleting a group works the same way.
+- Manual edits of the switches on the Company form remain allowed; a later group save overwrites them. There is no drift lock.
+- Only a System Manager can create or save a group (write access to each member Company is also required).
+- The gate read path is unchanged: invoices still read the switches from the Company itself (NULL = required, fail closed). A group is only a distribution mechanism, never read at check time.
+
+## Code format
+
+- Auto-generated (Generate Codes): 8 characters, no `0 O 1 I L`.
+- Typed by hand (e.g. `MESSI123`): letters A-Z and digits 0-9, 6-20 characters, stored upper-case. No spaces or symbols.
+- A code must be unique within its doctype. A code that has been used cannot change value (only its status).
+- Short manual codes are easy to guess; the check endpoints are rate-limited (20 attempts / 5 minutes).
+
+## Upgrade notes
+
+1. **Create refund codes BEFORE upgrading** for every outlet that still needs them. Existing discount codes are not copied into the refund pool, so returns at those outlets are blocked until refund codes exist.
+2. The migration (`v2_18_0.seed_company_code_switches`) sets each Company's refund switch from the old setting: off only if the company has at least one POS Profile and all of them had `require_refund_code` off; otherwise on. The discount switch is on for all.
+3. Returns cannot be created offline (the return dialog is disabled without connection), so there is no offline return queue to migrate; every return is validated live against the refund gate.
+4. Run `bench migrate` on every site (`posnext.localhost` and the test site).

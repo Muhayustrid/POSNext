@@ -78,6 +78,11 @@ class TestHQNativePermissions(FrappeTestCase):
             frappe.has_permission("POS Discount Confirmation Code", "create", user=self.sales_mgr)
         )
 
+    def test_sales_manager_refund_code_create(self):
+        self.assertTrue(
+            frappe.has_permission("POS Refund Code", "create", user=self.sales_mgr)
+        )
+
     def test_sales_manager_backdate_lane(self):
         from pos_next.api.backdate_invoices import has_backdate_role
 
@@ -121,6 +126,9 @@ class TestHQNativePermissions(FrappeTestCase):
         self.assertFalse(frappe.has_permission("POS Monthly Target", "write", user=self.cashier))
         self.assertFalse(
             frappe.has_permission("POS Discount Confirmation Code", "create", user=self.cashier)
+        )
+        self.assertFalse(
+            frappe.has_permission("POS Refund Code", "create", user=self.cashier)
         )
         self.assertFalse(frappe.has_permission("Wallet Transaction", "create", user=self.cashier))
 

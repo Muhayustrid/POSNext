@@ -112,6 +112,9 @@ class TestManagerPermissions(FrappeTestCase):
     def test_discount_confirmation_code_create(self):
         self._assert_matrix("POS Discount Confirmation Code", granted=("create",))
 
+    def test_refund_code_create(self):
+        self._assert_matrix("POS Refund Code", granted=("create",))
+
     def test_company_write(self):
         self._assert_matrix("Company", granted=("write",))
 

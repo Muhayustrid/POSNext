@@ -378,27 +378,32 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 
 
 def _ensure_profile_gate_off(profile_name):
-	"""Keep the HO discount-code gate off for the promotions profile.
+	"""Keep the refund-code gate off for the promotions profile.
 
-	Profile rows override the global single; without one the resolver falls
-	back to the site's global require_refund_code and the gate rejects this
-	module's discount scenarios.
+	The per-Company gate switch (fail-closed) must read 0 on the company the
+	profile invoices; otherwise the gate rejects any return this module could
+	create. Only the refund switch is touched: every invoice here is a sale,
+	so the discount switch is irrelevant. The caller's class cleanup restores
+	the original value (which may be NULL).
 	"""
-	if frappe.db.exists("POS Settings", {"pos_profile": profile_name}):
-		frappe.db.set_value(
-			"POS Settings",
-			{"pos_profile": profile_name},
-			{"enabled": 1, "require_refund_code": 0},
+	company = _resolve_company()
+	cls = TestPromotions
+	if getattr(cls, "_gate_backup", None) is None:
+		cls._gate_backup = (
+			frappe.db.get_value("Company", company, "pos_require_refund_code"),
+			company,
 		)
-	else:
-		frappe.get_doc(
-			{
-				"doctype": "POS Settings",
-				"pos_profile": profile_name,
-				"enabled": 1,
-				"require_refund_code": 0,
-			}
-		).insert(ignore_permissions=True)
+	frappe.db.set_value("Company", company, "pos_require_refund_code", 0)
+
+
+def _restore_gate():
+	"""Restore the refund gate switch the promotions helper turned off."""
+	cls = TestPromotions
+	if getattr(cls, "_gate_backup", None):
+		value, company = cls._gate_backup
+		frappe.db.set_value("Company", company, "pos_require_refund_code", value)
+		frappe.db.commit()
+		cls._gate_backup = None
 
 
 def _ctx():
@@ -583,6 +588,7 @@ class TestPromotions(FrappeTestCase):
 			"POS Next Global Settings", "invoice_type"
 		)
 		_set_invoice_type(SALES_INVOICE)
+		cls.addClassCleanup(_restore_gate)
 		# Resolve context once; per-test calls re-resolve so missing fixtures are
 		# surfaced where they're actually consumed.
 		cls.ctx = _ctx()

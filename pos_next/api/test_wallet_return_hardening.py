@@ -115,40 +115,19 @@ class TestWalletReturnReversal(FrappeTestCase):
         if not cls.wallet:
             raise unittest.SkipTest("no wallet account configured on company")
 
-        # the refund-code gate (fail-closed) demands a discount code on every
+        # the refund-code gate (fail-closed) demands a refund code on every
         # return; these tests exercise the wallet lane, not that gate — toggle
-        # it off for the profile's settings row (or the global single) and
-        # restore afterwards
-        cls._refund_gate_row = frappe.db.get_value(
-            "POS Settings", {"pos_profile": cls.profile.name, "enabled": 1}, "name"
+        # it off on the profile's company and restore afterwards
+        cls._refund_gate_backup = frappe.db.get_value(
+            "Company", cls.profile.company, "pos_require_refund_code"
         )
-        if cls._refund_gate_row:
-            cls._refund_gate_backup = frappe.db.get_value(
-                "POS Settings", cls._refund_gate_row, "require_refund_code"
-            )
-            frappe.db.set_value(
-                "POS Settings", cls._refund_gate_row, "require_refund_code", 0, update_modified=False
-            )
-        else:
-            cls._refund_gate_backup = frappe.db.get_single_value(
-                "POS Next Global Settings", "require_refund_code"
-            )
-            frappe.db.set_single_value("POS Next Global Settings", "require_refund_code", 0)
+        frappe.db.set_value("Company", cls.profile.company, "pos_require_refund_code", 0)
 
     @classmethod
     def tearDownClass(cls):
-        if cls._refund_gate_row:
-            frappe.db.set_value(
-                "POS Settings",
-                cls._refund_gate_row,
-                "require_refund_code",
-                cls._refund_gate_backup,
-                update_modified=False,
-            )
-        else:
-            frappe.db.set_single_value(
-                "POS Next Global Settings", "require_refund_code", cls._refund_gate_backup
-            )
+        frappe.db.set_value(
+            "Company", cls.profile.company, "pos_require_refund_code", cls._refund_gate_backup
+        )
         _set_invoice_type(cls.original_invoice_type or POS_INVOICE)
         frappe.db.commit()
         super().tearDownClass()
@@ -830,10 +809,10 @@ class TestInvoiceCancelCancelsLinkedWalletTransactions(FrappeTestCase):
     GL entries), so the balance returns to its pre-submit value.
     """
 
-    _FIELDS = ("enable_loyalty_program", "loyalty_to_wallet", "require_refund_code")
-    # loyalty-to-wallet ON mints the sales WT; require_refund_code OFF lets a
-    # return past the fail-closed refund gate
-    _ON = {"enable_loyalty_program": 1, "loyalty_to_wallet": 1, "require_refund_code": 0}
+    _FIELDS = ("enable_loyalty_program", "loyalty_to_wallet")
+    # loyalty-to-wallet ON mints the sales WT; pos_require_refund_code OFF on
+    # the profile's company lets a return past the fail-closed refund gate
+    _ON = {"enable_loyalty_program": 1, "loyalty_to_wallet": 1}
 
     @classmethod
     def setUpClass(cls):
@@ -892,7 +871,7 @@ class TestInvoiceCancelCancelsLinkedWalletTransactions(FrappeTestCase):
             raise unittest.SkipTest("no wallet account configured on company")
 
         # one settings slot (enabled profile row wins whole, else the global
-        # single) carries all three toggles; the resolver is deliberately
+        # single) carries the loyalty toggles; the resolver is deliberately
         # uncached so in-test toggles are read back on the next submit
         cls._settings_row = frappe.db.get_value(
             "POS Settings", {"pos_profile": cls.profile.name, "enabled": 1}, "name"
@@ -909,6 +888,10 @@ class TestInvoiceCancelCancelsLinkedWalletTransactions(FrappeTestCase):
                     "POS Next Global Settings", field
                 )
                 frappe.db.set_single_value("POS Next Global Settings", field, cls._ON[field])
+        cls._refund_gate_backup = frappe.db.get_value(
+            "Company", cls.profile.company, "pos_require_refund_code"
+        )
+        frappe.db.set_value("Company", cls.profile.company, "pos_require_refund_code", 0)
 
     @classmethod
     def tearDownClass(cls):
@@ -918,6 +901,9 @@ class TestInvoiceCancelCancelsLinkedWalletTransactions(FrappeTestCase):
         else:
             for field, value in cls._settings_backup.items():
                 frappe.db.set_single_value("POS Next Global Settings", field, value)
+        frappe.db.set_value(
+            "Company", cls.profile.company, "pos_require_refund_code", cls._refund_gate_backup
+        )
         frappe.db.delete("Loyalty Point Entry", {"loyalty_program": cls.loyalty_program.name})
         frappe.db.set_value(
             "Customer",

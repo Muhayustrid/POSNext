@@ -29,7 +29,6 @@
   "use_exact_amount",
   "section_break_returns",
   "allow_return",
-  "require_refund_code",
   "return_validity_days",
   "column_break_returns",
   "allow_return_without_invoice",
@@ -292,14 +291,6 @@
    "fieldname": "allow_return",
    "fieldtype": "Check",
    "label": "Allow Return"
-  },
-  {
-   "default": "1",
-   "description": "Refunds require a POS Discount Confirmation Code from head office (managed under Offers & Coupons)",
-   "fieldname": "require_refund_code",
-   "fieldtype": "Check",
-   "insert_after": "allow_return",
-   "label": "Require Code for Refund"
   },
   {
    "default": "0",

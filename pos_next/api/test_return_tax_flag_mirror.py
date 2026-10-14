@@ -98,36 +98,18 @@ class TestReturnTaxFlagMirror(FrappeTestCase):
         else:
             cls._tax_backup = None
         # the refund-code gate demands a code on every return; these tests
-        # exercise the tax flag mirror, not that gate — toggle it off
-        # (same pattern as test_wallet_return_hardening)
-        cls._refund_gate_row = cls._settings_row
-        if cls._refund_gate_row:
-            cls._refund_gate_backup = frappe.db.get_value(
-                "POS Settings", cls._refund_gate_row, "require_refund_code"
-            )
-            frappe.db.set_value(
-                "POS Settings", cls._refund_gate_row, "require_refund_code", 0, update_modified=False
-            )
-        else:
-            cls._refund_gate_backup = frappe.db.get_single_value(
-                "POS Next Global Settings", "require_refund_code"
-            )
-            frappe.db.set_single_value("POS Next Global Settings", "require_refund_code", 0)
+        # exercise the tax flag mirror, not that gate — toggle it off on the
+        # profile's company (same pattern as test_wallet_return_hardening)
+        cls._refund_gate_backup = frappe.db.get_value(
+            "Company", cls.profile.company, "pos_require_refund_code"
+        )
+        frappe.db.set_value("Company", cls.profile.company, "pos_require_refund_code", 0)
 
     @classmethod
     def tearDownClass(cls):
-        if cls._refund_gate_row:
-            frappe.db.set_value(
-                "POS Settings",
-                cls._refund_gate_row,
-                "require_refund_code",
-                cls._refund_gate_backup,
-                update_modified=False,
-            )
-        else:
-            frappe.db.set_single_value(
-                "POS Next Global Settings", "require_refund_code", cls._refund_gate_backup
-            )
+        frappe.db.set_value(
+            "Company", cls.profile.company, "pos_require_refund_code", cls._refund_gate_backup
+        )
         if cls._settings_row:
             frappe.db.set_value(
                 "POS Settings", cls._settings_row, "tax_inclusive", cls._tax_backup, update_modified=False

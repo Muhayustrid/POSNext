@@ -494,18 +494,19 @@ class TestMediumGatesSecurity(FrappeTestCase):
 		# refuses to delete the new draft while they point at the name. The
 		# draft itself has no ledgers yet, so every row referencing the name
 		# here is an orphan of the earlier invoice; purge them first.
-		for stale_code in frappe.get_all(
-			"POS Discount Confirmation Code",
-			filters={"last_used_in_invoice": name},
-			pluck="name",
-		):
-			frappe.db.set_value(
-				"POS Discount Confirmation Code",
-				stale_code,
-				"last_used_in_invoice",
-				None,
-				update_modified=False,
-			)
+		for stale_doctype in ("POS Discount Confirmation Code", "POS Refund Code"):
+			for stale_code in frappe.get_all(
+				stale_doctype,
+				filters={"last_used_in_invoice": name},
+				pluck="name",
+			):
+				frappe.db.set_value(
+					stale_doctype,
+					stale_code,
+					"last_used_in_invoice",
+					None,
+					update_modified=False,
+				)
 		for ledger_doctype, field in (
 			("GL Entry", "voucher_no"),
 			("GL Entry", "against_voucher"),

@@ -47,6 +47,33 @@ describe("discountRestriction store", () => {
 			expect(store.applicable).toBe(false)
 		})
 
+		it("can be switched off via discount_code_required alone (enabled alias)", async () => {
+			callMock.mockResolvedValue({ enabled: true, discount_code_required: false })
+			const store = useDiscountRestrictionStore()
+
+			await store.fetchStatus("Company A")
+
+			expect(store.applicable).toBe(false)
+		})
+
+		it("stays on when both server fields are true", async () => {
+			callMock.mockResolvedValue({ enabled: true, discount_code_required: true })
+			const store = useDiscountRestrictionStore()
+
+			await store.fetchStatus("Company A")
+
+			expect(store.applicable).toBe(true)
+		})
+
+		it("fails closed when the server omits the fields", async () => {
+			callMock.mockResolvedValue({})
+			const store = useDiscountRestrictionStore()
+
+			await store.fetchStatus("Company A")
+
+			expect(store.applicable).toBe(true)
+		})
+
 		it("ignores an empty company", async () => {
 			const store = useDiscountRestrictionStore()
 

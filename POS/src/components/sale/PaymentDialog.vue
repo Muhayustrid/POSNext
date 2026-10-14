@@ -812,7 +812,7 @@
 											v-model="confirmationCode"
 											type="text"
 											:placeholder="__('Enter the code from head office')"
-											maxlength="8"
+											maxlength="20"
 											class="w-full h-9 border border-orange-300 rounded-lg px-3 text-sm uppercase tracking-widest bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
 											@keyup.enter="unlockWithCode"
 										/>

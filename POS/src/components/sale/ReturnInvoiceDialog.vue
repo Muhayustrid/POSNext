@@ -1044,7 +1044,7 @@
 					></textarea>
 				</div>
 
-				<!-- HQ Confirmation Code (required to refund, per POS Settings) -->
+				<!-- HQ Confirmation Code (required to refund, per company switch) -->
 				<div v-if="refundCodeRequired && selectedItems.length > 0">
 					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
 						{{ __("Confirmation Code (HQ)") }}
@@ -1055,7 +1055,7 @@
 							v-model="refundCode"
 							type="text"
 							:placeholder="__('Enter the code from head office')"
-							maxlength="8"
+							maxlength="20"
 							:disabled="refundCodeVerified"
 							:class="[
 								'flex-1 h-10 border rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:border-blue-500',
@@ -1532,8 +1532,12 @@ const createReturnResource = createResource({
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,
 			// HQ confirmation code — required by the refund code gate
-			// (pos_next.overrides.discount_code) and stamped into the audit
-			discount_confirmation_code: refundCode.value.trim().toUpperCase(),
+			// (pos_next.overrides.discount_code) and stamped into the audit.
+			// Returns use the refund code pool; the server rejects discount
+			// codes on returns. Empty when the gate is off for this company.
+			refund_confirmation_code: refundCodeRequired.value
+				? refundCode.value.trim().toUpperCase()
+				: "",
 			// Payment amounts are negative for refunds
 			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
 			// This negative outstanding becomes customer credit balance
@@ -1603,8 +1607,8 @@ watch(
 	() => props.modelValue,
 		(val) => {
 			if (val) {
-				// Refresh the refund gate toggle for this profile (fail closed
-				// until the answer arrives).
+				// Refresh the refund gate toggle (fail closed until the answer
+				// arrives; re-checked per invoice company once one loads).
 				refundCodeRequired.value = true;
 				fetchRefundGateStatus();
 				// If a preselected invoice is provided, skip showing the invoice list dialog
@@ -1643,6 +1647,24 @@ watch(
 		if (!val) {
 			invoiceListFilter.value = "";
 		}
+	}
+);
+
+// Re-check the refund gate whenever an original invoice loads: the switch is
+// per company and the invoice's company may differ from the POS profile's.
+// A company change invalidates any code entered/verified for the previous
+// outlet — clear it so a stale code is never sent.
+watch(
+	() => originalInvoice.value?.company,
+	(company, oldCompany) => {
+		if (!company) return;
+		if (company !== oldCompany) {
+			refundCode.value = "";
+			refundCodeVerified.value = false;
+			refundCodeError.value = "";
+		}
+		refundCodeRequired.value = true;
+		fetchRefundGateStatus();
 	}
 );
 
@@ -2009,16 +2031,22 @@ async function searchInvoiceDirectly() {
 }
 
 /**
- * Load this profile's refund gate toggle from POS Settings. Purely UI
- * prompt-consistency — the server re-checks on submit and fails closed.
+ * Load the refund gate toggle for the original invoice's company (the same
+ * company the server gate uses). Purely UI prompt-consistency — the server
+ * re-checks on submit and fails closed. No company = no request (fail closed
+ * until one loads); the response only applies if its company is still the
+ * current one, so a slow stale response cannot override a newer answer.
  */
 async function fetchRefundGateStatus() {
+	const company = originalInvoice.value?.company;
+	if (!company) return;
+	const requestedCompany = company;
 	try {
-		const result = await call("pos_next.api.discount_code.get_status", {
-			pos_profile: props.posProfile || "",
-		});
+		const result = await call("pos_next.api.discount_code.get_status", { company });
+		if (originalInvoice.value?.company !== requestedCompany) return;
 		refundCodeRequired.value = result?.refund_code_required !== false;
 	} catch (error) {
+		if (originalInvoice.value?.company !== requestedCompany) return;
 		refundCodeRequired.value = true;
 	}
 }
@@ -2043,6 +2071,7 @@ async function verifyRefundCode() {
 		const result = await call("pos_next.api.discount_code.check_code", {
 			code: value,
 			company: originalInvoice.value?.company || "",
+			kind: "refund",
 		});
 		if (result?.valid) {
 			refundCodeVerified.value = true;

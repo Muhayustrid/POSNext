@@ -23,7 +23,6 @@ SALES_MANAGEMENT_FIELDS = (
 	"disable_rounded_total",
 	"max_discount_allowed",
 	"print_mode",
-	"require_refund_code",
 	"tax_inclusive",
 	"use_percentage_discount",
 )
