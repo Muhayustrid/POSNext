@@ -2239,7 +2239,11 @@ const {
 function handleNumpadEnter(value) {
 	if (value > 0 && lastSelectedMethod.value) {
 		numpadAddPayment();
-	} else if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
+	} else if (
+		remainingAmount.value === 0 &&
+		(totalPaid.value > 0 || isZeroTotal.value) &&
+		canComplete.value
+	) {
 		// If fully paid and can complete, trigger complete payment
 		completePayment();
 	}
@@ -2921,6 +2925,9 @@ const isExactAmountValid = computed(() => {
 	return totalPaid.value <= roundCurrency(props.grandTotal);
 });
 
+// Grand total fully discounted to zero: invoice can be submitted without payment
+const isZeroTotal = computed(() => roundCurrency(props.grandTotal) === 0);
+
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)
 	if (!isSalesPersonValid.value) {
@@ -2930,6 +2937,11 @@ const canComplete = computed(() => {
 	// Check exact amount validation
 	if (!isExactAmountValid.value) {
 		return false;
+	}
+
+	// Zero total (e.g. 100% discount): nothing to tender, no payment row needed
+	if (isZeroTotal.value) {
+		return true;
 	}
 
 	// "Pay on Receivable Account": the chosen account holds the unpaid balance
