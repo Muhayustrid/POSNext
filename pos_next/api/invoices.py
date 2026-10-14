@@ -628,6 +628,28 @@ def _price_mismatch_message(item_code, client_rate, expected_rate, rate_precisio
 	)
 
 
+def _is_full_discount_row(row, server_prices, rate_precision):
+	"""A rate-0 row whose explicit discount covers the whole list price.
+
+	Mirrors SEC-04's discount-only exemption: no manual-edit flag and the
+	discount fields carry the cut, so the discount code gate
+	(overrides/discount_code.py) requires a valid head-office code for it. A
+	smaller discount on a rate-0 row stays in the SEC-23 replay and is
+	rejected.
+	"""
+	if cint(row.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0):
+		return False
+	if flt(row.get("discount_percentage") or 0) >= 100:
+		return True
+	server_plr = _resolve_server_price_list_rate(server_prices, row)
+	discount_amount = flt(row.get("discount_amount") or 0)
+	return (
+		server_plr > 0
+		and discount_amount > 0
+		and discount_amount >= flt(server_plr, rate_precision) - _rate_mismatch_band(rate_precision)
+	)
+
+
 def _verify_offer_rate_magnitudes(
 	invoice_doc,
 	pos_profile,
@@ -684,6 +706,10 @@ def _verify_offer_rate_magnitudes(
 		elif claims:
 			rule_rows.append((idx, row, claims))
 		elif flt(row.get(FIELD_RATE) or 0) <= 0:
+			if _is_full_discount_row(row, server_prices, rate_precision):
+				# Manual 100% discount: the discount code gate authorizes it,
+				# same as SEC-04's discount-only exemption.
+				continue
 			zero_rows.append((idx, row, claims))
 	if not (rule_rows or free_rows or zero_rows):
 		# Header-only relay carts (transaction-level offers ride no rows) still
@@ -1423,6 +1449,25 @@ def _validate_receivable_account(account, company, pos_profile):
 	allow_credit_sale = cint(get_effective_pos_setting(pos_profile, "allow_credit_sale"))
 	if not allow_credit_sale:
 		frappe.throw(_("Credit sales are not enabled for this POS Profile."))
+
+
+def _ensure_zero_total_payment_row(invoice_doc, pos_profile_doc):
+	"""Give a fully discounted (grand total 0) sale a zero-amount payment row.
+
+	Nothing is tendered, so the client sends no payments, but POS Invoice
+	requires at least one Mode of Payment row (validate_mode_of_payment).
+	ERPNext's own POS fills the profile's modes with amount 0 the same way;
+	the row moves no money (paid_amount stays 0).
+	"""
+	if invoice_doc.get("payments") or invoice_doc.get("is_return") or not pos_profile_doc:
+		return
+	if flt(invoice_doc.get("grand_total")) != 0 or flt(invoice_doc.get("rounded_total")) != 0:
+		return
+	modes = pos_profile_doc.get("payments") or []
+	mode = next((m for m in modes if cint(m.get("default"))), None) or (modes[0] if modes else None)
+	if not mode:
+		return
+	invoice_doc.append("payments", {"mode_of_payment": mode.mode_of_payment, "amount": 0, "base_amount": 0})
 
 
 def _set_payment_accounts(payments, company):
@@ -2188,6 +2233,9 @@ def update_invoice(data):
 			invoice_doc.grand_total = 0.0
 		if invoice_doc.base_grand_total is None:
 			invoice_doc.base_grand_total = 0.0
+
+		if doctype != "Sales Order":
+			_ensure_zero_total_payment_row(invoice_doc, pos_profile_doc)
 
 		# Set accounts for payment methods before saving
 		_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
