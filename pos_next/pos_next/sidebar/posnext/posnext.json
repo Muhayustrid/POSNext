@@ -234,7 +234,7 @@
    "indent": 0,
    "keep_closed": 0,
    "label": "Refund Code",
-   "link_to": "POS Discount Confirmation Code",
+   "link_to": "POS Refund Code",
    "link_type": "DocType",
    "parentfield": "items",
    "parenttype": "Sidebar",

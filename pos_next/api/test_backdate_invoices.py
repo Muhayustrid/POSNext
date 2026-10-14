@@ -379,7 +379,7 @@ class TestBackdateEntryFlow(FrappeTestCase):
 			cls.orig_settings = frappe.db.get_value(
 				"POS Settings",
 				name,
-				["enabled", "allow_change_posting_date", "return_validity_days", "require_refund_code"],
+				["enabled", "allow_change_posting_date", "return_validity_days"],
 				as_dict=True,
 			)
 		else:
@@ -407,7 +407,6 @@ class TestBackdateEntryFlow(FrappeTestCase):
 				if orig
 				else 0,
 				"return_validity_days": getattr(orig, "return_validity_days", None) if orig else 0,
-				"require_refund_code": getattr(orig, "require_refund_code", None) if orig else 1,
 			},
 		)
 
@@ -476,8 +475,14 @@ class TestBackdateEntryFlow(FrappeTestCase):
 		self.stock_entry = se
 
 		# backdate lane on for every test; narrow tests flip it off explicitly.
-		# require_refund_code off so returns need no HO discount code (the
-		# code gate itself is covered by the discount_code suites).
+		# pos_require_refund_code off on the profile's company so returns need
+		# no HO refund code (the code gate itself is covered by the
+		# discount_code suites).
+		self._orig_refund_gate = frappe.db.get_value(
+			"Company", self.profile.company, "pos_require_refund_code"
+		)
+		self._orig_refund_gate_set = True
+		frappe.db.set_value("Company", self.profile.company, "pos_require_refund_code", 0)
 		frappe.db.set_value(
 			"POS Settings",
 			self.settings_name,
@@ -485,7 +490,6 @@ class TestBackdateEntryFlow(FrappeTestCase):
 				"enabled": 1,
 				"allow_change_posting_date": 1,
 				"return_validity_days": 0,
-				"require_refund_code": 0,
 			},
 		)
 
@@ -508,6 +512,12 @@ class TestBackdateEntryFlow(FrappeTestCase):
 		frappe.set_user(ADMIN)
 		if not getattr(self, "orig_allow_negative", 1):
 			frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 0)
+		if getattr(self, "_orig_refund_gate_set", False):
+			# write back unconditionally (incl. NULL) so a fail-closed NULL
+			# doesn't end up as 0 (fail-open)
+			frappe.db.set_value(
+				"Company", self.profile.company, "pos_require_refund_code", self._orig_refund_gate
+			)
 		# closings first: a submitted closing's child links would block the
 		# invoice cancels below (on_cancel clears them)
 		for name in frappe.get_all(

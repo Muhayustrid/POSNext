@@ -179,7 +179,7 @@
    "indent": 0,
    "keep_closed": 0,
    "label": "Refund Code",
-   "link_to": "POS Discount Confirmation Code",
+   "link_to": "POS Refund Code",
    "link_type": "DocType",
    "show_arrow": 0,
    "type": "Link"
@@ -552,7 +552,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-12 02:35:44.624795",
+ "modified": "2026-10-14 02:41:35.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",

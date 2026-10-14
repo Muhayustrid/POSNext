@@ -5,6 +5,12 @@ frappe.ui.form.on("POS Discount Confirmation Code", {
 	refresh(frm) {
 		if (frm.is_new()) return;
 
+		frm.add_custom_button(__("View Usage"), () => {
+			frappe.set_route("List", "Sales Invoice", {
+				discount_confirmation_code: frm.doc.code,
+			});
+		});
+
 		frm.add_custom_button(__("Generate Codes"), () => {
 			frappe.prompt(
 				[

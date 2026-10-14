@@ -18,8 +18,9 @@ Enforcement points (doc_events on Sales Invoice):
               fields (used_count, last_used_*).
 
 The gate applies to POS invoices only (is_pos); back-office invoices are not
-restricted. POS returns (is_return) are gated too — every refund needs a code,
-discounts or not (same code pool as discounts).
+restricted. POS returns (is_return) are gated too — every refund needs a code
+from the separate `POS Refund Code` pool, stored in `refund_confirmation_code`
+(discounts and refunds never validate each other's codes).
 
 Exemption: pre-approved discount channels need no code.
 - POS Offer promotions: an item whose discount is offer-attributed (its
@@ -43,7 +44,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime
 
-from pos_next.api.settings_resolver import get_effective_pos_setting
 from pos_next.overrides.pos_offer_usage import parse_applied_offer_rules
 from pos_next.overrides.pricing_rule import MIN_MAX_OPTIONS
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
@@ -52,6 +52,7 @@ from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
 )
 
 CODE_DOCTYPE = "POS Discount Confirmation Code"
+REFUND_CODE_DOCTYPE = "POS Refund Code"
 CODE_COMPANY_DOCTYPE = "POS Discount Code Company"
 # Scopes that consult the child outlet list; anything else is valid everywhere.
 _SCOPED_MODES = ("Selected Outlets", "All Outlets Except")
@@ -511,13 +512,13 @@ def _code_usability_error(row, company, companies, today=None):
 	"""
 	code = row.get("code") or row.get("name")
 	if row.get("status") != "Active":
-		return _("Discount code {0} has been disabled by head office.").format(code)
+		return _("Code {0} has been disabled by head office.").format(code)
 
 	today = getdate(today or frappe.utils.today())
 	if row.get("valid_from") and today < getdate(row.valid_from):
-		return _("Discount code {0} is not valid yet (starts on {1}).").format(code, row.valid_from)
+		return _("Code {0} is not valid yet (starts on {1}).").format(code, row.valid_from)
 	if row.get("valid_upto") and today > getdate(row.valid_upto):
-		return _("Discount code {0} has expired (was valid until {1}).").format(code, row.valid_upto)
+		return _("Code {0} has expired (was valid until {1}).").format(code, row.valid_upto)
 
 	scope = row.get("company_scope") or ""
 	if not company or scope not in _SCOPED_MODES:
@@ -528,39 +529,43 @@ def _code_usability_error(row, company, companies, today=None):
 	else:
 		allowed = company not in outlets
 	if not allowed:
-		return _("Discount code {0} is not valid for company {1}.").format(code, company)
+		return _("Code {0} is not valid for company {1}.").format(code, company)
 	return None
 
 
-def _scoped_outlets(code_name):
+def _scoped_outlets(code_name, parent_doctype=CODE_DOCTYPE):
 	"""Outlet names listed on the code's companies child table."""
 	return frappe.get_all(
 		CODE_COMPANY_DOCTYPE,
-		filters={"parenttype": CODE_DOCTYPE, "parent": code_name},
+		filters={"parenttype": parent_doctype, "parent": code_name},
 		pluck="company",
 	)
 
 
-def validate_code(code_value, company):
+def validate_code(code_value, company, doctype=CODE_DOCTYPE):
 	"""Read-only code validation. Returns the code document name; raises a
-	precise ValidationError on any problem."""
+	precise ValidationError on any problem. The empty-code message is
+	pool-aware: the discount lane keeps its original wording (pinned by
+	test_pos_invoice_submit), refunds get their own."""
 	code_value = (code_value or "").strip().upper()
 	if not code_value:
+		if doctype == REFUND_CODE_DOCTYPE:
+			frappe.throw(_("A refund code from head office is required for this return."))
 		frappe.throw(_("A discount code from head office is required for this discount."))
 
 	row = frappe.db.get_value(
-		CODE_DOCTYPE,
+		doctype,
 		{"code": code_value},
 		["name", "code", "status", "valid_from", "valid_upto", "company_scope"],
 		as_dict=True,
 	)
 	if not row:
-		frappe.throw(_("Discount code {0} is not valid.").format(code_value))
+		frappe.throw(_("Code {0} is not valid.").format(code_value))
 
 	# Child rows are only queried when the scope actually consults them.
 	companies = None
 	if company and (row.company_scope or "") in _SCOPED_MODES:
-		companies = _scoped_outlets(row.name)
+		companies = _scoped_outlets(row.name, doctype)
 
 	error = _code_usability_error(row, company, companies)
 	if error:
@@ -574,16 +579,39 @@ def validate_code(code_value, company):
 # ==========================================================================
 
 
-def refund_code_required(pos_profile):
-	"""Refund gate toggle from POS Settings (per profile, else global single).
+def _code_required(company, fieldname):
+	"""Per-Company gate switch read straight from the DB (no meta needed).
 
-	An unset value fails closed — the gate stays on until head office
-	explicitly turns it off.
-	"""
-	if not pos_profile:
+	Fails closed: a NULL/unset value, or a missing/blank company, keeps the
+	gate on until head office explicitly turns it off."""
+	if not company:
 		return True
-	value = get_effective_pos_setting(pos_profile, "require_refund_code")
+	value = frappe.db.get_value("Company", company, fieldname)
 	return True if value is None else bool(cint(value))
+
+
+def _gate_company(doc):
+	"""The company every gate decision for `doc` reads (switch lookup, code
+	scope, usage audit). Client-supplied `doc.company` is untrusted — the
+	checkout sends profile + company separately, so a forged company could
+	select an outlet whose switch is off. The profile's company wins; only a
+	missing profile (or one without a company) falls back to `doc.company`."""
+	profile = doc.get("pos_profile")
+	if profile:
+		profile_company = frappe.db.get_value("POS Profile", profile, "company")
+		if profile_company:
+			return profile_company
+	return doc.get("company")
+
+
+def discount_code_required(company: str | None) -> bool:
+	"""Whether this outlet requires an HQ code for manual discounts."""
+	return _code_required(company, "pos_require_discount_code")
+
+
+def refund_code_required(company: str | None) -> bool:
+	"""Whether this outlet requires an HQ code for refunds/returns."""
+	return _code_required(company, "pos_require_refund_code")
 
 
 def validate_invoice_discounts(doc, method=None):
@@ -599,16 +627,21 @@ def validate_invoice_discounts(doc, method=None):
 	if not doc.get("is_pos"):
 		return
 	if doc.get("is_return"):
-		# Refund gate — every return needs a code when the profile requires
-		# one. A coupon never explains a return's discount (fail closed): the
-		# stamped recompute above refuses stamped returns outright.
-		if refund_code_required(doc.get("pos_profile")):
-			validate_code(doc.get("discount_confirmation_code"), doc.get("company"))
+		# Refund gate — every return needs a refund-pool code when the outlet
+		# requires one. A coupon never explains a return's discount (fail
+		# closed): the stamped recompute above refuses stamped returns
+		# outright.
+		gate_company = _gate_company(doc)
+		if refund_code_required(gate_company):
+			validate_code(doc.get("refund_confirmation_code"), gate_company, REFUND_CODE_DOCTYPE)
 		return
 	if not invoice_has_manual_discount(doc):
 		return
+	gate_company = _gate_company(doc)
+	if not discount_code_required(gate_company):
+		return
 
-	validate_code(doc.get("discount_confirmation_code"), doc.get("company"))
+	validate_code(doc.get("discount_confirmation_code"), gate_company)
 
 
 def record_code_usage_on_submit(doc, method=None):
@@ -618,24 +651,31 @@ def record_code_usage_on_submit(doc, method=None):
 		return
 	if not doc.get("is_pos"):
 		return
-	code_value = (doc.get("discount_confirmation_code") or "").strip().upper()
-	if not code_value:
-		return
-	# Returns audit whenever they carry a code and the profile's refund gate is
-	# on; sales only when the code was actually needed for a discount.
+	# Returns audit against the refund pool; sales against the discount pool —
+	# each only when its own gate is on and the code was actually needed.
+	gate_company = _gate_company(doc)
 	if doc.get("is_return"):
-		if not refund_code_required(doc.get("pos_profile")):
+		if not refund_code_required(gate_company):
 			return
+		doctype = REFUND_CODE_DOCTYPE
+		code_value = (doc.get("refund_confirmation_code") or "").strip().upper()
 	elif not invoice_has_manual_discount(doc):
 		return
+	else:
+		if not discount_code_required(gate_company):
+			return
+		doctype = CODE_DOCTYPE
+		code_value = (doc.get("discount_confirmation_code") or "").strip().upper()
+	if not code_value:
+		return
 
-	code_name = validate_code(code_value, doc.get("company"))
+	code_name = validate_code(code_value, gate_company, doctype)
 
 	# Serialize concurrent submits on the same code so used_count cannot lose
 	# increments; the audit update lives in the submit transaction and rolls
 	# back with it.
 	row = frappe.db.get_value(
-		CODE_DOCTYPE,
+		doctype,
 		code_name,
 		["name", "code", "status", "valid_from", "valid_upto", "company_scope", "used_count"],
 		as_dict=True,
@@ -645,14 +685,14 @@ def record_code_usage_on_submit(doc, method=None):
 	# outlet scope may all have changed between the draft-time check and the
 	# submit (mirror of the old status/company re-check).
 	companies = None
-	if doc.get("company") and (row.company_scope or "") in _SCOPED_MODES:
-		companies = _scoped_outlets(row.name)
-	error = _code_usability_error(row, doc.get("company"), companies)
+	if gate_company and (row.company_scope or "") in _SCOPED_MODES:
+		companies = _scoped_outlets(row.name, doctype)
+	error = _code_usability_error(row, gate_company, companies)
 	if error:
 		frappe.throw(error)
 
 	frappe.db.set_value(
-		CODE_DOCTYPE,
+		doctype,
 		code_name,
 		{
 			"used_count": cint(row.used_count) + 1,

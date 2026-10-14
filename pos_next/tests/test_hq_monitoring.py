@@ -104,22 +104,10 @@ class TestHQMonitoring(IntegrationTestCase):
 		cls.profile_b = make_test_pos_profile(
 			"HQMB", cls.company_b, make_test_warehouse("HQMB", cls.company_b)
 		)
-		# refund code gate fails closed; disable it for these test profiles
-		# (only an enabled row is honoured by the settings resolver)
-		for profile in (cls.profile_a, cls.profile_b):
-			if not frappe.db.exists("POS Settings", {"pos_profile": profile}):
-				frappe.get_doc(
-					{
-						"doctype": "POS Settings",
-						"pos_profile": profile,
-						"enabled": 1,
-						"require_refund_code": 0,
-					}
-				).insert(ignore_permissions=True)
-			else:
-				frappe.db.set_value(
-					"POS Settings", {"pos_profile": profile}, {"enabled": 1, "require_refund_code": 0}
-				)
+		# refund code gate fails closed; disable it on these ad-hoc companies
+		# (fresh rows — the class-end rollback restores them, no backup needed)
+		for company in (cls.company_a, cls.company_b):
+			frappe.db.set_value("Company", company, "pos_require_refund_code", 0)
 		# The site's real customers restrict "Allowed To Transact With" to their
 		# outlet companies; a fresh unrestricted customer transacts with any of
 		# the ad-hoc test companies.
@@ -1403,20 +1391,10 @@ class TestTargetBasis(IntegrationTestCase):
 		cls.profile_np = make_test_pos_profile(
 			"TBNP", cls.company_np, make_test_warehouse("TBNP", cls.company_np)
 		)
-		for profile in (cls.profile_gp, cls.profile_np):
-			if not frappe.db.exists("POS Settings", {"pos_profile": profile}):
-				frappe.get_doc(
-					{
-						"doctype": "POS Settings",
-						"pos_profile": profile,
-						"enabled": 1,
-						"require_refund_code": 0,
-					}
-				).insert(ignore_permissions=True)
-			else:
-				frappe.db.set_value(
-					"POS Settings", {"pos_profile": profile}, {"enabled": 1, "require_refund_code": 0}
-				)
+		# refund code gate fails closed; disable it on these ad-hoc companies
+		# (fresh rows — the class-end rollback restores them, no backup needed)
+		for company in (cls.company_gp, cls.company_np):
+			frappe.db.set_value("Company", company, "pos_require_refund_code", 0)
 		cls.customer = cls._make_customer()
 		cls.price_list = cls._make_price_list()
 		cls.mode_gp = cls._profile_mode(cls.profile_gp)

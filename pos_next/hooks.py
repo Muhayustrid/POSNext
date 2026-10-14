@@ -49,8 +49,12 @@ doctype_js = {
 	"Promotional Scheme": "public/js/promotional_scheme.js",
 	"POS Package": "public/js/pos_package.js",
 	"POS Discount Confirmation Code": "public/js/pos_discount_code.js",
+	"POS Refund Code": "public/js/pos_refund_code.js",
 }
-doctype_list_js = {"POS Discount Confirmation Code": "public/js/pos_discount_code_list.js"}
+doctype_list_js = {
+	"POS Discount Confirmation Code": "public/js/pos_discount_code_list.js",
+	"POS Refund Code": "public/js/pos_refund_code_list.js",
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -183,6 +187,9 @@ doc_events = {
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
 		"validate": "pos_next.shift_schedule.validate_profile_schedule",
+	},
+	"Company": {
+		"validate": "pos_next.overrides.company_code_switch.guard_code_switches",
 	},
 	"Promotional Scheme": {
 		"validate": [

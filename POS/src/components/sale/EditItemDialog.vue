@@ -415,7 +415,7 @@
 															v-model="confirmationCode"
 															type="text"
 															:placeholder="__('Enter the code from head office')"
-															maxlength="8"
+															maxlength="20"
 															class="w-full h-9 border border-gray-300 rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 															@keyup.enter="unlockWithCode"
 														/>

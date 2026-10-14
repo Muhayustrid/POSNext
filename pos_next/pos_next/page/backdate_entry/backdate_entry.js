@@ -37,6 +37,9 @@ class BackdateEntry {
 		this.support_loaded = false;
 		this.amount_touched = false;
 		this.refund_touched = false;
+		// fail closed — both gates stay on until get_status answers otherwise
+		this.refund_code_required = true;
+		this.discount_code_required = true;
 		this.$root = $('<div class="bd-root">').appendTo(page.main);
 		this._restore_state();
 		this._check_access();
@@ -423,6 +426,8 @@ class BackdateEntry {
 		this.refund_code_error = "";
 		// fail closed — the field shows until get_status answers otherwise
 		this.refund_code_required = true;
+		// Sale mode honors the per-company discount switch (fail closed too)
+		this.discount_code_required = true;
 		this._render_entry();
 		this._load_support();
 		this._load_refund_gate();
@@ -500,7 +505,13 @@ class BackdateEntry {
 			})
 			.off("click", "[data-bd-mode]")
 			.on("click", "[data-bd-mode]", (e) => {
+				if (this.entry_mode === e.currentTarget.dataset.bdMode) return;
 				this.entry_mode = e.currentTarget.dataset.bdMode;
+				// Sale and return share the one code state; a verified refund
+				// code must never ride into a sale (or vice versa).
+				this.refund_code = "";
+				this.refund_code_verified = false;
+				this.refund_code_error = "";
 				this._render_entry();
 			});
 		this._save_state();
@@ -565,13 +576,13 @@ class BackdateEntry {
 					<p class="bd-fieldhint" data-bd-payment-hint></p>
 				</div>
 			</div>
-			<div class="bd-search-wrap" data-bd-sale-code-wrap${this._sale_has_discount() ? "" : ' style="display:none"'}>
+			<div class="bd-search-wrap" data-bd-sale-code-wrap${this.discount_code_required && this._sale_has_discount() ? "" : ' style="display:none"'}>
 				<label class="bd-label" for="bd-sale-code">${__("Confirmation Code (HQ)")} *</label>
 				<p class="bd-fieldhint">${__(
 					"A line has a discount, so a confirmation code from head office is required"
 				)}</p>
 				<div class="bd-code-row">
-					<input class="bd-input" id="bd-sale-code" type="text" autocomplete="off" maxlength="8"
+					<input class="bd-input" id="bd-sale-code" type="text" autocomplete="off" maxlength="20"
 						placeholder="${__("Enter the code from head office")}" data-bd-refund-code
 						value="${frappe.utils.escape_html(this.refund_code || "")}"
 						${this.refund_code_verified ? "disabled" : ""} />
@@ -588,6 +599,7 @@ class BackdateEntry {
 		this._bind_sale();
 		this._render_customer_state();
 		this._render_refund_code_state();
+		this._toggle_code_wrap();
 	}
 
 	// The row tables re-render on every keystroke; remember which row input
@@ -718,8 +730,20 @@ class BackdateEntry {
 
 	_toggle_sale_code() {
 		if (this.entry_mode !== "sale") return;
-		const $wrap = this.$body.find("[data-bd-sale-code-wrap]");
-		if ($wrap.length) $wrap.toggle(this._sale_has_discount());
+		this._toggle_code_wrap();
+	}
+
+	// Shared visibility for both code wraps: the sale one shows when the gate
+	// is on AND the cart has a discount; the return one only when the refund
+	// gate is on.
+	_toggle_code_wrap() {
+		if (this.entry_mode === "sale") {
+			const $wrap = this.$body.find("[data-bd-sale-code-wrap]");
+			if ($wrap.length) $wrap.toggle(this.discount_code_required && this._sale_has_discount());
+		} else {
+			const $wrap = this.$body.find("[data-bd-refund-code-wrap]");
+			if ($wrap.length) $wrap.toggle(this.refund_code_required);
+		}
 	}
 
 	// The customer chip makes the current selection visible; typing in the
@@ -906,7 +930,7 @@ class BackdateEntry {
 				<label class="bd-label" for="bd-refund-code">${__("Confirmation Code (HQ)")} *</label>
 				<p class="bd-fieldhint">${__("A return requires a confirmation code from head office")}</p>
 				<div class="bd-code-row">
-					<input class="bd-input" id="bd-refund-code" type="text" autocomplete="off" maxlength="8"
+					<input class="bd-input" id="bd-refund-code" type="text" autocomplete="off" maxlength="20"
 						placeholder="${__("Enter the code from head office")}" data-bd-refund-code
 						value="${frappe.utils.escape_html(this.refund_code || "")}"
 						${this.refund_code_verified ? "disabled" : ""} />
@@ -923,6 +947,7 @@ class BackdateEntry {
 		this._render_return_rows();
 		this._bind_return();
 		this._render_refund_code_state();
+		this._toggle_code_wrap();
 	}
 
 	_render_invoice_summary() {
@@ -1115,15 +1140,21 @@ class BackdateEntry {
 	}
 
 	_load_refund_gate() {
-		// POS Settings require_refund_code for this profile (UI hint only —
-		// the doc_events gate re-checks on save/submit and fails closed).
+		// Per-Company discount + refund switches (UI hints only — the
+		// doc_events gate re-checks on save/submit and fails closed). Company
+		// matches the gate the server applies: the shift's company. A late
+		// response for a previous shift must not flip the new shift's flags.
+		const shiftCompany = this.shift.company;
 		frappe.call({
 			method: "pos_next.api.discount_code.get_status",
-			args: { pos_profile: this.shift.pos_profile },
+			args: { company: shiftCompany },
 			callback: (r) => {
-				this.refund_code_required = (r.message || {}).refund_code_required !== false;
-				const $wrap = this.$body.find("[data-bd-refund-code-wrap]");
-				if ($wrap.length) $wrap.toggle(this.refund_code_required);
+				if ((this.shift || {}).company !== shiftCompany) return;
+				const status = r.message || {};
+				this.refund_code_required = status.refund_code_required !== false;
+				// Sale mode honors the discount switch; fail closed until answered.
+				this.discount_code_required = status.discount_code_required !== false;
+				this._toggle_code_wrap();
 			},
 		});
 	}
@@ -1137,11 +1168,15 @@ class BackdateEntry {
 			this._render_refund_code_state();
 			return;
 		}
+		// Sale mode validates against the discount pool, return mode against
+		// the refund pool — the server rejects a code from the wrong pool.
+		const is_return = this.entry_mode === "return";
 		frappe.call({
 			method: "pos_next.api.discount_code.check_code",
 			args: {
 				code: value,
-				company: (this.prepared_doc || {}).company || this.shift.company,
+				company: (is_return ? (this.prepared_doc || {}).company : null) || this.shift.company,
+				kind: is_return ? "refund" : "discount",
 			},
 			callback: (r) => {
 				const res = r.message || {};
@@ -1267,7 +1302,8 @@ class BackdateEntry {
 				return;
 			}
 			this.payment_amount = Number(this.$body.find("[data-bd-payment-amount]").val()) || 0;
-			if (this._sale_has_discount() && !this.refund_code_verified) {
+			// Sale gate: the per-company discount switch — off means no code needed
+			if (this.discount_code_required && this._sale_has_discount() && !this.refund_code_verified) {
 				frappe.msgprint(__("Verify the confirmation code before submitting the sale"));
 				return;
 			}
@@ -1324,7 +1360,7 @@ class BackdateEntry {
 				customer: this.prepared_doc.customer,
 				is_return: 1,
 				return_against: return_against,
-				discount_confirmation_code: (this.refund_code || "").trim().toUpperCase(),
+				refund_confirmation_code: (this.refund_code || "").trim().toUpperCase(),
 				update_outstanding_for_self: 0,
 				is_pos: 1,
 				update_stock: 1,

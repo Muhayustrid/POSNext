@@ -133,24 +133,11 @@ class TestSessionSummary(IntegrationTestCase):
 			cls.company,
 			make_test_warehouse("SessionSummary", cls.company),
 		)
-		# refund code gate fails closed; turn it off for this test profile
-		# (only an enabled row is honoured by the settings resolver)
-		if not frappe.db.exists("POS Settings", {"pos_profile": cls.pos_profile}):
-			frappe.get_doc(
-				{
-					"doctype": "POS Settings",
-					"pos_profile": cls.pos_profile,
-					"enabled": 1,
-					"require_refund_code": 0,
-				}
-			).insert(ignore_permissions=True)
-		else:
-			# a previous run may have left the gate on for this shared profile
-			frappe.db.set_value(
-				"POS Settings",
-				{"pos_profile": cls.pos_profile},
-				{"enabled": 1, "require_refund_code": 0},
-			)
+		# refund code gate fails closed; turn it off on the profile's company
+		cls._refund_gate_backup = frappe.db.get_value(
+			"Company", cls.company, "pos_require_refund_code"
+		)
+		frappe.db.set_value("Company", cls.company, "pos_require_refund_code", 0)
 		cls.debtors_account = frappe.db.get_value(
 			"Account",
 			{"company": cls.company, "account_type": "Receivable", "is_group": 0},
@@ -265,6 +252,10 @@ class TestSessionSummary(IntegrationTestCase):
 				frappe.db.commit()
 			except Exception:
 				frappe.db.rollback()
+		# restore the gate AFTER the purge block: the set-to-0 was committed in
+		# setUpClass, so a purge rollback must not undo this restore
+		frappe.db.set_value("Company", cls.company, "pos_require_refund_code", cls._refund_gate_backup)
+		frappe.db.commit()
 		super().tearDownClass()
 
 	@classmethod

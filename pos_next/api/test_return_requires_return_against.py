@@ -79,40 +79,20 @@ class TestReturnRequiresReturnAgainst(FrappeTestCase):
         if not cls.price_list:
             raise unittest.SkipTest("profile has no selling price list")
         cls.uom = frappe.db.get_value("Item", cls.item, "stock_uom")
-        # the refund-code gate (fail-closed) demands a discount code on every
+        # the refund-code gate (fail-closed) demands a refund code on every
         # return; these tests exercise the return_against gate, not that one —
-        # toggle it off and restore afterwards (same pattern as
-        # test_wallet_return_hardening)
-        cls._refund_gate_row = frappe.db.get_value(
-            "POS Settings", {"pos_profile": cls.profile.name, "enabled": 1}, "name"
+        # toggle it off on the profile's company and restore afterwards (same
+        # pattern as test_wallet_return_hardening)
+        cls._refund_gate_backup = frappe.db.get_value(
+            "Company", cls.profile.company, "pos_require_refund_code"
         )
-        if cls._refund_gate_row:
-            cls._refund_gate_backup = frappe.db.get_value(
-                "POS Settings", cls._refund_gate_row, "require_refund_code"
-            )
-            frappe.db.set_value(
-                "POS Settings", cls._refund_gate_row, "require_refund_code", 0, update_modified=False
-            )
-        else:
-            cls._refund_gate_backup = frappe.db.get_single_value(
-                "POS Next Global Settings", "require_refund_code"
-            )
-            frappe.db.set_single_value("POS Next Global Settings", "require_refund_code", 0)
+        frappe.db.set_value("Company", cls.profile.company, "pos_require_refund_code", 0)
 
     @classmethod
     def tearDownClass(cls):
-        if cls._refund_gate_row:
-            frappe.db.set_value(
-                "POS Settings",
-                cls._refund_gate_row,
-                "require_refund_code",
-                cls._refund_gate_backup,
-                update_modified=False,
-            )
-        else:
-            frappe.db.set_single_value(
-                "POS Next Global Settings", "require_refund_code", cls._refund_gate_backup
-            )
+        frappe.db.set_value(
+            "Company", cls.profile.company, "pos_require_refund_code", cls._refund_gate_backup
+        )
         _set_invoice_type(cls.original_invoice_type or POS_INVOICE)
         frappe.db.commit()
         super().tearDownClass()

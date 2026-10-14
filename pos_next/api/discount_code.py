@@ -17,6 +17,8 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import flt
 
 from pos_next.overrides.discount_code import (
+	REFUND_CODE_DOCTYPE,
+	discount_code_required,
 	invoice_has_manual_discount,
 	refund_code_required,
 	validate_code,
@@ -35,12 +37,18 @@ RATE_LIMIT_SECONDS = 300
 def get_status(company: str = None, pos_profile: str = None):
 	"""Gate states for the POS frontend — UI hints only.
 
-	`enabled`: the discount code gate (always on).
-	`refund_code_required`: whether returns need a code (POS Settings toggle
-	for the profile; fails closed). The server re-checks both on save/submit,
-	so a tampered client cannot bypass them.
+	`enabled` mirrors `discount_code_required` (kept for clients predating the
+	per-Company switches). `refund_code_required`: whether returns need a code
+	for this outlet. The server re-checks both on save/submit, so a tampered
+	client cannot bypass them. `pos_profile` is accepted and ignored for old
+	clients.
 	"""
-	return {"enabled": True, "refund_code_required": refund_code_required(pos_profile)}
+	discount_required = discount_code_required(company)
+	return {
+		"enabled": discount_required,
+		"discount_code_required": discount_required,
+		"refund_code_required": refund_code_required(company),
+	}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -83,16 +91,20 @@ def validate_confirmation_code(code: str, company: str, items=None, additional_d
 
 @frappe.whitelist(methods=["POST"])
 @rate_limit(key=None, limit=RATE_LIMIT, seconds=RATE_LIMIT_SECONDS)
-def check_code(code: str, company: str):
-	"""Validate a discount code VALUE alone — no cart context.
+def check_code(code: str, company: str, kind: str = "discount"):
+	"""Validate a code VALUE alone — no cart context.
 
 	Powers the locked-fields UX: the POS asks for the code BEFORE the discount
 	inputs unlock, so there is no discounted cart to check yet (and
-	validate_confirmation_code would skip the code check entirely). Returns
+	validate_confirmation_code would skip the code check entirely). `kind`
+	selects the pool: "discount" (sales) or "refund" (return dialog). Returns
 	{valid, message?} without throwing, for inline feedback.
 	"""
+	if kind not in ("discount", "refund"):
+		return {"valid": False, "message": _("Unknown code kind {0}.").format(kind)}
+	doctype = REFUND_CODE_DOCTYPE if kind == "refund" else "POS Discount Confirmation Code"
 	try:
-		validate_code(code, company)
+		validate_code(code, company, doctype)
 	except frappe.ValidationError as e:
 		return {"valid": False, "message": str(e)}
 
