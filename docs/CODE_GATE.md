@@ -25,6 +25,26 @@ On the **Company** form: `pos_require_discount_code` and `pos_require_refund_cod
 - The server decides the outlet from the invoice's **POS Profile company** when a profile is set (a doc naming both a company and a profile of another company is rejected); without a profile it falls back to the invoice's company value.
 - The old `require_refund_code` checkbox in POS Settings / Global Settings is retired and no longer read.
 
+## Code Gate Groups (template)
+
+`POS Code Gate Group` lets HQ manage the per-Company switches in bulk. Four template groups are seeded by the `v2_19_0.seed_code_gate_groups` patch (idempotent — existing groups are never touched on re-run):
+
+| Group | Discount code | Refund code |
+|---|---|---|
+| Group A | required (1) | skipped (0) |
+| Group B | skipped (0) | required (1) |
+| Group C | skipped (0) | skipped (0) |
+| Group D | required (1) | required (1) |
+
+Behavior:
+
+- Groups seed **without members**; HQ assigns Companies from the group's **Members** table.
+- Saving the group pushes both switches to every member Company via `db.set_value` (not a full Company save, so Company validate hooks do not fire). One member row per group: a Company can belong to only one Code Gate Group.
+- A Company removed from the Members table **keeps its last synced switches** — only the mirror field on the Company (`pos_code_gate_group`) is cleared. Deleting a group works the same way.
+- Manual edits of the switches on the Company form remain allowed; a later group save overwrites them. There is no drift lock.
+- Only a System Manager can create or save a group (write access to each member Company is also required).
+- The gate read path is unchanged: invoices still read the switches from the Company itself (NULL = required, fail closed). A group is only a distribution mechanism, never read at check time.
+
 ## Code format
 
 - Auto-generated (Generate Codes): 8 characters, no `0 O 1 I L`.

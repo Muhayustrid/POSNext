@@ -350,6 +350,18 @@ CUSTOM_FIELDS = {
 			"default": "1",
 			"description": "Uncheck to let this outlet skip the HQ code",
 		},
+		{
+			"fieldname": "pos_code_gate_group",
+			"label": "Code Gate Group",
+			"fieldtype": "Link",
+			"options": "POS Code Gate Group",
+			"insert_after": "pos_require_refund_code",
+			# read-only mirror: membership is authoritative on the Code Gate
+			# Group's Members table (enforced by
+			# validate_company_group_membership)
+			"read_only": 1,
+			"description": "Code Gate Group this outlet belongs to (set from the group's Members table). Saving the group pushes its code switches to every member company.",
+		},
 	],
 	"POS Profile": [
 		{

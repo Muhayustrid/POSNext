@@ -135,7 +135,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Configuration",
-   "link_count": 4,
+   "link_count": 5,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -176,6 +176,16 @@
    "label": "Shift Group",
    "link_count": 0,
    "link_to": "POS Profile Group",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Code Gate Group",
+   "link_count": 0,
+   "link_to": "POS Code Gate Group",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -375,7 +385,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-14 02:41:35.000000",
+ "modified": "2026-10-14 22:14:37.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
@@ -429,6 +439,14 @@
    "doc_view": "List",
    "label": "Shift Group",
    "link_to": "POS Profile Group",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Code Gate Group",
+   "link_to": "POS Code Gate Group",
    "stats_filter": "[]",
    "type": "DocType"
   },
