@@ -367,6 +367,14 @@ class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
 			"Tax Withholding Entry",
 		)
 
+	def validate_mode_of_payment(self):
+		# Zero-total invoices (e.g. a 100% HQ-coded discount) carry no money:
+		# no payment row can exist, so the row requirement is vacuous. Any
+		# positive total still needs at least one row (ERPNext rule).
+		if len(self.payments) == 0 and flt(self.grand_total) == 0:
+			return
+		super().validate_mode_of_payment()
+
 	def validate_pos_opening_entry(self):
 		if is_pos_next_owned(self):
 			shift = frappe.db.get_value(
