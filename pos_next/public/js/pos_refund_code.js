@@ -6,7 +6,7 @@ frappe.ui.form.on("POS Refund Code", {
 		if (frm.is_new()) return;
 
 		frm.add_custom_button(__("View Usage"), () => {
-			frappe.set_route("List", "Sales Invoice", {
+			frappe.set_route("List", "POS Invoice", {
 				refund_confirmation_code: frm.doc.code,
 			});
 		});

@@ -14,7 +14,7 @@ Design: `docs/superpowers/specs/2026-10-13-separate-refund-code-and-per-company-
 
 A discount code is never accepted on a return, and a refund code is never accepted for a discount. The same string may exist in both pools.
 
-Both doctypes: multi-use until disabled, validity window (`valid_from` / `valid_upto`), outlet scope (All Outlets / Selected Outlets / All Outlets Except), and a "last use" audit (`used_count`, last user, last invoice, last time). Use **View usage** on a code to open the Sales Invoice list filtered by that code (full history).
+Both doctypes: multi-use until disabled, validity window (`valid_from` / `valid_upto`), outlet scope (All Outlets / Selected Outlets / All Outlets Except), and a "last use" audit (`used_count`, last user, last invoice, last time). Use **View usage** on a code to open the POS Invoice list filtered by that code (the list shows matching invoices; it is not a complete history — drafts, cancelled invoices and usages recorded under the other invoice doctype are included or missing accordingly, while `used_count` counts submits only).
 
 ## Per-outlet switches
 
@@ -22,7 +22,7 @@ On the **Company** form: `pos_require_discount_code` and `pos_require_refund_cod
 
 - Unset (NULL) means **required** (fail closed).
 - Only a System Manager can change them (enforced on Company save).
-- The server decides the outlet from the invoice's **POS Profile company**, not from a value the client sends.
+- The server decides the outlet from the invoice's **POS Profile company** when a profile is set (a doc naming both a company and a profile of another company is rejected); without a profile it falls back to the invoice's company value.
 - The old `require_refund_code` checkbox in POS Settings / Global Settings is retired and no longer read.
 
 ## Code format
@@ -36,5 +36,5 @@ On the **Company** form: `pos_require_discount_code` and `pos_require_refund_cod
 
 1. **Create refund codes BEFORE upgrading** for every outlet that still needs them. Existing discount codes are not copied into the refund pool, so returns at those outlets are blocked until refund codes exist.
 2. The migration (`v2_18_0.seed_company_code_switches`) sets each Company's refund switch from the old setting: off only if the company has at least one POS Profile and all of them had `require_refund_code` off; otherwise on. The discount switch is on for all.
-3. Offline returns queued before the upgrade carry only `discount_confirmation_code`; they are rejected on sync where a refund code is still required and must be re-entered with a refund code.
+3. Returns cannot be created offline (the return dialog is disabled without connection), so there is no offline return queue to migrate; every return is validated live against the refund gate.
 4. Run `bench migrate` on every site (`posnext.localhost` and the test site).

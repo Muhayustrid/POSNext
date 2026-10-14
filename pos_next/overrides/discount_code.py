@@ -595,11 +595,20 @@ def _gate_company(doc):
 	scope, usage audit). Client-supplied `doc.company` is untrusted — the
 	checkout sends profile + company separately, so a forged company could
 	select an outlet whose switch is off. The profile's company wins; only a
-	missing profile (or one without a company) falls back to `doc.company`."""
+	missing profile (or one without a company) falls back to `doc.company`.
+	A doc that names BOTH a company and a profile of another company is
+	rejected outright instead of silently picking one."""
 	profile = doc.get("pos_profile")
 	if profile:
 		profile_company = frappe.db.get_value("POS Profile", profile, "company")
 		if profile_company:
+			doc_company = doc.get("company")
+			if doc_company and doc_company != profile_company:
+				frappe.throw(
+					_("Company {0} does not match the company of POS Profile {1} ({2}).").format(
+						doc_company, profile, profile_company
+					)
+				)
 			return profile_company
 	return doc.get("company")
 

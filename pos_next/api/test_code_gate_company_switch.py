@@ -230,15 +230,16 @@ class TestCompanyCodeSwitch(unittest.TestCase):
 
 	def test_forged_company_cannot_pick_switch_off_outlet(self):
 		# sale: doc.company points at a switch-OFF outlet, the doc's profile
-		# belongs to a switch-ON one — the profile must win
+		# belongs to a switch-ON one — the mismatch itself is rejected
 		off_company, on_company = _two_companies_with_switches()
 		profile = _profile_for_company(on_company)
 		frappe.db.set_value("Company", off_company, "pos_require_discount_code", 0)
 		try:
 			doc = self._discount_doc(company=off_company)
 			doc.pos_profile = profile
-			with self.assertRaises(frappe.ValidationError):
+			with self.assertRaises(frappe.ValidationError) as ctx:
 				validate_invoice_discounts(doc, "validate")
+			self.assertIn("does not match", str(ctx.exception))
 		finally:
 			frappe.db.set_value("Company", off_company, "pos_require_discount_code", 1)
 
@@ -250,16 +251,17 @@ class TestCompanyCodeSwitch(unittest.TestCase):
 			doc = self._return_doc("")
 			doc.company = off_company
 			doc.pos_profile = profile
-			with self.assertRaises(frappe.ValidationError):
+			with self.assertRaises(frappe.ValidationError) as ctx:
 				validate_invoice_discounts(doc, "validate")
+			self.assertIn("does not match", str(ctx.exception))
 		finally:
 			frappe.db.set_value("Company", off_company, "pos_require_refund_code", 1)
 
 	def test_profile_company_wins_scope_and_usage_stamp(self):
-		# a scoped code valid only for the PROFILE's company passes even though
-		# doc.company (forged) is a different outlet — and the usage stamp
+		# a scoped code valid only for the PROFILE's company passes when the
+		# doc's company agrees with the profile — and the usage stamp
 		# re-checks against the same gate company
-		on_company, off_company = _two_companies_with_switches()
+		on_company, _ = _two_companies_with_switches()
 		profile = _profile_for_company(on_company)
 		result = generate_codes_for(DISCOUNT_DOCTYPE, 1)
 		code_name = frappe.db.get_value(DISCOUNT_DOCTYPE, {"code": result["codes"][0]}, "name")
@@ -276,7 +278,7 @@ class TestCompanyCodeSwitch(unittest.TestCase):
 			}
 		).insert(ignore_permissions=True)
 		try:
-			doc = self._discount_doc(company=off_company)
+			doc = self._discount_doc(company=on_company)
 			doc.pos_profile = profile
 			doc.discount_confirmation_code = result["codes"][0]
 			doc.name = "ACC-SINV-GATECO"
@@ -292,6 +294,29 @@ class TestCompanyCodeSwitch(unittest.TestCase):
 				DISCOUNT_DOCTYPE, code_name, "company_scope", "All Outlets", update_modified=False
 			)
 			frappe.db.set_value(DISCOUNT_DOCTYPE, code_name, "used_count", 0, update_modified=False)
+			frappe.db.rollback()
+
+	def test_company_profile_mismatch_rejected(self):
+		# doc.company and the profile's company disagree: rejected outright,
+		# even with a code that would be valid for the profile's outlet
+		on_company, off_company = _two_companies_with_switches()
+		profile = _profile_for_company(on_company)
+		result = generate_codes_for(DISCOUNT_DOCTYPE, 1)
+		try:
+			doc = self._discount_doc(company=off_company)
+			doc.pos_profile = profile
+			doc.discount_confirmation_code = result["codes"][0]
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_invoice_discounts(doc, "validate")
+			self.assertIn("does not match", str(ctx.exception))
+
+			ret = self._return_doc("")
+			ret.company = off_company
+			ret.pos_profile = profile
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				validate_invoice_discounts(ret, "validate")
+			self.assertIn("does not match", str(ctx.exception))
+		finally:
 			frappe.db.rollback()
 
 	def test_doc_without_profile_uses_doc_company(self):
@@ -321,7 +346,10 @@ class TestCompanyCodeSwitch(unittest.TestCase):
 	def test_gate_company_helper_prefers_profile(self):
 		off_company, on_company = _two_companies_with_switches()
 		profile = _profile_for_company(on_company)
-		self.assertEqual(_gate_company(frappe._dict(company=off_company, pos_profile=profile)), on_company)
+		self.assertEqual(_gate_company(frappe._dict(company=on_company, pos_profile=profile)), on_company)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			_gate_company(frappe._dict(company=off_company, pos_profile=profile))
+		self.assertIn("does not match", str(ctx.exception))
 		self.assertEqual(_gate_company(frappe._dict(company=off_company)), off_company)
 		self.assertIsNone(_gate_company(frappe._dict(company=None)))
 		self.assertIsNone(_gate_company(frappe._dict(company=None, pos_profile="No Such Profile")))
