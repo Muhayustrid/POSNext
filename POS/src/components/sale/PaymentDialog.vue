@@ -1700,7 +1700,7 @@
 							<button
 								v-if="
 									(remainingAmount === 0 || (applyWriteOff && canWriteOff)) &&
-									totalPaid > 0
+									(totalPaid > 0 || isZeroTotal)
 								"
 								@click="completePayment"
 								:disabled="isSubmitting || !canComplete"
