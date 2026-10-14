@@ -130,3 +130,20 @@ describe("payment payload uses untranslated mode constants (COR-FE-13)", () => {
 		expect(wrapper.vm.paymentEntries[0].type).toBe("General")
 	})
 })
+
+describe("zero grand total (100% discount)", () => {
+	it("can complete without any payment row", async () => {
+		const wrapper = mountDialog({ grandTotal: 0 })
+		await flushPromises()
+
+		expect(wrapper.vm.paymentEntries).toHaveLength(0)
+		expect(wrapper.vm.canComplete).toBe(true)
+	})
+
+	it("still requires payment when total is above zero", async () => {
+		const wrapper = mountDialog({ grandTotal: 5000 })
+		await flushPromises()
+
+		expect(wrapper.vm.canComplete).toBe(false)
+	})
+})

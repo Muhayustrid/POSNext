@@ -516,3 +516,88 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 			limit=1,
 		)
 		self.assertTrue(logs, "audit-only must write the mismatch to the Error Log")
+
+	# ------------------------------------------------------------------
+	# (8) 100% manual discount (HQ-coded): SEC-23 exempts, code gate stays
+	# ------------------------------------------------------------------
+
+	def _mint_code(self, code):
+		code_doc = frappe.get_doc(
+			{
+				"doctype": "POS Discount Confirmation Code",
+				"code": code,
+				"status": "Active",
+				"valid_from": nowdate(),
+				"company_scope": "All Outlets",
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.delete_doc(
+				"POS Discount Confirmation Code", code_doc.name, force=1, ignore_permissions=True
+			)
+		)
+		return code
+
+	def _full_discount_line(self, **overrides):
+		line = _line(self.ctx, ITEM_A, qty=1)
+		line.update(
+			{
+				"rate": 0,
+				"price_list_rate": 50.0,
+				"discount_percentage": 100,
+				"discount_amount": 50.0,
+			}
+		)
+		line.update(overrides)
+		return line
+
+	def test_full_manual_discount_passes(self):
+		"""Rate-0 row with a 100% manual discount + valid HQ code submits: the
+		SEC-23 replay has no engine grant to compare against, and authorization
+		stays with the discount code gate (which the code satisfies)."""
+		code = self._mint_code("SEC23D8AA")
+		payload = self._paid_payload([self._full_discount_line()])
+		payload["discount_confirmation_code"] = code.lower()
+		from pos_next.api.invoices import update_invoice
+
+		created = update_invoice(json.dumps(payload))
+		self._created.append(created.get("name"))
+		doc = frappe.get_doc("Sales Invoice", created.get("name"))
+		self.assertAlmostEqual(flt(doc.items[0].rate), 0, places=2)
+		self.assertAlmostEqual(flt(doc.grand_total), 0, places=2)
+
+	def test_full_manual_discount_without_code_rejected(self):
+		"""The SEC-23 exemption must not weaken authorization: the same row
+		without an HQ code is still refused by the discount code gate."""
+		payload = self._paid_payload([self._full_discount_line()])
+		from pos_next.api.invoices import update_invoice
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			update_invoice(json.dumps(payload))
+		self.assertIn("discount code", str(ctx.exception).lower())
+
+	def test_partial_discount_rate_zero_rejected(self):
+		"""A rate-0 row with only a partial discount stays rejected: the
+		exemption covers the 100% case, not a half-price wipe."""
+		code = self._mint_code("SEC23D8AB")
+		line = self._full_discount_line(discount_percentage=50, discount_amount=25.0)
+		payload = self._paid_payload([line])
+		payload["discount_confirmation_code"] = code.lower()
+		from pos_next.api.invoices import update_invoice
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			update_invoice(json.dumps(payload))
+		self.assertIn(_RATE_MSG, str(ctx.exception))
+
+	def test_full_discount_with_manual_edit_flag_rejected(self):
+		"""A rate-0 row carrying the manual-edit flag never qualifies for the
+		exemption — it stays on the rate-edit lane (which itself rejects
+		non-positive rates)."""
+		code = self._mint_code("SEC23D8AC")
+		line = self._full_discount_line(is_rate_manually_edited=1)
+		payload = self._paid_payload([line])
+		payload["discount_confirmation_code"] = code.lower()
+		from pos_next.api.invoices import update_invoice
+
+		with self.assertRaises(frappe.ValidationError):
+			update_invoice(json.dumps(payload))

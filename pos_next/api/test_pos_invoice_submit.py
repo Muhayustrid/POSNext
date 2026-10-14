@@ -225,6 +225,55 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		# must be OUR clear message, not ERPNext's payment-row error
 		self.assertIn("POS Invoice mode", str(ctx.exception))
 
+	def test_zero_total_discount_submits_without_payments(self):
+		# 100% HQ-coded manual discount: grand total 0 carries no money, so no
+		# payment row can exist. The POS Invoice row requirement is vacuous
+		# here (CustomPOSInvoice.validate_mode_of_payment exemption); any
+		# positive total without rows must still be rejected (pinned below).
+		code_doc = frappe.get_doc(
+			{
+				"doctype": "POS Discount Confirmation Code",
+				"code": "ZER8D8AA",
+				"status": "Active",
+				"valid_from": frappe.utils.nowdate(),
+				"company_scope": "All Outlets",
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.delete_doc(
+				"POS Discount Confirmation Code", code_doc.name, force=1, ignore_permissions=True
+			)
+		)
+		payload = self._payload(
+			payments=[],
+			items=[
+				{
+					"item_code": self.item,
+					"qty": 1,
+					"rate": 0,
+					"price_list_rate": 100,
+					"discount_percentage": 100,
+					"discount_amount": 100,
+					"warehouse": self.profile.warehouse,
+				}
+			],
+			discount_confirmation_code="zer8d8aa",
+		)
+		result = submit_invoice(invoice=payload)
+		name = result.get("name")
+		self._created.append(name)
+		self.assertTrue(name)
+		doc = frappe.get_doc("POS Invoice", name)
+		self.assertEqual(doc.docstatus, 1)
+		self.assertAlmostEqual(flt(doc.grand_total), 0, places=2)
+
+	def test_positive_total_without_payments_still_rejected(self):
+		# The zero-total exemption must not open a paymentless lane for real
+		# money: a positive total with no rows is still refused.
+		payload = self._payload(payments=[])
+		with self.assertRaises(frappe.ValidationError):
+			submit_invoice(invoice=payload)
+
 	def test_returnable_lists_pos_invoice(self):
 		result = submit_invoice(invoice=self._payload())
 		name = result.get("name")

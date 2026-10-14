@@ -317,6 +317,35 @@ def _rate_mismatch_band(rate_precision):
 	return max(0.05, 1.5 / (10 ** cint(rate_precision)))
 
 
+def _is_full_manual_discount_row(row, server_plr, band):
+	"""True for a rate-0 row whose discount wipes the whole line (SEC-23).
+
+	Mirrors the SEC-04 explicit-discount exemption for the 100% case: a row
+	priced at zero with discount_percentage >= 100 (or a discount_amount
+	covering server list x qty) is a fully discounted manual row, not a
+	forged magnitude. Authorization stays with the discount code gate
+	(overrides/discount_code.py) — this only skips the magnitude comparison.
+	Flagged manual edits, offer-claimed rows and free-item rows never qualify;
+	a rate-0 row with a partial discount stays rejected.
+	"""
+	if cint(row.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0):
+		return False
+	if cint(row.get("is_free_item") or 0):
+		return False
+	if _row_offer_claims(row):
+		return False
+	if abs(flt(row.get(FIELD_RATE) or 0)) > band:
+		return False
+	if flt(row.get(FIELD_DISCOUNT_PERCENTAGE) or 0) >= 100:
+		return True
+	qty = flt(row.get("qty") or row.get("quantity") or 0)
+	return (
+		qty > 0
+		and server_plr > 0
+		and flt(row.get("discount_amount") or 0) + band >= server_plr * qty
+	)
+
+
 def _replay_offer_rates(
 	invoice_doc,
 	pos_profile_doc,
@@ -716,8 +745,14 @@ def _verify_offer_rate_magnitudes(
 		expected = expected_rates.get(idx)
 		if expected is None:
 			continue
-		if _resolve_server_price_list_rate(server_prices, row) <= 0:
+		server_plr = _resolve_server_price_list_rate(server_prices, row)
+		if server_plr <= 0:
 			# No server truth for this row — the SEC-04 legacy fallback governs.
+			continue
+		if _is_full_manual_discount_row(row, server_plr, band):
+			# 100% manual discount row (HQ code lane) — the replay has no
+			# engine grant to compare against; magnitude is not the question
+			# here, authorization is.
 			continue
 		client_rate = flt(row.get(FIELD_RATE) or 0)
 		if abs(client_rate - expected) > band:
