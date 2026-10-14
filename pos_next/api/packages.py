@@ -17,7 +17,10 @@ current POS price-list value — and the parent row drops to zero. The snapshot
 then carries an ``allocation`` marker so re-validation can tell the modes
 apart; snapshots without the marker are always repriced the legacy way.
 
-Pricing is ``base_price + sum(option.price_adjustment * qty)``.
+Pricing is ``base_price + sum(option.price_adjustment * qty)``. When the POS
+Profile sells from a Price Group's managed list (``PG-<name>``) that carries an
+Item Price for the package's parent item, that rate replaces ``base_price``;
+any other price list leaves ``base_price`` untouched.
 
 The quote is computed here on the server and mirrored byte-for-byte by
 ``POS/src/utils/packageQuote.js`` (allocation off) so the POS can price
@@ -35,6 +38,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 from pos_next.api.items import _fetch_uom_prices_map
+from pos_next.price_group_ownership import PRICE_LIST_OWNER_FIELD
 
 PARENT_ROLE = "Package"
 COMPONENT_ROLE = "Package Item"
@@ -102,8 +106,48 @@ def _stock_flags_map(item_codes):
 	)
 
 
-def _serialize_package(doc):
-	"""Full package definition — enough for the POS to render and price offline."""
+def _price_group_list(pos_profile):
+	"""The profile's selling price list when a Price Group owns it, else None."""
+	price_list = frappe.db.get_value("POS Profile", pos_profile, "selling_price_list")
+	if not price_list:
+		return None
+	pl = frappe.db.get_value("Price List", price_list, ["enabled", PRICE_LIST_OWNER_FIELD], as_dict=True)
+	if not pl or not pl.enabled or not pl.get(PRICE_LIST_OWNER_FIELD):
+		return None
+	return price_list
+
+
+def _effective_base_price(doc, pos_profile, on_date=None):
+	"""Package base price on this profile.
+
+	A Price Group prices its outlets through Item Prices on its managed list, so
+	a parent-item rate there overrides ``POS Package.base_price``. Only Price
+	Group lists qualify: an ordinary list carrying the parent item must not
+	silently reprice packages that were set up with ``base_price``.
+	"""
+	base_price = flt(doc.base_price)
+	if not pos_profile:
+		return base_price
+	price_list = _price_group_list(pos_profile)
+	if not price_list:
+		return base_price
+
+	uom_prices = _fetch_uom_prices_map([doc.parent_item], price_list, on_date).get(doc.parent_item) or {}
+	stock_uom = frappe.get_cached_value("Item", doc.parent_item, "stock_uom")
+	rate = uom_prices.get(stock_uom) if stock_uom else None
+	if rate is None:
+		rate = uom_prices.get("")
+	if rate is None and len(uom_prices) == 1:
+		rate = next(iter(uom_prices.values()))
+	return base_price if rate is None else flt(rate)
+
+
+def _serialize_package(doc, pos_profile=None, on_date=None):
+	"""Full package definition — enough for the POS to render and price offline.
+
+	``base_price`` is the profile's effective price (see ``_effective_base_price``)
+	so the offline quote mirror prices Price Group outlets correctly.
+	"""
 	component_codes = {row.item_code for row in doc.items or []}
 	component_codes |= {row.item_code for row in doc.options or []}
 	stock_flags = _stock_flags_map(component_codes)
@@ -112,7 +156,7 @@ def _serialize_package(doc):
 		"name": doc.name,
 		"package_name": doc.package_name,
 		"parent_item": doc.parent_item,
-		"base_price": flt(doc.base_price),
+		"base_price": _effective_base_price(doc, pos_profile, on_date),
 		"currency": doc.currency,
 		"company": doc.company,
 		"description": doc.description,
@@ -214,7 +258,9 @@ def get_packages(pos_profile, on_date=None):
 	_assert_profile_access(pos_profile)
 
 	names = _eligible_package_names(pos_profile, on_date)
-	return [_serialize_package(frappe.get_cached_doc("POS Package", name)) for name in names]
+	return [
+		_serialize_package(frappe.get_cached_doc("POS Package", name), pos_profile, on_date) for name in names
+	]
 
 
 def _index_choices(choices):
@@ -455,7 +501,9 @@ def quote(package_name, choices, pos_profile, warehouse=None, allocate=None, pos
 		if group_key not in group_keys:
 			frappe.throw(_("Unknown choice group {0}.").format(frappe.bold(group_key)))
 
-	total = flt(doc.base_price)
+	# posting_date None = a live sale (today's price); else the invoice's date.
+	base_price = _effective_base_price(doc, pos_profile, posting_date)
+	total = base_price
 	component_lines = []
 	snapshot_selections = []
 
@@ -559,7 +607,7 @@ def quote(package_name, choices, pos_profile, warehouse=None, allocate=None, pos
 	snapshot = {
 		"package": doc.name,
 		"package_name": doc.package_name,
-		"base_price": flt(doc.base_price),
+		"base_price": base_price,
 		"total": total,
 		"selections": snapshot_selections,
 		"included_items": [
