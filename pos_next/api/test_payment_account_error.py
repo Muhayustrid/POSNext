@@ -46,3 +46,16 @@ class TestSetPaymentAccountsErrorPropagation(unittest.TestCase):
             _set_payment_accounts(payments, "Test Company")
         resolver.assert_not_called()
         self.assertEqual(payments[0].get("account"), "Preset - TC")
+
+
+class TestGetPaymentAccountFallback(unittest.TestCase):
+    def test_unmapped_mode_of_payment_falls_back_to_company_account(self):
+        """RED: the POS Payment Method fallback queried a non-existent
+        `default_account` column and crashed with a SQL error."""
+        from pos_next.api.invoices import get_payment_account
+
+        company = frappe.db.get_value("Company", {"name": ["like", "_Test Company"]}, "name")
+        result = get_payment_account("_PNXT Unmapped Wallet", company)
+        account = result["account"]
+        self.assertEqual(frappe.db.get_value("Account", account, "company"), company)
+        self.assertIn(frappe.db.get_value("Account", account, "account_type"), ("Cash", "Bank"))
