@@ -112,8 +112,12 @@ class CustomSalesInvoice(SalesInvoice):
 			skip_change_gl_entries = not _get_post_change_gl_entries_setting()
 
 			for payment_mode in self.payments:
+				base_amount = flt(payment_mode.base_amount)
+				amount = flt(payment_mode.amount)
+				# Net change per currency: base_change_amount from base, change_amount from amount.
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
-					payment_mode.base_amount -= flt(self.change_amount)
+					base_amount -= flt(self.base_change_amount)
+					amount -= flt(self.change_amount)
 
 				if payment_mode.amount:
 					# POS, make payment entries
@@ -125,10 +129,10 @@ class CustomSalesInvoice(SalesInvoice):
 								"party_type": "Customer",
 								"party": self.customer,
 								"against": payment_mode.account,
-								"credit": payment_mode.base_amount,
-								"credit_in_account_currency": payment_mode.base_amount
+								"credit": base_amount,
+								"credit_in_account_currency": base_amount
 								if self.party_account_currency == self.company_currency
-								else payment_mode.amount,
+								else amount,
 								"against_voucher": self.return_against
 								if cint(self.is_return) and self.return_against
 								else self.name,
@@ -155,10 +159,10 @@ class CustomSalesInvoice(SalesInvoice):
 								"party_type": party_type,
 								"party": party,
 								"against": self.customer,
-								"debit": payment_mode.base_amount,
-								"debit_in_account_currency": payment_mode.base_amount
+								"debit": base_amount,
+								"debit_in_account_currency": base_amount
 								if payment_mode_account_currency == self.company_currency
-								else payment_mode.amount,
+								else amount,
 								"cost_center": self.cost_center,
 							},
 							payment_mode_account_currency,
