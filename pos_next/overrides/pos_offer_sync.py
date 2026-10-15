@@ -266,6 +266,7 @@ def _rule_values(offer, scheme_name, company, company_enabled, slab_name):
 		"promotional_scheme": scheme_name,
 		"promotional_scheme_id": slab_name,
 		"pos_offer_max_discount": flt(offer.max_discount_amount or 0),
+		"pos_offer_allow_coupon": cint(offer.allow_coupon_combination),
 		"coupon_code_based": 0,
 	}
 

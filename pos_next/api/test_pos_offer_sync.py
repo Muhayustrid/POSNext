@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import frappe
 
 from pos_next.overrides.pos_offer_sync import (
+	_rule_values,
 	guard_pricing_rule,
 	guard_promotional_scheme,
 	handle_offer_trash,
@@ -224,6 +225,17 @@ class TestSyncCreate(unittest.TestCase):
 			self.assertTrue(rule.inserted)
 			# eligibility copied onto the rule
 			self.assertEqual(1, len(rule.children.get("items", [])))
+
+	def test_rule_values_mirror_allow_coupon(self):
+		offer = make_offer(allow_coupon_combination=1)
+		values = _rule_values(offer, "Promo Gula", "Company A", 1, "SLAB-1")
+		self.assertEqual(1, values["pos_offer_allow_coupon"])
+
+		offer = make_offer(allow_coupon_combination=0)
+		self.assertEqual(0, _rule_values(offer, "Promo Gula", "Company A", 1, "SLAB-1")["pos_offer_allow_coupon"])
+
+		offer = make_offer(allow_coupon_combination=None)
+		self.assertEqual(0, _rule_values(offer, "Promo Gula", "Company A", 1, "SLAB-1")["pos_offer_allow_coupon"])
 
 	def test_scheme_values_stamped(self):
 		offer = make_offer()

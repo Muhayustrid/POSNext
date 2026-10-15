@@ -348,7 +348,7 @@
 													>{{ __("Item Discount") }}<span
 														v-if="discountLockedByOffer"
 														class="ms-1 text-xs font-normal text-amber-600"
-													>{{ __("Locked (offer applied)") }}</span></label
+													>{{ discountLockReason }}</span></label
 												>
 												<div class="grid grid-cols-2 gap-3">
 													<!-- Discount Type -->
@@ -409,7 +409,7 @@
 											</div>
 
 												<!-- HQ confirmation code unlocks the discount fields -->
-												<div v-if="discountLocked" class="border-t border-gray-200 pt-4">
+												<div v-if="discountLocked && !discountLockedByOffer" class="border-t border-gray-200 pt-4">
 													<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
 														{{ __("Confirmation Code (HQ)") }}
 													</label>
@@ -510,6 +510,7 @@
 <script setup>
 import { useToast } from "@/composables/useToast";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
+import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { getItemStock } from "@/utils/stockValidator";
@@ -526,6 +527,7 @@ const { showSuccess, showError, showWarning } = useToast();
 const settingsStore = usePOSSettingsStore();
 const serialStore = useSerialNumberStore();
 const restrictionStore = useDiscountRestrictionStore();
+const cartStore = usePOSCartStore();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -595,8 +597,21 @@ const canEditRate = computed(() => {
 
 // A row that carries an offer (and is not a gratis row) cannot also take a
 // manual discount — offers and manual discounts never stack on one line.
-const discountLockedByOffer = computed(
+const discountLockedByRowOffer = computed(
 	() => hasPricingRules.value && !localItem.value?.is_free_item
+);
+
+// ...and a cart-wide transaction offer forbids manual item discounts on every
+// row. The fields lock, but the row's own discount is preserved on save.
+const discountLockedByOffer = computed(
+	() => discountLockedByRowOffer.value || cartStore.headerDiscountFromOffer
+);
+
+// The reason shown next to the locked discount fields.
+const discountLockReason = computed(() =>
+	discountLockedByRowOffer.value
+		? __("Locked (offer applied)")
+		: __("A cart offer is applied; item discounts are locked. Remove the offer to edit.")
 );
 
 // Tooltip message for why rate editing is disabled
@@ -1047,13 +1062,14 @@ async function updateItem() {
 		price_list_rate: originalPriceListRate.value,
 		warehouse: localWarehouse.value,
 		// An offer row never carries a manual discount: the offer's own discount
-		// must not be re-sent as a manual one on save.
-		discount_percentage: discountLockedByOffer.value
+		// must not be re-sent as a manual one on save. A cart-wide offer only
+		// locks the fields — the row's own manual discount is preserved.
+		discount_percentage: discountLockedByRowOffer.value
 			? 0
 			: discountType.value === "percentage"
 			? discountValue.value
 			: 0,
-		discount_amount: discountLockedByOffer.value
+		discount_amount: discountLockedByRowOffer.value
 			? 0
 			: discountType.value === "amount"
 			? discountValue.value

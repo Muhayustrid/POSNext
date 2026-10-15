@@ -2259,8 +2259,14 @@ def update_invoice(data):
 				if frappe.db.table_exists("POS Coupon"):
 					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
 
+					# Scope against the profile's company, never the client's claim.
+					coupon_company = (
+						pos_profile_doc.company
+						if pos_profile_doc and pos_profile_doc.company
+						else invoice_doc.company
+					)
 					coupon_result = check_coupon_code(
-						payload_coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
+						payload_coupon_code, customer=invoice_doc.customer, company=coupon_company
 					)
 
 					if not coupon_result or not coupon_result.get("valid"):

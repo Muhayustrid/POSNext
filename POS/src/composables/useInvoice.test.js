@@ -2,6 +2,7 @@
 // one unit when the caller asked for none. Absent values still default to 1;
 // an explicit 0 or negative is rejected instead.
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { nextTick } from "vue"
 
 const { invoicePayloads } = vi.hoisted(() => ({ invoicePayloads: [] }))
 
@@ -294,5 +295,69 @@ describe("package allocation rows (Fase 2)", () => {
 		expect(rows[0].rate).toBe(0)
 		expect(rows[1].rate).toBe(4000)
 		expect(rows[2].rate).toBe(15000)
+	})
+})
+
+// The coupon's header discount must follow the cart (recomputed with the
+// server formula against the pre-header bases) instead of freezing at the
+// amount computed when the coupon was applied — otherwise a later item
+// discount leaves a stale, too-large header discount.
+describe("coupon follows the cart (server formula)", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		invoicePayloads.length = 0
+	})
+
+	const twentyPct = {
+		name: "C20",
+		code: "C20",
+		apply_on: "Grand Total",
+		coupon: { discount_type: "Percentage", discount_percentage: 20, apply_on: "Grand Total" },
+	}
+
+	function setupCouponCart() {
+		const invoice = useInvoice()
+		invoice.invoiceItems.value = [
+			{
+				item_code: "ITEM-1",
+				item_name: "Item 1",
+				quantity: 1,
+				rate: 100000,
+				price_list_rate: 100000,
+				amount: 100000,
+			},
+		]
+		invoice.rebuildIncrementalCache()
+		return invoice
+	}
+
+	function applyManualItemDiscount(invoice, percentage) {
+		const item = invoice.invoiceItems.value[0]
+		item.discount_percentage = percentage
+		invoice.recalculateItem(item)
+		invoice.rebuildIncrementalCache()
+	}
+
+	it("drops to zero when a 100% item discount follows a 20% coupon", async () => {
+		const invoice = setupCouponCart()
+		invoice.applyDiscount({ ...twentyPct })
+		expect(invoice.additionalDiscount.value).toBe(20000)
+
+		applyManualItemDiscount(invoice, 100)
+		await nextTick()
+
+		expect(invoice.additionalDiscount.value).toBe(0)
+		expect(invoice.grandTotal.value).toBe(0)
+	})
+
+	it("shrinks to 20% of the basis left after a manual 90% discount", async () => {
+		const invoice = setupCouponCart()
+		invoice.applyDiscount({ ...twentyPct })
+
+		applyManualItemDiscount(invoice, 90)
+		await nextTick()
+
+		// 20% of the remaining 10000 — not the 20000 frozen at apply time.
+		expect(invoice.additionalDiscount.value).toBe(2000)
 	})
 })

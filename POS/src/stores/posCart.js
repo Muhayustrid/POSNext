@@ -1,4 +1,6 @@
 import { useInvoice } from "@/composables/useInvoice";
+import { formatCurrency } from "@/utils/currency";
+import { couponMinAmountUnmet } from "@/utils/couponDiscount";
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -92,6 +94,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		subtotal,
 		totalTax,
 		totalDiscount,
+		couponBases,
 		grandTotal,
 		posProfile,
 		posOpeningShift,
@@ -416,15 +419,93 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	// Discount & Offer Management
+	function isTransactionOffer(offer) {
+		return offer?.apply_on === "Transaction";
+	}
+
+	/**
+	 * Can `offer` sit beside a coupon? Item offers may only when HQ ticked both
+	 * flags; a transaction (cart-total) offer shares the coupon's own header
+	 * slot and never can, whatever the flags say.
+	 */
+	function canCombine(offer, couponDef) {
+		if (!offer || isTransactionOffer(offer)) return false;
+		return Boolean(offer.allow_coupon_combination && couponDef?.allow_offer_combination);
+	}
+
+	/** A row carries a cashier-entered manual discount (not one an offer put there). */
+	function hasManualItemDiscount() {
+		return invoiceItems.value.some(
+			(item) =>
+				!item.is_free_item &&
+				!hasPricingRules(item.pricing_rules) &&
+				(Number(item.discount_percentage) > 0 || Number(item.discount_amount) > 0)
+		);
+	}
+
+	/**
+	 * Auto-apply may not build a forbidden stack: while a coupon is applied an
+	 * offer must be mutually combinable with it, and a transaction offer must not
+	 * land on a cart that already carries a manual discount.
+	 */
+	function autoApplyAllowed(offer) {
+		const couponDef = appliedCoupon.value?.coupon || null;
+		if (couponDef && !canCombine(offer, couponDef)) return false;
+		if (isTransactionOffer(offer) && hasManualItemDiscount()) return false;
+		return true;
+	}
+
 	function applyDiscountToCart(discount) {
-		// An offer already discounts the cart total (a server-applied
-		// transaction offer); a coupon would replace or stack on it — refuse it.
+		const couponDef = discount?.coupon || null;
+		if (couponDef) {
+			// The cashier's coupon wins over automatic offers: drop the
+			// auto/offline ones it can't combine with. An offer the cashier
+			// applied by hand is a deliberate choice — refuse the coupon instead.
+			const conflicting = appliedOffers.value.filter(
+				(entry) => !canCombine(entry.offer, couponDef)
+			);
+			const cashierApplied = conflicting.filter((entry) => entry.source === "manual");
+			if (cashierApplied.length) {
+				showWarning(
+					__("Coupon {0} can't be combined with offer {1}. Remove the offer first.", [
+						discount.name,
+						cashierApplied.map((entry) => entry.name).join(", "),
+					])
+				);
+				return;
+			}
+			if (conflicting.length) {
+				// removeOffer also dismisses the codes, so the next auto pass
+				// cannot put the offers back on this cart.
+				removeOffer(
+					conflicting.map((entry) => entry.code),
+					{
+						customer: customer.value?.name || customer.value,
+						company: posProfile.value?.company,
+						selling_price_list: posProfile.value?.selling_price_list,
+						currency: posProfile.value?.currency,
+					}
+				);
+			}
+			for (const entry of conflicting) {
+				showWarning(
+					__("Offer {0} was removed: it can't be combined with coupon {1}", [
+						entry.name,
+						discount.name,
+					])
+				);
+			}
+		}
+
+		// A transaction-offer header discount that is not tracked as an applied
+		// offer still occupies the header slot a coupon would need.
 		if (headerDiscountFromOffer.value) {
 			showWarning(
 				__("A coupon can't be combined with an offer that discounts the cart total")
 			);
 			return;
 		}
+
 		applyDiscount(discount);
 		// A coupon discount replaces whatever the header carried — the
 		// offer-sourced attribution no longer describes this value.
@@ -686,6 +767,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * rule applies on the current cart).
 	 */
 	function applyHeaderDiscountFromServer(headerDiscount) {
+		// A coupon owns the header slot: a transaction-offer header must not
+		// overwrite the coupon-driven additional discount.
+		if (appliedCoupon.value) return;
+
 		if (!headerDiscount) {
 			additionalDiscount.value = 0;
 			headerDiscountFromOffer.value = false;
@@ -749,6 +834,33 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		if (!posProfile.value || invoiceItems.value.length === 0) {
 			showWarning(__("Add items to the cart before applying an offer."));
+			offersDialogRef?.resetApplyingState();
+			return false;
+		}
+
+		// A cashier-chosen offer that can't combine with the applied coupon is
+		// refused rather than silently swapping the header discount.
+		const couponDef = appliedCoupon.value?.coupon || null;
+		if (couponDef && !canCombine(offer, couponDef)) {
+			showWarning(
+				__("Offer {0} can't be combined with coupon {1}. Remove the coupon first.", [
+					offer.title || offer.name,
+					appliedCoupon.value.name,
+				])
+			);
+			offersDialogRef?.resetApplyingState();
+			return false;
+		}
+
+		// A transaction (cart-total) offer would stack on a row's manual
+		// discount: refuse it before the server has to.
+		if (isTransactionOffer(offer) && hasManualItemDiscount()) {
+			showWarning(
+				__(
+					"Offer {0} can't be applied: an item already has a manual discount. Remove it first.",
+					[offer.title || offer.name]
+				)
+			);
 			offersDialogRef?.resetApplyingState();
 			return false;
 		}
@@ -877,17 +989,21 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	async function removeOffer(offer, currentProfile = null, offersDialogRef = null) {
-		const offerCode = typeof offer === "string" ? offer : offer?.name || offer?.code;
+		// An array removes several offers in one re-evaluation; separate calls
+		// would each re-send the others as still applied.
+		const offerCodes = Array.isArray(offer)
+			? offer
+			: [typeof offer === "string" ? offer : offer?.name || offer?.code].filter(Boolean);
 
 		// Cancel any pending auto-processing
 		debouncedProcessOffers.cancel();
 
 		// Remember the cashier's choice: auto-apply must not put it back on the
 		// next cart change.
-		const removedCodes = offerCode ? [offerCode] : getAppliedOfferCodes();
+		const removedCodes = offerCodes.length ? offerCodes : getAppliedOfferCodes();
 		dismissedOfferCodes.value = [...new Set([...dismissedOfferCodes.value, ...removedCodes])];
 
-		if (!offerCode) {
+		if (!offerCodes.length) {
 			// Remove all offers - immediate operation, no queue needed
 			offerQueue.cancel();
 
@@ -902,7 +1018,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return true;
 		}
 
-		const remainingOffers = appliedOffers.value.filter((entry) => entry.code !== offerCode);
+		const remainingOffers = appliedOffers.value.filter((entry) => !offerCodes.includes(entry.code));
 		const remainingCodes = remainingOffers.map((entry) => entry.code);
 
 		if (remainingCodes.length === 0) {
@@ -1136,7 +1252,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const appliedOfferCodes = new Set(appliedOffers.value.map((o) => o.code));
 			const dismissed = new Set(dismissedOfferCodes.value);
 			const newOffers = eligibleOffers.filter(
-				(offer) => !appliedOfferCodes.has(offer.name) && !dismissed.has(offer.name)
+				(offer) =>
+					!appliedOfferCodes.has(offer.name) &&
+					!dismissed.has(offer.name) &&
+					autoApplyAllowed(offer)
 			);
 
 			if (newOffers.length === 0) {
@@ -1831,7 +1950,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const dismissed = new Set(dismissedOfferCodes.value);
 			const newOffers = settingsStore.autoApplyOffers
 				? offersStore.allEligibleOffers.filter(
-						(offer) => !currentAppliedCodes.has(offer.name) && !dismissed.has(offer.name)
+						(offer) =>
+							!currentAppliedCodes.has(offer.name) &&
+							!dismissed.has(offer.name) &&
+							autoApplyAllowed(offer)
 					)
 				: [];
 
@@ -2112,6 +2234,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 	);
+
+	// A coupon whose minimum spend is no longer met must not linger: clear it
+	// through the same path as removeDiscountFromCart (but leave applied offers
+	// untouched, they are independent) and tell the cashier why.
+	watch([appliedCoupon, couponBases], () => {
+		const coupon = appliedCoupon.value;
+		const def = coupon?.coupon;
+		if (!def) return;
+		if (!couponMinAmountUnmet(def, couponBases.value)) return;
+
+		removeDiscount();
+		headerDiscountFromOffer.value = false;
+		appliedCoupon.value = null;
+		showWarning(
+			__("Coupon {0} was removed: the cart is below its minimum of {1}", [
+				coupon.name,
+				formatCurrency(def.min_amount, usePOSShiftStore().profileCurrency),
+			])
+		);
+	});
 
 	return {
 		// State

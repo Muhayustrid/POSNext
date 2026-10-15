@@ -673,12 +673,14 @@ class TestOfferStacking(unittest.TestCase):
 	_rule = staticmethod(TestOfferExemption._rule)
 	_gate_get_all = staticmethod(TestOfferExemption._gate_get_all)
 
-	def _run(self, doc, rules, child_rows=None, switch=1):
+	def _run(self, doc, rules, child_rows=None, switch=1, coupon=None):
+		# The stamp lookup is always mocked: no coupon test doc carries a real
+		# pos_coupon_code, so the real _stamped_coupon would return None anyway.
 		with DB_PATCH as mock_db, patch(
 			"pos_next.overrides.discount_code.frappe.get_all",
 			side_effect=self._gate_get_all(rules, child_rows),
 			create=True,
-		):
+		), patch("pos_next.overrides.discount_code._stamped_coupon", return_value=coupon):
 			mock_db.get_value.side_effect = _company_then_code(switch, _code_row())
 			validate_invoice_discounts(doc, "validate")
 
@@ -696,7 +698,16 @@ class TestOfferStacking(unittest.TestCase):
 		return FakeItem(**row)
 
 	def _doc(self, items, **overrides):
-		doc = dict(is_pos=1, company="Company A", items=items, discount_confirmation_code="abcd2345")
+		# In production the invoice-level stash (pos_applied_offer_rules) also
+		# holds the ITEM-scope rule names relayed from the row stashes, so tests
+		# set it the same way when they mean to mimic a real invoice.
+		doc = dict(
+			is_pos=1,
+			company="Company A",
+			items=items,
+			discount_confirmation_code="abcd2345",
+			pos_applied_offer_rules="",
+		)
 		doc.update(overrides)
 		return FakeDoc(**doc)
 
@@ -744,6 +755,130 @@ class TestOfferStacking(unittest.TestCase):
 
 	def _txn(self, **overrides):
 		return self._rule("PR-T", apply_on="Transaction", discount_percentage=10, **overrides)
+
+	@staticmethod
+	def _coupon(**overrides):
+		"""Stamped POS Coupon row as _stamped_coupon returns it. Defaults to a
+		flat 100 Amount coupon that exactly explains a 100 header discount, so
+		the coupon's own enforce lane passes and the stacking check is what
+		fires."""
+		coupon = dict(
+			name="COUPON-1",
+			coupon_code="SAVE10",
+			apply_on="Grand Total",
+			discount_type="Amount",
+			discount_percentage=0,
+			discount_amount=100,
+			min_amount=0,
+			max_amount=0,
+			allow_offer_combination=0,
+		)
+		coupon.update(overrides)
+		return frappe._dict(coupon)
+
+	def test_transaction_offer_with_manual_item_discount_rejected_even_with_code(self):
+		# A transaction offer forbids any manual item discount; even a valid
+		# code cannot authorize the row's extra discount.
+		doc = self._doc(
+			[FakeItem(item_code="IT1", discount_percentage=10, price_list_rate=100, rate=90)],
+			additional_discount_percentage=10,
+			pos_applied_offer_rules='["PR-T"]',
+		)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._run(doc, [self._txn()])
+		self.assertIn(
+			"The invoice already has an offer discount; another discount cannot be added.",
+			str(ctx.exception),
+		)
+
+	def test_transaction_offer_with_undiscounted_items_passes(self):
+		doc = self._doc(
+			[FakeItem(item_code="IT1")],
+			additional_discount_percentage=10,
+			pos_applied_offer_rules='["PR-T"]',
+			discount_confirmation_code="",
+		)
+		self._run(doc, [self._txn()])
+
+	def test_transaction_offer_with_coupon_rejected(self):
+		doc = self._doc(
+			[FakeItem(item_code="IT1")],
+			discount_amount=100,
+			pos_applied_offer_rules='["PR-T"]',
+		)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._run(doc, [self._txn()], coupon=self._coupon())
+		self.assertIn("cannot be combined with an offer", str(ctx.exception))
+
+	def test_coupon_with_item_offer_both_flags_on_passes(self):
+		# Production shape: the relay merges the item-scope rule name into
+		# pos_applied_offer_rules, so an item offer rides the invoice stash too —
+		# it must still be treated as an ITEM offer, not a transaction one.
+		rules = [self._rule("PR-1", pos_offer_allow_coupon=1)]
+		child = [{"parent": "PR-1", "item_code": "IT1"}]
+		doc = self._doc([self._row()], discount_amount=100, pos_applied_offer_rules='["PR-1"]')
+		self._run(doc, rules, child, coupon=self._coupon(allow_offer_combination=1))
+
+	def test_coupon_with_item_offer_in_stash_flag_off_rejected(self):
+		# Same production shape, one flag off: the ITEM-offer message fires, not
+		# the transaction-offer one (an item rule is not a transaction rule).
+		child = [{"parent": "PR-1", "item_code": "IT1"}]
+		for coupon_flag, offer_flag in ((0, 1), (1, 0)):
+			with self.subTest(coupon_flag=coupon_flag, offer_flag=offer_flag):
+				rules = [self._rule("PR-1", pos_offer_allow_coupon=offer_flag)]
+				doc = self._doc([self._row()], discount_amount=100, pos_applied_offer_rules='["PR-1"]')
+				with self.assertRaises(frappe.ValidationError) as ctx:
+					self._run(doc, rules, child, coupon=self._coupon(allow_offer_combination=coupon_flag))
+				self.assertIn("Coupon SAVE10 cannot be combined with offer PR-1.", str(ctx.exception))
+
+	def test_item_offer_in_invoice_stash_does_not_flag_unrelated_manual_row(self):
+		# The relay puts item-scope rules in pos_applied_offer_rules; lacking a
+		# TRANSACTION rule they must not trip the transaction-offer lane, so a
+		# manual discount on an unrelated row stays on the ordinary manual gate.
+		rules = [self._rule("PR-A")]
+		child = [{"parent": "PR-A", "item_code": "IT1"}]
+		doc = self._doc(
+			[
+				self._row(pos_offer_item_rules='["PR-A"]'),  # row A: offer discount
+				FakeItem(item_code="IT2", discount_percentage=5, price_list_rate=100, rate=95),
+			],
+			pos_applied_offer_rules='["PR-A"]',
+		)
+		self._run(doc, rules, child)
+
+	def test_coupon_with_item_offer_flag_off_rejected(self):
+		# Combinable only when BOTH flags are on: every other pair is refused,
+		# and the message names the coupon.
+		child = [{"parent": "PR-1", "item_code": "IT1"}]
+		for coupon_flag, offer_flag in ((0, 0), (1, 0), (0, 1)):
+			with self.subTest(coupon_flag=coupon_flag, offer_flag=offer_flag):
+				rules = [self._rule("PR-1", pos_offer_allow_coupon=offer_flag)]
+				doc = self._doc([self._row()], discount_amount=100)
+				with self.assertRaises(frappe.ValidationError) as ctx:
+					self._run(doc, rules, child, coupon=self._coupon(allow_offer_combination=coupon_flag))
+				self.assertIn("Coupon SAVE10 cannot be combined with offer PR-1.", str(ctx.exception))
+
+	def test_coupon_with_non_pos_offer_rule_rejected(self):
+		# A rule not owned by a POS Offer carries no flag, so it never combines
+		# with a coupon — even when the coupon allows combination.
+		rules = [self._rule("PR-1")]
+		child = [{"parent": "PR-1", "item_code": "IT1"}]
+		doc = self._doc([self._row()], discount_amount=100)
+		with self.assertRaises(frappe.ValidationError):
+			self._run(doc, rules, child, coupon=self._coupon(allow_offer_combination=1))
+
+	def test_coupon_with_manual_item_discount_no_offer_unchanged(self):
+		# Coupon + manual item discount (no offer) stays in the manual lane: the
+		# stacking matrix leaves it alone, so a valid code authorizes it and an
+		# empty code hits the ordinary manual gate.
+		items = [self._row(pos_offer_item_rules="", discount_percentage=20, rate=80)]
+		self._run(self._doc(items, discount_amount=100), [], coupon=self._coupon())
+		with self.assertRaises(frappe.ValidationError):
+			self._run(
+				self._doc(items, discount_amount=100, discount_confirmation_code=""),
+				[],
+				coupon=self._coupon(),
+			)
 
 	def test_transaction_offer_exact_header_passes(self):
 		doc = self._doc(

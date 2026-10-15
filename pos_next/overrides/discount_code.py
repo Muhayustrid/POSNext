@@ -61,6 +61,7 @@ _SCOPED_MODES = ("Selected Outlets", "All Outlets Except")
 # one batched query verifies claims instead of trusting the names.
 _RULE_FIELDS = [
 	"name",
+	"title",
 	"apply_on",
 	"company",
 	"valid_from",
@@ -83,6 +84,7 @@ _RULE_FIELDS = [
 	"apply_discount_on_price",
 	"min_or_max_discount_qty_limit",
 	"pos_offer_max_discount",
+	"pos_offer_allow_coupon",
 ]
 # applicable_for value → the rule field and the matching doc field.
 _SCOPE_FIELD_MAP = {
@@ -434,6 +436,7 @@ def _stamped_coupon(doc):
 			"discount_amount",
 			"min_amount",
 			"max_amount",
+			"allow_offer_combination",
 		],
 		as_dict=True,
 	)
@@ -545,7 +548,11 @@ def reject_stacked_offer_discounts(doc):
 	offer claim may carry only what that offer explains, and a verified
 	Price-type Transaction claim fixes the header discount to what it explains
 	(or the stamped coupon's). Unlike the manual lane, no HQ code can authorize
-	the excess. Rows/headers without such a claim are left to the manual gate."""
+	the excess. Rows/headers without such a claim are left to the manual gate.
+
+	The stacking matrix (spec 2026-10-15): an item offer + manual on the same
+	row, a transaction offer + any manual discount, a transaction offer + coupon
+	and a coupon + a non-combinable item offer are all refused here."""
 	verified_rules, invoice_claims = _verified_applied_rules(doc)
 	if not verified_rules:
 		return
@@ -562,14 +569,56 @@ def reject_stacked_offer_discounts(doc):
 				)
 			)
 
+	# A transaction offer discounts the whole invoice, so its lane is decided
+	# before the header early-return below (a manual item row or a coupon must
+	# be refused even when the header itself carries no discount). Only
+	# apply_on == "Transaction" rules qualify: the relay merges item-scope rule
+	# names into pos_applied_offer_rules too, so a Price-type ITEM offer is not
+	# a transaction offer (same discriminator as verify_transaction_rule_names).
+	txn_rules = [
+		verified_rules[name]
+		for name in invoice_claims
+		if name in verified_rules
+		and verified_rules[name].get("apply_on") == "Transaction"
+		and verified_rules[name].get("price_or_product_discount") == "Price"
+	]
+	if txn_rules:
+		for item in doc.get("items") or []:
+			if item.get("is_free_item") or not _item_has_discount(item):
+				continue
+			if not _item_offer_matches(item, verified_rules, scope_map):
+				frappe.throw(_("The invoice already has an offer discount; another discount cannot be added."))
+
+	coupon = _stamped_coupon(doc)
+	if txn_rules and coupon:
+		frappe.throw(_("A coupon cannot be combined with an offer that discounts the invoice total."))
+
+	if coupon:
+		for item in doc.get("items") or []:
+			applicable = _item_applicable_rules(item, verified_rules, scope_map)
+			if not applicable:
+				continue
+			if coupon.allow_offer_combination and all(
+				rule.get("pos_offer_allow_coupon") for rule in applicable
+			):
+				continue
+			offending = applicable[0]
+			frappe.throw(
+				_("Coupon {0} cannot be combined with offer {1}.").format(
+					coupon.coupon_code, offending.get("title") or offending.get("name")
+				)
+			)
+
 	if flt(doc.get("discount_amount") or 0) <= 0 and flt(doc.get("additional_discount_percentage") or 0) <= 0:
 		return
-	txn_rules = [
+	# The pre-existing header exemption keeps its original list (any Price-type
+	# claim, no apply_on filter) — behaviour unchanged from base.
+	price_rules = [
 		verified_rules[name]
 		for name in invoice_claims
 		if name in verified_rules and verified_rules[name].get("price_or_product_discount") == "Price"
 	]
-	if txn_rules and not any(_header_rule_exempts(rule, doc) for rule in txn_rules) and not (
+	if price_rules and not any(_header_rule_exempts(rule, doc) for rule in price_rules) and not (
 		stamped_coupon_explains_header(doc)
 	):
 		frappe.throw(_("The invoice already has an offer discount; another discount cannot be added."))

@@ -8,6 +8,8 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate, strip, today
 
 ONE_USE_COUPON_DOCTYPES = ("Sales Invoice", "POS Invoice")
+# Child table listing the outlets a coupon is scoped to (shared with the code gate).
+COUPON_COMPANY_DOCTYPE = "POS Discount Code Company"
 
 
 class POSCoupon(Document):
@@ -57,6 +59,45 @@ class POSCoupon(Document):
 				frappe.throw(_("Valid From date cannot be after Valid Until date"))
 
 
+def coupon_usable_at(coupon, company):
+	"""None when `coupon` may be used at `company`; otherwise the reason.
+
+	`coupon` carries name, coupon_code, company (the issuing outlet),
+	company_scope and discount_type. Scope mirrors the head-office code gate:
+	"All Outlets" is unrestricted, "Selected Outlets" (also an empty scope —
+	fail closed) lists its outlets (an empty list means the issuing outlet
+	only), "All Outlets Except" lists its exclusions. An "Amount" coupon is bound to the issuing
+	outlet's currency — a fixed nominal amount has no meaning in another one.
+	"""
+	if not company:
+		return None
+
+	scope = coupon.get("company_scope") or "Selected Outlets"
+	if scope in ("Selected Outlets", "All Outlets Except"):
+		outlets = set(
+			frappe.get_all(
+				COUPON_COMPANY_DOCTYPE,
+				{"parenttype": "POS Coupon", "parent": coupon.get("name")},
+				pluck="company",
+			)
+		)
+		if scope == "Selected Outlets":
+			usable = company in outlets or (not outlets and coupon.get("company") == company)
+		else:
+			usable = company not in outlets
+		if not usable:
+			return _("Sorry, this coupon is not valid for this company")
+
+	if coupon.get("discount_type") == "Amount":
+		issuing_currency = frappe.get_cached_value("Company", coupon.get("company"), "default_currency")
+		target_currency = frappe.get_cached_value("Company", company, "default_currency")
+		if issuing_currency != target_currency:
+			return _("Coupon {0} is in {1} and cannot be used at {2}.").format(
+				coupon.get("coupon_code"), issuing_currency, company
+			)
+	return None
+
+
 def check_coupon_code(coupon_code, customer=None, company=None):
 	"""Validate and return coupon details"""
 	res = {"coupon": None}
@@ -88,9 +129,10 @@ def check_coupon_code(coupon_code, customer=None, company=None):
 		res["msg"] = _("Sorry, this coupon code has been fully redeemed")
 		return res
 
-	# Check company
-	if company and coupon.company != company:
-		res["msg"] = _("Sorry, this coupon is not valid for this company")
+	# Check company scope (a coupon may be scoped beyond its issuing outlet)
+	error = coupon_usable_at(coupon, company)
+	if error:
+		res["msg"] = error
 		return res
 
 	# Check customer (for Gift Cards)

@@ -14,6 +14,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
+import { flushPromises } from "@vue/test-utils";
+import { useToast } from "@/composables/useToast";
+import { usePOSOffersStore } from "./posOffers";
+import { offlineState } from "@/utils/offline/offlineState";
 
 const resources = vi.hoisted(() => ({ instances: [] }));
 
@@ -351,5 +355,421 @@ describe("dismissedOfferCodes lifetime (BUG C)", () => {
 		await store.applyOffer({ name: "PR-1", title: "Offer 1" }, { company: "C" });
 
 		expect(store.dismissedOfferCodes).toEqual([]);
+	});
+});
+
+describe("coupon min_amount follows the cart", () => {
+	it("removes the coupon when the basis drops below its minimum", async () => {
+		const { clearAllToasts, toastQueue, toastNotification } = useToast();
+		clearAllToasts();
+
+		const store = usePOSCartStore();
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 100000,
+			price_list_rate: 100000,
+			amount: 100000,
+			discount_percentage: 0,
+			discount_amount: 0,
+		});
+		store.rebuildIncrementalCache();
+
+		store.applyDiscountToCart({
+			name: "C1",
+			code: "C1",
+			apply_on: "Grand Total",
+			coupon: {
+				discount_type: "Percentage",
+				discount_percentage: 10,
+				min_amount: 50000,
+				apply_on: "Grand Total",
+			},
+		});
+		await nextTick();
+		expect(store.appliedCoupon).not.toBeNull();
+
+		// A manual 60% discount drops the basis to 40000, below the coupon's 50000.
+		const item = store.invoiceItems[0];
+		item.discount_percentage = 60;
+		store.recalculateItem(item);
+		store.rebuildIncrementalCache();
+		await nextTick();
+
+		expect(store.appliedCoupon).toBeNull();
+		expect(store.additionalDiscount).toBe(0);
+		const warned = [toastNotification.value, ...toastQueue.value].some((t) =>
+			t?.message?.includes("minimum")
+		);
+		expect(warned).toBe(true);
+	});
+});
+
+// A coupon occupies the header slot; whether an offer may sit beside it is the
+// stacking matrix. The UI pre-locks: the cashier's deliberate action wins over
+// automatic offers, and a forbidden stack is refused with a message.
+function couponDiscount(allowOfferCombination) {
+	return {
+		name: "C1",
+		code: "C1",
+		apply_on: "Grand Total",
+		coupon: {
+			discount_type: "Amount",
+			discount_amount: 100,
+			apply_on: "Grand Total",
+			allow_offer_combination: allowOfferCombination,
+		},
+	};
+}
+
+describe("coupon vs offer stacking locks", () => {
+	it("coupon removes a non-combinable auto offer with a notice", async () => {
+		const { clearAllToasts, toastQueue, toastNotification } = useToast();
+		clearAllToasts();
+
+		const store = usePOSCartStore();
+		store.appliedOffers = [
+			{
+				code: "PR-1",
+				name: "Offer 1",
+				source: "auto",
+				offer: { name: "PR-1", apply_on: "Item Code", allow_coupon_combination: 0 },
+			},
+		];
+
+		store.applyDiscountToCart(couponDiscount(1));
+
+		// The coupon wins; the auto offer is gone AND dismissed so the next
+		// auto pass cannot put it back.
+		expect(store.appliedCoupon).not.toBeNull();
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.dismissedOfferCodes).toContain("PR-1");
+		const warned = [toastNotification.value, ...toastQueue.value].some((t) =>
+			t?.message?.includes("can't be combined")
+		);
+		expect(warned).toBe(true);
+	});
+
+	it("removes several non-combinable auto offers in one re-evaluation", async () => {
+		const store = usePOSCartStore();
+		const autoOffer = (code, allow) => ({
+			code,
+			name: code,
+			source: "auto",
+			offer: { name: code, apply_on: "Item Code", allow_coupon_combination: allow },
+		});
+		store.appliedOffers = [autoOffer("PR-1", 0), autoOffer("PR-2", 0), autoOffer("PR-3", 1)];
+
+		store.applyDiscountToCart(couponDiscount(1));
+		await flushPromises();
+
+		// Per-offer removals would each re-send the other conflicting offer as
+		// still applied; one call must keep only the combinable offer.
+		const submit = applyOffersResource().submit;
+		expect(submit).toHaveBeenCalledTimes(1);
+		expect(submit.mock.calls[0][0].selected_offers).toEqual(["PR-3"]);
+		expect(store.dismissedOfferCodes).toEqual(expect.arrayContaining(["PR-1", "PR-2"]));
+	});
+
+	it("refuses the coupon over a non-combinable cashier-applied offer", () => {
+		const store = usePOSCartStore();
+		store.appliedOffers = [
+			{
+				code: "PR-1",
+				name: "Offer 1",
+				source: "manual",
+				offer: { name: "PR-1", apply_on: "Item Code", allow_coupon_combination: 0 },
+			},
+		];
+
+		store.applyDiscountToCart(couponDiscount(1));
+
+		// The cashier's manually applied offer stays; no coupon lands.
+		expect(store.appliedCoupon).toBeNull();
+		expect(store.appliedOffers).toHaveLength(1);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("allows the coupon when both flags are on", () => {
+		const store = usePOSCartStore();
+		store.appliedOffers = [
+			{
+				code: "PR-1",
+				name: "Offer 1",
+				source: "auto",
+				offer: { name: "PR-1", apply_on: "Item Code", allow_coupon_combination: 1 },
+			},
+		];
+
+		store.applyDiscountToCart(couponDiscount(1));
+
+		// Both sides allowed the combination: the coupon lands and the offer stays.
+		expect(store.appliedCoupon).not.toBeNull();
+		expect(store.appliedOffers).toHaveLength(1);
+	});
+
+	it("auto-apply skips a non-combinable offer while a coupon is applied", async () => {
+		const store = usePOSCartStore();
+		const offersStore = usePOSOffersStore();
+		store.posProfile = { company: "C", currency: "IDR" };
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 1000,
+			price_list_rate: 1000,
+			amount: 1000,
+			discount_percentage: 0,
+			discount_amount: 0,
+		});
+		offersStore.availableOffers = [
+			{
+				name: "PR-1",
+				title: "Offer 1",
+				auto: 1,
+				apply_on: "Item Code",
+				eligible_items: ["A"],
+				discount_type: "Discount Percentage",
+				discount_percentage: 10,
+				allow_coupon_combination: 0,
+			},
+		];
+		offersStore.hasFetched = true;
+
+		store.applyDiscountToCart(couponDiscount(1));
+		store.forceRefreshOffers();
+		await flushPromises();
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(applyOffersResource().submit).not.toHaveBeenCalled();
+	});
+
+	it("auto-apply skips a transaction offer when a row has a manual discount", async () => {
+		const store = usePOSCartStore();
+		const offersStore = usePOSOffersStore();
+		store.posProfile = { company: "C", currency: "IDR" };
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 1000,
+			price_list_rate: 1000,
+			amount: 900,
+			discount_percentage: 10,
+			discount_amount: 100,
+		});
+		offersStore.availableOffers = [
+			{
+				name: "PR-T",
+				title: "Txn Offer",
+				auto: 1,
+				apply_on: "Transaction",
+				discount_type: "Discount Percentage",
+				discount_percentage: 10,
+				allow_coupon_combination: 0,
+			},
+		];
+		offersStore.hasFetched = true;
+
+		store.forceRefreshOffers();
+		await flushPromises();
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(applyOffersResource().submit).not.toHaveBeenCalled();
+	});
+
+	it("refuses a cashier transaction offer over a manual row discount", async () => {
+		const store = usePOSCartStore();
+		store.posProfile = { company: "C", currency: "IDR" };
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 1000,
+			price_list_rate: 1000,
+			amount: 900,
+			discount_percentage: 10,
+			discount_amount: 100,
+		});
+
+		const result = await store.applyOffer(
+			{ name: "PR-T", title: "Txn Offer", apply_on: "Transaction", discount_percentage: 10 },
+			{ company: "C", currency: "IDR" }
+		);
+
+		// A transaction offer would stack on the row's manual discount: refused.
+		expect(result).toBe(false);
+		expect(store.appliedOffers).toEqual([]);
+		expect(applyOffersResource().submit).not.toHaveBeenCalled();
+	});
+
+	it("offline auto-apply skips a non-combinable offer while a coupon is applied", async () => {
+		const store = usePOSCartStore();
+		const offersStore = usePOSOffersStore();
+		offlineState.setManualOffline(true, { silent: true });
+		try {
+			store.posProfile = { company: "C", currency: "IDR" };
+			store.invoiceItems.push({
+				item_code: "A",
+				item_name: "A",
+				quantity: 1,
+				uom: "Nos",
+				rate: 1000,
+				price_list_rate: 1000,
+				amount: 1000,
+				discount_percentage: 0,
+				discount_amount: 0,
+			});
+			offersStore.availableOffers = [
+				{
+					name: "PR-1",
+					title: "Offer 1",
+					auto: 1,
+					apply_on: "Item Code",
+					eligible_items: ["A"],
+					discount_type: "Discount Percentage",
+					discount_percentage: 10,
+					allow_coupon_combination: 0,
+				},
+			];
+			offersStore.hasFetched = true;
+
+			store.applyDiscountToCart(couponDiscount(1));
+			store.forceRefreshOffers();
+			await flushPromises();
+
+			expect(store.appliedOffers).toEqual([]);
+			expect(store.invoiceItems[0].discount_percentage).toBe(0);
+		} finally {
+			offlineState.setManualOffline(false, { silent: true });
+		}
+	});
+
+	it("applies a transaction-offer header when no coupon is applied", async () => {
+		const store = usePOSCartStore();
+		store.posProfile = { company: "C", currency: "IDR" };
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 1000,
+			price_list_rate: 1000,
+			amount: 1000,
+		});
+		store.rebuildIncrementalCache();
+		store.appliedOffers = [
+			{ code: "PR-1", name: "Offer 1", offer: { name: "PR-1" } },
+			{ code: "PR-2", name: "Offer 2", offer: { name: "PR-2" } },
+		];
+		applyOffersResource().submit.mockResolvedValue({
+			message: {
+				items: [
+					{
+						item_code: "A",
+						qty: 1,
+						rate: 1000,
+						price_list_rate: 1000,
+						discount_percentage: 0,
+						discount_amount: 0,
+					},
+				],
+				applied_pricing_rules: ["PR-2"],
+				discount_amount: 700,
+				apply_discount_on: "Grand Total",
+			},
+		});
+
+		await store.removeOffer("PR-1", { company: "C", currency: "IDR" });
+
+		// Without a coupon the server's transaction-offer header still lands.
+		expect(store.headerDiscountFromOffer).toBe(true);
+		expect(store.additionalDiscount).toBe(700);
+	});
+
+	it("refuses a cashier offer over a non-combinable coupon", async () => {
+		const store = usePOSCartStore();
+		store.posProfile = { company: "C", currency: "IDR" };
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 1000,
+			price_list_rate: 1000,
+			amount: 1000,
+		});
+		store.applyDiscountToCart(couponDiscount(0));
+		expect(store.appliedCoupon).not.toBeNull();
+
+		const result = await store.applyOffer(
+			{ name: "PR-1", title: "Offer 1", apply_on: "Item Code", allow_coupon_combination: 0 },
+			{ company: "C", currency: "IDR" }
+		);
+
+		expect(result).toBe(false);
+		expect(store.appliedOffers).toEqual([]);
+		expect(applyOffersResource().submit).not.toHaveBeenCalled();
+	});
+
+	it("does not apply a transaction-offer header while a coupon is applied", async () => {
+		const store = usePOSCartStore();
+		store.posProfile = { company: "C", currency: "IDR" };
+		store.invoiceItems.push({
+			item_code: "A",
+			item_name: "A",
+			quantity: 1,
+			uom: "Nos",
+			rate: 1000,
+			price_list_rate: 1000,
+			amount: 1000,
+		});
+		store.rebuildIncrementalCache();
+		store.applyDiscountToCart({
+			name: "C1",
+			code: "C1",
+			apply_on: "Grand Total",
+			coupon: {
+				discount_type: "Amount",
+				discount_amount: 300,
+				apply_on: "Grand Total",
+				allow_offer_combination: 1,
+			},
+		});
+		expect(store.additionalDiscount).toBe(300);
+
+		store.appliedOffers = [
+			{ code: "PR-1", name: "Offer 1", source: "manual", offer: { name: "PR-1" } },
+			{ code: "PR-2", name: "Offer 2", source: "manual", offer: { name: "PR-2" } },
+		];
+		// The server still surfaces a transaction-offer header discount.
+		applyOffersResource().submit.mockResolvedValue({
+			message: {
+				items: [
+					{
+						item_code: "A",
+						qty: 1,
+						rate: 1000,
+						price_list_rate: 1000,
+						discount_percentage: 0,
+						discount_amount: 0,
+					},
+				],
+				applied_pricing_rules: ["PR-2"],
+				discount_amount: 700,
+				apply_discount_on: "Grand Total",
+			},
+		});
+
+		await store.removeOffer("PR-1", { company: "C", currency: "IDR" });
+
+		// The coupon's header discount is not overwritten by the offer's.
+		expect(store.headerDiscountFromOffer).toBe(false);
+		expect(store.additionalDiscount).toBe(300);
 	});
 });

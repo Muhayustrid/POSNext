@@ -29,6 +29,7 @@
   "min_qty",
   "column_break_19",
   "min_amt",
+  "allow_coupon_combination",
   "companies_section",
   "companies",
   "quota_section",
@@ -182,6 +183,13 @@
    "description": "0 = no minimum"
   },
   {
+   "default": "0",
+   "description": "Let a coupon that also allows offer combination stack on this offer.",
+   "fieldname": "allow_coupon_combination",
+   "fieldtype": "Check",
+   "label": "Allow Coupon Combination"
+  },
+  {
    "fieldname": "companies_section",
    "fieldtype": "Section Break",
    "label": "Companies"
@@ -238,7 +246,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-06 00:00:00.000000",
+ "modified": "2026-10-15 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Offer",

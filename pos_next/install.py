@@ -442,6 +442,16 @@ CUSTOM_FIELDS = {
 				"no_copy": 1,
 				"print_hide": 1,
 				"description": "Per-unit nominal cap for POS Offer percentage discounts (0 = no cap).",
+			},
+			{
+				"fieldname": "pos_offer_allow_coupon",
+				"label": "POS Offer Allow Coupon",
+				"fieldtype": "Check",
+				"insert_after": "pos_offer_max_discount",
+				"read_only": 1,
+				"no_copy": 1,
+				"print_hide": 1,
+				"description": "Mirror of the POS Offer flag that lets a combination coupon stack on this offer.",
 			}
 		],
 		# Home data for the POS production flow (design D5/D7): the Work Order is

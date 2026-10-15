@@ -2552,8 +2552,9 @@ async function handlePaymentCompleted(paymentData) {
 				}
 
 				const invoiceName = result.name || result.message?.name || __("Unknown");
-				const invoiceTotal = result.grand_total || result.total || 0;
-				const paidAmount = paymentData.paid_amount || invoiceTotal;
+				// `??` not `||`: a fully discounted sale has grand_total 0, not "missing".
+				const invoiceTotal = result.grand_total ?? result.total ?? 0;
+				const paidAmount = paymentData.paid_amount ?? invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import frappe
 
-from pos_next.api.offers import enrich_offers_with_quota
+from pos_next.api.offers import OfferBuilder, OfferEligibility, enrich_offers_with_quota
 from pos_next.api.promotions import (
 	_items_with_names,
 	_managed_schemes_for_company,
@@ -267,3 +267,28 @@ class TestItemsWithNames(unittest.TestCase):
 		with self.GET_ALL_PROMO_PATCH as mock_get_all:
 			self.assertEqual([], _items_with_names([]))
 			mock_get_all.assert_not_called()
+
+
+class TestOfferFeedAllowCoupon(unittest.TestCase):
+	def _rule(self, **overrides):
+		rule = {
+			"name": "PR-1",
+			"title": "Promo Gula",
+			"apply_on": "Item Code",
+			"coupon_code_based": 0,
+			"price_or_product_discount": "Price",
+		}
+		rule.update(overrides)
+		return rule
+
+	SLAB = {"rate_or_discount": "Discount Percentage", "discount_percentage": 10}
+
+	def test_offer_feed_carries_allow_coupon_combination(self):
+		elig = OfferEligibility([], [], [])
+
+		offer = OfferBuilder.build_from_scheme_rule(self._rule(pos_offer_allow_coupon=1), self.SLAB, elig)
+		self.assertEqual(1, offer.allow_coupon_combination)
+		self.assertEqual(1, offer.to_dict()["allow_coupon_combination"])
+
+		offer = OfferBuilder.build_from_scheme_rule(self._rule(), self.SLAB, elig)
+		self.assertEqual(0, offer.allow_coupon_combination)

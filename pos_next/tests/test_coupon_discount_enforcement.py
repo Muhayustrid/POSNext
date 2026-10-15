@@ -256,6 +256,17 @@ class TestStampedCouponEnforcement(POSInvoiceModeMixin, FrappeTestCase):
 		self._created.append(echo["name"])
 		self.assertEqual(echo.get("apply_discount_on"), "Net Total")
 
+	def test_coupon_payload_without_profile_is_refused(self):
+		"""Coupon scope falls back to the payload company only without a
+		profile; that is safe because a POS sale without its shift's profile
+		never saves (a profile of another company is refused by _gate_company)."""
+		coupon = _make_coupon(self)
+		payload = _build_payload(self, discount=10, coupon_code=coupon.coupon_code)
+		payload.pop("pos_profile")
+		payload["company"] = self.profile.company
+		with self.assertRaises(frappe.ValidationError):
+			update_invoice(json.dumps(payload))
+
 	def test_invalid_apply_discount_on_rejected(self):
 		"""The field is not stripped from the payload — the whitelist here is
 		what keeps it from being a mass-assignment vector (coupon-less lane)."""
