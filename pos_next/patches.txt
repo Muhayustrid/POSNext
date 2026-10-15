@@ -33,3 +33,4 @@ pos_next.patches.v2_18_0.seed_company_code_switches
 pos_next.patches.v2_19_0.seed_code_gate_groups
 pos_next.patches.v2_20_0.backfill_offer_usage_invoice_type
 pos_next.patches.v2_20_0.scope_existing_coupons
+pos_next.patches.v2_21_0.repoint_app_desktop_icon

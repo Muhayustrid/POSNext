@@ -16,7 +16,7 @@ add_to_apps_screen = [
 		"name": "pos_next",
 		"logo": "/assets/pos_next/icons/desktop_icons/solid/posnext.svg",
 		"title": "POSNext",
-		"route": "/app/posnext",
+		"route": "/posnext-home",
 		"has_permission": "pos_next.api.permission.has_app_permission",
 	}
 ]

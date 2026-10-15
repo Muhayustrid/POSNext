@@ -13,20 +13,20 @@
    "indent": 0,
    "keep_closed": 0,
    "label": "Home",
-   "link_to": "POSNext",
-   "link_type": "Workspace",
+   "link_to": "hq-sales-monitoring",
+   "link_type": "Page",
    "show_arrow": 0,
    "type": "Link"
   },
   {
    "child": 0,
    "collapsible": 1,
-   "icon": "dashboard",
+   "icon": "layout-grid",
    "indent": 0,
    "keep_closed": 0,
-   "label": "HQ Dashboard",
-   "link_to": "hq-sales-monitoring",
-   "link_type": "Page",
+   "label": "All Menus",
+   "link_to": "POSNext",
+   "link_type": "Workspace",
    "show_arrow": 0,
    "type": "Link"
   },
@@ -564,7 +564,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-14 22:14:37.000000",
+ "modified": "2026-10-15 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
