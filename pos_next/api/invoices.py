@@ -3990,6 +3990,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 			"customer_name",
 			"net_total",
 			"total_taxes_and_charges",
+			"change_amount",
+			"base_change_amount",
+			"account_for_change_amount",
 		),
 	)
 
@@ -4081,6 +4084,15 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		.select(si_payment.mode_of_payment, si_payment.amount, si_payment.base_amount, si_payment.account)
 		.where(si_payment.parent == invoice_name)
 	).run(as_dict=True)
+
+	# Change handed back left the drawer: refund what was kept, not what was tendered.
+	if flt(invoice_info.change_amount) and payments_data:
+		change_row = next(
+			(p for p in payments_data if p.account == invoice_info.account_for_change_amount),
+			payments_data[0],
+		)
+		change_row.amount = flt(change_row.amount) - flt(invoice_info.change_amount)
+		change_row.base_amount = flt(change_row.base_amount) - flt(invoice_info.base_change_amount)
 
 	# Cross-branch return: remap foreign payment modes to the current profile.
 	#

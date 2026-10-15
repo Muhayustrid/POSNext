@@ -20,6 +20,7 @@ from pos_next.api.invoices import (
 	_sync_existing_invoice,
 	check_offline_invoice_synced,
 	get_returnable_invoices,
+	prepare_return_invoice,
 	submit_invoice,
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
@@ -269,6 +270,17 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		doc = frappe.get_doc("POS Invoice", name)
 		self.assertEqual(doc.docstatus, 1)
 		self.assertAlmostEqual(flt(doc.grand_total), 0, places=2)
+
+	def test_return_prefill_nets_change(self):
+		# Paid 150 on a 100 sale (change 50): the refund prefill must be the
+		# cash actually kept (100), not the gross tendered (150).
+		result = submit_invoice(invoice=self._payload(payments=[{"mode_of_payment": self.mode[0], "amount": 150}]))
+		self._created.append(result.get("name"))
+		doc = frappe.get_doc("POS Invoice", result.get("name"))
+		self.assertAlmostEqual(flt(doc.change_amount), 50)
+		prepared = prepare_return_invoice(doc.name, self.shift.name)
+		refund = sum(flt(p.amount) for p in prepared["_original_invoice"]["payments"])
+		self.assertAlmostEqual(refund, flt(doc.grand_total))
 
 	def test_positive_total_without_payments_still_rejected(self):
 		# The zero-total exemption must not open a paymentless lane for real
