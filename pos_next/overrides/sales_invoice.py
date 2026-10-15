@@ -337,6 +337,29 @@ class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
 		POSInvoice.on_submit(self)
 		self._post_parity_accounting()
 
+	def get_sle_for_source_warehouse(self, item_row):
+		sle = super().get_sle_for_source_warehouse(item_row)
+		if self.docstatus == 1 and cint(self.is_return) and self.return_against and is_pos_next_owned(self):
+			# ERPNext resolves a return's incoming rate only for Sales Invoice /
+			# Delivery Note (and recalculate_rate would zero it for POS Invoice),
+			# so take it from the original sale's SLE, as ERPNext does for those.
+			filters = {
+				"voucher_type": self.doctype,
+				"voucher_no": self.return_against,
+				"item_code": item_row.item_code,
+				"is_cancelled": 0,
+			}
+			ref_row = frappe.db.get_value("POS Invoice Item", item_row.name, "pos_invoice_item")
+			if ref_row:
+				filters["voucher_detail_no"] = ref_row
+			original = frappe.db.get_value(
+				"Stock Ledger Entry", filters, ["stock_value_difference", "actual_qty"], as_dict=True
+			)
+			if original and flt(original.actual_qty):
+				sle.incoming_rate = abs(flt(original.stock_value_difference) / flt(original.actual_qty))
+				sle.recalculate_rate = 0
+		return sle
+
 	def on_cancel(self):
 		if not is_pos_next_owned(self):
 			return super().on_cancel()
