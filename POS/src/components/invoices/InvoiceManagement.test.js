@@ -234,6 +234,37 @@ describe("InvoiceManagement pager", () => {
 	})
 })
 
+describe("InvoiceManagement refresh button", () => {
+	const icon = (wrapper) => wrapper.find('[data-test="refresh-button"] i')
+
+	it("spins the refresh icon while a history-tab refresh is in flight", async () => {
+		const wrapper = await mountOnTab("history", {
+			historyInvoices: makeInvoices(3),
+		})
+		expect(wrapper.vm.refreshing).toBe(false)
+
+		await wrapper.find('[data-test="refresh-button"]').trigger("click")
+		await flushPromises()
+
+		expect(wrapper.emitted("refresh-history")).toBeTruthy()
+		expect(wrapper.vm.refreshing).toBe(true)
+		expect(icon(wrapper).classes()).toContain("animate-spin")
+	})
+
+	it("clears the spin once the parent replaces the history data", async () => {
+		const wrapper = await mountOnTab("history", {
+			historyInvoices: makeInvoices(3),
+		})
+		await wrapper.find('[data-test="refresh-button"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.vm.refreshing).toBe(true)
+
+		await wrapper.setProps({ historyInvoices: makeInvoices(4) })
+		await flushPromises()
+		expect(wrapper.vm.refreshing).toBe(false)
+	})
+})
+
 describe("InvoiceManagement cashier column", () => {
 	it("renders cashier_name in the history table, falling back to owner", async () => {
 		const rows = [
