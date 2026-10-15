@@ -294,6 +294,34 @@ class TestSubmitAndCancel(unittest.TestCase):
 			self.assertEqual(1, len(inserted))
 			mock_db.count.assert_not_called()
 
+	def test_submit_records_pos_invoice_doctype(self):
+		# POS Invoice mode: the ledger must point at the POS Invoice, not
+		# validate the name against Sales Invoice (LinkValidationError).
+		offer = make_offer(enforce_usage_quota=0)
+		invoice = self.make_invoice(pos_applied_offer_rules='["PR-A"]', doctype="POS Invoice")
+		with GET_ALL_PATCH as mock_get_all, DB_PATCH, GET_DOC_PATCH as mock_get_doc, SESSION_PATCH:
+			mock_get_all.side_effect = resolve_side_effect([offer], {"PR-A": "S-Promo Gula"})
+			inserted = []
+
+			def fake_get_doc(*args, **kwargs):
+				if args and isinstance(args[0], dict):
+					payload = args[0]
+					doc = frappe._dict(payload)
+					doc.insert = lambda *a, **k: inserted.append(payload) or doc
+					return doc
+				return frappe._dict({"doctype": args[0] if args else None, "time_zone": None})
+
+			mock_get_doc.side_effect = fake_get_doc
+
+			record_offer_usage_on_submit(invoice)
+			self.assertEqual("POS Invoice", inserted[0]["invoice_type"])
+
+	def test_usage_ledgers_link_invoice_dynamically(self):
+		for doctype in ("POS Offer Usage", "One Time Customer Offer Usage"):
+			field = frappe.get_meta(doctype).get_field("sales_invoice")
+			self.assertEqual("Dynamic Link", field.fieldtype, doctype)
+			self.assertEqual("invoice_type", field.options, doctype)
+
 	def test_cancel_deletes_rows(self):
 		with DB_PATCH as mock_db:
 			release_offer_usage_on_cancel(self.make_invoice())

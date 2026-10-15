@@ -31,3 +31,4 @@ pos_next.patches.v2_16_0.drop_monthly_target_transactions
 pos_next.patches.v2_17_0.reorder_pos_settings_fields
 pos_next.patches.v2_18_0.seed_company_code_switches
 pos_next.patches.v2_19_0.seed_code_gate_groups
+pos_next.patches.v2_20_0.backfill_offer_usage_invoice_type

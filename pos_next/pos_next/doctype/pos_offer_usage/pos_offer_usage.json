@@ -7,6 +7,7 @@
  "field_order": [
   "pos_offer",
   "company",
+  "invoice_type",
   "sales_invoice",
   "posting_date",
   "used_by",
@@ -33,11 +34,18 @@
    "reqd": 1
   },
   {
-   "fieldname": "sales_invoice",
+   "default": "Sales Invoice",
+   "fieldname": "invoice_type",
    "fieldtype": "Link",
+   "label": "Invoice Type",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Dynamic Link",
    "in_list_view": 1,
-   "label": "Sales Invoice",
-   "options": "Sales Invoice",
+   "label": "Invoice",
+   "options": "invoice_type",
    "reqd": 1,
    "search_index": 1
   },
@@ -66,7 +74,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-05 00:00:00.000000",
+ "modified": "2026-10-15 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Offer Usage",

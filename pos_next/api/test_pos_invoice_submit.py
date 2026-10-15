@@ -239,6 +239,9 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 				"company_scope": "All Outlets",
 			}
 		).insert(ignore_permissions=True)
+		# addCleanup runs after tearDown's commit, so the delete commits itself
+		# (otherwise the code row leaks and the next run hits "already in use").
+		self.addCleanup(frappe.db.commit)
 		self.addCleanup(
 			lambda: frappe.delete_doc(
 				"POS Discount Confirmation Code", code_doc.name, force=1, ignore_permissions=True

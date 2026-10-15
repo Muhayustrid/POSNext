@@ -186,6 +186,7 @@ def record_one_time_offer_usage(doc, method=None):
 					"doctype": "One Time Customer Offer Usage",
 					"customer": doc.customer,
 					"pricing_rule": rule,
+					"invoice_type": doc.doctype,
 					"sales_invoice": doc.name,
 					"redemption_date": now(),
 				}
