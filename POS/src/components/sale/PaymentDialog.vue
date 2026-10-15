@@ -567,6 +567,13 @@
 									<span class="text-[11px] font-bold text-purple-700">{{
 										__("Coupon")
 									}}</span>
+									<span
+										v-if="appliedCouponCode"
+										class="bg-purple-600 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0 max-w-[80px] truncate"
+										:title="appliedCouponCode"
+									>
+										{{ appliedCouponCode }}
+									</span>
 								</button>
 							</div>
 						</div>
@@ -2152,6 +2159,11 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	/** True while a coupon drives the cart discount (locks the additional discount). */
+	headerDiscountFromCoupon: {
+		type: Boolean,
+		default: false,
+	},
 	targetDoctype: {
 		type: String,
 		default: "Sales Invoice",
@@ -2172,6 +2184,11 @@ const props = defineProps({
 	appliedOfferCount: {
 		type: Number,
 		default: 0,
+	},
+	/** Applied coupon code (falls back to its name), shown as a badge on the Coupon button. */
+	appliedCouponCode: {
+		type: String,
+		default: "",
 	},
 });
 
@@ -2298,12 +2315,18 @@ const additionalDiscountCodeLocked = computed(
 // cashier may not add another discount on top. This lock wins over the code
 // lock and never asks for an HQ code.
 const additionalDiscountLockedByOffer = computed(() => props.headerDiscountFromOffer);
+// An applied coupon also occupies the header discount slot.
+const additionalDiscountLockedByCoupon = computed(() => props.headerDiscountFromCoupon);
 const additionalDiscountLocked = computed(
-	() => additionalDiscountLockedByOffer.value || additionalDiscountCodeLocked.value
+	() =>
+		additionalDiscountLockedByOffer.value ||
+		additionalDiscountLockedByCoupon.value ||
+		additionalDiscountCodeLocked.value
 );
 
 const additionalDiscountLockedReason = computed(() => {
 	if (additionalDiscountLockedByOffer.value) return __("Locked (offer applied)");
+	if (additionalDiscountLockedByCoupon.value) return __("Locked (coupon applied)");
 	if (additionalDiscountCodeLocked.value)
 		return __("Enter the HQ confirmation code to apply a discount");
 	return "";

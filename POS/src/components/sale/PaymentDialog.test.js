@@ -175,3 +175,18 @@ describe("header discount from offer locks the additional discount", () => {
 		expect(wrapper.vm.additionalDiscountLockedReason).toBe("")
 	})
 })
+
+describe("header discount from coupon locks the additional discount", () => {
+	it("locks (with the coupon reason) even when a code is already entered", async () => {
+		const wrapper = mountDialog({ headerDiscountFromCoupon: true })
+		await flushPromises()
+
+		// Unlock the HQ-code half of the lock; the coupon lock must still hold.
+		useDiscountRestrictionStore().setCode("HQCODE")
+		await flushPromises()
+
+		expect(wrapper.vm.additionalDiscountCodeLocked).toBe(false)
+		expect(wrapper.vm.additionalDiscountLocked).toBe(true)
+		expect(wrapper.vm.additionalDiscountLockedReason).toBe("Locked (coupon applied)")
+	})
+})

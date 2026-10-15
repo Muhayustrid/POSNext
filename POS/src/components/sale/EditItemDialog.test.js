@@ -257,3 +257,62 @@ describe("a cart-wide transaction offer locks item discounts", () => {
 		expect(emitted[0][0].discount_amount).toBe(0)
 	})
 })
+
+describe("an applied coupon locks item discounts like a cart offer", () => {
+	it("locks the discount controls (coupon reason) on a plain row", async () => {
+		const pinia = createPinia()
+		setActivePinia(pinia)
+		const cartStore = usePOSCartStore()
+		cartStore.appliedCoupon = { name: "COUP-1", code: "COUP-1" }
+
+		const wrapper = mountDialogWithPinia(
+			{
+				item_code: "A",
+				item_name: "A",
+				quantity: 1,
+				uom: "Nos",
+				stock_uom: "Nos",
+				rate: 100,
+				price_list_rate: 100,
+				discount_percentage: 0,
+				discount_amount: 0,
+				is_free_item: 0,
+			},
+			pinia
+		)
+		await flushPromises()
+
+		expect(wrapper.vm.discountLockedByOffer).toBe(true)
+		expect(wrapper.vm.discountLockReason).toBe("Locked (coupon applied)")
+	})
+
+	it("does not lock once the coupon is removed", async () => {
+		const pinia = createPinia()
+		setActivePinia(pinia)
+		const cartStore = usePOSCartStore()
+		cartStore.appliedCoupon = { name: "COUP-1", code: "COUP-1" }
+
+		const wrapper = mountDialogWithPinia(
+			{
+				item_code: "A",
+				item_name: "A",
+				quantity: 1,
+				uom: "Nos",
+				stock_uom: "Nos",
+				rate: 100,
+				price_list_rate: 100,
+				discount_percentage: 0,
+				discount_amount: 0,
+				is_free_item: 0,
+			},
+			pinia
+		)
+		await flushPromises()
+		expect(wrapper.vm.discountLockedByOffer).toBe(true)
+
+		cartStore.appliedCoupon = null
+		await nextTick()
+
+		expect(wrapper.vm.discountLockedByOffer).toBe(false)
+	})
+})

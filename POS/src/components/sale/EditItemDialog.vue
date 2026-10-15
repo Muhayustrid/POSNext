@@ -603,16 +603,20 @@ const discountLockedByRowOffer = computed(
 
 // ...and a cart-wide transaction offer forbids manual item discounts on every
 // row. The fields lock, but the row's own discount is preserved on save.
+// An applied coupon locks the same fields (a coupon is a cart-wide discount).
 const discountLockedByOffer = computed(
-	() => discountLockedByRowOffer.value || cartStore.headerDiscountFromOffer
+	() =>
+		discountLockedByRowOffer.value ||
+		cartStore.headerDiscountFromOffer ||
+		Boolean(cartStore.appliedCoupon)
 );
 
 // The reason shown next to the locked discount fields.
-const discountLockReason = computed(() =>
-	discountLockedByRowOffer.value
-		? __("Locked (offer applied)")
-		: __("A cart offer is applied; item discounts are locked. Remove the offer to edit.")
-);
+const discountLockReason = computed(() => {
+	if (discountLockedByRowOffer.value) return __("Locked (offer applied)");
+	if (cartStore.appliedCoupon) return __("Locked (coupon applied)");
+	return __("A cart offer is applied; item discounts are locked. Remove the offer to edit.");
+});
 
 // Tooltip message for why rate editing is disabled
 const rateEditDisabledReason = computed(() => {
