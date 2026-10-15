@@ -1,6 +1,7 @@
 import { createResource } from "frappe-ui";
-import { computed, ref, toRaw } from "vue";
+import { computed, ref, toRaw, watch } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
+import { expectedCouponDiscount } from "@/utils/couponDiscount";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -43,6 +44,10 @@ export function useInvoice() {
 	// "Please select Apply Discount On" whenever discount_amount is set without
 	// apply_discount_on, so the checkout payload must always carry it.
 	const couponApplyOn = ref(null);
+	// The POS Coupon definition behind the header discount. While set, the
+	// discount is recomputed from it on every cart change (server formula)
+	// instead of staying frozen at the amount computed when it was applied.
+	const appliedCouponDef = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -201,11 +206,45 @@ export function useInvoice() {
 	// Use roundCurrency for monetary totals to match ERPNext's currency precision (from System Settings)
 	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value));
 	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value));
+	// Header discount actually applicable: never more than what is left after
+	// item discounts. Stacking a header discount (offer or coupon) on rows
+	// already discounted to zero must not push the grand total below zero.
+	const appliedAdditionalDiscount = computed(() => {
+		const header = additionalDiscount.value || 0;
+		if (header <= 0) return 0;
+		const base = taxInclusive.value
+			? _cachedSubtotal.value - _cachedTotalDiscount.value
+			: _cachedSubtotal.value + _cachedTotalTax.value - _cachedTotalDiscount.value;
+		return roundCurrency(Math.max(0, Math.min(header, base)));
+	});
+	// Pre-header-discount bases the coupon formula is defined against, mirroring
+	// the server (pos_coupon.expected_coupon_discount): grand = subtotal + tax -
+	// item discounts (tax-inclusive: subtotal - item discounts), net = grand -
+	// tax.
+	const couponBases = computed(() => {
+		const itemDiscount = _cachedTotalDiscount.value;
+		const grand = taxInclusive.value
+			? _cachedSubtotal.value - itemDiscount
+			: _cachedSubtotal.value + _cachedTotalTax.value - itemDiscount;
+		const net = taxInclusive.value
+			? grand - _cachedTotalTax.value
+			: _cachedSubtotal.value - itemDiscount;
+		return { grand, net };
+	});
+	// Follow the cart: while a coupon drives the header discount, a later item
+	// discount must shrink the coupon amount, not leave the apply-time amount
+	// frozen and push the grand total below zero.
+	watch(couponBases, () => {
+		if (!appliedCouponDef.value) return;
+		additionalDiscount.value = roundCurrency(
+			expectedCouponDiscount(appliedCouponDef.value, couponBases.value)
+		);
+	});
 	const totalDiscount = computed(() =>
-		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0))
+		roundCurrency(_cachedTotalDiscount.value + appliedAdditionalDiscount.value)
 	);
 	const grandTotal = computed(() => {
-		const discount = _cachedTotalDiscount.value + (additionalDiscount.value || 0);
+		const discount = _cachedTotalDiscount.value + appliedAdditionalDiscount.value;
 
 		if (taxInclusive.value) {
 			// Tax inclusive: Subtotal already includes tax, so don't add it again
@@ -608,7 +647,7 @@ export function useInvoice() {
 		/**
 		 * Apply discount as Additional Discount (grand total level)
 		 * This prevents conflicts with item-level pricing rules
-		 * @param {Object} discount - { percentage, amount, name, code, apply_on }
+		 * @param {Object} discount - { percentage, amount, name, code, apply_on, coupon }
 		 */
 		if (!discount) return;
 
@@ -617,6 +656,19 @@ export function useInvoice() {
 		// Remember the coupon's discount base so the checkout payload can send
 		// apply_discount_on; default matches the server-side fallback.
 		couponApplyOn.value = discount.apply_on || "Grand Total";
+
+		const couponDef = discount.coupon || null;
+		appliedCouponDef.value = couponDef;
+
+		if (couponDef) {
+			// A coupon follows the cart: recompute from its definition against the
+			// current bases (server formula) so a later item discount shrinks it.
+			additionalDiscount.value = roundCurrency(
+				expectedCouponDiscount(couponDef, couponBases.value)
+			);
+			rebuildIncrementalCache();
+			return;
+		}
 
 		const baseAmount =
 			typeof discount.base_amount === "number" ? discount.base_amount : subtotal.value;
@@ -652,6 +704,7 @@ export function useInvoice() {
 		// Clear coupon code
 		couponCode.value = null;
 		couponApplyOn.value = null;
+		appliedCouponDef.value = null;
 
 		// Rebuild cache after removing discount
 		rebuildIncrementalCache();
@@ -1041,7 +1094,7 @@ export function useInvoice() {
 			buyer_name: buyerName.value.trim(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
-			discount_amount: additionalDiscount.value || 0,
+			discount_amount: appliedAdditionalDiscount.value,
 			coupon_code: couponCode.value,
 			// ERPNext throws "Please select Apply Discount On" whenever
 			// discount_amount is set without apply_discount_on, so the payload
@@ -1140,7 +1193,7 @@ export function useInvoice() {
 					buyer_name: buyerName.value.trim(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
-					discount_amount: additionalDiscount.value || 0,
+					discount_amount: appliedAdditionalDiscount.value,
 					coupon_code: couponCode.value,
 					// Same as saveDraft: ERPNext throws without apply_discount_on
 					// whenever discount_amount is set.
@@ -1326,6 +1379,7 @@ export function useInvoice() {
 		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
 		couponApplyOn.value = null;
+		appliedCouponDef.value = null;
 		// One-time HQ code is consumed with the invoice it was submitted on
 		restrictionStore.clearCode();
 
@@ -1357,6 +1411,7 @@ export function useInvoice() {
 		buyerName.value = ""; // reset optional buyer label shown on receipt
 		couponCode.value = null;
 		couponApplyOn.value = null;
+		appliedCouponDef.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1443,6 +1498,7 @@ export function useInvoice() {
 		subtotal,
 		totalTax,
 		totalDiscount,
+		couponBases,
 		grandTotal,
 		totalPaid,
 		remainingAmount,
@@ -1471,6 +1527,7 @@ export function useInvoice() {
 		loadTaxRules,
 		setTaxInclusive,
 		recalculateItem,
+		computeBackendRate,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
 		resolveUomPricing,

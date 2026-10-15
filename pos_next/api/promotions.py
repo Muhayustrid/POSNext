@@ -8,6 +8,8 @@ from frappe import _
 from frappe.query_builder.functions import Count
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
+from pos_next.pos_next.doctype.pos_coupon.pos_coupon import coupon_usable_at
+
 
 def _target_summary(doc):
 	"""Eligibility targets for the informational promotion cards (POS dialog).
@@ -760,9 +762,6 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 
 	filters = {}
 
-	if company:
-		filters["company"] = company
-
 	# Check if disabled field exists before filtering
 	has_disabled_field = frappe.db.has_column("POS Coupon", "disabled")
 
@@ -787,6 +786,8 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 		"one_use",
 		"company",
 		"campaign",
+		"company_scope",
+		"discount_type",
 	]
 
 	# Check for optional fields
@@ -794,6 +795,10 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 		fields.append("disabled")
 
 	coupons = frappe.get_all("POS Coupon", filters=filters, fields=fields, order_by="modified desc")
+
+	# A coupon may be scoped beyond its issuing outlet — list the ones usable here.
+	if company:
+		coupons = [coupon for coupon in coupons if coupon_usable_at(coupon, company) is None]
 
 	# Enrich with status
 	today = getdate(nowdate())
@@ -915,6 +920,7 @@ def create_coupon(data):
 				"max_amount": flt(data.get("max_amount")) if data.get("max_amount") else None,
 				"apply_on": data.get("apply_on", "Grand Total"),
 				"company": data.get("company"),
+				"company_scope": "Selected Outlets",
 				"customer": data.get("customer"),
 				"valid_from": data.get("valid_from"),
 				"valid_upto": data.get("valid_upto"),
@@ -923,6 +929,8 @@ def create_coupon(data):
 				"campaign": data.get("campaign"),
 			}
 		)
+		# New coupons are scoped to their issuing outlet only.
+		coupon.append("companies", {"company": data.get("company")})
 
 		coupon.insert()
 

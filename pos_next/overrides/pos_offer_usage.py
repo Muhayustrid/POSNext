@@ -208,6 +208,7 @@ def record_offer_usage_on_submit(doc, method=None):
 					"doctype": USAGE_DOCTYPE,
 					"pos_offer": offer.name,
 					"company": company,
+					"invoice_type": doc.get("doctype") or "Sales Invoice",
 					"sales_invoice": doc.get("name"),
 					"posting_date": doc.get("posting_date") or today(),
 					"used_by": frappe.session.user,

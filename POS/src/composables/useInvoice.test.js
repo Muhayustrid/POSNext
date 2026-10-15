@@ -2,6 +2,7 @@
 // one unit when the caller asked for none. Absent values still default to 1;
 // an explicit 0 or negative is rejected instead.
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { nextTick } from "vue"
 
 const { invoicePayloads } = vi.hoisted(() => ({ invoicePayloads: [] }))
 
@@ -181,6 +182,40 @@ describe("checkout payload apply_discount_on (A1)", () => {
 	})
 })
 
+// A header discount (offer or coupon) stacked on rows already discounted to
+// zero must not push the grand total below zero — the cashier could not
+// check out a negative total.
+describe("header discount clamp", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		invoicePayloads.length = 0
+	})
+
+	it("caps the header discount at what is left after item discounts", async () => {
+		const invoice = useInvoice()
+		invoice.invoiceItems.value = [
+			{
+				item_code: "ITEM-1",
+				item_name: "Item 1",
+				quantity: 1,
+				rate: 0,
+				price_list_rate: 12000,
+				discount_percentage: 100,
+				discount_amount: 12000,
+				amount: 0,
+			},
+		]
+		invoice.rebuildIncrementalCache()
+		invoice.additionalDiscount.value = 12000
+
+		expect(invoice.grandTotal.value).toBe(0)
+		expect(invoice.totalDiscount.value).toBe(12000)
+
+		await invoice.saveDraft()
+		expect(invoicePayloads[0].discount_amount).toBe(0)
+	})
+})
+
 // Fase 2: an allocation-mode package keeps its allocated component rates on
 // the submitted rows, with the parent as a zero line. Tax-inclusive must not
 // touch the component backend rate (the gross basis matches the package
@@ -260,5 +295,69 @@ describe("package allocation rows (Fase 2)", () => {
 		expect(rows[0].rate).toBe(0)
 		expect(rows[1].rate).toBe(4000)
 		expect(rows[2].rate).toBe(15000)
+	})
+})
+
+// The coupon's header discount must follow the cart (recomputed with the
+// server formula against the pre-header bases) instead of freezing at the
+// amount computed when the coupon was applied — otherwise a later item
+// discount leaves a stale, too-large header discount.
+describe("coupon follows the cart (server formula)", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		invoicePayloads.length = 0
+	})
+
+	const twentyPct = {
+		name: "C20",
+		code: "C20",
+		apply_on: "Grand Total",
+		coupon: { discount_type: "Percentage", discount_percentage: 20, apply_on: "Grand Total" },
+	}
+
+	function setupCouponCart() {
+		const invoice = useInvoice()
+		invoice.invoiceItems.value = [
+			{
+				item_code: "ITEM-1",
+				item_name: "Item 1",
+				quantity: 1,
+				rate: 100000,
+				price_list_rate: 100000,
+				amount: 100000,
+			},
+		]
+		invoice.rebuildIncrementalCache()
+		return invoice
+	}
+
+	function applyManualItemDiscount(invoice, percentage) {
+		const item = invoice.invoiceItems.value[0]
+		item.discount_percentage = percentage
+		invoice.recalculateItem(item)
+		invoice.rebuildIncrementalCache()
+	}
+
+	it("drops to zero when a 100% item discount follows a 20% coupon", async () => {
+		const invoice = setupCouponCart()
+		invoice.applyDiscount({ ...twentyPct })
+		expect(invoice.additionalDiscount.value).toBe(20000)
+
+		applyManualItemDiscount(invoice, 100)
+		await nextTick()
+
+		expect(invoice.additionalDiscount.value).toBe(0)
+		expect(invoice.grandTotal.value).toBe(0)
+	})
+
+	it("shrinks to 20% of the basis left after a manual 90% discount", async () => {
+		const invoice = setupCouponCart()
+		invoice.applyDiscount({ ...twentyPct })
+
+		applyManualItemDiscount(invoice, 90)
+		await nextTick()
+
+		// 20% of the remaining 10000 — not the 20000 frozen at apply time.
+		expect(invoice.additionalDiscount.value).toBe(2000)
 	})
 })

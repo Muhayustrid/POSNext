@@ -85,7 +85,7 @@
 							</nav>
 						</div>
 						<div class="flex items-center gap-2 shrink-0">
-							<RefreshButton :loading="loading" @click="refreshCurrentTab" />
+							<RefreshButton :loading="loading || refreshing" @click="refreshCurrentTab" />
 							<button
 								v-if="!embedded"
 								@click="handleClose"
@@ -1475,6 +1475,10 @@ const InvoiceListPager = {
 
 const show = ref(props.modelValue);
 const loading = ref(false);
+// History/Drafts/Returns load in the parent's refresh-history handler, which
+// emit() cannot await; track that work locally and clear it when the parent's
+// data lands (see the props watch below).
+const refreshing = ref(false);
 const activeTab = ref("partial");
 
 // Initialize filter store and composable
@@ -1675,17 +1679,22 @@ function handleClose() {
 async function refreshCurrentTab() {
 	if (activeTab.value === "partial") {
 		await Promise.all([loadUnpaidInvoices(), loadUnpaidSummary()]);
-	} else if (activeTab.value === "history") {
-		// Request parent to refresh history data
-		emit("refresh-history");
-	} else if (activeTab.value === "drafts") {
-		// Drafts are passed from parent, emit event if needed
-		emit("refresh-history");
-	} else if (activeTab.value === "returns") {
-		// Returns would also need a refresh
-		emit("refresh-history");
+		return;
 	}
+	// History/Drafts/Returns are reloaded by the parent; keep the icon spinning
+	// until it hands the fresh data back.
+	refreshing.value = true;
+	emit("refresh-history");
 }
+
+// The parent replaces historyInvoices/draftInvoices when its reload finishes —
+// the only signal that a manual refresh of those tabs is done.
+watch(
+	() => [props.historyInvoices, props.draftInvoices],
+	() => {
+		refreshing.value = false;
+	}
+);
 
 async function loadUnpaidInvoices() {
 	if (!props.posProfile) return;

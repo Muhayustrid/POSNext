@@ -724,7 +724,14 @@
 					</svg>
 					<span class="text-[11px] font-bold text-purple-700">{{ __("Coupon") }}</span>
 					<span
-						v-if="availableGiftCards.length > 0"
+						v-if="appliedCouponCode"
+						class="bg-purple-600 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0 max-w-[80px] truncate"
+						:title="appliedCouponCode"
+					>
+						{{ appliedCouponCode }}
+					</span>
+					<span
+						v-else-if="availableGiftCards.length > 0"
 						class="bg-purple-600 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0 min-w-[16px] text-center"
 					>
 						{{ availableGiftCards.length }}
@@ -1862,6 +1869,14 @@ watch(
  * @returns {Number} Count of applied offers
  */
 const appliedOfferCount = computed(() => (props.appliedOffers || []).length);
+
+/**
+ * Applied coupon code for the Coupon button badge, falling back to the coupon
+ * name for restored drafts that carry no code. Empty when no coupon is applied.
+ */
+const appliedCouponCode = computed(
+	() => cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || ""
+);
 
 /**
  * Pre-computed customer lookup map for O(1) access by ID.

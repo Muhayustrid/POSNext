@@ -149,6 +149,28 @@ class TestQueueAPI(FrappeTestCase):
 		settings = _get_pos_settings(frappe.get_doc("POS Profile", self.profile))
 		self.assertEqual(settings.get("print_driver"), "imin")
 
+	def test_bootstrap_settings_include_auto_apply_offers(self):
+		# posSettings.js reads settings.auto_apply_offers; without the key the POS
+		# is pinned ON and unchecking the POS Settings box does nothing.
+		from pos_next.api.bootstrap import _get_pos_settings
+
+		name = frappe.db.get_value("POS Settings", {"pos_profile": self.profile}, "name")
+		settings = _get_pos_settings(frappe.get_doc("POS Profile", self.profile))
+		self.assertIn("auto_apply_offers", settings)
+		frappe.db.set_value("POS Settings", name, "auto_apply_offers", 0)
+		settings = _get_pos_settings(frappe.get_doc("POS Profile", self.profile))
+		self.assertEqual(settings.get("auto_apply_offers"), 0)
+
+	def test_bootstrap_settings_auto_apply_offers_global_fallback(self):
+		# No enabled POS Settings row: the POS Next Global Settings single feeds it.
+		from pos_next.api.bootstrap import _get_pos_settings
+
+		name = frappe.db.get_value("POS Settings", {"pos_profile": self.profile}, "name")
+		frappe.db.set_value("POS Settings", name, "enabled", 0)
+		frappe.db.set_single_value("POS Next Global Settings", "auto_apply_offers", 0)
+		settings = _get_pos_settings(frappe.get_doc("POS Profile", self.profile))
+		self.assertEqual(settings.get("auto_apply_offers"), 0)
+
 	def test_lost_insert_race_retries(self):
 		# First-day insert race: the first insert hits the DB unique index and
 		# frappe's insert path surfaces it as DuplicateEntryError. The retry

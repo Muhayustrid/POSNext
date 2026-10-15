@@ -66,10 +66,21 @@ class TestValidateCoupon(unittest.TestCase):
 		self.assertFalse(result["valid"])
 		self.assertEqual(result["message"], "Invalid coupon code")
 		# 4a568c0 narrowed the fetched columns to the server-owned response
-		# fields instead of SELECT *
+		# fields instead of SELECT *; the outlet scope lookup drops the company
+		# filter and carries name/company/company_scope for coupon_usable_at.
 		mock_db.get_value.assert_any_call(
 			"POS Coupon",
-			{"coupon_code": "SAVE10", "company": "Test Company"},
-			[*_COUPON_RESPONSE_FIELDS, "disabled", "used", "maximum_use", "valid_from", "valid_upto"],
+			{"coupon_code": "SAVE10"},
+			[
+				*_COUPON_RESPONSE_FIELDS,
+				"name",
+				"company",
+				"company_scope",
+				"disabled",
+				"used",
+				"maximum_use",
+				"valid_from",
+				"valid_upto",
+			],
 			as_dict=1,
 		)

@@ -402,7 +402,7 @@
 										cartStore.removeOffer(
 											offer,
 											shiftStore.currentProfile,
-											offersDialogRef.value
+											offersDialogRef
 										)
 								"
 								@update-uom="cartStore.changeItemUOM"
@@ -512,12 +512,16 @@
 				:company="shiftStore.profileCompany"
 				:additional-discount="cartStore.additionalDiscount"
 				:header-discount-from-offer="cartStore.headerDiscountFromOffer"
+				:header-discount-from-coupon="Boolean(cartStore.appliedCoupon)"
 				:items="cartStore.invoiceItems"
 				:tax-amount="cartStore.totalTax"
 				:discount-amount="cartStore.totalDiscount"
 				:target-doctype="cartStore.targetDoctype"
 				:is-submitting="cartStore.isSubmitting"
 				:applied-offer-count="cartStore.appliedOffers.length"
+				:applied-coupon-code="
+					cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || ''
+				"
 				@payment-completed="handlePaymentCompleted"
 				@update-additional-discount="handleAdditionalDiscountUpdate"
 				@show-offers="uiStore.showOffersDialog = true"
@@ -597,7 +601,7 @@
 						cartStore.removeOffer(
 							offer,
 							shiftStore.currentProfile,
-							offersDialogRef.value
+							offersDialogRef
 						)
 				"
 			/>
@@ -2552,8 +2556,9 @@ async function handlePaymentCompleted(paymentData) {
 				}
 
 				const invoiceName = result.name || result.message?.name || __("Unknown");
-				const invoiceTotal = result.grand_total || result.total || 0;
-				const paidAmount = paymentData.paid_amount || invoiceTotal;
+				// `??` not `||`: a fully discounted sale has grand_total 0, not "missing".
+				const invoiceTotal = result.grand_total ?? result.total ?? 0;
+				const paidAmount = paymentData.paid_amount ?? invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();

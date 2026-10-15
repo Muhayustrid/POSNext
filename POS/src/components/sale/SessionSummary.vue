@@ -140,7 +140,7 @@
 		<!-- Error without cached data -->
 		<div v-else-if="!summary" class="text-center py-8">
 			<p class="text-sm text-gray-500">{{ __("Could not load the session summary.") }}</p>
-			<Button variant="subtle" class="mt-3" @click="refresh">
+			<Button variant="subtle" class="mt-3" :loading="loading" @click="refresh">
 				{{ __("Retry") }}
 			</Button>
 		</div>

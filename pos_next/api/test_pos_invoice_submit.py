@@ -20,6 +20,7 @@ from pos_next.api.invoices import (
 	_sync_existing_invoice,
 	check_offline_invoice_synced,
 	get_returnable_invoices,
+	prepare_return_invoice,
 	submit_invoice,
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
@@ -239,6 +240,9 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 				"company_scope": "All Outlets",
 			}
 		).insert(ignore_permissions=True)
+		# addCleanup runs after tearDown's commit, so the delete commits itself
+		# (otherwise the code row leaks and the next run hits "already in use").
+		self.addCleanup(frappe.db.commit)
 		self.addCleanup(
 			lambda: frappe.delete_doc(
 				"POS Discount Confirmation Code", code_doc.name, force=1, ignore_permissions=True
@@ -266,6 +270,17 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		doc = frappe.get_doc("POS Invoice", name)
 		self.assertEqual(doc.docstatus, 1)
 		self.assertAlmostEqual(flt(doc.grand_total), 0, places=2)
+
+	def test_return_prefill_nets_change(self):
+		# Paid 150 on a 100 sale (change 50): the refund prefill must be the
+		# cash actually kept (100), not the gross tendered (150).
+		result = submit_invoice(invoice=self._payload(payments=[{"mode_of_payment": self.mode[0], "amount": 150}]))
+		self._created.append(result.get("name"))
+		doc = frappe.get_doc("POS Invoice", result.get("name"))
+		self.assertAlmostEqual(flt(doc.change_amount), 50)
+		prepared = prepare_return_invoice(doc.name, self.shift.name)
+		refund = sum(flt(p.amount) for p in prepared["_original_invoice"]["payments"])
+		self.assertAlmostEqual(refund, flt(doc.grand_total))
 
 	def test_positive_total_without_payments_still_rejected(self):
 		# The zero-total exemption must not open a paymentless lane for real
@@ -686,3 +701,98 @@ class TestSubmitInvoiceSalesOrderPayload(FrappeTestCase):
 
 		self.assertEqual(seen, [("Sales Order", "SO-PN-TEST-NONEXISTENT")])
 
+
+
+class TestPOSInvoiceReturnStockValue(FrappeTestCase):
+	"""A POS Invoice return must take stock back at the original sale's cost.
+
+	ERPNext only resolves a return's incoming rate for Sales Invoice /
+	Delivery Note, so a parity POS Invoice return posted incoming_rate 0:
+	stock came back worth nothing and COGS was never reversed."""
+
+	def setUp(self):
+		from pos_next.tests.price_group_helpers import make_test_item
+
+		# Kept disabled outside this test: every other test here picks the
+		# first enabled stock item and seeds it with zero-rate stock.
+		self.item = make_test_item("PNXT Return Value", is_stock_item=1)
+		frappe.db.set_value("Item", self.item, "disabled", 1)
+		self.case = TestSubmitInvoicePOSIMode()
+		self.case.setUp()
+		frappe.db.set_value("Item", self.item, "disabled", 0)
+		company = self.case.profile.company
+		self._refund_gate = frappe.db.get_value("Company", company, "pos_require_refund_code")
+		frappe.db.set_value("Company", company, "pos_require_refund_code", 0)
+		self.addCleanup(frappe.db.set_value, "Company", company, "pos_require_refund_code", self._refund_gate)
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"stock_entry_type": "Material Receipt",
+				"purpose": "Material Receipt",
+				"company": company,
+				"items": [
+					{
+						"item_code": self.item,
+						"qty": 2,
+						"basic_rate": 50,
+						"t_warehouse": self.case.profile.warehouse,
+					}
+				],
+			}
+		)
+		se.flags.ignore_permissions = True
+		se.insert()
+		se.submit()
+		self._se = se.name
+
+	def tearDown(self):
+		# invoices first (return before its sale), so cancelling the receipt
+		# can't drive stock negative
+		self.case._created.reverse()
+		self.case.tearDown()
+		se = frappe.get_doc("Stock Entry", self._se)
+		if se.docstatus == 1:
+			se.cancel()
+		frappe.delete_doc("Stock Entry", se.name, force=1, ignore_permissions=True)
+		frappe.db.set_value("Item", self.item, "disabled", 1)
+		frappe.db.commit()
+
+	def _sle_value(self, name):
+		return flt(
+			frappe.db.sql(
+				"""select sum(stock_value_difference) from `tabStock Ledger Entry`
+				where voucher_type='POS Invoice' and voucher_no=%s and is_cancelled=0""",
+				name,
+			)[0][0]
+		)
+
+	def test_return_restores_stock_at_original_cost(self):
+		"""RED: the return SLE carried incoming_rate 0 (stock_value_difference 0)."""
+		item_row = {"item_code": self.item, "qty": 1, "rate": 100, "warehouse": self.case.profile.warehouse}
+		sale = submit_invoice(invoice=self.case._payload(items=[item_row])).get("name")
+		self.case._created.append(sale)
+		self.assertAlmostEqual(self._sle_value(sale), -50)
+
+		ret = submit_invoice(
+			invoice=self.case._payload(
+				is_return=1,
+				return_against=sale,
+				items=[dict(item_row, qty=-1)],
+				payments=[{"mode_of_payment": self.case.mode[0], "amount": -100}],
+			)
+		).get("name")
+		self.case._created.append(ret)
+		self.assertAlmostEqual(self._sle_value(ret), 50)
+		if not frappe.get_cached_value("Company", self.case.profile.company, "enable_perpetual_inventory"):
+			return
+		# COGS reversed: the stock account is debited back on the return
+		stock_dr = flt(
+			frappe.db.sql(
+				"""select sum(debit - credit) from `tabGL Entry` gle
+				join `tabAccount` acc on acc.name = gle.account
+				where gle.voucher_type='POS Invoice' and gle.voucher_no=%s
+				and gle.is_cancelled=0 and acc.account_type='Stock'""",
+				ret,
+			)[0][0]
+		)
+		self.assertAlmostEqual(stock_dr, 50)

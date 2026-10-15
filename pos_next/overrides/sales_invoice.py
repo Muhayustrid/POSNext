@@ -112,8 +112,12 @@ class CustomSalesInvoice(SalesInvoice):
 			skip_change_gl_entries = not _get_post_change_gl_entries_setting()
 
 			for payment_mode in self.payments:
+				base_amount = flt(payment_mode.base_amount)
+				amount = flt(payment_mode.amount)
+				# Net change per currency: base_change_amount from base, change_amount from amount.
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
-					payment_mode.base_amount -= flt(self.change_amount)
+					base_amount -= flt(self.base_change_amount)
+					amount -= flt(self.change_amount)
 
 				if payment_mode.amount:
 					# POS, make payment entries
@@ -125,10 +129,10 @@ class CustomSalesInvoice(SalesInvoice):
 								"party_type": "Customer",
 								"party": self.customer,
 								"against": payment_mode.account,
-								"credit": payment_mode.base_amount,
-								"credit_in_account_currency": payment_mode.base_amount
+								"credit": base_amount,
+								"credit_in_account_currency": base_amount
 								if self.party_account_currency == self.company_currency
-								else payment_mode.amount,
+								else amount,
 								"against_voucher": self.return_against
 								if cint(self.is_return) and self.return_against
 								else self.name,
@@ -155,10 +159,10 @@ class CustomSalesInvoice(SalesInvoice):
 								"party_type": party_type,
 								"party": party,
 								"against": self.customer,
-								"debit": payment_mode.base_amount,
-								"debit_in_account_currency": payment_mode.base_amount
+								"debit": base_amount,
+								"debit_in_account_currency": base_amount
 								if payment_mode_account_currency == self.company_currency
-								else payment_mode.amount,
+								else amount,
 								"cost_center": self.cost_center,
 							},
 							payment_mode_account_currency,
@@ -332,6 +336,29 @@ class CustomPOSInvoice(CustomSalesInvoice, POSInvoice):
 		# unallocated-mode cleanup, status), then the deferred accounting.
 		POSInvoice.on_submit(self)
 		self._post_parity_accounting()
+
+	def get_sle_for_source_warehouse(self, item_row):
+		sle = super().get_sle_for_source_warehouse(item_row)
+		if self.docstatus == 1 and cint(self.is_return) and self.return_against and is_pos_next_owned(self):
+			# ERPNext resolves a return's incoming rate only for Sales Invoice /
+			# Delivery Note (and recalculate_rate would zero it for POS Invoice),
+			# so take it from the original sale's SLE, as ERPNext does for those.
+			filters = {
+				"voucher_type": self.doctype,
+				"voucher_no": self.return_against,
+				"item_code": item_row.item_code,
+				"is_cancelled": 0,
+			}
+			ref_row = frappe.db.get_value("POS Invoice Item", item_row.name, "pos_invoice_item")
+			if ref_row:
+				filters["voucher_detail_no"] = ref_row
+			original = frappe.db.get_value(
+				"Stock Ledger Entry", filters, ["stock_value_difference", "actual_qty"], as_dict=True
+			)
+			if original and flt(original.actual_qty):
+				sle.incoming_rate = abs(flt(original.stock_value_difference) / flt(original.actual_qty))
+				sle.recalculate_rate = 0
+		return sle
 
 	def on_cancel(self):
 		if not is_pos_next_owned(self):

@@ -17,6 +17,7 @@ from frappe.utils import cint, flt, getdate, nowdate
 
 from pos_next.api.pos_profile import _assert_profile_or_manager
 from pos_next.overrides.pos_offer_usage import get_quota_info
+from pos_next.pos_next.doctype.pos_coupon.pos_coupon import coupon_usable_at
 
 # ============================================================================
 # Constants
@@ -100,6 +101,7 @@ class Offer:
 	one_time_per_customer: int = 0  # 1 if each customer may redeem this offer only once
 	# POS Offer campaign metadata (present when the rule belongs to a POS Offer)
 	max_discount_amount: float = 0
+	allow_coupon_combination: int = 0
 	quota_scope: str | None = None
 	quota_period: str | None = None
 	quota_limit: int = 0
@@ -373,6 +375,7 @@ class OfferBuilder:
 			apply_recursion_over=flt(slab.get("apply_recursion_over", 0)) if not is_price_discount else 0,
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
 			max_discount_amount=flt(rule.get("pos_offer_max_discount", 0)),
+			allow_coupon_combination=cint(rule.get("pos_offer_allow_coupon", 0)),
 		)
 
 	@staticmethod
@@ -569,7 +572,7 @@ def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:
 			name, title, apply_on, selling, promotional_scheme,
 			promotional_scheme_id, coupon_code_based, one_time_per_customer,
 			price_or_product_discount, priority, valid_from, valid_upto,
-			pos_offer_max_discount
+			pos_offer_max_discount, pos_offer_allow_coupon
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0
@@ -679,18 +682,23 @@ def get_active_coupons(customer: str, company: str) -> list[dict]:
 	if not frappe.db.table_exists("POS Coupon"):
 		return []
 
+	display_fields = ["name", "coupon_code", "coupon_name", "valid_from", "valid_upto"]
 	coupons = frappe.get_all(
 		"POS Coupon",
 		filters={
-			"company": company,
 			"coupon_type": "Gift Card",
 			"customer": customer,
 			"used": 0,
 		},
-		fields=["name", "coupon_code", "coupon_name", "valid_from", "valid_upto"],
+		fields=[*display_fields, "company", "company_scope", "discount_type"],
 	)
 
-	return coupons
+	# A coupon may be scoped beyond its issuing outlet — keep the ones usable here.
+	return [
+		{field: coupon[field] for field in display_fields}
+		for coupon in coupons
+		if coupon_usable_at(coupon, company) is None
+	]
 
 
 # SEC-08: response whitelist — only the fields the POS coupon dialog consumes.
@@ -707,6 +715,7 @@ _COUPON_RESPONSE_FIELDS = (
 	"max_amount",
 	"apply_on",
 	"customer",
+	"allow_offer_combination",
 )
 
 
@@ -730,8 +739,18 @@ def validate_coupon(coupon_code: str, company: str, customer: str | None = None)
 	# Note: coupon_code field is unique, so we can fetch directly
 	coupon = frappe.db.get_value(
 		"POS Coupon",
-		{"coupon_code": coupon_code, "company": company},
-		[*_COUPON_RESPONSE_FIELDS, "disabled", "used", "maximum_use", "valid_from", "valid_upto"],
+		{"coupon_code": coupon_code},
+		[
+			*_COUPON_RESPONSE_FIELDS,
+			"name",
+			"company",
+			"company_scope",
+			"disabled",
+			"used",
+			"maximum_use",
+			"valid_from",
+			"valid_upto",
+		],
 		as_dict=1,
 	)
 
@@ -760,6 +779,11 @@ def validate_coupon(coupon_code: str, company: str, customer: str | None = None)
 	# Check customer restriction
 	if coupon.customer and coupon.customer != customer:
 		return {"valid": False, "message": _("This coupon is not valid for this customer")}
+
+	# Check outlet scope / currency (the coupon may be scoped beyond its issuer)
+	error = coupon_usable_at(coupon, company)
+	if error:
+		return {"valid": False, "message": error}
 
 	# Strip internal validation fields — the client only gets the whitelist.
 	return {"valid": True, "coupon": {field: coupon.get(field) for field in _COUPON_RESPONSE_FIELDS}}

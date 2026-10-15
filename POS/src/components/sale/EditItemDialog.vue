@@ -345,7 +345,10 @@
 											>
 												<label
 													class="block text-sm font-medium text-gray-700 mb-3 text-start"
-													>{{ __("Item Discount") }}</label
+													>{{ __("Item Discount") }}<span
+														v-if="discountLockedByOffer"
+														class="ms-1 text-xs font-normal text-amber-600"
+													>{{ discountLockReason }}</span></label
 												>
 												<div class="grid grid-cols-2 gap-3">
 													<!-- Discount Type -->
@@ -357,7 +360,7 @@
 														<SelectInput
 															v-model="discountType"
 															:options="discountTypeOptions"
-															:disabled="discountLocked"
+															:disabled="discountLocked || discountLockedByOffer"
 															@change="handleDiscountTypeChange"
 														/>
 													</div>
@@ -382,9 +385,9 @@
 																		: undefined
 																"
 																step="0.01"
-																:disabled="discountLocked"
+																:disabled="discountLocked || discountLockedByOffer"
 																:class="
-																	discountLocked
+																	discountLocked || discountLockedByOffer
 																		? 'bg-gray-50 cursor-not-allowed'
 																		: 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 																"
@@ -406,7 +409,7 @@
 											</div>
 
 												<!-- HQ confirmation code unlocks the discount fields -->
-												<div v-if="discountLocked" class="border-t border-gray-200 pt-4">
+												<div v-if="discountLocked && !discountLockedByOffer" class="border-t border-gray-200 pt-4">
 													<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
 														{{ __("Confirmation Code (HQ)") }}
 													</label>
@@ -507,6 +510,7 @@
 <script setup>
 import { useToast } from "@/composables/useToast";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
+import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { getItemStock } from "@/utils/stockValidator";
@@ -523,6 +527,7 @@ const { showSuccess, showError, showWarning } = useToast();
 const settingsStore = usePOSSettingsStore();
 const serialStore = useSerialNumberStore();
 const restrictionStore = useDiscountRestrictionStore();
+const cartStore = usePOSCartStore();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -590,6 +595,29 @@ const canEditRate = computed(() => {
 	return settingsStore.allowUserToEditRate && !hasPricingRules.value;
 });
 
+// A row that carries an offer (and is not a gratis row) cannot also take a
+// manual discount — offers and manual discounts never stack on one line.
+const discountLockedByRowOffer = computed(
+	() => hasPricingRules.value && !localItem.value?.is_free_item
+);
+
+// ...and a cart-wide transaction offer forbids manual item discounts on every
+// row. The fields lock, but the row's own discount is preserved on save.
+// An applied coupon locks the same fields (a coupon is a cart-wide discount).
+const discountLockedByOffer = computed(
+	() =>
+		discountLockedByRowOffer.value ||
+		cartStore.headerDiscountFromOffer ||
+		Boolean(cartStore.appliedCoupon)
+);
+
+// The reason shown next to the locked discount fields.
+const discountLockReason = computed(() => {
+	if (discountLockedByRowOffer.value) return __("Locked (offer applied)");
+	if (cartStore.appliedCoupon) return __("Locked (coupon applied)");
+	return __("A cart offer is applied; item discounts are locked. Remove the offer to edit.");
+});
+
 // Tooltip message for why rate editing is disabled
 const rateEditDisabledReason = computed(() => {
 	if (!settingsStore.allowUserToEditRate) {
@@ -634,6 +662,8 @@ const discountTypeOptions = computed(() => [
 // HQ discount code needed: this edit applies a discount (percentage/amount or
 // a manual rate reduction) and no code has been entered yet.
 const restrictionCodeRequired = computed(() => {
+	// An offer row applies no manual discount, so no code is required for it.
+	if (discountLockedByOffer.value) return false;
 	if (!restrictionStore.applicable || restrictionStore.hasCode) return false;
 	const hasRateDiscount =
 		canEditRate.value &&
@@ -1035,8 +1065,19 @@ async function updateItem() {
 		// Preserve price_list_rate for reference (original price before any manual edits)
 		price_list_rate: originalPriceListRate.value,
 		warehouse: localWarehouse.value,
-		discount_percentage: discountType.value === "percentage" ? discountValue.value : 0,
-		discount_amount: discountType.value === "amount" ? discountValue.value : 0,
+		// An offer row never carries a manual discount: the offer's own discount
+		// must not be re-sent as a manual one on save. A cart-wide offer only
+		// locks the fields — the row's own manual discount is preserved.
+		discount_percentage: discountLockedByRowOffer.value
+			? 0
+			: discountType.value === "percentage"
+			? discountValue.value
+			: 0,
+		discount_amount: discountLockedByRowOffer.value
+			? 0
+			: discountType.value === "amount"
+			? discountValue.value
+			: 0,
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,

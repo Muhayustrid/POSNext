@@ -1364,64 +1364,12 @@ def _resolve_target_doctype(payload_doctype):
 
 
 def get_payment_account(mode_of_payment, company):
+	"""Account for a mode of payment, from its Mode of Payment Account row.
+
+	No guessing from Company defaults: a payment must post to the account its
+	mode names (the one POS Profile validation already requires), else throw.
 	"""
-	Get account for mode of payment.
-	Tries multiple fallback methods to find a suitable account.
-	"""
-	# Try 1: Mode of Payment Account table
-	account = frappe.db.get_value(
-		"Mode of Payment Account",
-		{"parent": mode_of_payment, "company": company},
-		"default_account",
-	)
-	if account:
-		return {"account": account}
-
-	# Try 2: POS Payment Method from POS Profile
-	account = frappe.db.sql(
-		"""
-		SELECT ppm.default_account
-		FROM `tabPOS Payment Method` ppm
-		INNER JOIN `tabPOS Profile` pp ON ppm.parent = pp.name
-		WHERE ppm.mode_of_payment = %s
-		AND pp.company = %s
-		AND ppm.default_account IS NOT NULL
-		LIMIT 1
-	""",
-		(mode_of_payment, company),
-		as_dict=1,
-	)
-
-	if account and account[0].default_account:
-		return {"account": account[0].default_account}
-
-	# Try 3: Company default cash account (for cash payments)
-	if "cash" in mode_of_payment.lower():
-		account = frappe.get_value("Company", company, "default_cash_account")
-		if account:
-			return {"account": account}
-
-	# Try 4: Company default bank account
-	account = frappe.get_value("Company", company, "default_bank_account")
-	if account:
-		return {"account": account}
-
-	# Try 5: Any Cash/Bank account for the company
-	account = frappe.db.get_value(
-		"Account",
-		{"company": company, "account_type": ["in", ["Cash", "Bank"]], "is_group": 0},
-		"name",
-	)
-	if account:
-		return {"account": account}
-
-	# No account found - throw error
-	frappe.throw(
-		_(
-			"Please set default Cash or Bank account in Mode of Payment {0} or set default accounts in Company {1}"
-		).format(mode_of_payment, company),
-		title=_("Missing Account"),
-	)
+	return get_bank_cash_account(mode_of_payment, company)
 
 
 def _validate_receivable_account(account, company, pos_profile):
@@ -2259,8 +2207,14 @@ def update_invoice(data):
 				if frappe.db.table_exists("POS Coupon"):
 					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
 
+					# Scope against the profile's company, never the client's claim.
+					coupon_company = (
+						pos_profile_doc.company
+						if pos_profile_doc and pos_profile_doc.company
+						else invoice_doc.company
+					)
 					coupon_result = check_coupon_code(
-						payload_coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
+						payload_coupon_code, customer=invoice_doc.customer, company=coupon_company
 					)
 
 					if not coupon_result or not coupon_result.get("valid"):
@@ -4036,6 +3990,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 			"customer_name",
 			"net_total",
 			"total_taxes_and_charges",
+			"change_amount",
+			"base_change_amount",
+			"account_for_change_amount",
 		),
 	)
 
@@ -4127,6 +4084,15 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		.select(si_payment.mode_of_payment, si_payment.amount, si_payment.base_amount, si_payment.account)
 		.where(si_payment.parent == invoice_name)
 	).run(as_dict=True)
+
+	# Change handed back left the drawer: refund what was kept, not what was tendered.
+	if flt(invoice_info.change_amount) and payments_data:
+		change_row = next(
+			(p for p in payments_data if p.account == invoice_info.account_for_change_amount),
+			payments_data[0],
+		)
+		change_row.amount = flt(change_row.amount) - flt(invoice_info.change_amount)
+		change_row.base_amount = flt(change_row.base_amount) - flt(invoice_info.base_change_amount)
 
 	# Cross-branch return: remap foreign payment modes to the current profile.
 	#
@@ -4715,6 +4681,12 @@ def apply_offers(invoice_data, selected_offers=None):
 
 			conversion_factor = flt(item.get("conversion_factor") or 1) or 1
 			price_list_rate = flt(item.get("price_list_rate") or item.get("rate") or 0)
+			# A row already discounted to rate 0 (100% manual discount) is worth
+			# nothing in the cart: falling back to price_list_rate here would make
+			# transaction-level offers discount money the customer no longer pays
+			# (grand total below zero). Only a missing rate falls back.
+			raw_rate = item.get("rate")
+			rate = price_list_rate if raw_rate in (None, "") else flt(raw_rate)
 
 			pricing_items.append(
 				frappe._dict(
@@ -4734,8 +4706,8 @@ def apply_offers(invoice_data, selected_offers=None):
 						"stock_uom": item.get("stock_uom") or (cached.stock_uom if cached else None),
 						"price_list_rate": price_list_rate,
 						"base_price_list_rate": price_list_rate,
-						"rate": flt(item.get("rate") or price_list_rate),
-						"base_rate": flt(item.get("rate") or price_list_rate),
+						"rate": rate,
+						"base_rate": rate,
 						"discount_percentage": 0,
 						"discount_amount": 0,
 						"warehouse": item.get("warehouse") or profile.warehouse,

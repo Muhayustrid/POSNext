@@ -147,7 +147,7 @@
 				data-test="error-state"
 			>
 				<p class="text-sm text-gray-500">{{ __("Could not load the dashboard.") }}</p>
-				<Button variant="subtle" class="mt-3" @click="refresh">
+				<Button variant="subtle" class="mt-3" :loading="loading" @click="refresh">
 					{{ __("Retry") }}
 				</Button>
 			</div>
@@ -171,7 +171,7 @@
 					data-test="error-alert"
 				>
 					<span>{{ __("Could not load the dashboard.") }}</span>
-					<Button variant="subtle" @click="refresh">{{ __("Retry") }}</Button>
+					<Button variant="subtle" :loading="loading" @click="refresh">{{ __("Retry") }}</Button>
 				</div>
 
 				<!-- Toolbar band: shift context as one quiet text line + refresh -->

@@ -46,3 +46,26 @@ class TestSetPaymentAccountsErrorPropagation(unittest.TestCase):
             _set_payment_accounts(payments, "Test Company")
         resolver.assert_not_called()
         self.assertEqual(payments[0].get("account"), "Preset - TC")
+
+
+class TestGetPaymentAccountFromModeOfPayment(unittest.TestCase):
+    def test_mapped_mode_of_payment_uses_its_account(self):
+        from pos_next.api.invoices import get_payment_account
+
+        row = frappe.db.get_value(
+            "Mode of Payment Account",
+            {"default_account": ["is", "set"]},
+            ["parent", "company", "default_account"],
+            as_dict=True,
+        )
+        result = get_payment_account(row.parent, row.company)
+        self.assertEqual(result["account"], row.default_account)
+
+    def test_unmapped_mode_of_payment_raises_instead_of_guessing(self):
+        """RED: an unmapped mode silently fell back to a Company cash/bank
+        account, so the payment posted to an account the mode never named."""
+        from pos_next.api.invoices import get_payment_account
+
+        company = frappe.db.get_value("Company", {"name": ["like", "_Test Company"]}, "name")
+        with self.assertRaises(frappe.ValidationError):
+            get_payment_account("_PNXT Unmapped Wallet", company)
