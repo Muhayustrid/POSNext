@@ -69,6 +69,21 @@ test('every drill-down link sits in its card title, same style', () => {
 	for (const a of links) assert.ok(a.startsWith('<a class="btn btn-xs btn-default hq-title-link"'), a);
 });
 
+test('compare filter reads as "vs …" so it cannot pass for a second range', () => {
+	for (const label of ['Yesterday', 'Last week', 'Last month']) {
+		assert.ok(
+			source.includes(`{ label: \`\${__("vs")} \${__("${label}")}\``),
+			`${label} option must carry the vs prefix`
+		);
+	}
+});
+
+test('delta badges name the same-clock-time cutoff when the server sends one', () => {
+	assert.match(source, /this\._cmp_cut = \(cmp && cmp\.cut_at\) \|\| "";/);
+	assert.match(source, /__\("as of"\)/);
+	assert.match(source, /same time \(\{0\}\)/);
+});
+
 test('hero styling keeps Total Sales visibly dominant over companions', () => {
 	const hero = css.match(/\.hq-hero-value\s*\{([^}]+)\}/)[1];
 	assert.match(hero, /font-size:\s*28px/);

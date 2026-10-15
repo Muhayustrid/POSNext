@@ -172,9 +172,9 @@ class HQSalesMonitor {
 			default: this.compare_with || "last_week",
 			options: [
 				{ label: __("No comparison"), value: "none" },
-				{ label: __("Yesterday"), value: "yesterday" },
-				{ label: __("Last week"), value: "last_week" },
-				{ label: __("Last month"), value: "last_month" },
+				{ label: `${__("vs")} ${__("Yesterday")}`, value: "yesterday" },
+				{ label: `${__("vs")} ${__("Last week")}`, value: "last_week" },
+				{ label: `${__("vs")} ${__("Last month")}`, value: "last_month" },
 			],
 			change: this._later(() => {
 				this.compare_with = this.compare_field.get_value() || "none";
@@ -684,7 +684,8 @@ class HQSalesMonitor {
 	_delta_badge(current, prior, fmt) {
 		if (prior === null || prior === undefined) return "";
 		const pct = HQ_UTILS.compareDeltaPct(current, prior);
-		const vs = `${__("vs")} <span class="hq-money">${fmt(prior)}</span> ${frappe.utils.escape_html(this._cmp_label || "")}`;
+		const cut = this._cmp_cut ? ` · ${__("as of")} ${frappe.utils.escape_html(this._cmp_cut)}` : "";
+		const vs = `${__("vs")} <span class="hq-money">${fmt(prior)}</span> ${frappe.utils.escape_html(this._cmp_label || "")}${cut}`;
 		if (pct === null || pct === undefined) {
 			return `<div class="hq-delta hq-delta--na"><span class="hq-delta-pct">—</span><span class="hq-delta-vs">${vs}</span></div>`;
 		}
@@ -717,6 +718,9 @@ class HQSalesMonitor {
 		this._cmp_label = cmp
 			? { yesterday: __("Yesterday"), last_week: __("Last week"), last_month: __("Last month") }[cmp.compare_with] || ""
 			: "";
+		// Same-clock-time cutoff from the server ("HH:MM"): present only when
+		// the selected range includes today, so the badge then reads like-for-like.
+		this._cmp_cut = (cmp && cmp.cut_at) || "";
 
 		// Achievement (MTD aggregate) keeps its progress bar in the row. The
 		// numerator follows the configured monthly target basis (neutral key
@@ -928,7 +932,7 @@ class HQSalesMonitor {
 				<thead><tr>
 					${this._sort_th(__("Outlet (Company)"), "name", t, false)}
 					${this._sort_th(__("Net Sales"), "net", t, true)}
-					${this._sort_th(`${__("Δ Net Sales")} ${this._cell_tip(__("Net sales vs the comparison period, in the outlet's own currency"))}`, "delta", t, true)}
+					${this._sort_th(`${__("Δ Net Sales")} ${this._cell_tip(this._cmp_cut ? __("Net sales vs the comparison period up to the same time ({0}), in the outlet's own currency", [this._cmp_cut]) : __("Net sales vs the comparison period, in the outlet's own currency"))}`, "delta", t, true)}
 					${this._sort_th(__("TC"), "tc", t, true)}
 					${this._sort_th(__("Avg Ticket"), "avg", t, true)}
 					${this._sort_th(`${__("Share")} ${this._cell_tip(__("Share of net sales within the same currency"))}`, "share", t, true)}
