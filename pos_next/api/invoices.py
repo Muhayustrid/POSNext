@@ -1364,48 +1364,12 @@ def _resolve_target_doctype(payload_doctype):
 
 
 def get_payment_account(mode_of_payment, company):
+	"""Account for a mode of payment, from its Mode of Payment Account row.
+
+	No guessing from Company defaults: a payment must post to the account its
+	mode names (the one POS Profile validation already requires), else throw.
 	"""
-	Get account for mode of payment.
-	Tries multiple fallback methods to find a suitable account.
-	"""
-	# Try 1: Mode of Payment Account table
-	account = frappe.db.get_value(
-		"Mode of Payment Account",
-		{"parent": mode_of_payment, "company": company},
-		"default_account",
-	)
-	if account:
-		return {"account": account}
-
-	# POS Payment Method carries no account; Mode of Payment Account above is the only per-mode source.
-
-	# Try 2: Company default cash account (for cash payments)
-	if "cash" in mode_of_payment.lower():
-		account = frappe.get_value("Company", company, "default_cash_account")
-		if account:
-			return {"account": account}
-
-	# Try 3: Company default bank account
-	account = frappe.get_value("Company", company, "default_bank_account")
-	if account:
-		return {"account": account}
-
-	# Try 4: Any Cash/Bank account for the company
-	account = frappe.db.get_value(
-		"Account",
-		{"company": company, "account_type": ["in", ["Cash", "Bank"]], "is_group": 0},
-		"name",
-	)
-	if account:
-		return {"account": account}
-
-	# No account found - throw error
-	frappe.throw(
-		_(
-			"Please set default Cash or Bank account in Mode of Payment {0} or set default accounts in Company {1}"
-		).format(mode_of_payment, company),
-		title=_("Missing Account"),
-	)
+	return get_bank_cash_account(mode_of_payment, company)
 
 
 def _validate_receivable_account(account, company, pos_profile):
