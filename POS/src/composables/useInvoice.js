@@ -201,11 +201,22 @@ export function useInvoice() {
 	// Use roundCurrency for monetary totals to match ERPNext's currency precision (from System Settings)
 	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value));
 	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value));
+	// Header discount actually applicable: never more than what is left after
+	// item discounts. Stacking a header discount (offer or coupon) on rows
+	// already discounted to zero must not push the grand total below zero.
+	const appliedAdditionalDiscount = computed(() => {
+		const header = additionalDiscount.value || 0;
+		if (header <= 0) return 0;
+		const base = taxInclusive.value
+			? _cachedSubtotal.value - _cachedTotalDiscount.value
+			: _cachedSubtotal.value + _cachedTotalTax.value - _cachedTotalDiscount.value;
+		return roundCurrency(Math.max(0, Math.min(header, base)));
+	});
 	const totalDiscount = computed(() =>
-		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0))
+		roundCurrency(_cachedTotalDiscount.value + appliedAdditionalDiscount.value)
 	);
 	const grandTotal = computed(() => {
-		const discount = _cachedTotalDiscount.value + (additionalDiscount.value || 0);
+		const discount = _cachedTotalDiscount.value + appliedAdditionalDiscount.value;
 
 		if (taxInclusive.value) {
 			// Tax inclusive: Subtotal already includes tax, so don't add it again
@@ -1041,7 +1052,7 @@ export function useInvoice() {
 			buyer_name: buyerName.value.trim(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
-			discount_amount: additionalDiscount.value || 0,
+			discount_amount: appliedAdditionalDiscount.value,
 			coupon_code: couponCode.value,
 			// ERPNext throws "Please select Apply Discount On" whenever
 			// discount_amount is set without apply_discount_on, so the payload
@@ -1140,7 +1151,7 @@ export function useInvoice() {
 					buyer_name: buyerName.value.trim(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
-					discount_amount: additionalDiscount.value || 0,
+					discount_amount: appliedAdditionalDiscount.value,
 					coupon_code: couponCode.value,
 					// Same as saveDraft: ERPNext throws without apply_discount_on
 					// whenever discount_amount is set.
@@ -1471,6 +1482,7 @@ export function useInvoice() {
 		loadTaxRules,
 		setTaxInclusive,
 		recalculateItem,
+		computeBackendRate,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
 		resolveUomPricing,

@@ -79,6 +79,8 @@ vi.mock("frappe-ui", async () => {
 	}
 })
 
+import { useDiscountRestrictionStore } from "@/stores/discountRestriction"
+
 import PaymentDialog from "./PaymentDialog.vue"
 
 function mountDialog(props = {}) {
@@ -145,5 +147,31 @@ describe("zero grand total (100% discount)", () => {
 		await flushPromises()
 
 		expect(wrapper.vm.canComplete).toBe(false)
+	})
+})
+
+describe("header discount from offer locks the additional discount", () => {
+	it("locks (with the offer reason) even when a code is already entered", async () => {
+		const wrapper = mountDialog({ headerDiscountFromOffer: true })
+		await flushPromises()
+
+		// Unlock the HQ-code half of the lock; the offer lock must still hold.
+		useDiscountRestrictionStore().setCode("HQCODE")
+		await flushPromises()
+
+		expect(wrapper.vm.additionalDiscountCodeLocked).toBe(false)
+		expect(wrapper.vm.additionalDiscountLocked).toBe(true)
+		expect(wrapper.vm.additionalDiscountLockedReason).toBe("Locked (offer applied)")
+	})
+
+	it("stays unlocked when no offer drives the header and a code is entered", async () => {
+		const wrapper = mountDialog({ headerDiscountFromOffer: false })
+		await flushPromises()
+
+		useDiscountRestrictionStore().setCode("HQCODE")
+		await flushPromises()
+
+		expect(wrapper.vm.additionalDiscountLocked).toBe(false)
+		expect(wrapper.vm.additionalDiscountLockedReason).toBe("")
 	})
 })

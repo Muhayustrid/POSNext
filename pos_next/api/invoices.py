@@ -4715,6 +4715,12 @@ def apply_offers(invoice_data, selected_offers=None):
 
 			conversion_factor = flt(item.get("conversion_factor") or 1) or 1
 			price_list_rate = flt(item.get("price_list_rate") or item.get("rate") or 0)
+			# A row already discounted to rate 0 (100% manual discount) is worth
+			# nothing in the cart: falling back to price_list_rate here would make
+			# transaction-level offers discount money the customer no longer pays
+			# (grand total below zero). Only a missing rate falls back.
+			raw_rate = item.get("rate")
+			rate = price_list_rate if raw_rate in (None, "") else flt(raw_rate)
 
 			pricing_items.append(
 				frappe._dict(
@@ -4734,8 +4740,8 @@ def apply_offers(invoice_data, selected_offers=None):
 						"stock_uom": item.get("stock_uom") or (cached.stock_uom if cached else None),
 						"price_list_rate": price_list_rate,
 						"base_price_list_rate": price_list_rate,
-						"rate": flt(item.get("rate") or price_list_rate),
-						"base_rate": flt(item.get("rate") or price_list_rate),
+						"rate": rate,
+						"base_rate": rate,
 						"discount_percentage": 0,
 						"discount_amount": 0,
 						"warehouse": item.get("warehouse") or profile.warehouse,

@@ -104,6 +104,9 @@ _PCT_TOLERANCE = 0.5
 # Money slack where values must match near-exactly (ERPNext stamps the doc with
 # the rule's own figure and the honest apply_offers flow relays it unchanged).
 _EXACT_TOLERANCE = 0.01
+# Money slack for a percentage header offer relayed as an amount: the amount
+# is the percentage of the basis rounded to currency precision.
+_HEADER_AMOUNT_TOLERANCE = 1.0
 
 
 # ==========================================================================
@@ -277,17 +280,22 @@ def _expected_rule_pct(rule, item):
 	return pct
 
 
-def _item_offer_matches(item, verified_rules, scope_map):
-	"""True when the item's discount is fully explained by its claimed rules:
-	at least one claimed, verified, applicable rule whose configured discount
-	reconciles with the row's actual discount (stacked rules may sum)."""
+def _item_applicable_rules(item, verified_rules, scope_map):
+	"""The row's claimed rules that are verified and apply to it."""
 	claimed = set(parse_applied_offer_rules(item.get("pos_offer_item_rules")))
 	claimed.update(_engine_rule_claims(item))
-	applicable = [
+	return [
 		verified_rules[name]
 		for name in claimed
 		if name in verified_rules and _rule_applies_to_item(verified_rules[name], item, scope_map)
 	]
+
+
+def _item_offer_matches(item, verified_rules, scope_map):
+	"""True when the item's discount is fully explained by its claimed rules:
+	at least one claimed, verified, applicable rule whose configured discount
+	reconciles with the row's actual discount (stacked rules may sum)."""
+	applicable = _item_applicable_rules(item, verified_rules, scope_map)
 	if not applicable:
 		return False
 
@@ -324,11 +332,46 @@ def _header_rule_exempts(rule, doc):
 
 	pct = flt(doc.get("additional_discount_percentage") or 0)
 	if rule.get("rate_or_discount") == "Discount Percentage":
-		return pct > 0 and abs(pct - flt(rule.get("discount_percentage") or 0)) <= _EXACT_TOLERANCE
+		rule_pct = flt(rule.get("discount_percentage") or 0)
+		if pct > 0:
+			return abs(pct - rule_pct) <= _EXACT_TOLERANCE
+		# The POS relays the engine's header stamp as an AMOUNT only
+		# (discount_amount, percentage left at 0) — the honest shape of every
+		# percentage Transaction offer. Reconcile that amount against the
+		# rule's percentage of the pre-discount basis.
+		return _header_amount_matches_pct(doc, rule_pct)
 	if rule.get("rate_or_discount") == "Discount Amount":
 		amount = flt(doc.get("discount_amount") or 0)
 		return amount > 0 and abs(amount - flt(rule.get("discount_amount") or 0)) <= _EXACT_TOLERANCE
 	return False
+
+
+def _header_discount_bases(doc, amount):
+	"""Candidate pre-discount bases the header discount was computed on.
+
+	``doc.total`` (items after item discounts, before the header discount) is
+	the Net Total basis and the only one known before ERPNext computes the
+	totals (update_invoice bootstraps it from the rows). Once totals exist,
+	the grand/net total plus the discount itself rebuild the Grand Total /
+	Net Total basis (exclusive taxes included)."""
+	bases = {flt(doc.get("total") or 0)}
+	for field in ("grand_total", "net_total"):
+		if doc.get(field) is not None:
+			bases.add(flt(doc.get(field)) + amount)
+	return [base for base in bases if base > 0]
+
+
+def _header_amount_matches_pct(doc, rule_pct):
+	"""True when the header discount_amount equals ``rule_pct`` of a
+	pre-discount basis, within one currency unit of rounding (ERPNext rounds
+	the percentage-to-amount conversion to currency precision)."""
+	amount = flt(doc.get("discount_amount") or 0)
+	if amount <= 0 or rule_pct <= 0:
+		return False
+	return any(
+		abs(amount - base * rule_pct / 100.0) <= _HEADER_AMOUNT_TOLERANCE
+		for base in _header_discount_bases(doc, amount)
+	)
 
 
 def verify_transaction_rule_names(rule_names, doc):
@@ -497,6 +540,41 @@ def invoice_has_manual_discount(doc):
 	)
 
 
+def reject_stacked_offer_discounts(doc):
+	"""An offer excludes any other discount: a row with a verified, applicable
+	offer claim may carry only what that offer explains, and a verified
+	Price-type Transaction claim fixes the header discount to what it explains
+	(or the stamped coupon's). Unlike the manual lane, no HQ code can authorize
+	the excess. Rows/headers without such a claim are left to the manual gate."""
+	verified_rules, invoice_claims = _verified_applied_rules(doc)
+	if not verified_rules:
+		return
+	scope_map = _item_scope_map(verified_rules)
+	for item in doc.get("items") or []:
+		if item.get("is_free_item") or not _item_has_discount(item):
+			continue
+		if _item_applicable_rules(item, verified_rules, scope_map) and not _item_offer_matches(
+			item, verified_rules, scope_map
+		):
+			frappe.throw(
+				_("Item {0} already has an offer discount; another discount cannot be added.").format(
+					item.get("item_code")
+				)
+			)
+
+	if flt(doc.get("discount_amount") or 0) <= 0 and flt(doc.get("additional_discount_percentage") or 0) <= 0:
+		return
+	txn_rules = [
+		verified_rules[name]
+		for name in invoice_claims
+		if name in verified_rules and verified_rules[name].get("price_or_product_discount") == "Price"
+	]
+	if txn_rules and not any(_header_rule_exempts(rule, doc) for rule in txn_rules) and not (
+		stamped_coupon_explains_header(doc)
+	):
+		frappe.throw(_("The invoice already has an offer discount; another discount cannot be added."))
+
+
 # ==========================================================================
 # Code validation
 # ==========================================================================
@@ -644,6 +722,7 @@ def validate_invoice_discounts(doc, method=None):
 		if refund_code_required(gate_company):
 			validate_code(doc.get("refund_confirmation_code"), gate_company, REFUND_CODE_DOCTYPE)
 		return
+	reject_stacked_offer_discounts(doc)
 	if not invoice_has_manual_discount(doc):
 		return
 	gate_company = _gate_company(doc)

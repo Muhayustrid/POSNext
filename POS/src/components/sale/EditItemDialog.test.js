@@ -1,0 +1,116 @@
+// @vitest-environment jsdom
+//
+// Per-line rule: a line that carries an offer (pricing_rules) cannot also take
+// a manual discount. The discount controls lock with a reason, and a save must
+// never turn the offer's discount into a manual one on the row.
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { flushPromises, mount } from "@vue/test-utils"
+import { createPinia, setActivePinia } from "pinia"
+import { defineComponent, reactive } from "vue"
+
+vi.mock("@/composables/useToast", () => ({
+	useToast: () => ({
+		showSuccess: vi.fn(),
+		showWarning: vi.fn(),
+		showInfo: vi.fn(),
+		showError: vi.fn(),
+	}),
+}))
+
+vi.mock("@/utils/apiWrapper", () => ({
+	call: vi.fn(async () => ({})),
+}))
+
+vi.mock("frappe-ui", async () => {
+	const { defineComponent, reactive } = await import("vue")
+	const Button = defineComponent({
+		name: "Button",
+		emits: ["click"],
+		template: `<button v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
+	})
+	const stub = defineComponent({ name: "FrappeUIStub", render: () => null })
+	return {
+		Button,
+		FeatherIcon: stub,
+		Input: stub,
+		TextInput: stub,
+		call: vi.fn(async () => ({})),
+		createResource: () =>
+			reactive({
+				loading: false,
+				data: null,
+				error: null,
+				reload: vi.fn(),
+				submit: vi.fn(async () => ({})),
+				reset: vi.fn(),
+				update: vi.fn(),
+			}),
+	}
+})
+
+import EditItemDialog from "./EditItemDialog.vue"
+
+function mountDialog(item) {
+	const pinia = createPinia()
+	setActivePinia(pinia)
+	return mount(EditItemDialog, {
+		props: {
+			modelValue: true,
+			item,
+			warehouses: [],
+			currency: "IDR",
+		},
+		global: {
+			plugins: [pinia],
+			config: { globalProperties: { __: globalThis.__ } },
+		},
+	})
+}
+
+const OFFER_ROW = {
+	item_code: "A",
+	item_name: "A",
+	quantity: 1,
+	uom: "Nos",
+	stock_uom: "Nos",
+	rate: 100,
+	price_list_rate: 100,
+	discount_percentage: 10,
+	discount_amount: 10,
+	pricing_rules: ["PR-1"],
+	is_free_item: 0,
+}
+
+beforeEach(() => {
+	vi.clearAllMocks()
+})
+
+describe("offer row cannot take a manual discount", () => {
+	it("locks the discount controls for an offer row", async () => {
+		const wrapper = mountDialog({ ...OFFER_ROW })
+		await flushPromises()
+
+		expect(wrapper.vm.discountLockedByOffer).toBe(true)
+	})
+
+	it("does not lock a free row that merely carries pricing_rules", async () => {
+		const wrapper = mountDialog({ ...OFFER_ROW, is_free_item: 1 })
+		await flushPromises()
+
+		expect(wrapper.vm.discountLockedByOffer).toBe(false)
+	})
+
+	it("does not send a manual discount when saving an offer row", async () => {
+		const wrapper = mountDialog({ ...OFFER_ROW })
+		await flushPromises()
+
+		await wrapper.vm.updateItem()
+		await flushPromises()
+
+		const emitted = wrapper.emitted("update-item")
+		expect(emitted).toHaveLength(1)
+		// The row's offer discount must not be re-sent as a manual discount.
+		expect(emitted[0][0].discount_percentage).toBe(0)
+		expect(emitted[0][0].discount_amount).toBe(0)
+	})
+})

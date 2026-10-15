@@ -402,7 +402,7 @@
 										cartStore.removeOffer(
 											offer,
 											shiftStore.currentProfile,
-											offersDialogRef.value
+											offersDialogRef
 										)
 								"
 								@update-uom="cartStore.changeItemUOM"
@@ -597,7 +597,7 @@
 						cartStore.removeOffer(
 							offer,
 							shiftStore.currentProfile,
-							offersDialogRef.value
+							offersDialogRef
 						)
 				"
 			/>

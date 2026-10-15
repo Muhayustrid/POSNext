@@ -702,7 +702,7 @@
 									<div
 										class="col-span-2 flex items-center border border-orange-300 rounded-lg overflow-hidden"
 										:class="additionalDiscountLocked ? 'bg-gray-50 cursor-not-allowed' : 'bg-white'"
-										:title="additionalDiscountLocked ? __('Enter the HQ confirmation code to apply a discount') : ''"
+										:title="additionalDiscountLockedReason"
 									>
 										<!-- Decrement Button -->
 										<button
@@ -803,7 +803,7 @@
 							     shown only when this dialog actually has editable
 							     discount controls (item-level discounts are gated in
 							     EditItemDialog, whose code the store already holds) -->
-							<div v-if="settingsStore.allowAdditionalDiscount && additionalDiscountLocked" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
+							<div v-if="settingsStore.allowAdditionalDiscount && additionalDiscountCodeLocked" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
 									<label class="block text-xs font-medium text-orange-700 mb-1 text-start">
 										{{ __("Confirmation Code (HQ)") }}
 									</label>
@@ -2290,9 +2290,24 @@ const restrictionCodeRequired = computed(() =>
 
 // Locked-fields UX: the additional-discount controls stay disabled until a
 // valid HQ code unlocks them (the completePayment gate stays as a backstop).
-const additionalDiscountLocked = computed(
+const additionalDiscountCodeLocked = computed(
 	() => restrictionStore.applicable && !restrictionStore.hasCode
 );
+
+// A server-applied transaction offer already discounts the cart total; the
+// cashier may not add another discount on top. This lock wins over the code
+// lock and never asks for an HQ code.
+const additionalDiscountLockedByOffer = computed(() => props.headerDiscountFromOffer);
+const additionalDiscountLocked = computed(
+	() => additionalDiscountLockedByOffer.value || additionalDiscountCodeLocked.value
+);
+
+const additionalDiscountLockedReason = computed(() => {
+	if (additionalDiscountLockedByOffer.value) return __("Locked (offer applied)");
+	if (additionalDiscountCodeLocked.value)
+		return __("Enter the HQ confirmation code to apply a discount");
+	return "";
+});
 
 const paymentMethodsResource = createResource({
 	url: "pos_next.api.pos_profile.get_payment_methods",

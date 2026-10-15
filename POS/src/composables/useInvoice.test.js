@@ -181,6 +181,40 @@ describe("checkout payload apply_discount_on (A1)", () => {
 	})
 })
 
+// A header discount (offer or coupon) stacked on rows already discounted to
+// zero must not push the grand total below zero — the cashier could not
+// check out a negative total.
+describe("header discount clamp", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		invoicePayloads.length = 0
+	})
+
+	it("caps the header discount at what is left after item discounts", async () => {
+		const invoice = useInvoice()
+		invoice.invoiceItems.value = [
+			{
+				item_code: "ITEM-1",
+				item_name: "Item 1",
+				quantity: 1,
+				rate: 0,
+				price_list_rate: 12000,
+				discount_percentage: 100,
+				discount_amount: 12000,
+				amount: 0,
+			},
+		]
+		invoice.rebuildIncrementalCache()
+		invoice.additionalDiscount.value = 12000
+
+		expect(invoice.grandTotal.value).toBe(0)
+		expect(invoice.totalDiscount.value).toBe(12000)
+
+		await invoice.saveDraft()
+		expect(invoicePayloads[0].discount_amount).toBe(0)
+	})
+})
+
 // Fase 2: an allocation-mode package keeps its allocated component rates on
 // the submitted rows, with the parent as a zero line. Tax-inclusive must not
 // touch the component backend rate (the gross basis matches the package

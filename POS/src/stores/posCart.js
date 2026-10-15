@@ -116,6 +116,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		getItemDetailsResource,
 		resolveUomPricing,
 		recalculateItem,
+		computeBackendRate,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
 	} = useInvoice();
@@ -146,6 +147,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const pendingItem = ref(null);
 	const pendingItemQty = ref(1);
 	const appliedOffers = ref([]);
+	// Offer codes the cashier switched off for the current cart. Auto-apply
+	// skips them until the cart is cleared or the cashier switches them on.
+	const dismissedOfferCodes = ref([]);
 	const appliedCoupon = ref(null);
 	// True while the header additional discount mirrors a server-applied
 	// transaction-scope offer discount (applyHeaderDiscountFromServer) and has
@@ -309,6 +313,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer.value = null;
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
+		dismissedOfferCodes.value = [];
 		appliedCoupon.value = null;
 		headerDiscountFromOffer.value = false;
 		currentDraftId.value = null;
@@ -412,6 +417,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Discount & Offer Management
 	function applyDiscountToCart(discount) {
+		// An offer already discounts the cart total (a server-applied
+		// transaction offer); a coupon would replace or stack on it — refuse it.
+		if (headerDiscountFromOffer.value) {
+			showWarning(
+				__("A coupon can't be combined with an offer that discounts the cart total")
+			);
+			return;
+		}
 		applyDiscount(discount);
 		// A coupon discount replaces whatever the header carried — the
 		// offer-sourced attribution no longer describes this value.
@@ -430,7 +443,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	/**
 	 * Silently clear the header discount and coupon, leaving items, customer
-	 * and offers untouched. Use when the cart is being REPLACED wholesale
+	 * and applied offers untouched. Use when the cart is being REPLACED wholesale
 	 * (draft load, profile switch): the previous cart's discount must not ride
 	 * into the replacement's submission. Routes through useInvoice.removeDiscount
 	 * so the submission-level couponCode is cleared too, not just the UI state.
@@ -439,6 +452,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeDiscount();
 		appliedCoupon.value = null;
 		headerDiscountFromOffer.value = false;
+		// Dismissals belong to the replaced cart; the cashier's off-switches do
+		// not carry into the replacement's offers.
+		dismissedOfferCodes.value = [];
 	}
 
 	function buildOfferEvaluationPayload(currentProfile) {
@@ -454,24 +470,36 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: appliedCoupon.value?.name || "",
-			items: rawItems.map((item) => ({
-				item_code: item.item_code,
-				item_name: item.item_name,
-				qty: item.quantity,
-				rate: item.rate,
-				uom: item.uom,
-				warehouse: item.warehouse,
-				conversion_factor: item.conversion_factor || 1,
-				price_list_rate: item.price_list_rate || item.rate,
-				discount_percentage: item.discount_percentage || 0,
-				discount_amount: item.discount_amount || 0,
-				// Package linkage: stage-1 rule says offers never apply to
-				// package lines. The server needs the marker to exclude them
-				// explicitly (and list them back in package_rows_excluded).
-				pos_package: item.package_name || null,
-				pos_package_instance: item.package_instance || null,
-				pos_package_role: item.package_role || null,
-			})),
+			items: rawItems.map((item) => {
+				// A row the cashier discounted manually (no offer pricing_rules)
+				// must report its EFFECTIVE rate: the server builds a
+				// transaction-scope offer's basis from qty*rate, so sending the
+				// list rate would discount money the customer no longer pays.
+				// Offer rows keep the list rate — the server recomputes their
+				// discount from it each call. Free rows stay at 0.
+				const offerDiscounted = hasPricingRules(item.pricing_rules);
+				const manuallyDiscounted = !item.is_free_item && !offerDiscounted;
+				const hasManualDiscount = item.discount_percentage || item.discount_amount;
+				return {
+					item_code: item.item_code,
+					item_name: item.item_name,
+					qty: item.quantity,
+					rate:
+						manuallyDiscounted && hasManualDiscount ? computeBackendRate(item) : item.rate,
+					uom: item.uom,
+					warehouse: item.warehouse,
+					conversion_factor: item.conversion_factor || 1,
+					price_list_rate: item.price_list_rate || item.rate,
+					discount_percentage: item.discount_percentage || 0,
+					discount_amount: item.discount_amount || 0,
+					// Package linkage: stage-1 rule says offers never apply to
+					// package lines. The server needs the marker to exclude them
+					// explicitly (and list them back in package_rows_excluded).
+					pos_package: item.package_name || null,
+					pos_package_instance: item.package_instance || null,
+					pos_package_role: item.package_role || null,
+				};
+			}),
 		};
 	}
 
@@ -506,12 +534,30 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
 
+			// A row the cashier discounted manually never takes an item-level
+			// offer on top: keep the manual discount, ignore the server's offer
+			// for this row.
+			if (
+				!hasPricingRules(item.pricing_rules) &&
+				(Number(item.discount_percentage) > 0 || Number(item.discount_amount) > 0)
+			) {
+				recalculateItem(item);
+				return;
+			}
+
 			// Only update if server applied a pricing rule or discount
 			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
 				item.discount_percentage = discountPct;
 				item.discount_amount = discountAmt;
 				item.pricing_rules = serverItem.pricing_rules;
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
+			} else if (hasPricingRules(item.pricing_rules)) {
+				// This row carried an offer discount that the server no longer
+				// returns (the offer stopped applying). Drop it instead of
+				// preserving it as if it were a manual discount.
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+				item.pricing_rules = [];
 			}
 			// Otherwise preserve existing manual discount
 
@@ -656,6 +702,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		rebuildIncrementalCache();
 	}
 
+	/** Drop the item-level discounts offers put on rows (rows carrying
+	 * pricing_rules); manual discounts on other rows stay. */
+	function clearOfferItemDiscounts() {
+		invoiceItems.value.forEach((item) => {
+			if (hasPricingRules(item.pricing_rules)) {
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+				item.pricing_rules = [];
+				recalculateItem(item);
+			}
+		});
+		rebuildIncrementalCache();
+	}
+
 	function getAppliedOfferCodes() {
 		return appliedOffers.value.map((entry) => entry.code);
 	}
@@ -681,6 +741,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const offerCode = offer.name;
 		const existingCodes = getAppliedOfferCodes();
 		const alreadyApplied = existingCodes.includes(offerCode);
+		dismissedOfferCodes.value = dismissedOfferCodes.value.filter((code) => code !== offerCode);
 
 		if (alreadyApplied) {
 			return await removeOffer(offerCode, currentProfile, offersDialogRef);
@@ -821,13 +882,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Cancel any pending auto-processing
 		debouncedProcessOffers.cancel();
 
+		// Remember the cashier's choice: auto-apply must not put it back on the
+		// next cart change.
+		const removedCodes = offerCode ? [offerCode] : getAppliedOfferCodes();
+		dismissedOfferCodes.value = [...new Set([...dismissedOfferCodes.value, ...removedCodes])];
+
 		if (!offerCode) {
 			// Remove all offers - immediate operation, no queue needed
 			offerQueue.cancel();
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			clearOfferItemDiscounts();
 			removeDiscount();
+			headerDiscountFromOffer.value = false;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -843,7 +911,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			clearOfferItemDiscounts();
 			removeDiscount();
+			headerDiscountFromOffer.value = false;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1060,8 +1130,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			// Find new offers to apply (both price and product discounts)
+			if (!settingsStore.autoApplyOffers) {
+				return;
+			}
 			const appliedOfferCodes = new Set(appliedOffers.value.map((o) => o.code));
-			const newOffers = eligibleOffers.filter((offer) => !appliedOfferCodes.has(offer.name));
+			const dismissed = new Set(dismissedOfferCodes.value);
+			const newOffers = eligibleOffers.filter(
+				(offer) => !appliedOfferCodes.has(offer.name) && !dismissed.has(offer.name)
+			);
 
 			if (newOffers.length === 0) {
 				return;
@@ -1174,8 +1250,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let applied = false;
 
 		for (const item of eligibleItems) {
-			// Only apply if no existing pricing rule
+			// Only apply if no existing pricing rule and no manual discount
+			// (a manually discounted row never takes an offer on top).
 			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
+			if (Number(item.discount_percentage) > 0 || Number(item.discount_amount) > 0) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
 				// Always a percentage: a binding cap folds into an effective
@@ -1746,12 +1824,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 			}
 
-			// 2. Identify new eligible offers to apply (client-side check)
-			const allEligibleOffers = offersStore.allEligibleOffers;
+			// 2. Identify new eligible offers to apply (client-side check).
+			// Auto-apply is a POS Settings switch; offers the cashier switched
+			// off for this cart stay off.
 			const currentAppliedCodes = new Set(appliedOffers.value.map((o) => o.code));
-			const newOffers = allEligibleOffers.filter(
-				(offer) => !currentAppliedCodes.has(offer.name)
-			);
+			const dismissed = new Set(dismissedOfferCodes.value);
+			const newOffers = settingsStore.autoApplyOffers
+				? offersStore.allEligibleOffers.filter(
+						(offer) => !currentAppliedCodes.has(offer.name) && !dismissed.has(offer.name)
+					)
+				: [];
 
 			// 3. Determine if we need to call the server
 			// We MUST hit the server if:
@@ -1770,17 +1852,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
 				appliedOffers.value = [];
 				processFreeItems([]);
-				invoiceItems.value.forEach((item) => {
-					if (item.pricing_rules && item.pricing_rules.length > 0) {
-						item.discount_percentage = 0;
-						item.discount_amount = 0;
-						recalculateItem(item);
-					}
-				});
+				// Drop offer discounts AND their pricing_rules so a later
+				// applyDiscountsFromServer won't mistake the stale row for one
+				// that never had offer pricing.
+				clearOfferItemDiscounts();
 				// Also clear any transaction-level header discount the server
 				// previously surfaced — if no offers remain, no header discount applies.
 				applyHeaderDiscountFromServer(null);
-				rebuildIncrementalCache();
 
 				const names = invalidOffers.map((o) => o.name).join(", ");
 				showWarning(__("Offer removed: {0}. Cart no longer meets requirements.", [names]));
@@ -2005,6 +2083,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			() => customer.value?.name || customer.value,
 		],
 		(_newVals, oldVals) => {
+			// A dismissed offer stays off only for the cart that dismissed it:
+			// once the cart empties, the next cart starts fresh.
+			if (invoiceItems.value.length === 0) {
+				dismissedOfferCodes.value = [];
+			}
+
 			// Skip if this is initial render with empty cart
 			if (!oldVals && invoiceItems.value.length === 0) {
 				return;
@@ -2048,6 +2132,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		pendingItem,
 		pendingItemQty,
 		appliedOffers,
+		dismissedOfferCodes,
 		appliedCoupon,
 		selectionMode,
 		currentDraftId,
