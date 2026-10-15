@@ -480,6 +480,45 @@ class TestHQMonitoring(IntegrationTestCase):
 			self._products(user=self.user_no_role)
 		frappe.set_user(ADMIN)
 
+	# ------------------------------------------------------------------
+	# POS Payment Method Report (the full mode detail behind the donut)
+	# ------------------------------------------------------------------
+
+	def _payments_report(self, user=ADMIN, **filters):
+		from pos_next.pos_next.report.pos_payment_method_report.pos_payment_method_report import execute
+
+		frappe.set_user(user)
+		today = frappe.utils.nowdate()
+		return execute({"company": self.company_a, "from_date": today, "to_date": today, **filters})[1]
+
+	def test_payment_report_reconciles_with_payments_section(self):
+		rows = self._payments_report()
+		# one cash mode, one currency in scope: a single row
+		self.assertEqual(len(rows), 1)
+		row = rows[0]
+		self.assertEqual(row.mode_of_payment, self.cash_a)
+		self.assertEqual(row.currency, self.currency_a)
+		# 2000 + 500 - 1000 (return) + 3000: the return is netted into the total
+		self.assertEqual(row.amount, 4500.0)
+		self.assertEqual(row.share_pct, 100.0)
+		self.assertEqual(row.transactions, 4)
+		# same scope/range as the donut card: the totals reconcile
+		section = self._payload(from_date=frappe.utils.nowdate(), to_date=frappe.utils.nowdate())["payments"]
+		self.assertEqual(row.amount, sum(r["amount"] for r in section["rows"]))
+		frappe.set_user(ADMIN)
+
+	def test_payment_report_mode_filter_and_access(self):
+		rows = self._payments_report(mode_of_payment=self.cash_a)
+		self.assertTrue(rows)
+		self.assertTrue(all(r.mode_of_payment == self.cash_a for r in rows))
+		# a mode nobody paid with yields nothing
+		self.assertEqual(self._payments_report(mode_of_payment="_Test HQ No Such Mode"), [])
+		with self.assertRaises(frappe.PermissionError):
+			self._payments_report(user=self.user_co_a, company=self.company_b)
+		with self.assertRaises(frappe.PermissionError):
+			self._payments_report(user=self.user_no_role)
+		frappe.set_user(ADMIN)
+
 	def test_allocation_package_ranks_with_instance_money(self):
 		"""Allocation mode: the package line is 0 and the components carry the
 		money. The package must still rank (qty 1, the instance's money, under

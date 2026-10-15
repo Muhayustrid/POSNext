@@ -1142,8 +1142,10 @@ class HQSalesMonitor {
 		const body = entries.length
 			? `${this._donut_body(kind, entries, ccy)}${foot}`
 			: this._empty_line(__("No positive sales in this period"));
+		const report = payments ? "POS Payment Method Report" : "POS Outlet Performance Report";
 		return `<div class="hq-card">
-			<div class="hq-card-title">${title}</div>
+			<div class="hq-card-title">${title}
+				<a class="btn btn-xs btn-default hq-title-link" href="${this._report_href(report)}">${__("View details")} →</a></div>
 			${body}
 		</div>`;
 	}

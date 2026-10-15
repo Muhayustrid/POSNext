@@ -60,11 +60,12 @@ test('page stays a summary: detail lists live in reports', () => {
 	assert.match(source, /_report_href\("POS Product Sales Report"\)/);
 	assert.match(source, /_report_href\("POS Return Report"\)/);
 	assert.match(source, /_report_href\("POS Outlet Performance Report"\)/);
+	assert.match(source, /"POS Payment Method Report"/);
 });
 
 test('every drill-down link sits in its card title, same style', () => {
 	const links = source.match(/<a class="[^"]*"[^>]*>\$\{__\("[^"]+"\)\} →<\/a>/g) || [];
-	assert.equal(links.length, 5);
+	assert.equal(links.length, 6);
 	for (const a of links) assert.ok(a.startsWith('<a class="btn btn-xs btn-default hq-title-link"'), a);
 });
 
