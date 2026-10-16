@@ -2,6 +2,8 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { call } from "@/utils/apiWrapper";
 import { isOffline } from "@/utils/offline";
+import { offlineState } from "@/utils/offline/offlineState";
+import { toISODate } from "@/utils/salesRecap";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import {
 	getOneTimeRedemptions,
@@ -20,6 +22,11 @@ const defaultSnapshot = () => ({
 	itemQuantities: {}, // { item_code: qty }
 	itemGroupQuantities: {}, // { item_group: qty }
 	brandQuantities: {}, // { brand: qty }
+	// Context the offline eligibility gate checks against (null = unknown).
+	customer: null,
+	warehouse: null,
+	priceList: null,
+	uomsByItem: {}, // { item_code: uom }
 });
 
 function getDiscountSortValue(offer) {
@@ -161,6 +168,15 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
+			// Context conditions an offer may be scoped to; null = not known,
+			// which makes a matching scoped offer ineligible offline.
+			customer: snapshot.customer || null,
+			warehouse: snapshot.warehouse || null,
+			priceList: snapshot.priceList || null,
+			uomsByItem:
+				snapshot.uomsByItem && typeof snapshot.uomsByItem === "object"
+					? snapshot.uomsByItem
+					: {},
 		};
 	}
 
@@ -227,11 +243,75 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	}
 
 	/**
+	 * Offline-only eligibility gate. The server enforces validity, customer,
+	 * warehouse, price-list and UOM scoping; offline we can only check the
+	 * subset the cart snapshot exposes. A condition we cannot evaluate offline
+	 * (unknown value, or a Python `condition`) makes the offer ineligible:
+	 * under-discounting beats a sale the server later rejects or flags.
+	 * @param {Object} offer - The offer to check
+	 * @returns {Object} {eligible: boolean, reason: string|null}
+	 */
+	function checkOfflineEligibility(offer) {
+		const snapshot = cartSnapshot.value;
+		const today = toISODate(new Date());
+
+		if (offer?.valid_from && String(offer.valid_from) > today) {
+			return { eligible: false, reason: __("Offer is not valid yet") };
+		}
+		if (offer?.valid_upto && String(offer.valid_upto) < today) {
+			return { eligible: false, reason: __("Offer has expired") };
+		}
+
+		// A Python `condition` runs server-side only.
+		if (offer?.has_condition) {
+			return { eligible: false, reason: __("cannot be checked offline") };
+		}
+
+		const applicableFor = offer?.applicable_for;
+		if (applicableFor) {
+			// Only a Customer condition maps to data the cart holds; the rest
+			// (Customer Group, Territory, Sales Partner, Campaign) do not.
+			if (applicableFor !== "Customer") {
+				return { eligible: false, reason: __("cannot be checked offline") };
+			}
+			if (!snapshot.customer || offer.applicable_value !== snapshot.customer) {
+				return { eligible: false, reason: __("Offer applies to another customer") };
+			}
+		}
+
+		if (offer?.warehouse && offer.warehouse !== snapshot.warehouse) {
+			return { eligible: false, reason: __("Offer applies to another warehouse") };
+		}
+		if (offer?.for_price_list && offer.for_price_list !== snapshot.priceList) {
+			return { eligible: false, reason: __("Offer applies to another price list") };
+		}
+
+		const itemUoms = offer?.item_uoms || {};
+		const uomsByItem = snapshot.uomsByItem || {};
+		for (const [itemCode, uom] of Object.entries(itemUoms)) {
+			if (uomsByItem[itemCode] && uomsByItem[itemCode] !== uom) {
+				return { eligible: false, reason: __("Offer applies to another UOM") };
+			}
+		}
+
+		return { eligible: true, reason: null };
+	}
+
+	/**
 	 * Checks if an offer is eligible based on current cart state
 	 * @param {Object} offer - The offer to check
 	 * @returns {Object} {eligible: boolean, reason: string|null}
 	 */
 	function checkOfferEligibility(offer) {
+		// Offline the client is the engine; online the server decides, so the
+		// extra scoping gate only runs offline.
+		if (offlineState.isOffline) {
+			const offline = checkOfflineEligibility(offer);
+			if (!offline.eligible) {
+				return offline;
+			}
+		}
+
 		const subtotal = cartSnapshot.value.subtotal || 0;
 		const itemCount = cartSnapshot.value.itemCount || 0;
 		const cartItemCodes = cartSnapshot.value.itemCodes || [];

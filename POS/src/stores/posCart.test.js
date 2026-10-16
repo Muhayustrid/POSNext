@@ -11,13 +11,14 @@
  *  - BUG C: dismissedOfferCodes (offers the cashier switched off) leaked past the
  *    cart that produced them — surviving an incremental empty and a draft load.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import { flushPromises } from "@vue/test-utils";
 import { useToast } from "@/composables/useToast";
 import { usePOSOffersStore } from "./posOffers";
 import { offlineState } from "@/utils/offline/offlineState";
+import { shiftState } from "@/composables/useShift";
 
 const resources = vi.hoisted(() => ({ instances: [] }));
 
@@ -771,5 +772,233 @@ describe("coupon vs offer stacking locks", () => {
 		// The coupon's header discount is not overwritten by the offer's.
 		expect(store.headerDiscountFromOffer).toBe(false);
 		expect(store.additionalDiscount).toBe(300);
+	});
+});
+
+describe("offline offer eligibility and transaction header (Task 5)", () => {
+	afterEach(() => {
+		offlineState.setManualOffline(false, { silent: true });
+		shiftState.value = { ...shiftState.value, pos_profile: null };
+	});
+
+	// Offline cart with one row; `subtotal` is the row's list amount.
+	function setupOfflineCart({
+		subtotal = 50000,
+		itemCode = "A",
+		uom = "Nos",
+		profile = {},
+	} = {}) {
+		offlineState.setManualOffline(true, { silent: true });
+		const store = usePOSCartStore();
+		store.posProfile = { company: "C", currency: "IDR", ...profile };
+		store.invoiceItems.push({
+			item_code: itemCode,
+			item_name: itemCode,
+			quantity: 1,
+			uom,
+			rate: subtotal,
+			price_list_rate: subtotal,
+			amount: subtotal,
+			discount_percentage: 0,
+			discount_amount: 0,
+		});
+		store.rebuildIncrementalCache();
+		return store;
+	}
+
+	async function runOffline(store, offers) {
+		const offersStore = usePOSOffersStore();
+		offersStore.availableOffers = offers;
+		offersStore.hasFetched = true;
+		store.forceRefreshOffers();
+		await flushPromises();
+		return offersStore;
+	}
+
+	const txnOffer = (extra = {}) => ({
+		name: "PR-TXN",
+		title: "Txn 10%",
+		auto: 1,
+		offer: "Item Price",
+		apply_on: "Transaction",
+		discount_type: "Discount Percentage",
+		discount_percentage: 10,
+		...extra,
+	});
+
+	it("offline transaction offer becomes a header discount, never row discounts", async () => {
+		const store = setupOfflineCart();
+		await runOffline(store, [txnOffer()]);
+
+		expect(store.additionalDiscount).toBe(5000);
+		expect(store.invoiceItems[0].discount_percentage).toBe(0);
+		expect(store.invoiceItems[0].pricing_rules || []).toEqual([]);
+		expect(store.appliedOffers.map((o) => o.code)).toEqual(["PR-TXN"]);
+	});
+
+	it("offline transaction offer is skipped while a coupon owns the header", async () => {
+		const store = setupOfflineCart();
+		store.applyDiscountToCart(couponDiscount(1));
+		await runOffline(store, [txnOffer()]);
+
+		expect(store.additionalDiscount).toBe(100);
+		expect(store.appliedOffers).toEqual([]);
+	});
+
+	it("does not apply an expired offer offline", async () => {
+		const store = setupOfflineCart();
+		await runOffline(store, [
+			{
+				name: "PR-EXP",
+				auto: 1,
+				offer: "Item Price",
+				apply_on: "Item Code",
+				eligible_items: ["A"],
+				discount_type: "Discount Percentage",
+				discount_percentage: 10,
+				valid_upto: "2000-01-01",
+			},
+		]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.invoiceItems[0].discount_percentage).toBe(0);
+	});
+
+	it("does not apply a customer-group offer offline (cannot be checked)", async () => {
+		const store = setupOfflineCart();
+		const offersStore = await runOffline(store, [
+			txnOffer({ name: "PR-GRP", applicable_for: "Customer Group", applicable_value: "Retail" }),
+		]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+		const { eligible, reason } = offersStore.checkOfferEligibility(
+			offersStore.availableOffers[0]
+		);
+		expect(eligible).toBe(false);
+		expect(reason).toBe("cannot be checked offline");
+	});
+
+	it("does not apply an offer carrying a Python condition offline", async () => {
+		const store = setupOfflineCart();
+		await runOffline(store, [txnOffer({ name: "PR-COND", has_condition: true })]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("offline customer offer skips when the cart customer differs", async () => {
+		const store = setupOfflineCart();
+		store.customer = { name: "CUST-B" };
+		await runOffline(store, [
+			txnOffer({ applicable_for: "Customer", applicable_value: "CUST-A" }),
+		]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("offline customer offer applies when the cart customer matches", async () => {
+		const store = setupOfflineCart();
+		store.customer = { name: "CUST-A" };
+		await runOffline(store, [
+			txnOffer({ applicable_for: "Customer", applicable_value: "CUST-A" }),
+		]);
+
+		expect(store.appliedOffers.map((o) => o.code)).toEqual(["PR-TXN"]);
+		expect(store.additionalDiscount).toBe(5000);
+	});
+
+	it("does not apply a warehouse-scoped offer offline when the warehouse differs", async () => {
+		const store = setupOfflineCart({ profile: { warehouse: "WH-1" } });
+		await runOffline(store, [txnOffer({ warehouse: "WH-2" })]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("does not apply a price-list-scoped offer offline when the price list differs", async () => {
+		const store = setupOfflineCart({ profile: { selling_price_list: "PL-1" } });
+		await runOffline(store, [txnOffer({ for_price_list: "PL-2" })]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("does not apply an offer whose item UOM does not match the cart", async () => {
+		const store = setupOfflineCart({ uom: "Box" });
+		await runOffline(store, [
+			txnOffer({ apply_on: "Item Code", eligible_items: ["A"], item_uoms: { A: "Nos" } }),
+		]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.invoiceItems[0].discount_percentage).toBe(0);
+	});
+
+	it("clears the offline header discount when the offer stops being eligible", async () => {
+		const store = setupOfflineCart();
+		store.customer = { name: "CUST-A" };
+		await runOffline(store, [
+			txnOffer({ applicable_for: "Customer", applicable_value: "CUST-A" }),
+		]);
+		expect(store.additionalDiscount).toBe(5000);
+
+		// Another customer's cart: the offer no longer applies and its header
+		// discount must not survive on the cart.
+		store.customer = { name: "CUST-B" };
+		await store.reapplyOffer({ company: "C", currency: "IDR" });
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("clears the offline header discount when the cart empties", async () => {
+		const store = setupOfflineCart();
+		await runOffline(store, [txnOffer()]);
+		expect(store.additionalDiscount).toBe(5000);
+		expect(store.headerDiscountFromOffer).toBe(true);
+
+		// Cashier removes every line: the offer-owned header must not ride into
+		// the next cart (and must not keep the discount-code gate bypassed).
+		store.invoiceItems.splice(0, store.invoiceItems.length);
+		await store.reapplyOffer({ company: "C", currency: "IDR" });
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+		expect(store.headerDiscountFromOffer).toBe(false);
+	});
+
+	it("does not apply an offer whose valid_from is in the future", async () => {
+		const store = setupOfflineCart();
+		await runOffline(store, [
+			txnOffer({ name: "PR-FUTURE", valid_from: "2099-01-01" }),
+		]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("does not apply a scoped offer when the snapshot value is unknown", async () => {
+		// No warehouse on the profile -> snapshot.warehouse is null.
+		const store = setupOfflineCart();
+		await runOffline(store, [txnOffer({ warehouse: "WH-2" })]);
+
+		expect(store.appliedOffers).toEqual([]);
+		expect(store.additionalDiscount).toBe(0);
+	});
+
+	it("reads the profile warehouse from the shift store when posProfile is a name", async () => {
+		const store = setupOfflineCart();
+		// Production sets cartStore.posProfile to the profile NAME string.
+		store.posProfile = "Kasir 1";
+		shiftState.value = {
+			...shiftState.value,
+			pos_profile: { warehouse: "WH-9", selling_price_list: "PL-9" },
+		};
+
+		await runOffline(store, [txnOffer({ warehouse: "WH-9" })]);
+
+		expect(store.appliedOffers.map((o) => o.code)).toEqual(["PR-TXN"]);
+		expect(store.additionalDiscount).toBe(5000);
 	});
 });

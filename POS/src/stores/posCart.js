@@ -1,5 +1,5 @@
 import { useInvoice } from "@/composables/useInvoice";
-import { formatCurrency } from "@/utils/currency";
+import { formatCurrency, roundCurrency } from "@/utils/currency";
 import { couponMinAmountUnmet } from "@/utils/couponDiscount";
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -1103,6 +1103,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (invoiceItems.value.length === 0 && appliedOffers.value.length) {
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items when cart is empty
+			// An offer-owned header discount must not outlive the cart it was
+			// computed for; a coupon or manual header is left alone.
+			if (headerDiscountFromOffer.value) {
+				applyHeaderDiscountFromServer(null);
+			}
 			return true;
 		}
 
@@ -1159,6 +1164,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							recalculateItem(item);
 						}
 					});
+					// No offers remain, so no transaction-offer header discount
+					// may survive on the cart (mirrors the online path).
+					applyHeaderDiscountFromServer(null);
 					rebuildIncrementalCache();
 				} else {
 					// Reapply only valid offers
@@ -1208,6 +1216,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
+	 * Resolve a transaction-scope offer's header discount offline: a percentage
+	 * of the subtotal left after item discounts, or a flat amount, capped by
+	 * max_discount_amount. Mirrors the SAR amount the server surfaces.
+	 */
+	function computeOfflineHeaderDiscount(offer) {
+		const base = couponBases.value.net;
+		let amount;
+		if (offer.discount_type === "Discount Percentage") {
+			const percentage = Number.parseFloat(offer.discount_percentage) || 0;
+			amount = roundCurrency((base * percentage) / 100);
+		} else {
+			amount = Number.parseFloat(offer.discount_amount) || 0;
+		}
+		const cap = Number.parseFloat(offer.max_discount_amount) || 0;
+		if (cap > 0) {
+			amount = Math.min(amount, cap);
+		}
+		return amount;
+	}
+
+	/**
 	 * Apply offers when offline using cached offer data.
 	 * Calculates discounts client-side based on offer rules.
 	 *
@@ -1215,7 +1244,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * 1. Check eligibility using posOffers.checkOfferEligibility
 	 * 2. Apply discount percentage/amount directly to cart items
 	 * 3. Handle free items (product discounts) via dedicated is_free_item rows (same as online)
-	 * 4. Mark offers as applied (with source: "offline")
+	 * 4. Apply a transaction-scope price offer as a header discount, never a row discount
+	 * 5. Mark offers as applied (with source: "offline")
 	 *
 	 * Supports:
 	 * - Discount Percentage (e.g., 10% off)
@@ -1266,6 +1296,30 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const excludedPackageCodes = [];
 
 			for (const offer of newOffers) {
+				// A transaction-scope price rule is a header discount, never a
+				// row discount — the server's replay grants it the same way.
+				if (offer.apply_on === "Transaction" && offer.offer === "Item Price") {
+					// A coupon owns the header slot; the offer must not stack.
+					if (appliedCoupon.value) continue;
+					const discountAmount = computeOfflineHeaderDiscount(offer);
+					if (discountAmount <= 0) continue;
+					applyHeaderDiscountFromServer({ discountAmount });
+					appliedOffers.value.push({
+						name: offer.title || offer.name,
+						code: offer.name,
+						offer,
+						source: "offline",
+						applied: true,
+						rules: [offer.name],
+						min_qty: offer.min_qty,
+						max_qty: offer.max_qty,
+						min_amt: offer.min_amt,
+						max_amt: offer.max_amt,
+					});
+					newlyAppliedOffers.push(offer.title || offer.name);
+					continue;
+				}
+
 				// Determine offer type: "Item Price" (discount) or "Give Product" (free item)
 				const isProductDiscount = offer.offer === "Give Product";
 
@@ -1580,6 +1634,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 
+		// Context the offline offer gate scopes against. posProfile.value is the
+		// profile NAME in production, so the profile object (warehouse / price
+		// list) comes from the shift store; tests may pass the object directly.
+		const shiftProfile = usePOSShiftStore().currentProfile || {};
+		const profile =
+			posProfile.value && typeof posProfile.value === "object"
+				? posProfile.value
+				: shiftProfile;
+
+		// Cart UOM per item code, for offers scoped to a specific UOM.
+		const uomsByItem = {};
+		for (const item of items) {
+			if (item.item_code) {
+				uomsByItem[item.item_code] = item.uom || item.stock_uom;
+			}
+		}
+
 		return {
 			subtotal: subtotal.value,
 			itemCount: totalQty,
@@ -1590,6 +1661,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
+			customer: customer.value?.name || customer.value || null,
+			warehouse: profile.warehouse || null,
+			priceList: profile.selling_price_list || null,
+			uomsByItem,
 		};
 	}
 
