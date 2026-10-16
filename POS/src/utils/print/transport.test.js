@@ -41,6 +41,7 @@ let createTransport
 let log
 
 beforeEach(async () => {
+	localStorage.clear()
 	const mod = await import("./transport")
 	createTransport = mod.createTransport
 	log = { attempts: [] }
@@ -333,4 +334,52 @@ it("stops the chain for PostPrintError instances even without the flag", async (
 	})
 	await expect(t.printHTML("<html/>")).rejects.toThrow("status poll failed")
 	expect(browser.printHTML).not.toHaveBeenCalled()
+})
+
+it("caches the server print config in localStorage on success", async () => {
+	const { call } = await import("@/utils/apiWrapper")
+	const { initTransportFromServer } = await import("./transport")
+	call.mockResolvedValueOnce({ driver: "imin", paper: "58mm" })
+	await initTransportFromServer("POS Profile cache-write")
+	const raw = localStorage.getItem(
+		"pos_next_print_config:POS Profile cache-write",
+	)
+	expect(raw).toBeTruthy()
+	expect(JSON.parse(raw)).toMatchObject({ driver: "imin", paper: "58mm" })
+})
+
+it("falls back to the cached print config when the server call fails", async () => {
+	const { call } = await import("@/utils/apiWrapper")
+	const { initTransportFromServer, getTransport } = await import("./transport")
+	localStorage.setItem(
+		"pos_next_print_config:POS Profile cache-read",
+		JSON.stringify({ driver: "imin", paper: "80mm" }),
+	)
+	// Start from a different config so applying the cache is observable.
+	getTransport().setConfig({ driver: "browser", paper: "58mm" })
+	call.mockRejectedValueOnce(new Error("offline"))
+	await initTransportFromServer("POS Profile cache-read")
+	expect(getTransport().getConfig()).toMatchObject({
+		driver: "imin",
+		paper: "80mm",
+	})
+})
+
+it("rethrows when the server call fails and nothing is cached", async () => {
+	const { call } = await import("@/utils/apiWrapper")
+	const { initTransportFromServer } = await import("./transport")
+	call.mockRejectedValueOnce(new Error("offline"))
+	await expect(initTransportFromServer("POS Profile no-cache")).rejects.toThrow(
+		"offline",
+	)
+})
+
+it("treats a corrupted cache as nothing cached", async () => {
+	const { call } = await import("@/utils/apiWrapper")
+	const { initTransportFromServer } = await import("./transport")
+	localStorage.setItem("pos_next_print_config:POS Profile corrupt", "{not json")
+	call.mockRejectedValueOnce(new Error("offline"))
+	await expect(initTransportFromServer("POS Profile corrupt")).rejects.toThrow(
+		"offline",
+	)
 })

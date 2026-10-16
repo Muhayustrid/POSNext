@@ -194,6 +194,22 @@ export default defineConfig({
 						urlPattern: /\/api\/.*/i,
 						handler: "NetworkOnly",
 					},
+					// Direct print loads the vendored iMin SDK at print time; a
+					// reload while offline must still find it. The path is
+					// versioned (1.4.0), so CacheFirst cannot pin a stale copy.
+					{
+						urlPattern: /\/assets\/pos_next\/js\/lib\/imin\/.*\.js$/i,
+						handler: "CacheFirst",
+						options: {
+							cacheName: "imin-sdk-cache",
+							expiration: {
+								maxEntries: 5,
+							},
+							cacheableResponse: {
+								statuses: [0, 200],
+							},
+						},
+					},
 					{
 						urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
 						handler: "CacheFirst",

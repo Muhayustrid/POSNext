@@ -231,10 +231,13 @@ export async function printHTML(html, opts) {
 	return getTransport().printHTML(html, opts)
 }
 
-export async function initTransportFromServer(posProfile) {
-	const cfg = await call("pos_next.api.printing.get_print_config", {
-		pos_profile: posProfile,
-	})
+/** localStorage key holding the last server print config per POS Profile. */
+function printConfigKey(posProfile) {
+	return `pos_next_print_config:${posProfile}`
+}
+
+/** Apply a server-shaped config to the singleton (same mapping for both paths). */
+function applyConfig(cfg) {
 	getTransport().setConfig({
 		driver: cfg.driver,
 		paper: cfg.paper,
@@ -263,5 +266,37 @@ export async function initTransportFromServer(posProfile) {
 		eod_top_margin: cfg.eod_top_margin,
 		fallback_enabled: cfg.fallback_enabled,
 	})
+}
+
+/**
+ * Cache the print config per POS Profile so a reload while offline keeps the
+ * direct-print driver (iMin) instead of falling back to the browser dialog.
+ * localStorage can throw (private mode, quota) — never let that break printing.
+ */
+export async function initTransportFromServer(posProfile) {
+	let cfg
+	try {
+		cfg = await call("pos_next.api.printing.get_print_config", {
+			pos_profile: posProfile,
+		})
+	} catch (err) {
+		let cached = null
+		try {
+			const raw = localStorage.getItem(printConfigKey(posProfile))
+			cached = raw ? JSON.parse(raw) : null
+		} catch {
+			// Storage unavailable or corrupted JSON: treat as nothing cached.
+			cached = null
+		}
+		if (!cached) throw err
+		applyConfig(cached)
+		return cached
+	}
+	try {
+		localStorage.setItem(printConfigKey(posProfile), JSON.stringify(cfg))
+	} catch {
+		// localStorage write failed (private mode etc.) — printing still works.
+	}
+	applyConfig(cfg)
 	return cfg
 }
