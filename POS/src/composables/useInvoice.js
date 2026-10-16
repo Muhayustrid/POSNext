@@ -1076,6 +1076,19 @@ export function useInvoice() {
 		};
 	}
 
+	function buildDiscountFields() {
+		// Transaction-level discount fields shared by every invoice payload
+		// (online draft/submit and the offline queue) so the lanes cannot drift.
+		return {
+			discount_amount: appliedAdditionalDiscount.value,
+			coupon_code: couponCode.value,
+			// ERPNext throws "Please select Apply Discount On" whenever
+			// discount_amount is set without apply_discount_on, so the payload
+			// always carries the coupon's base (server default: Grand Total).
+			apply_discount_on: couponApplyOn.value || "Grand Total",
+		};
+	}
+
 	async function saveDraft(targetDoctype = "Sales Invoice", relayedOfferRules = null) {
 		/**
 		 * Save invoice as draft (Step 1)
@@ -1094,12 +1107,7 @@ export function useInvoice() {
 			buyer_name: buyerName.value.trim(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
-			discount_amount: appliedAdditionalDiscount.value,
-			coupon_code: couponCode.value,
-			// ERPNext throws "Please select Apply Discount On" whenever
-			// discount_amount is set without apply_discount_on, so the payload
-			// always carries the coupon's base (server default: Grand Total).
-			apply_discount_on: couponApplyOn.value || "Grand Total",
+			...buildDiscountFields(),
 			discount_confirmation_code: restrictionStore.code || "",
 			is_pos: 1,
 			update_stock: 1,
@@ -1193,11 +1201,7 @@ export function useInvoice() {
 					buyer_name: buyerName.value.trim(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
-					discount_amount: appliedAdditionalDiscount.value,
-					coupon_code: couponCode.value,
-					// Same as saveDraft: ERPNext throws without apply_discount_on
-					// whenever discount_amount is set.
-					apply_discount_on: couponApplyOn.value || "Grand Total",
+					...buildDiscountFields(),
 					discount_confirmation_code: restrictionStore.code || "",
 					is_pos: 1,
 					update_stock: 1, // Critical: ensures stock is updated
@@ -1530,6 +1534,7 @@ export function useInvoice() {
 		computeBackendRate,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
+		buildDiscountFields,
 		resolveUomPricing,
 
 		// Resources

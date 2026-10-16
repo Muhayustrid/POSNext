@@ -2406,6 +2406,9 @@ async function handlePaymentCompleted(paymentData) {
 				customer: customerValue || shiftStore.profileCustomer,
 				buyer_name: (cartStore.buyerName || "").trim(),
 				discount_confirmation_code: restrictionStore.code || "",
+				// Transaction-level discount fields, same source as the online
+				// payload: without them the server prices the replay at full price.
+				...cartStore.buildDiscountFields(),
 				items: preparedItems,
 				// Relay the applied offer rule names (incl. transaction-scope
 				// rules, which never ride item rows) so the offline replay

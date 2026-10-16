@@ -122,6 +122,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		computeBackendRate,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
+		buildDiscountFields,
 	} = useInvoice();
 
 	const offersStore = usePOSOffersStore();
@@ -2391,6 +2392,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		applyOffersResource,
 		buildOfferEvaluationPayload,
 		formatItemsForSubmission,
+		buildDiscountFields,
 
 		// Sales Order feature
 		targetDoctype,

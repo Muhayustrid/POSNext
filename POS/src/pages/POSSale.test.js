@@ -459,6 +459,26 @@ describe("offline checkout double-tap guard (COR-FE-01)", () => {
 	})
 })
 
+describe("offline checkout discount payload", () => {
+	it("carries the header/transaction discount fields into the queued invoice", async () => {
+		await mountPOS()
+
+		// A header discount (coupon or transaction offer) must ride the offline
+		// payload too: without it the server replay prices the invoice at full
+		// price (or throws "At least one mode of payment is required" at 100%).
+		cartStore.applyDiscountToCart({ ...COUPON })
+		await flushPromises()
+
+		await wrapper.find('[data-test="complete-payment"]').trigger("click")
+		await flushPromises()
+
+		const queued = offlineWorkerMock.saveOfflineInvoice.mock.calls[0][0]
+		expect(queued.discount_amount).toBe(10000)
+		expect(queued.coupon_code).toBe("DISKON10RB")
+		expect(queued.apply_discount_on).toBe("Grand Total")
+	})
+})
+
 describe("draft load discount isolation (COR-FE-02)", () => {
 	it("resets the live cart's coupon and header discount when loading a draft without them", async () => {
 		await mountPOS({ DraftInvoicesDialog: DraftInvoicesDialogStub })
