@@ -121,6 +121,23 @@ describe("offline receipt matches the 'POS Next Receipt' template", () => {
 		expect(html).toContain(marker)
 	})
 
+	it("glues the currency symbol to amounts like the server template", () => {
+		expect(jinjaHTML).toContain("{{ currency_symbol }}{{")
+		expect(html).toContain("Rp30.000")
+	})
+
+	it("keeps the server template's literal labels on a translated site", () => {
+		const original = globalThis.__
+		globalThis.__ = (text) => `xx-${text}`
+		try {
+			const translated = buildReceiptHTML(sampleDoc)
+			expect(translated).toContain('info-label">Cashier')
+			expect(translated).toContain("Thank you")
+		} finally {
+			globalThis.__ = original
+		}
+	})
+
 	it("drops the legacy labels the server template never had", () => {
 		expect(html).not.toContain("TAX INVOICE")
 		expect(html).not.toContain("BrainWise")

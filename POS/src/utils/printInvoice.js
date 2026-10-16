@@ -16,7 +16,7 @@ import {
 	receiptStylesFor,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
-import { formatCurrencyNumber } from "./currency"
+import { formatCurrencyNumber, getCurrencySymbol } from "./currency"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 export { receiptStylesFor }
 
@@ -33,8 +33,10 @@ const DEFAULT_PRINT_FORMAT = "POS Next Receipt"
 // unknown currency keeps the legacy integer display.
 let receiptCurrency = null
 
+// Symbol glued to the number, as the server template prints it ("Rp10.000").
 function formatCurrency(amount) {
-	return formatCurrencyNumber(Number.parseFloat(amount || 0), undefined, receiptCurrency)
+	const symbol = receiptCurrency ? getCurrencySymbol(receiptCurrency) : ""
+	return `${symbol}${formatCurrencyNumber(Number.parseFloat(amount || 0), undefined, receiptCurrency)}`
 }
 
 /**
@@ -171,6 +173,7 @@ export const RECEIPT_STYLES = receiptStylesFor(576)
  * where the two overlap (.footer, .total-row, .outstanding-row).
  */
 const RECEIPT_TEMPLATE_CSS = `
+	body { font-family: 'DejaVu Sans', 'Arial', sans-serif; font-weight: normal; padding: 10px; font-size: 11px; line-height: 1.4; }
 	.text-center { text-align: center; }
 	.bold { font-weight: bold; }
 	.divider { border-top: 2px dashed #333; margin: 6px 0; padding: 0; }
@@ -313,7 +316,7 @@ export function buildReceiptHTML(invoiceData) {
 							<div class="row item-line">${line}</div>
 							${
 								hasDiscount
-									? `<div class="row discount-line"><span>${__("Discount")}${
+									? `<div class="row discount-line"><span>Discount${
 											item.discount_percentage
 												? ` (${Number(item.discount_percentage).toFixed(1)}%)`
 												: ""
@@ -324,9 +327,7 @@ export function buildReceiptHTML(invoiceData) {
 							}
 							${
 								item.serial_no
-									? `<div class="serial-line"><div class="serial-label">${__(
-											"Serial No:",
-										)}</div><div>${escapeHtml(String(item.serial_no)).replace(
+									? `<div class="serial-line"><div class="serial-label">Serial No:</div><div>${escapeHtml(String(item.serial_no)).replace(
 											/\n/g,
 											", ",
 										)}</div></div>`
@@ -340,9 +341,7 @@ export function buildReceiptHTML(invoiceData) {
 			<div class="receipt">
 				${
 					invoiceData.pos_queue_number
-						? `<div class="queue-number"><div class="queue-label">${__(
-								"NO. ANTRIAN",
-							)}</div><div class="queue-value">${formatQueueNumber(
+						? `<div class="queue-number"><div class="queue-label">NO. ANTRIAN</div><div class="queue-value">${formatQueueNumber(
 								invoiceData.pos_queue_number,
 							)}</div></div>`
 						: ""
@@ -365,31 +364,23 @@ export function buildReceiptHTML(invoiceData) {
 				<div class="divider" style="margin-top: 14px; margin-bottom: 4px;"></div>
 
 				<div style="margin-bottom: 4px; line-height: 1.25;">
-					<div class="info-row"><span class="info-label">${__("Invoice")}</span><span class="info-value">${escapeHtml(invoiceData.name)}</span></div>
+					<div class="info-row"><span class="info-label">Invoice</span><span class="info-value">${escapeHtml(invoiceData.name)}</span></div>
 					${
 						cashierName
-							? `<div class="info-row"><span class="info-label">${__(
-									"Cashier",
-								)}</span><span class="info-value">${escapeHtml(cashierName)}</span></div>`
+							? `<div class="info-row"><span class="info-label">Cashier</span><span class="info-value">${escapeHtml(cashierName)}</span></div>`
 							: ""
 					}
-					<div class="info-row"><span class="info-label">${__("Date")}</span><span class="info-value">${escapeHtml(timestamp)}</span></div>
+					<div class="info-row"><span class="info-label">Date</span><span class="info-value">${escapeHtml(timestamp)}</span></div>
 					${
 						buyerName
-							? `<div class="info-row"><span class="info-label">${__(
-									"Buyer",
-								)}</span><span class="info-value">${escapeHtml(buyerName)}</span></div>`
+							? `<div class="info-row"><span class="info-label">Buyer</span><span class="info-value">${escapeHtml(buyerName)}</span></div>`
 							: customerName
-								? `<div class="info-row"><span class="info-label">${__(
-										"Customer",
-									)}</span><span class="info-value">${escapeHtml(customerName)}</span></div>`
+								? `<div class="info-row"><span class="info-label">Customer</span><span class="info-value">${escapeHtml(customerName)}</span></div>`
 								: ""
 					}
 					${
 						isPartial
-							? `<div class="info-row" style="color: #dc3545;"><span class="info-label">${__(
-									"Status",
-								)}</span><span class="info-value">${__("PARTIAL PAYMENT")}</span></div>`
+							? `<div class="info-row" style="color: #dc3545;"><span class="info-label">Status</span><span class="info-value">PARTIAL PAYMENT</span></div>`
 							: ""
 					}
 				</div>
@@ -399,27 +390,25 @@ export function buildReceiptHTML(invoiceData) {
 				${itemsHtml}
 
 				<div class="info-row" style="margin-top: 10px;">
-					<span class="info-label">${__("Total Qty")}</span>
+					<span class="info-label">Total Qty</span>
 					<span class="info-value">${escapeHtml(totalQty)}</span>
 				</div>
 
 				${
 					invoiceData.total_taxes_and_charges &&
 					invoiceData.total_taxes_and_charges > 0
-						? `<div class="row"><span>${__("Subtotal:")}</span><span>${formatCurrency(
+						? `<div class="row"><span>Subtotal:</span><span>${formatCurrency(
 								(invoiceData.grand_total || 0) -
 									(invoiceData.total_taxes_and_charges || 0),
 							)}</span></div>
-					<div class="row"><span>${__("Tax:")}</span><span>${formatCurrency(
+					<div class="row"><span>Tax:</span><span>${formatCurrency(
 						invoiceData.total_taxes_and_charges,
 					)}</span></div>`
 						: ""
 				}
 				${
 					invoiceData.discount_amount
-						? `<div class="row" style="color: #28a745;"><span>${__(
-								"Additional Discount",
-							)}${
+						? `<div class="row" style="color: #28a745;"><span>Additional Discount${
 								invoiceData.additional_discount_percentage
 									? ` (${Number(
 											invoiceData.additional_discount_percentage,
@@ -432,7 +421,7 @@ export function buildReceiptHTML(invoiceData) {
 				}
 				<div class="total-group">
 					<div class="info-row total-row">
-						<span class="info-label">${__("TOTAL")}</span><span class="info-colon">:</span>
+						<span class="info-label">TOTAL</span><span class="info-colon">:</span>
 						<span class="info-value">${formatCurrency(
 							invoiceData.grand_total,
 						)}</span>
@@ -449,27 +438,21 @@ export function buildReceiptHTML(invoiceData) {
 						.join("")}
 					${
 						paidAmount
-							? `<div class="info-row"><span class="info-label">${__(
-									"Paid",
-								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
+							? `<div class="info-row"><span class="info-label">Paid</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
 									paidAmount,
 								)}</span></div>`
 							: ""
 					}
 					${
 						invoiceData.change_amount && invoiceData.change_amount > 0
-							? `<div class="info-row"><span class="info-label">${__(
-									"Change",
-								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
+							? `<div class="info-row"><span class="info-label">Change</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
 									invoiceData.change_amount,
 								)}</span></div>`
 							: ""
 					}
 					${
 						invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0
-							? `<div class="info-row outstanding-row"><span class="info-label">${__(
-									"Due",
-								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
+							? `<div class="info-row outstanding-row"><span class="info-label">Due</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
 									invoiceData.outstanding_amount,
 								)}</span></div>`
 							: ""
@@ -478,8 +461,8 @@ export function buildReceiptHTML(invoiceData) {
 
 				<div class="footer">
 					${invoiceData.footer ? `<div style="margin-bottom: 4px;">${escapeHtml(invoiceData.footer)}</div>` : ""}
-					<div style="margin-bottom: 4px;">${__("Thank you")}</div>
-					<div style="color: #888;">${__("Powered by POS Next")}</div>
+					<div style="margin-bottom: 4px;">Thank you</div>
+					<div style="color: #888;">Powered by POS Next</div>
 				</div>
 			</div>`
 }

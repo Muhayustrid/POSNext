@@ -2472,6 +2472,7 @@ async function handlePaymentCompleted(paymentData) {
 				// Display name of the signed-in user — the receipts' Cashier row.
 				cashier: window.frappe?.boot?.user?.full_name || "",
 				company: shiftStore.profileCompany || undefined,
+				currency: shiftStore.profileCurrency,
 				customer_name: customerLabel,
 				buyer_name: (cartStore.buyerName || "").trim(),
 				items: preparedItems.map((item) => ({
