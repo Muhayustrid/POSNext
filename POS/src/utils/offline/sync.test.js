@@ -102,6 +102,7 @@ import {
 	getOfflineInvoiceCount,
 	getOfflineInvoices,
 	retryOfflineInvoice,
+	saveOfflineInvoice,
 	syncOfflineInvoices,
 } from "@/utils/offline/sync";
 
@@ -387,3 +388,55 @@ describe("zero quantity is rejected at sync time (COR-FE-12)", () => {
 		expect(payload.invoice.items[0].qty).toBe(1);
 	});
 });
+
+describe("stamp sale time on offline invoice (Task 4)", () => {
+	it("stamps posting date/time at save", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 9, 16, 14, 5, 9));
+
+		try {
+			const invoiceData = {
+				customer: "Walk-in Customer",
+				items: [{ item_code: "ITEM-1", qty: 1 }],
+				grand_total: 100,
+			};
+
+			await saveOfflineInvoice(invoiceData);
+
+			expect(store.rows).toHaveLength(1);
+			const savedData = store.rows[0].data;
+			expect(savedData.posting_date).toBe("2026-10-16");
+			expect(savedData.posting_time).toBe("14:05:09");
+			expect(savedData.set_posting_time).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("keeps existing posting_date if already present in payload", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 9, 16, 14, 5, 9));
+
+		try {
+			const invoiceData = {
+				customer: "Walk-in Customer",
+				items: [{ item_code: "ITEM-1", qty: 1 }],
+				grand_total: 100,
+				posting_date: "2026-10-01",
+				posting_time: "10:00:00",
+				set_posting_time: 1,
+			};
+
+			await saveOfflineInvoice(invoiceData);
+
+			expect(store.rows).toHaveLength(1);
+			const savedData = store.rows[0].data;
+			expect(savedData.posting_date).toBe("2026-10-01");
+			expect(savedData.posting_time).toBe("10:00:00");
+			expect(savedData.set_posting_time).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+

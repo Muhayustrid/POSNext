@@ -1,6 +1,7 @@
 import { call, serverErrorMessage } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { CoalescingMutex } from "@/utils/mutex";
+import { toISODate } from "@/utils/salesRecap";
 import { db } from "./db";
 import { offlineState } from "./offlineState";
 import { removeOfflineReceiptPayload } from "./offlineReceiptCache";
@@ -96,6 +97,13 @@ export const saveOfflineInvoice = async (invoiceData) => {
 	const cleanData = JSON.parse(JSON.stringify(invoiceData));
 	const offlineId = generateOfflineId();
 	cleanData.offline_id = offlineId;
+
+	if (!cleanData.posting_date) {
+		const now = new Date();
+		cleanData.posting_date = toISODate(now);
+		cleanData.posting_time = now.toLocaleTimeString("en-GB", { hour12: false });
+		cleanData.set_posting_time = 1;
+	}
 
 	const id = await db.invoice_queue.add({
 		offline_id: offlineId,
