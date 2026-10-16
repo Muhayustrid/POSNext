@@ -34,3 +34,4 @@ pos_next.patches.v2_19_0.seed_code_gate_groups
 pos_next.patches.v2_20_0.backfill_offer_usage_invoice_type
 pos_next.patches.v2_20_0.scope_existing_coupons
 pos_next.patches.v2_21_0.repoint_app_desktop_icon
+pos_next.patches.v2_22_0.add_offline_price_mismatch_field

@@ -657,6 +657,20 @@ def _price_mismatch_message(item_code, client_rate, expected_rate, rate_precisio
 	)
 
 
+def _offline_claims_genuine(invoice_doc, claimed_rules):
+	"""True when every rule an offline replay claims is a real, enabled rule of
+	the invoice's own company. An empty claim set is genuine: a free / zero-rate
+	row with no engine claim is a sale already charged and paid, not a forgery.
+	"""
+	for rule_name in claimed_rules or set():
+		rule = frappe.db.get_value(
+			"Pricing Rule", rule_name, ["disable", "company"], as_dict=True
+		)
+		if not rule or cint(rule.disable) or rule.company != invoice_doc.get("company"):
+			return False
+	return True
+
+
 def _verify_offer_rate_magnitudes(
 	invoice_doc,
 	pos_profile,
@@ -807,6 +821,27 @@ def _verify_offer_rate_magnitudes(
 				)
 
 	if not violations:
+		return
+
+	# Offline replay: the sale is already paid and the cashier cannot re-price
+	# it, so a mismatch with a genuine claim set is accepted at the charged
+	# price and flagged for HQ instead of rejecting the queued sale. A
+	# fabricated / disabled / foreign-company claim, or a replay that is not
+	# offline, keeps the hard rejection below.
+	if getattr(frappe.flags, "pos_next_offline_sync", None):
+		if not _offline_claims_genuine(invoice_doc, claimed_all):
+			frappe.throw(violations[0])
+		already_flagged = cint(invoice_doc.get("pos_offline_price_mismatch") or 0)
+		invoice_doc.pos_offline_price_mismatch = 1
+		# The draft save and the submit path may both run this check; only the
+		# first writes the audit log.
+		if not already_flagged:
+			frappe.log_error(
+				title="POS Offline Price Mismatch",
+				message="{}\n{}".format(
+					invoice_doc.name or invoice_doc.get("offline_id"), "\n".join(violations)
+				)[:2000],
+			)
 		return
 
 	if pos_settings_cache is not None and FIELD_PRICE_REPLAY_AUDIT_ONLY in pos_settings_cache:
@@ -1259,6 +1294,8 @@ def _strip_server_managed_fields(payload):
 	cleaned.pop("is_pos", None)
 	cleaned.pop("is_consolidated", None)
 	cleaned.pop("is_cash_or_non_trade_discount", None)
+	# Server sets this on Offline Price Mismatch; a client value would skip the log.
+	cleaned.pop("pos_offline_price_mismatch", None)
 	items = cleaned.get("items")
 	if isinstance(items, list) and any(isinstance(item, dict) for item in items):
 		cleaned["items"] = [
@@ -1767,6 +1804,43 @@ def _posting_date_shifted(invoice_doc):
 		return True  # unparseable date — fail closed
 
 
+def _offline_sale_time_allowed(invoice_doc):
+	"""Offline replay may keep its own sale time inside the shift window.
+
+	Only an offline submit (frappe.flags.pos_next_offline_sync, set by
+	submit_invoice when the payload carries an offline_id) that drives its own
+	posting time qualifies. The sale time must fall at or after the linked
+	shift opened; a sale time in the future is clamped to now so the saved
+	values stay in the past.
+	"""
+	if not getattr(frappe.flags, "pos_next_offline_sync", None):
+		return False
+	if not cint(invoice_doc.get("set_posting_time")):
+		return False
+	shift_name = invoice_doc.get("posa_pos_opening_shift") or invoice_doc.get("pos_opening_shift")
+	if not shift_name or not invoice_doc.get("posting_date"):
+		return False
+	period_start = frappe.db.get_value("POS Opening Shift", shift_name, "period_start_date")
+	if not period_start:
+		return False
+	sale_time = get_datetime(
+		"{0} {1}".format(invoice_doc.get("posting_date"), invoice_doc.get("posting_time") or "00:00:00")
+	)
+	if sale_time is None:
+		return False  # unparseable sale time: fall back to the normal policy
+	if sale_time < get_datetime(period_start):
+		frappe.throw(
+			_("Offline sale time {0} is before shift {1} opened at {2}.").format(
+				sale_time, shift_name, get_datetime(period_start)
+			),
+			frappe.ValidationError,
+		)
+	if sale_time > frappe.utils.now_datetime():
+		invoice_doc.posting_date = nowdate()
+		invoice_doc.posting_time = nowtime()
+	return True
+
+
 def _enforce_posting_date_policy(invoice_doc):
 	"""A shifted posting date is the HO backdate lane only.
 
@@ -1774,8 +1848,11 @@ def _enforce_posting_date_policy(invoice_doc):
 	pos_next.api.backdate_invoices.submit_backdate_invoice after its own
 	role + POS Settings verification), or when the session user itself holds
 	a backdate role while the invoice profile's allow_change_posting_date is
-	on. Everything else — including offline replays — is rejected.
+	on. An offline replay whose sale time falls inside the shift window keeps
+	its own posting datetime too; everything else is rejected.
 	"""
+	if _offline_sale_time_allowed(invoice_doc):
+		return
 	if not _posting_date_shifted(invoice_doc):
 		return
 	if getattr(frappe.flags, "pos_next_backdate_entry", None):
@@ -2649,6 +2726,11 @@ def submit_invoice(invoice=None, data=None):
 		# Store the sync record name for later update
 		sync_record_name = dedup_result.get("sync_record_name") if dedup_result else None
 
+	# An offline replay carries its own sale time: downstream gates (posting-date
+	# policy, shift schedule, offer-rate replay) key on this flag. Reset in the
+	# finally below so a thrown submit never leaks it.
+	frappe.flags.pos_next_offline_sync = bool(offline_id)
+
 	# Track whether invoice was successfully submitted
 	invoice_submitted = False
 
@@ -3014,6 +3096,7 @@ def submit_invoice(invoice=None, data=None):
 		raise
 
 	finally:
+		frappe.flags.pos_next_offline_sync = None
 		# Cleanup sync record if invoice was not successfully submitted
 		if sync_record_name and not invoice_submitted:
 			_cleanup_failed_sync(sync_record_name)

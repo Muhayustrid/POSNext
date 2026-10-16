@@ -292,8 +292,10 @@ def validate_invoice(doc, method=None):
 	Admission is judged by the server clock only: a transaction created
 	(doc.creation) before the deadline is admitted — printed drafts settled by
 	the closing flow and stale drafts stay submittable; anything created after
-	the deadline is rejected (fail-closed). `posa_pos_opening_shift` edits by
-	the client are neutralized via _gate_shifts.
+	the deadline is rejected (fail-closed). An offline replay (flagged by
+	submit_invoice) is judged by the sale time it carries instead, since
+	doc.creation is only when the queue drained. `posa_pos_opening_shift` edits
+	by the client are neutralized via _gate_shifts.
 	"""
 	if doc.get("is_consolidated"):
 		return
@@ -304,11 +306,15 @@ def validate_invoice(doc, method=None):
 	if not shift and not profile:
 		return
 
-	creation = get_datetime(doc.creation) if getattr(doc, "creation", None) else None
+	admission = get_datetime(doc.creation) if getattr(doc, "creation", None) else None
+	if getattr(frappe.flags, "pos_next_offline_sync", None) and cint(doc.get("set_posting_time")):
+		admission = get_datetime(
+			"{0} {1}".format(doc.get("posting_date"), doc.get("posting_time") or "00:00:00")
+		)
 	for gate_shift in _gate_shifts(shift, profile):
 		gate = get_shift_gate(gate_shift)
 		if gate and gate["expired"]:
-			if creation and creation <= gate["deadline"]:
+			if admission and admission <= gate["deadline"]:
 				continue
 			if _backdate_exempt(doc, gate_shift):
 				continue

@@ -293,11 +293,25 @@ class TestSalesGate(unittest.TestCase):
 				self.assertIsNone(get_shift_gate("POSA-OS-0001"))
 
 
-def _doc(shift=None, profile=None, docstatus=1):
+def _doc(
+	shift=None,
+	profile=None,
+	docstatus=1,
+	set_posting_time=None,
+	posting_date=None,
+	posting_time=None,
+):
 	doc = Mock()
 	doc.docstatus = docstatus
 	doc.pos_profile = profile
-	values = {"posa_pos_opening_shift": shift, "pos_opening_shift": None, "pos_profile": profile}
+	values = {
+		"posa_pos_opening_shift": shift,
+		"pos_opening_shift": None,
+		"pos_profile": profile,
+		"set_posting_time": set_posting_time,
+		"posting_date": posting_date,
+		"posting_time": posting_time,
+	}
 	doc.get = lambda field: values.get(field)
 	return doc
 
@@ -400,6 +414,61 @@ class TestInvoiceHook(unittest.TestCase):
 			)
 			with self.assertRaises(RuntimeError):
 				validate_invoice(doc)
+
+	def _offline_doc(self, posting_time):
+		# made offline (set_posting_time) but synced late: creation is after the
+		# 22:00 deadline, the queued sale time is what the gate must judge.
+		doc = _doc(
+			shift="POSA-OS-0001",
+			profile="Profile 1",
+			set_posting_time=1,
+			posting_date="2026-09-07",
+			posting_time=posting_time,
+		)
+		doc.creation = "2026-09-07 22:30:00.000000"
+		return doc
+
+	def _gate_get_value(self, doctype, name, fields=None, as_dict=False, **kwargs):
+		if fields == ("pos_profile", "docstatus", "status"):
+			return self.OPEN_SHIFT_ROW
+		return self.EXPIRED
+
+	def _validate(self, doc, offline_flag):
+		# frappe.flags has no writable __dict__, so patch.object cannot target
+		# it; set/restore directly like TestBackdateExemption does.
+		old = getattr(frappe.flags, "pos_next_offline_sync", None)
+		frappe.flags.pos_next_offline_sync = offline_flag
+		try:
+			with (
+				patch("pos_next.shift_schedule.frappe.db.exists", return_value=True),
+				patch("pos_next.shift_schedule.frappe.db.get_value", side_effect=self._gate_get_value),
+				patch("pos_next.shift_schedule.now_datetime", return_value=_dt(2026, 9, 7, 23, 0)),
+			):
+				validate_invoice(doc)
+		finally:
+			frappe.flags.pos_next_offline_sync = old
+
+	def test_offline_sale_before_deadline_admitted(self):
+		# sale at 21:00, synced at 22:30: the queued sale time admits it
+		self._validate(self._offline_doc("21:00:00"), True)  # must not raise
+
+	def test_offline_sale_after_deadline_rejected(self):
+		# sale at 22:30 (after the 22:00 deadline) is still gated, however late
+		# the sync
+		throw = Mock(side_effect=_throw)
+		with patch("pos_next.shift_schedule.frappe.throw", throw):
+			with self.assertRaises(RuntimeError):
+				self._validate(self._offline_doc("22:30:00"), True)
+		throw.assert_called_once()
+
+	def test_online_late_creation_still_rejected(self):
+		# flag unset: the online path keeps judging by creation time, so an
+		# in-window sale time must not rescue a late creation
+		throw = Mock(side_effect=_throw)
+		with patch("pos_next.shift_schedule.frappe.throw", throw):
+			with self.assertRaises(RuntimeError):
+				self._validate(self._offline_doc("21:00:00"), None)
+		throw.assert_called_once()
 
 
 class TestBackdateExemption(unittest.TestCase):

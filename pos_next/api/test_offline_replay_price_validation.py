@@ -22,7 +22,7 @@ import unittest
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import flt, nowdate
+from frappe.utils import add_to_date, cint, flt, get_datetime, get_time_str, now_datetime, nowdate
 
 import pos_next  # noqa: F401 — ensure app hooks load.
 from pos_next.api.invoices import submit_invoice
@@ -90,6 +90,21 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 				["price_replay_audit_only", "allow_user_to_edit_rate", "max_discount_allowed"],
 				as_dict=True,
 			)
+		# An open shift two hours back: offline replays link it so the queued sale
+		# time can be judged against the shift window (Task 1).
+		cls.shift = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": cls.ctx.pos_profile,
+				"company": cls.ctx.company,
+				"user": "Administrator",
+				"posting_date": nowdate(),
+				"period_start_date": add_to_date(now_datetime(), hours=-2),
+				"balance_details": [{"mode_of_payment": cls.ctx.mode_of_payment, "amount": 0}],
+			}
+		).insert(ignore_permissions=True)
+		cls.shift.reload()
+		cls.shift.submit()
 
 	@classmethod
 	def tearDownClass(cls):
@@ -105,6 +120,11 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 				update_modified=False,
 			)
 		_set_invoice_type(cls.original_invoice_type or "POS Invoice")
+		if getattr(cls, "shift", None) and frappe.db.exists("POS Opening Shift", cls.shift.name):
+			frappe.db.set_value(
+				"POS Opening Shift", cls.shift.name, "docstatus", 2, update_modified=False
+			)
+			frappe.delete_doc("POS Opening Shift", cls.shift.name, force=1, ignore_permissions=True)
 		frappe.db.commit()
 		super().tearDownClass()
 
@@ -454,13 +474,77 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 		self.assertTrue(result.get("name"))
 		doc = frappe.get_doc("Sales Invoice", result.get("name"))
 		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(cint(doc.pos_offline_price_mismatch or 0), 0)
 		self.assertAlmostEqual(flt(doc.items[0].rate), 42.5, places=2)
 
-	def test_forged_offline_replay_rejected(self):
-		"""The offline replay path runs the same gate: a forged magnitude in
-		the queued payload must be rejected at submit."""
+	def _offline_mismatch_logs(self):
+		return set(
+			frappe.get_all(
+				"Error Log", filters={"method": "POS Offline Price Mismatch"}, pluck="name"
+			)
+		)
+
+	def test_offline_mismatch_accepted_and_flagged(self):
+		"""An offline replay whose Price Replay disagrees (genuine claimed rule,
+		a rate the server would not produce) is accepted at the charged price
+		and flagged for HQ — an Error Log with the mismatch detail is written."""
 		rule = self._rule(
-			"_PNXT_SEC23_ReplayForged",
+			"_PNXT_SEC23_ReplayForgedAccepted",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+		)
+		payload = self._paid_payload([_line(self.ctx, ITEM_A, qty=1)])
+		_apply_offers_and_stamp(payload, [rule])
+		# The offline client priced off a stale/forged list price: its row is
+		# internally consistent with the claimed 15% offer (plr 23.53 -> rate
+		# 20), but the server's own list price (50) replays to 42.5.
+		payload["items"][0].update(
+			{"rate": 20, "price_list_rate": 20 / 0.85, "discount_percentage": 15}
+		)
+		payload["_paid"] = 20
+		# A client pre-setting the server-managed flag must not suppress the log.
+		payload["pos_offline_price_mismatch"] = 1
+		offline_id = self._offline_id("ACCEPTED")
+		before = self._offline_mismatch_logs()
+		result = self._submit_offline(payload, offline_id=offline_id)
+		doc = frappe.get_doc("Sales Invoice", result.get("name"))
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(cint(doc.pos_offline_price_mismatch), 1)
+		self.assertAlmostEqual(flt(doc.items[0].rate), 20, places=2)
+		new_logs = [n for n in self._offline_mismatch_logs() if n not in before]
+		self.assertEqual(len(new_logs), 1)
+		self.assertIn(offline_id, frappe.get_value("Error Log", new_logs[0], "error"))
+		self.assertIn(_RATE_MSG, frappe.get_value("Error Log", new_logs[0], "error"))
+
+	def test_offline_mismatch_fabricated_rule_rejected(self):
+		"""A forged rule name in the offline payload never earns the accept
+		path: the claim is not a real rule, so it is rejected."""
+		rule = self._rule(
+			"_PNXT_SEC23_ReplayFabricated",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+		)
+		payload = self._paid_payload([_line(self.ctx, ITEM_A, qty=1)])
+		_apply_offers_and_stamp(payload, [rule])
+		payload["items"][0]["rate"] = 20
+		payload["items"][0]["discount_percentage"] = 60
+		payload["items"][0]["pricing_rules"] = "_PNXT_SEC23_DOES_NOT_EXIST"
+		payload["_paid"] = 20
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._submit_offline(payload, offline_id=self._offline_id("FABRICATED"))
+		self.assertIn(_RATE_MSG, str(ctx.exception))
+
+	def test_offline_mismatch_disabled_rule_rejected(self):
+		"""A claimed rule that is disabled by the time of replay is not genuine:
+		the offline accept path is refused."""
+		rule = self._rule(
+			"_PNXT_SEC23_ReplayDisabled",
 			apply_on="Item Code",
 			items=[{"item_code": ITEM_A}],
 			rate_or_discount="Discount Percentage",
@@ -472,9 +556,50 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 		payload["items"][0]["rate"] = 20
 		payload["items"][0]["discount_percentage"] = 60
 		payload["_paid"] = 20
+		frappe.db.set_value("Pricing Rule", rule, "disable", 1)
 		with self.assertRaises(frappe.ValidationError) as ctx:
-			self._submit_offline(payload, offline_id=self._offline_id("FORGED"))
+			self._submit_offline(payload, offline_id=self._offline_id("DISABLED"))
 		self.assertIn(_RATE_MSG, str(ctx.exception))
+
+	def test_offline_mismatch_with_header_discount_flagged_once(self):
+		"""Review Focus 3: a forged row plus a relayed transaction rule / header
+		discount is accepted, and only ONE mismatch log is written for the
+		invoice even when the replay runs on the draft save and the submit."""
+		item_rule = self._rule(
+			"_PNXT_SEC23_OnceItem",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+		)
+		txn_rule = self._rule(
+			"_PNXT_SEC23_OnceTxn",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_qty=0,
+			apply_discount_on="Grand Total",
+		)
+		payload = self._paid_payload([_line(self.ctx, ITEM_A, qty=1)])
+		_apply_offers_and_stamp(payload, [item_rule, txn_rule])
+		# The row is internally consistent with the claimed 15% offer (stale
+		# plr 23.53 -> rate 20); the server replays the row to 42.5. The
+		# relayed header stays its own 10% of the forged total (2).
+		payload["items"][0].update(
+			{"rate": 20, "price_list_rate": 20 / 0.85, "discount_percentage": 15}
+		)
+		payload["discount_amount"] = 2
+		payload["apply_discount_on"] = "Grand Total"
+		payload["_paid"] = 18
+		before = self._offline_mismatch_logs()
+		result = self._submit_offline(payload, offline_id=self._offline_id("HEADER"))
+		doc = frappe.get_doc("Sales Invoice", result.get("name"))
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(cint(doc.pos_offline_price_mismatch), 1)
+		new_logs = [n for n in self._offline_mismatch_logs() if n not in before]
+		self.assertEqual(len(new_logs), 1)
 
 	# ------------------------------------------------------------------
 	# Escape hatch: audit-only toggle logs instead of rejecting
@@ -601,3 +726,59 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			update_invoice(json.dumps(payload))
+
+	# ------------------------------------------------------------------
+	# (9) Offline replay keeps its own sale time, inside the shift window
+	# ------------------------------------------------------------------
+
+	def _offline_time_payload(self, sale_time):
+		payload = self._paid_payload([_line(self.ctx, ITEM_A, qty=1)])
+		payload.update(
+			{
+				"posa_pos_opening_shift": self.shift.name,
+				"set_posting_time": 1,
+				"posting_date": sale_time.strftime("%Y-%m-%d"),
+				"posting_time": sale_time.strftime("%H:%M:%S"),
+				"_paid": flt(payload["items"][0]["rate"]),
+			}
+		)
+		return payload
+
+	def test_offline_sale_time_kept(self):
+		"""An offline replay inside the shift window keeps its own sale time."""
+		sale_time = add_to_date(now_datetime(), minutes=-2)
+		result = self._submit_offline(
+			self._offline_time_payload(sale_time), offline_id=self._offline_id("SALETIME")
+		)
+		doc = frappe.get_doc("Sales Invoice", result.get("name"))
+		self.assertEqual(
+			get_time_str(doc.posting_time),
+			"{0}:{1}:{2}".format(sale_time.hour, sale_time.minute, sale_time.second),
+		)
+
+	def test_offline_sale_time_before_shift_rejected(self):
+		"""A sale time before the linked shift opened is refused."""
+		bad = add_to_date(get_datetime(self.shift.period_start_date), days=-1)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._submit_offline(
+				self._offline_time_payload(bad), offline_id=self._offline_id("BEFORE")
+			)
+		self.assertIn("before shift", str(ctx.exception))
+
+	def test_offline_sale_time_future_clamped(self):
+		"""A future sale time is clamped to now before it is saved."""
+		payload = self._offline_time_payload(add_to_date(now_datetime(), minutes=10))
+		result = self._submit_offline(payload, offline_id=self._offline_id("FUTURE"))
+		doc = frappe.get_doc("Sales Invoice", result.get("name"))
+		stored = get_datetime(doc.posting_date) + doc.posting_time
+		self.assertLessEqual(stored, now_datetime())
+
+	def test_online_set_posting_time_still_rejected(self):
+		"""The offline lane is the only way to shift the posting date: the same
+		payload through update_invoice (no offline_id) is refused."""
+		payload = self._offline_time_payload(add_to_date(now_datetime(), minutes=-2))
+		from pos_next.api.invoices import update_invoice
+
+		with self.assertRaises(frappe.PermissionError) as ctx:
+			update_invoice(json.dumps(payload))
+		self.assertIn("Changing the invoice posting date is not allowed", str(ctx.exception))
