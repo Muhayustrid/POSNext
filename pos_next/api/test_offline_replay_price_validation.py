@@ -728,6 +728,57 @@ class TestOfflineReplayPriceValidation(FrappeTestCase):
 			update_invoice(json.dumps(payload))
 
 	# ------------------------------------------------------------------
+	# (10) Offline zero-total replay: a lost discount must not submit a
+	#      paymentless full-price invoice (the safety guard)
+	# ------------------------------------------------------------------
+
+	def _submit_offline_without_payments(self, payload, offline_id, client_grand_total=0):
+		"""Offline replay of a zero-total sale: the queue carries payments [] and
+		the client's grand_total, keyed by offline_id (submit_invoice builds the
+		draft via update_invoice and submits it in one call)."""
+		payload["offline_id"] = offline_id
+		payload["grand_total"] = client_grand_total
+		payload["payments"] = []
+		result = submit_invoice(invoice=json.dumps(payload))
+		self._created.append((result or {}).get("name"))
+		return result
+
+	def test_offline_zero_total_discount_submits_without_payments(self):
+		"""Offline replay of a 100% HQ-coded discount: the client queued payments
+		[] and grand_total 0, and the server honours the discount, so both totals
+		are 0 and the invoice submits (the guard only fires on a divergence)."""
+		code = self._mint_code("OFFZER8A")
+		payload = self._paid_payload([self._full_discount_line()])
+		payload["discount_confirmation_code"] = code.lower()
+		result = self._submit_offline_without_payments(payload, self._offline_id("ZEROTOTAL"))
+		doc = frappe.get_doc("Sales Invoice", result.get("name"))
+		self.assertEqual(doc.docstatus, 1)
+		self.assertAlmostEqual(flt(doc.grand_total), 0, places=2)
+
+	def test_offline_zero_total_without_discount_rejected(self):
+		"""Offline replay whose discount was lost: the client queued grand_total 0
+		with payments [], but the server recomputes the full price. The guard must
+		refuse it with a clear message instead of letting a paymentless full-price
+		invoice through (ERPNext's cryptic payment-row error)."""
+		drafts_before = set(
+			frappe.get_all("Sales Invoice", {"docstatus": 0, "customer": self.ctx.customer}, pluck="name")
+		)
+		payload = self._paid_payload([_line(self.ctx, ITEM_A, qty=1)])
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._submit_offline_without_payments(payload, self._offline_id("LOST"))
+		self.assertIn("Offline discount could not be re-applied", str(ctx.exception))
+		# update_invoice saved a draft before the guard refused it; the helper got
+		# no name back, so sweep the new draft here (and prove it existed — the
+		# guard fires AFTER the draft is built, not before).
+		drafts_after = set(
+			frappe.get_all("Sales Invoice", {"docstatus": 0, "customer": self.ctx.customer}, pluck="name")
+		)
+		new_drafts = drafts_after - drafts_before
+		self.assertTrue(new_drafts, "update_invoice should have saved a draft before the guard")
+		for name in new_drafts:
+			frappe.delete_doc("Sales Invoice", name, force=1, ignore_permissions=True)
+
+	# ------------------------------------------------------------------
 	# (9) Offline replay keeps its own sale time, inside the shift window
 	# ------------------------------------------------------------------
 

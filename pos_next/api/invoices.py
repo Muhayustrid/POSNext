@@ -2970,6 +2970,29 @@ def submit_invoice(invoice=None, data=None):
 				frappe.throw(_("Credit sales are not enabled for this POS Profile."))
 			invoice_doc.flags.pos_next_credit_sale = 1
 
+		# Offline replay safety net: the client queued this sale as zero-total
+		# (payments: [], client grand_total 0), but the server recomputed a
+		# positive total — the offline discount was lost on replay (a stale or
+		# unverifiable offer claim). Submitting now would post a full-price
+		# invoice with no tender, so refuse and let the cashier re-enter it.
+		# Credit sales and customer-credit redemptions are intentionally
+		# paymentless with a positive total (marked by their own flags above),
+		# and online submits have no offline_id, so none of them are affected.
+		if (
+			offline_id
+			and not is_credit_sale
+			and not redeemed_customer_credit
+			and not invoice_doc.payments
+			and flt(invoice.get("grand_total") or data.get("grand_total") or 0) == 0
+			and flt(invoice_doc.grand_total or 0) > 0
+		):
+			frappe.throw(
+				_(
+					"Offline discount could not be re-applied on sync: the server total is {0} "
+					"but the receipt shows 0. The sale was not submitted — please re-enter it manually."
+				).format(frappe.bold(flt(invoice_doc.grand_total)))
+			)
+
 		# Save before submit
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
