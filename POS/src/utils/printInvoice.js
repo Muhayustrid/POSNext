@@ -105,7 +105,6 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		// The queued payload carries the doctype it was captured with; older
 		// queue entries predate POS Invoice mode and fall back to it.
 		doctype: raw.doctype || "POS Invoice",
-		is_offline: true,
 		pos_profile: raw.pos_profile,
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
 		posting_time: raw.posting_time || null,
@@ -358,8 +357,6 @@ export function buildReceiptHTML(invoiceData) {
 				}
 
 				${invoiceData.header ? `<div class="text-center bold">${escapeHtml(invoiceData.header)}</div>` : ""}
-
-				${invoiceData.is_offline ? `<div class="offline-badge">${__("OFFLINE — PENDING SYNC")}</div>` : ""}
 
 				<div class="divider" style="margin-top: 14px; margin-bottom: 4px;"></div>
 

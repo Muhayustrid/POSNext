@@ -1636,7 +1636,6 @@
 "ORDER","ORDER",""
 "Crew copy - {0}","Rangkap Crew - {0}",""
 "Buyer:","Pembeli:",""
-"OFFLINE — PENDING SYNC","OFFLINE — MENUNGGU SINKRONISASI",""
 "This offline receipt is no longer in browser storage. Sync the invoice, then print from history.","Struk offline ini tidak ada lagi di penyimpanan browser. Sinkronkan fakturnya, lalu cetak dari riwayat.",""
 "This offline receipt is no longer in browser storage. Complete checkout again or sync, then print from history.","Struk offline ini tidak ada lagi di penyimpanan browser. Selesaikan checkout lagi atau sinkronkan, lalu cetak dari riwayat.",""
 "This offline receipt is no longer in browser storage. Use browser print from the success dialog after checkout.","Struk offline ini tidak ada lagi di penyimpanan browser. Pakai cetak browser dari dialog sukses setelah checkout.",""

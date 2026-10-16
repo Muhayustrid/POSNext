@@ -2466,7 +2466,6 @@ async function handlePaymentCompleted(paymentData) {
 			const offlinePrintDoc = {
 				name: offlineReceiptName,
 				doctype: "Sales Invoice",
-				is_offline: true,
 				pos_profile: cartStore.posProfile,
 				posting_date: new Date().toISOString().slice(0, 10),
 				// Local clock at creation, "HH:MM:SS" — the crew slip and the server

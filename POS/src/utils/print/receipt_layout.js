@@ -183,10 +183,6 @@ export function receiptStylesFor(dots) {
 		display: flex; justify-content: space-between; font-size: 12px; font-weight: bold;
 		border: 1px solid #000; padding: 6px; margin-top: 4px; border-radius: 4px;
 	}
-	.offline-badge {
-		text-align: center; font-size: 10px; font-weight: bold;
-		border: 1px dashed #000; padding: 3px; margin-bottom: 6px;
-	}
 	.footer { text-align: center; margin-top: 8px; padding-top: 4px; border-top: 2px dashed #000; font-size: 10px; }
 	.pn-receipt-tail { background: #fff; }
 	@media print {
