@@ -8,7 +8,7 @@ This module provides a clean API for retrieving promotional offers from both
 Promotional Schemes and standalone Pricing Rules.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
 import frappe
@@ -59,6 +59,8 @@ class OfferEligibility:
 	items: list[str]
 	item_groups: list[str]
 	brands: list[str]
+	# item_code → uom for the item rows that pin a UOM (offline engine checks it)
+	item_uoms: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -107,6 +109,15 @@ class Offer:
 	quota_limit: int = 0
 	quota_used: int = 0
 	quota_remaining: int | None = None
+	# Eligibility conditions the offline engine evaluates (None = no condition)
+	applicable_for: str | None = None
+	applicable_value: str | None = None
+	warehouse: str | None = None
+	for_price_list: str | None = None
+	item_uoms: dict[str, str] = field(default_factory=dict)
+	# True when the rule carries a Python `condition` the server enforces but the
+	# offline client cannot evaluate (it must then skip the offer).
+	has_condition: bool = False
 
 	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
@@ -138,6 +149,7 @@ class EligibilityFetcher:
 		items_map = EligibilityFetcher._fetch_items(parent_names)
 		item_groups_map = EligibilityFetcher._fetch_item_groups(parent_names)
 		brands_map = EligibilityFetcher._fetch_brands(parent_names)
+		item_uoms_map = EligibilityFetcher._fetch_item_uoms(parent_names)
 
 		# Combine all maps into OfferEligibility objects
 		eligibility = {}
@@ -146,6 +158,7 @@ class EligibilityFetcher:
 				items=items_map.get(parent, []),
 				item_groups=item_groups_map.get(parent, []),
 				brands=brands_map.get(parent, []),
+				item_uoms=item_uoms_map.get(parent, {}),
 			)
 
 		return eligibility
@@ -204,6 +217,43 @@ class EligibilityFetcher:
 				items_map[parent].extend(variants_map[item_code])
 
 		return items_map
+
+	@staticmethod
+	def _fetch_item_uoms(parent_names: list[str]) -> dict[str, dict[str, str]]:
+		"""Fetch the UOM pinned on each item row (rows without a UOM are skipped).
+
+		Template items are expanded to their enabled variants, mirroring
+		``_fetch_items``: the offline engine UOM-checks the same item set the
+		server engine does, so a variant must carry the template's pinned UOM.
+		"""
+		results = frappe.db.sql(
+			"""
+			SELECT parent, item_code, uom
+			FROM `tabPricing Rule Item Code`
+			WHERE parent IN %s AND uom IS NOT NULL AND uom != ''
+		""",
+			[parent_names],
+			as_dict=1,
+		)
+		if not results:
+			return {}
+
+		# One query: the variants of any pinned item code that is a template.
+		variants_map = {}
+		for variant in frappe.get_all(
+			"Item",
+			filters={"variant_of": ["in", list({row["item_code"] for row in results})], "disabled": 0},
+			fields=["name", "variant_of"],
+		):
+			variants_map.setdefault(variant["variant_of"], []).append(variant["name"])
+
+		uoms_map = {}
+		for row in results:
+			item_uoms = uoms_map.setdefault(row["parent"], {})
+			item_uoms[row["item_code"]] = row["uom"]
+			for variant_name in variants_map.get(row["item_code"], []):
+				item_uoms[variant_name] = row["uom"]
+		return uoms_map
 
 	@staticmethod
 	def _fetch_item_groups(parent_names: list[str]) -> dict[str, list[str]]:
@@ -313,6 +363,15 @@ class OfferBuilder:
 	"""Builds Offer objects from pricing rules and schemes"""
 
 	@staticmethod
+	def _applicable_value(rule: dict) -> str | None:
+		"""Value of the Pricing Rule field named by ``applicable_for``
+		("Customer Group" → customer_group). None when no condition is set."""
+		applicable_for = rule.get("applicable_for")
+		if not applicable_for:
+			return None
+		return rule.get(frappe.scrub(applicable_for))
+
+	@staticmethod
 	def build_from_scheme_rule(rule: dict, slab: dict, eligibility: OfferEligibility) -> Offer:
 		"""Build offer from promotional scheme pricing rule"""
 
@@ -376,6 +435,12 @@ class OfferBuilder:
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
 			max_discount_amount=flt(rule.get("pos_offer_max_discount", 0)),
 			allow_coupon_combination=cint(rule.get("pos_offer_allow_coupon", 0)),
+			applicable_for=rule.get("applicable_for") or None,
+			applicable_value=OfferBuilder._applicable_value(rule),
+			warehouse=rule.get("warehouse") or None,
+			for_price_list=rule.get("for_price_list") or None,
+			item_uoms=eligibility.item_uoms,
+			has_condition=bool(rule.get("condition")),
 		)
 
 	@staticmethod
@@ -424,6 +489,12 @@ class OfferBuilder:
 			eligible_item_groups=eligible_item_groups,
 			eligible_brands=eligible_brands,
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
+			applicable_for=rule.get("applicable_for") or None,
+			applicable_value=OfferBuilder._applicable_value(rule),
+			warehouse=rule.get("warehouse") or None,
+			for_price_list=rule.get("for_price_list") or None,
+			item_uoms=eligibility.item_uoms,
+			has_condition=bool(rule.get("condition")),
 		)
 
 
@@ -572,7 +643,9 @@ def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:
 			name, title, apply_on, selling, promotional_scheme,
 			promotional_scheme_id, coupon_code_based, one_time_per_customer,
 			price_or_product_discount, priority, valid_from, valid_upto,
-			pos_offer_max_discount, pos_offer_allow_coupon
+			pos_offer_max_discount, pos_offer_allow_coupon,
+			applicable_for, customer, customer_group, territory, sales_partner,
+			campaign, warehouse, for_price_list, `condition`
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0
@@ -631,7 +704,9 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> list[Offer]:
 			rate_or_discount, rate, discount_amount, discount_percentage,
 			apply_discount_on_price, min_or_max_discount_qty_limit,
 			min_qty, max_qty, min_amt, max_amt,
-			priority, valid_from, valid_upto
+			priority, valid_from, valid_upto,
+			applicable_for, customer, customer_group, territory, sales_partner,
+			campaign, warehouse, for_price_list, `condition`
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0

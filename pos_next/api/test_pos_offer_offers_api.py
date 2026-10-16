@@ -8,8 +8,15 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import frappe
+from frappe.tests.utils import FrappeTestCase
 
-from pos_next.api.offers import OfferBuilder, OfferEligibility, enrich_offers_with_quota
+from pos_next.api.offers import (
+	EligibilityFetcher,
+	OfferBuilder,
+	OfferEligibility,
+	enrich_offers_with_quota,
+	get_offers,
+)
 from pos_next.api.promotions import (
 	_items_with_names,
 	_managed_schemes_for_company,
@@ -17,6 +24,7 @@ from pos_next.api.promotions import (
 	_scheme_discount_summary,
 	_target_summary,
 )
+from pos_next.test_promotions import ITEM_A, _ctx, _make_rule, _restore_gate
 
 
 class FakeOffer:
@@ -292,3 +300,78 @@ class TestOfferFeedAllowCoupon(unittest.TestCase):
 
 		offer = OfferBuilder.build_from_scheme_rule(self._rule(), self.SLAB, elig)
 		self.assertEqual(0, offer.allow_coupon_combination)
+
+
+class TestGetOffersConditions(FrappeTestCase):
+	"""get_offers must expose each offer's eligibility conditions (customer /
+	group / territory, warehouse, price list, per-item UOM) so the offline
+	engine can evaluate them without the server."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+		cls.addClassCleanup(_restore_gate)
+
+	def test_get_offers_exposes_conditions(self):
+		rule = _make_rule(
+			"_PNXT_TEST_OffersConditions",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A, "uom": "Nos"}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+			applicable_for="Customer Group",
+			customer_group="Commercial",
+			warehouse=self.ctx.warehouse,
+			for_price_list=self.ctx.price_list,
+		)
+		self.addCleanup(frappe.delete_doc, "Pricing Rule", rule, force=True, ignore_permissions=True)
+
+		offers = get_offers(self.ctx.pos_profile)
+		entry = next((o for o in offers if o["name"] == rule), None)
+		self.assertIsNotNone(entry, "the created pricing rule must appear in get_offers")
+		self.assertEqual("Customer Group", entry["applicable_for"])
+		self.assertEqual("Commercial", entry["applicable_value"])
+		self.assertEqual(self.ctx.warehouse, entry["warehouse"])
+		self.assertEqual(self.ctx.price_list, entry["for_price_list"])
+		self.assertEqual({ITEM_A: "Nos"}, entry["item_uoms"])
+		self.assertFalse(entry["has_condition"])
+
+	def test_get_offers_flags_python_condition(self):
+		rule = _make_rule(
+			"_PNXT_TEST_OffersCondition",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+			condition="doc.grand_total > 0",
+		)
+		self.addCleanup(frappe.delete_doc, "Pricing Rule", rule, force=True, ignore_permissions=True)
+
+		offers = get_offers(self.ctx.pos_profile)
+		entry = next((o for o in offers if o["name"] == rule), None)
+		self.assertIsNotNone(entry, "the created pricing rule must appear in get_offers")
+		self.assertTrue(entry["has_condition"])
+
+
+class TestEligibilityItemUoms(unittest.TestCase):
+	"""A rule on a template item must carry the pinned UOM for its variants too,
+	so the offline engine UOM-checks the same item set the server does."""
+
+	def test_variant_inherits_template_uom(self):
+		with GET_ALL_PATCH as mock_get_all, DB_PATCH as mock_db:
+			mock_db.sql.return_value = [
+				{"parent": "PR-1", "item_code": "TEMPLATE", "uom": "Box"},
+				{"parent": "PR-1", "item_code": "PLAIN", "uom": "Nos"},
+			]
+			mock_get_all.return_value = [{"name": "VAR-1", "variant_of": "TEMPLATE"}]
+
+			result = EligibilityFetcher._fetch_item_uoms(["PR-1"])
+
+			self.assertEqual(
+				{"TEMPLATE": "Box", "VAR-1": "Box", "PLAIN": "Nos"},
+				result["PR-1"],
+			)
+			mock_get_all.assert_called_once()  # one extra query for the variants
