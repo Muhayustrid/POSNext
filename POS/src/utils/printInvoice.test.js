@@ -238,14 +238,15 @@ describe("buildReceiptHTML (package allocation rows, Fase 2)", () => {
 			payments: [{ mode_of_payment: "Cash", amount: 8000 }],
 		})
 
-		expect(html).toContain("<strong>Paket Hemat</strong>")
-		expect(html).not.toContain("1 × 0")
+		expect(html).toContain('class="bold">Paket Hemat</span>')
+		// The allocated parent prints with an empty price cell.
+		expect(html).toContain('<span class="bold">Paket Hemat</span><span></span>')
 		// Components keep their allocated prices.
-		expect(html).toContain("2 × 4.000")
+		expect(html).toContain("2x Cola")
 		expect(html).toContain("8.000")
 	})
 
-	it("keeps a legacy price-carrying package line exactly as before", () => {
+	it("keeps a legacy price-carrying package line priced at its rate", () => {
 		const html = buildReceiptHTML({
 			...doc,
 			items: [
@@ -263,19 +264,19 @@ describe("buildReceiptHTML (package allocation rows, Fase 2)", () => {
 			payments: [{ mode_of_payment: "Cash", amount: 23000 }],
 		})
 
-		expect(html).toContain("1 × 23.000")
-		expect(html).toContain("Legacy Paket")
+		expect(html).toContain("1x Legacy Paket")
+		expect(html).toContain("23.000")
 	})
 
-	it("keeps a zero-price legacy package row (no marker) as before", () => {
+	it("keeps a zero-price legacy package row (no marker) as a priced line", () => {
 		const html = buildReceiptHTML({
 			...doc,
 			items: [{ ...allocatedParent, item_name: "Gratis", pos_package_snapshot: null }],
 		})
 
 		// No allocation marker -> legacy rendering, price row included.
-		expect(html).toContain("1 × 0")
-		expect(html).not.toContain("<strong>Gratis</strong>")
+		expect(html).toContain("1x Gratis")
+		expect(html).not.toContain('class="bold">Gratis')
 	})
 })
 
@@ -297,7 +298,8 @@ describe("buildReceiptHTML (package grouped under its title)", () => {
 			],
 		})
 
-		expect(html).toContain("1 × 25.000")
+		expect(html).toContain("1x Paket Hemat")
+		expect(html).toContain("25.000")
 		expect(html).toContain("- 1x&nbsp;</span><span>Ropi Coklat")
 		expect(html).toContain("- 1x&nbsp;</span><span>Ropi Keju")
 		expect(html).not.toContain("15.000")
@@ -314,10 +316,13 @@ describe("buildReceiptHTML (package grouped under its title)", () => {
 			],
 		})
 
-		expect(html).toContain("2 × 23.000")
+		expect(html).toContain("2x Paket Hemat")
 		expect(html).toContain("46.000")
 		expect(html).toContain("- 2x&nbsp;</span><span>Ropi Coklat")
-		expect(html).not.toContain("2 × 0")
+		// The zero-rate component prints with no price cell.
+		expect(html).toContain(
+			'<div class="pkg-component"><span>- 2x&nbsp;</span><span>Ropi Coklat</span></div>',
+		)
 	})
 })
 
@@ -328,7 +333,7 @@ describe("buildReceiptHTML (queue block)", () => {
 		const queueStart = html.indexOf('class="queue-number"')
 		expect(queueStart).toBeGreaterThan(-1)
 		expect(queueStart).toBeGreaterThan(receiptStart)
-		expect(html.indexOf('class="header"')).toBeGreaterThan(queueStart)
+		expect(html.indexOf('class="text-center bold"')).toBeGreaterThan(queueStart)
 		expect(html).toContain(">048<")
 	})
 
@@ -336,7 +341,7 @@ describe("buildReceiptHTML (queue block)", () => {
 		const html = buildReceiptHTML({ ...doc, pos_queue_number: 48 })
 		const queueStart = html.indexOf('class="queue-number"')
 		const logoStart = html.indexOf("/files/ropi-logo.png")
-		const headerStart = html.indexOf('class="header"')
+		const headerStart = html.indexOf('class="text-center bold"')
 		expect(logoStart).toBeGreaterThan(queueStart)
 		expect(logoStart).toBeLessThan(headerStart)
 	})
@@ -344,7 +349,7 @@ describe("buildReceiptHTML (queue block)", () => {
 	it("renders the logo above the header even without a queue number", () => {
 		const html = buildReceiptHTML(doc)
 		const logoStart = html.indexOf("/files/ropi-logo.png")
-		const headerStart = html.indexOf('class="header"')
+		const headerStart = html.indexOf('class="text-center bold"')
 		expect(logoStart).toBeGreaterThan(-1)
 		expect(logoStart).toBeLessThan(headerStart)
 	})
@@ -651,6 +656,26 @@ describe("printWithSilentFallback (post-print failure stops the fallback, COR-FE
 	})
 })
 
+describe("buildReceiptHTML (draft header/footer overrides)", () => {
+	it("renders a draft header and footer when set, and nothing extra otherwise", () => {
+		const draftHtml = buildReceiptHTML({
+			...doc,
+			status: "Draft",
+			header: "Draft",
+			footer: "Disclaimer <b>x</b>",
+		})
+
+		expect(draftHtml).toContain('<div class="text-center bold">Draft</div>')
+		expect(draftHtml).toContain("Disclaimer &lt;b&gt;x&lt;/b&gt;")
+		expect(draftHtml).not.toContain("<b>x</b>")
+
+		// A normal receipt carries neither override.
+		const plainHtml = buildReceiptHTML(doc)
+		expect(plainHtml).not.toContain('<div class="text-center bold">Draft</div>')
+		expect(plainHtml).not.toContain("Disclaimer")
+	})
+})
+
 describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {	const evil = {
 		...doc,
 		name: 'SINV-1"><img src=x onerror=alert(1)>',
@@ -684,6 +709,9 @@ describe("buildReceiptHTML escapes data-sourced HTML (SEC-11)", () => {	const ev
 		expect(html).toContain("Bob &lt;b&gt;Evil&lt;/b&gt;")
 		expect(html).toContain("&lt;b&gt;Cash&lt;/b&gt;")
 		expect(html).toContain("SN&lt;img src=x&gt;")
+		// The draft header/footer overrides are escaped too.
+		expect(html).toContain("HEADER&lt;img src=x&gt;")
+		expect(html).toContain("FOOTER&lt;img src=x&gt;")
 	})
 
 	it("escapes the popup document title as well", () => {

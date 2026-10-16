@@ -106,6 +106,7 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		is_offline: true,
 		pos_profile: raw.pos_profile,
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
+		posting_time: raw.posting_time || null,
 		company: raw.company,
 		customer_name: raw.customer,
 		buyer_name: (raw.buyer_name || "").trim() || null,
@@ -164,6 +165,38 @@ export async function hydrateLocalOnlyInvoice(invoiceData) {
 export const RECEIPT_STYLES = receiptStylesFor(576)
 
 /**
+ * Class rules copied verbatim from the server "POS Next Receipt" print format,
+ * so the offline receipt renders exactly like the online one. Appended AFTER
+ * the dot-aware base stylesheet in buildReceiptDocumentHTML — later rules win
+ * where the two overlap (.footer, .total-row, .outstanding-row).
+ */
+const RECEIPT_TEMPLATE_CSS = `
+	.text-center { text-align: center; }
+	.bold { font-weight: bold; }
+	.divider { border-top: 2px dashed #333; margin: 6px 0; padding: 0; }
+	.info-row { display: flex; margin-bottom: 1px; }
+	.info-label { min-width: 54px; }
+	.info-value::before { content: ": "; }
+	.total-group { margin-top: 12px; }
+	.total-group .info-row { margin: 1px 0; }
+	.total-group .info-colon { width: 2px; }
+	.total-group .info-value { flex: 1; text-align: right; }
+	.total-group .info-value::before { content: ""; }
+	.row { display: table; width: 100%; margin: 2px 0; }
+	.row > span:first-child { display: table-cell; text-align: left; width: 60%; }
+	.row > span:last-child { display: table-cell; text-align: right; width: 40%; }
+	.item-section { margin-bottom: 6px; }
+	.pkg-component { display: flex; width: 60%; box-sizing: border-box; padding-left: 12px; margin: 2px 0; }
+	.pkg-component > span:first-child { white-space: nowrap; }
+	.discount-line { color: #28a745; padding-left: 10px; }
+	.serial-line { color: #666; background-color: #f5f5f5; padding: 4px 6px; margin-top: 4px; border-radius: 3px; }
+	.serial-label { margin-bottom: 2px; }
+	.total-row { font-weight: bold; border-top: 2px dashed #000; padding-top: 3px; }
+	.outstanding-row { color: #dc3545; background-color: #fff3cd; padding: 6px; margin-top: 8px; border-radius: 4px; }
+	.footer { border-top: 2px dashed #000; margin-top: 14px; padding-top: 10px; text-align: center; }
+`
+
+/**
  * Paper width (dots) the CURRENT print config resolves to: the transport's
  * server config alone (layout no longer reads device localStorage).
  * Receipts embed this so the stylesheet's @page/body width matches the paper
@@ -191,11 +224,31 @@ export function effectiveReceiptDots() {
 export function buildReceiptHTML(invoiceData) {
 	receiptCurrency = invoiceData.currency || null
 	const items = invoiceData.items || []
+	const totalQty = items.reduce(
+		(sum, item) => sum + (Number(item.quantity ?? item.qty) || 0),
+		0,
+	)
 	const paidAmount = derivePaidAmount(invoiceData)
 	const buyerName = (invoiceData.buyer_name || "").trim()
-	const partyLabel = buyerName ? __("Buyer:") : __("Customer:")
-	const partyValue =
-		buyerName || invoiceData.customer_name || invoiceData.customer || ""
+	const customerName = (
+		invoiceData.customer_name ||
+		invoiceData.customer ||
+		""
+	).trim()
+	const cashierName = (
+		invoiceData.cashier_name ||
+		invoiceData.cashier ||
+		""
+	).trim()
+	// Date row: the raw posting date + time, exactly as the Jinja template
+	// prints them (fractional seconds dropped).
+	const timestamp = `${invoiceData.posting_date || ""} ${
+		String(invoiceData.posting_time || "").split(".")[0]
+	}`.trim()
+	const isPartial =
+		invoiceData.status === "Partly Paid" ||
+		(invoiceData.outstanding_amount > 0 &&
+			invoiceData.outstanding_amount < invoiceData.grand_total)
 	// A package prints as one priced line (its whole instance's money, wherever
 	// it sits: the header in legacy mode, the components when allocated) with
 	// its components listed under it, indented and unpriced.
@@ -209,64 +262,60 @@ export function buildReceiptHTML(invoiceData) {
 	const itemsHtml = items
 		.map((item) => {
 			const instance = item.pos_package_instance
+			const qty = item.quantity || item.qty || 0
+			// A package component prints indented and unpriced; the package line
+			// above it carries the money.
 			if (instance && item.pos_package_role === "Package Item") {
-				// qty leads so it never wraps away from the name; a long name wraps
-				// under itself, not under the qty
 				return `
-						<div class="item-row" style="padding-left: 12px;">
-							<div class="item-name" style="display: flex;"><span style="white-space: nowrap;">- ${escapeHtml(item.quantity || item.qty || 0)}x&nbsp;</span><span>${escapeHtml(item.item_name || item.item_code)}</span></div>
+						<div class="item-section">
+							<div class="pkg-component"><span>- ${escapeHtml(qty)}x&nbsp;</span><span>${escapeHtml(item.item_name || item.item_code)}</span></div>
 						</div>`
 			}
 			if (instance && item.pos_package_role === "Package") {
-				const qty = item.quantity || item.qty || 0
 				const total = packageTotals[instance]
 				return `
-						<div class="item-row">
-							<div class="item-name">${escapeHtml(item.item_name || item.item_code)}</div>
-							<div class="item-details">
-								<span>${escapeHtml(qty)} × ${formatCurrency(qty ? total / qty : 0)}</span>
-								<span><strong>${formatCurrency(total)}</strong></span>
+						<div class="item-section">
+							<div class="row item-line">
+								<span>${escapeHtml(qty)}x ${escapeHtml(item.item_name || item.item_code)}</span>
+								<span>${formatCurrency(total)}</span>
 							</div>
 						</div>`
 			}
-			const hasDiscount =
-				(item.discount_percentage &&
-					Number.parseFloat(item.discount_percentage) > 0) ||
-				(item.discount_amount && Number.parseFloat(item.discount_amount) > 0)
-			const isFree = item.is_free_item
-			const qty = item.quantity || item.qty || 0
 			const displayRate = item.price_list_rate || item.rate || 0
-			const subtotal = qty * displayRate
+			const isFree = item.is_free_item
 			// Allocated packages move the money to the component rows, leaving the
-			// package line at rate 0: print it as a group header without a price
-			// instead of the meaningless "1 × 0". Legacy package lines (no
-			// allocation marker) render exactly as before, a free package included.
+			// package line at rate 0: print it as a group header without a price.
 			const isZeroPackageLine =
 				item.pos_package_role === "Package" &&
 				!displayRate &&
 				isAllocationSnapshot(item.pos_package_snapshot)
+			const hasDiscount =
+				(item.discount_percentage &&
+					Number.parseFloat(item.discount_percentage) > 0) ||
+				(item.discount_amount && Number.parseFloat(item.discount_amount) > 0)
+			const name = escapeHtml(item.item_name || item.item_code)
+			let line
+			if (isZeroPackageLine) {
+				line = `<span class="bold">${name}</span><span></span>`
+			} else if (isFree) {
+				line = `<span style="color: #28a745;">${escapeHtml(qty)}x ${name} (${__(
+					"FREE",
+				)})</span><span><span style="color: #28a745;">${formatCurrency(
+					0,
+				)}</span></span>`
+			} else {
+				line = `<span>${escapeHtml(qty)}x ${name}</span><span>${formatCurrency(
+					qty * displayRate,
+				)}</span>`
+			}
 			return `
-						<div class="item-row">
-							<div class="item-name">${
-								isZeroPackageLine
-									? `<strong>${escapeHtml(item.item_name || item.item_code)}</strong>`
-									: `${escapeHtml(item.item_name || item.item_code)} ${isFree ? __("(FREE)") : ""}`
-							}</div>
-							${
-								isZeroPackageLine
-									? ""
-									: `<div class="item-details">
-								<span>${escapeHtml(qty)} × ${formatCurrency(displayRate)}</span>
-								<span><strong>${formatCurrency(subtotal)}</strong></span>
-							</div>`
-							}
+						<div class="item-section">
+							<div class="row item-line">${line}</div>
 							${
 								hasDiscount
-									? `<div class="item-discount"><span>${__(
-											"Discount",
-										)}${
+									? `<div class="row discount-line"><span>${__("Discount")}${
 											item.discount_percentage
-												? `(${Number(item.discount_percentage).toFixed(2)}%)`
+												? ` (${Number(item.discount_percentage).toFixed(1)}%)`
 												: ""
 										}</span><span>-${formatCurrency(
 											item.discount_amount || 0,
@@ -275,11 +324,12 @@ export function buildReceiptHTML(invoiceData) {
 							}
 							${
 								item.serial_no
-									? `<div class="item-serials"><div class="item-serials-label">${__(
+									? `<div class="serial-line"><div class="serial-label">${__(
 											"Serial No:",
-										)}</div><div class="item-serials-list">${escapeHtml(
-											String(item.serial_no),
-										).replace(/\n/g, ", ")}</div></div>`
+										)}</div><div>${escapeHtml(String(item.serial_no)).replace(
+											/\n/g,
+											", ",
+										)}</div></div>`
 									: ""
 							}
 						</div>`
@@ -299,119 +349,137 @@ export function buildReceiptHTML(invoiceData) {
 				}
 				<!-- Brand logo centred above the company header (offline receipt) -->
 				<div style="text-align: center; margin-bottom: 6px;"><img src="/files/ropi-logo.png" style="display: block; margin: 0 auto; position: relative; top: 8px; width: 14mm; height: auto;" alt=""></div>
-				<div class="header">
-					<div class="company-name">${escapeHtml(invoiceData.company || "POS Next")}</div>
-					<div style="font-size: 12px;">${escapeHtml(invoiceData.header || __("TAX INVOICE"))}</div>
-				</div>
+				<div class="text-center bold">${escapeHtml(invoiceData.company || "POS Next")}</div>
+				${
+					invoiceData.company_address_line
+						? `<div class="text-center" style="font-size: 10px; margin-bottom: 2px;">${escapeHtml(
+								invoiceData.company_address_line,
+							)}</div>`
+						: ""
+				}
+
+				${invoiceData.header ? `<div class="text-center bold">${escapeHtml(invoiceData.header)}</div>` : ""}
 
 				${invoiceData.is_offline ? `<div class="offline-badge">${__("OFFLINE — PENDING SYNC")}</div>` : ""}
 
-				<div class="invoice-info">
-					<div><span>${__("Invoice #:")}</span><span><strong>${escapeHtml(invoiceData.name)}</strong></span></div>
-					<div><span>${__("Date:")}</span><span>${parseDateOnly(
-						invoiceData.posting_date || Date.now(),
-					).toLocaleString()}</span></div>
-						${
-							partyValue
-								? `<div><span>${partyLabel}</span><span>${escapeHtml(partyValue)}</span></div>`
+				<div class="divider" style="margin-top: 14px; margin-bottom: 4px;"></div>
+
+				<div style="margin-bottom: 4px; line-height: 1.25;">
+					<div class="info-row"><span class="info-label">${__("Invoice")}</span><span class="info-value">${escapeHtml(invoiceData.name)}</span></div>
+					${
+						cashierName
+							? `<div class="info-row"><span class="info-label">${__(
+									"Cashier",
+								)}</span><span class="info-value">${escapeHtml(cashierName)}</span></div>`
+							: ""
+					}
+					<div class="info-row"><span class="info-label">${__("Date")}</span><span class="info-value">${escapeHtml(timestamp)}</span></div>
+					${
+						buyerName
+							? `<div class="info-row"><span class="info-label">${__(
+									"Buyer",
+								)}</span><span class="info-value">${escapeHtml(buyerName)}</span></div>`
+							: customerName
+								? `<div class="info-row"><span class="info-label">${__(
+										"Customer",
+									)}</span><span class="info-value">${escapeHtml(customerName)}</span></div>`
 								: ""
-						}
+					}
 					${
-						invoiceData.status === "Partly Paid" ||
-						(
-							invoiceData.outstanding_amount &&
-								invoiceData.outstanding_amount > 0 &&
-								invoiceData.outstanding_amount < invoiceData.grand_total
-						)
-							? `<div class="partial-status"><span>${__("Status:")}</span><span>${__(
-									"PARTIAL PAYMENT",
-								)}</span></div>`
+						isPartial
+							? `<div class="info-row" style="color: #dc3545;"><span class="info-label">${__(
+									"Status",
+								)}</span><span class="info-value">${__("PARTIAL PAYMENT")}</span></div>`
 							: ""
 					}
 				</div>
 
-				<div class="items-table">
-					${itemsHtml}
-				</div>
+				<div class="divider" style="margin-top: 14px; margin-bottom: 4px;"></div>
 
-				<div class="totals">
-					${
-						invoiceData.total_taxes_and_charges &&
-						invoiceData.total_taxes_and_charges > 0
-							? `
-					<div class="total-row"><span>${__("Subtotal:")}</span><span>${formatCurrency(
-						(invoiceData.grand_total || 0) -
-							(invoiceData.total_taxes_and_charges || 0),
-					)}</span></div>
-					<div class="total-row"><span>${__("Tax:")}</span><span>${formatCurrency(
-						invoiceData.total_taxes_and_charges,
-					)}</span></div>`
-							: ""
-					}
-					${
-						invoiceData.discount_amount
-							? `
-					<div class="total-row" style="color: #28a745;"><span>${__("Additional Discount")}${
-						invoiceData.additional_discount_percentage
-							? ` (${Number(invoiceData.additional_discount_percentage).toFixed(
-									1,
-								)}%)`
-							: ""
-					}:</span><span>-${formatCurrency(
-						Math.abs(invoiceData.discount_amount),
-					)}</span></div>`
-							: ""
-					}
-					<div class="total-row grand-total"><span>${__("TOTAL:")}</span><span>${formatCurrency(
-						invoiceData.grand_total,
-					)}</span></div>
+				${itemsHtml}
+
+				<div class="info-row" style="margin-top: 10px;">
+					<span class="info-label">${__("Total Qty")}</span>
+					<span class="info-value">${escapeHtml(totalQty)}</span>
 				</div>
 
 				${
-					invoiceData.payments && invoiceData.payments.length > 0
-						? `
-				<div class="payments">
-					<div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">${__("Payments:")}</div>
-					${invoiceData.payments
+					invoiceData.total_taxes_and_charges &&
+					invoiceData.total_taxes_and_charges > 0
+						? `<div class="row"><span>${__("Subtotal:")}</span><span>${formatCurrency(
+								(invoiceData.grand_total || 0) -
+									(invoiceData.total_taxes_and_charges || 0),
+							)}</span></div>
+					<div class="row"><span>${__("Tax:")}</span><span>${formatCurrency(
+						invoiceData.total_taxes_and_charges,
+					)}</span></div>`
+						: ""
+				}
+				${
+					invoiceData.discount_amount
+						? `<div class="row" style="color: #28a745;"><span>${__(
+								"Additional Discount",
+							)}${
+								invoiceData.additional_discount_percentage
+									? ` (${Number(
+											invoiceData.additional_discount_percentage,
+										).toFixed(1)}%)`
+									: ""
+							}:</span><span>-${formatCurrency(
+								Math.abs(invoiceData.discount_amount),
+							)}</span></div>`
+						: ""
+				}
+				<div class="total-group">
+					<div class="info-row total-row">
+						<span class="info-label">${__("TOTAL")}</span><span class="info-colon">:</span>
+						<span class="info-value">${formatCurrency(
+							invoiceData.grand_total,
+						)}</span>
+					</div>
+					${(invoiceData.payments || [])
 						.map(
-								(p) =>
-									`<div class="payment-row"><span>${
-										escapeHtml(p.mode_of_payment)
-									}:</span><span>${formatCurrency(p.amount)}</span></div>`,
+							(p) =>
+								`<div class="info-row"><span class="info-label">${escapeHtml(
+									p.mode_of_payment,
+								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
+									p.amount,
+								)}</span></div>`,
 						)
 						.join("")}
-					<div class="payment-row total-paid"><span>${__("Total Paid:")}</span><span>${formatCurrency(
-						paidAmount,
-					)}</span></div>
+					${
+						paidAmount
+							? `<div class="info-row"><span class="info-label">${__(
+									"Paid",
+								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
+									paidAmount,
+								)}</span></div>`
+							: ""
+					}
 					${
 						invoiceData.change_amount && invoiceData.change_amount > 0
-							? `<div class="payment-row" style="font-weight: bold; margin-top: 5px;"><span>${__(
-									"Change:",
-								)}</span><span>${formatCurrency(
+							? `<div class="info-row"><span class="info-label">${__(
+									"Change",
+								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
 									invoiceData.change_amount,
 								)}</span></div>`
 							: ""
 					}
 					${
 						invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0
-							? `<div class="outstanding-row"><span>${__(
-									"BALANCE DUE:",
-								)}</span><span>${formatCurrency(
+							? `<div class="info-row outstanding-row"><span class="info-label">${__(
+									"Due",
+								)}</span><span class="info-colon">:</span><span class="info-value">${formatCurrency(
 									invoiceData.outstanding_amount,
 								)}</span></div>`
 							: ""
 					}
-				</div>`
-						: ""
-				}
+				</div>
 
 				<div class="footer">
-					<div style="margin-bottom: 5px;">${escapeHtml(invoiceData.footer || __("Thank you for your business!"))}</div>
-					${
-						invoiceData.footer
-							? ""
-							: `<div style="font-size: 10px;">${__("Powered by")} <a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>`
-					}
+					${invoiceData.footer ? `<div style="margin-bottom: 4px;">${escapeHtml(invoiceData.footer)}</div>` : ""}
+					<div style="margin-bottom: 4px;">${__("Thank you")}</div>
+					<div style="color: #888;">${__("Powered by POS Next")}</div>
 				</div>
 			</div>`
 }
@@ -437,7 +505,7 @@ export function buildReceiptDocumentHTML(
 		<head>
 			<meta charset="UTF-8">
 			<title>${__("Invoice - {0}", [escapeHtml(invoiceData.name)])}</title>
-			<style>${receiptStylesFor(dots ?? 576)}</style>
+			<style>${receiptStylesFor(dots ?? 576)}${RECEIPT_TEMPLATE_CSS}</style>
 		</head>
 		<body>
 			${buildReceiptHTML(invoiceData)}
