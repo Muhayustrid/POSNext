@@ -42,6 +42,12 @@ POS_ROLES = {"POSNext Cashier", "POSNext Manager"}
 #   reversal doctype 25 Sep memindahkan mode faktur situs dari Sales Invoice
 #   ke POS Invoice, jadi baris kloning persis baris Sales Invoice per persona;
 #   tanpa read POS Invoice, "Lihat Detail" kasir di SPA 417 (E2E-01 27 Sep).
+# - Stock Reconciliation (pn-cshr/pn-mgr-stock-reconciliation):
+#   Stock Opname outlet — spec P1, Custom DocPerm read/write/create/delete.
+# - Serial and Batch Bundle (pn-cshr/pn-mgr-serial-batch-bundle):
+#   menyimpan opname baris serial kosong (reconcile_all) memanggil
+#   StockReconciliation.set_current_serial_and_batch_bundle → bundle.save();
+#   tanpa create, kasir gagal menyimpan (plan Task 3 Step 3).
 ALLOWED_PARENTS = {
     "Account",
     "Bin",
@@ -59,6 +65,8 @@ ALLOWED_PARENTS = {
     "Purchase Receipt",
     "Sales Invoice",
     "Sales Invoice Item",
+    "Serial and Batch Bundle",
+    "Stock Reconciliation",
     "Territory",
     "Warehouse",
 }

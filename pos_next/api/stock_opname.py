@@ -525,22 +525,25 @@ def _merge_rows(doc, ops, warehouse):
 	"""Merge file ops onto the doc's current rows (U8), keeping rows not in the file.
 
 	Key (item_code, batch_no); serial items aggregate per item: qty 1 adds the
-	serial, 0 removes it. Returns ERPNext row dicts via `_validated_rows`.
+	serial, 0 removes it. A serial item touched by the file whose merged serial
+	set is empty is written as a qty-0 serial row (counted, none present) — the
+	same representation Task 3 uses. Returns (rows, applied) where applied counts
+	file ops whose target survived into `rows`.
 	"""
 	current = {}
-	pre = set()
 	for row in doc.items if doc else []:
 		meta = _item_flags(row.item_code)
 		if meta and meta.has_serial_no:
-			key = (row.item_code, None)
-			current[key] = {
+			current[(row.item_code, None)] = {
 				"item_code": row.item_code,
 				"serial_nos": {s.strip() for s in (row.serial_no or "").split("\n") if s.strip()},
 			}
 		else:
-			key = (row.item_code, row.batch_no)
-			current[key] = {"item_code": row.item_code, "batch_no": row.batch_no, "qty": row.qty}
-		pre.add(key)
+			current[(row.item_code, row.batch_no)] = {
+				"item_code": row.item_code,
+				"batch_no": row.batch_no,
+				"qty": row.qty,
+			}
 	for op in ops:
 		if "serial" in op:
 			entry = current.setdefault((op["item_code"], None), {"item_code": op["item_code"], "serial_nos": set()})
@@ -555,16 +558,15 @@ def _merge_rows(doc, ops, warehouse):
 				"qty": op["qty"],
 			}
 	entries = []
-	for key, val in current.items():
+	for val in current.values():
 		if "serial_nos" in val:
-			if not val["serial_nos"] and key not in pre:
-				continue  # absent serial with no draft row: nothing to record
 			entries.append({"item_code": val["item_code"], "serial_nos": sorted(val["serial_nos"])})
 		else:
 			entries.append({"item_code": val["item_code"], "qty": val["qty"], "batch_no": val["batch_no"]})
 	if not entries:
-		return []
-	return _validated_rows(entries, warehouse)
+		return [], 0
+	applied = sum(1 for op in ops if (op["item_code"], None if "serial" in op else op["batch_no"]) in current)
+	return _validated_rows(entries, warehouse), applied
 
 
 @frappe.whitelist()
@@ -584,7 +586,9 @@ def import_opname_template(pos_profile, file_url, name=None):
 		rows = read_xlsx_file_from_attached_file(file_url=file_url)
 		ops, skipped, errors = _parse_import(rows, warehouse)
 		target = _import_target(name, warehouse)
-		merged = _merge_rows(target, ops, warehouse) if ops else []
+		# Merge (and validate) before any state change, so a failure cannot
+		# leave a Rejected doc revised to Draft with nothing applied.
+		merged, applied = _merge_rows(target, ops, warehouse) if ops else ([], 0)
 		if not merged:
 			return {"name": target.name if target else None, "applied": 0, "skipped": skipped, "errors": errors}
 		if target is None:
@@ -605,7 +609,7 @@ def import_opname_template(pos_profile, file_url, name=None):
 				target.append("items", row)
 			target.save()
 			doc = target
-		return {"name": doc.name, "applied": len(ops), "skipped": skipped, "errors": errors}
+		return {"name": doc.name, "applied": applied, "skipped": skipped, "errors": errors}
 	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:

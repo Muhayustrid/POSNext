@@ -516,6 +516,27 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		self.assertEqual(sorted(row["serial_nos"]), sorted([self.serials[0], self.serials[2]]))
 		self.assertEqual(row["qty"], 2)
 
+	def test_import_all_serials_absent_writes_zero_row(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template, save_opname
+
+		self._cashier()
+		# Draft has no row for the serial item; the file marks every serial absent.
+		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 1}]})
+		url = self._attach(
+			[
+				TEMPLATE_HEADER,
+				[self.serial_item, "", "", "", self.serials[0], 0],
+				[self.serial_item, "", "", "", self.serials[1], 0],
+				[self.serial_item, "", "", "", self.serials[2], 0],
+			]
+		)
+		result = import_opname_template(self.profile, url, name=draft["name"])
+		self.assertEqual(result["applied"], 3)
+		rows = {r["item_code"]: r for r in get_opname(self.profile, draft["name"])["items"]}
+		self.assertIn(self.serial_item, rows)
+		self.assertEqual(rows[self.serial_item]["serial_nos"], [])
+		self.assertEqual(rows[self.serial_item]["qty"], 0)
+
 	def test_import_reports_bad_rows_and_applies_good(self):
 		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
 
