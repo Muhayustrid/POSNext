@@ -22,6 +22,7 @@ from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import (
 )
 from frappe import _
 
+from pos_next.services.production import _resolve_profile
 from pos_next.stock_opname_setup import HQ_ROLES
 
 DOCTYPE = "Stock Reconciliation"
@@ -30,7 +31,7 @@ DOCTYPE = "Stock Reconciliation"
 class CustomStockReconciliation(StockReconciliation):
 	def remove_items_with_no_change(self):
 		# Drafts keep every counted row (blind count); filter only on submit.
-		if self.docstatus == 0 and self._action != "submit":
+		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
 			return
 		try:
 			super().remove_items_with_no_change()
@@ -65,18 +66,27 @@ class CustomStockReconciliation(StockReconciliation):
 
 
 def outlet_warehouses(user=None):
-	"""Warehouses of POS Profiles `user` is a `POS Profile User` of."""
+	"""Warehouses of POS Profiles `user` is a `POS Profile User` of.
+
+	Resolved through `_resolve_profile` (same as creation in Task 3): a
+	profile with an empty warehouse falls back to the company default.
+	Unresolvable profiles are skipped.
+	"""
 	user = user or frappe.session.user
 	profiles = frappe.get_all(
 		"POS Profile User",
 		filters={"user": user, "parenttype": "POS Profile"},
 		pluck="parent",
 	)
-	if not profiles:
-		return []
-	return [
-		w for w in frappe.get_all("POS Profile", filters={"name": ["in", profiles]}, pluck="warehouse") if w
-	]
+	warehouses = []
+	for profile in profiles:
+		try:
+			_warehouse = _resolve_profile(profile)[1]
+		except Exception:
+			continue
+		if _warehouse and _warehouse not in warehouses:
+			warehouses.append(_warehouse)
+	return warehouses
 
 
 def is_hq_user(user=None):

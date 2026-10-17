@@ -274,3 +274,31 @@ class TestStockOpnameOverride(FrappeTestCase):
 		visible = frappe.get_list(DOCTYPE, pluck="name")
 		self.assertIn(own.name, visible)
 		self.assertIn(foreign.name, visible)
+
+	def test_empty_profile_warehouse_resolves_company_fallback(self):
+		from pos_next.overrides.stock_reconciliation import outlet_warehouses
+
+		fallback = frappe.db.get_value(
+			"Warehouse", {"company": self.company, "is_group": 0, "disabled": 0}, "name"
+		)
+		self.assertTrue(fallback, "site needs a default warehouse for _Test Company")
+		src = frappe.get_doc("POS Profile", self.profile)
+		profile = frappe.copy_doc(src)
+		profile.name = f"SO-T-{uuid.uuid4().hex[:8]}"
+		profile.applicable_for_users = []
+		profile.insert(ignore_permissions=True, set_name=profile.name)
+		# warehouse is mandatory on the form; empty it direct-to-DB to mimic
+		# legacy data and exercise the _resolve_profile company fallback.
+		profile.db_set("warehouse", None)
+		self.addCleanup(frappe.delete_doc, "POS Profile", profile.name, force=True, ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": profile.name,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": self.cashier,
+			}
+		).insert(ignore_permissions=True)
+
+		self.assertIn(fallback, outlet_warehouses(self.cashier))
