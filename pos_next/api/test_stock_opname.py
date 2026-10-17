@@ -43,7 +43,12 @@ def _make_user(role):
 	return email
 
 
-class TestStockOpnameApi(FrappeTestCase):
+class _StockOpnameFixture(FrappeTestCase):
+	"""Shared fixtures: warehouse + profile + items for both test classes.
+
+	No ``test_`` methods, so unittest collects nothing from this base.
+	"""
+
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
@@ -155,6 +160,8 @@ class TestStockOpnameApi(FrappeTestCase):
 	def _cashier(self):
 		frappe.set_user(self.cashier)
 
+
+class TestStockOpnameApi(_StockOpnameFixture):
 	def test_save_get_roundtrip_is_blind(self):
 		from pos_next.api.stock_opname import get_opname, save_opname
 
@@ -337,3 +344,222 @@ class TestStockOpnameApi(FrappeTestCase):
 		submit_opname(self.profile, payload["name"])
 		with self.assertRaisesRegex(frappe.ValidationError, "Self approval is not allowed"):
 			apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Approve")
+
+
+class TestStockOpnameExcel(_StockOpnameFixture):
+	"""Task 4: Excel template download and upload-merge (spec U7, U8)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		# Stock in cls.warehouse so every fixture item has a Bin there (the
+		# template source). Plain + batch via _seed_stock; serials need a
+		# serial_no column on the receipt row.
+		_seed_stock(cls.plain, cls.warehouse, 5)
+		_seed_stock(cls.batch_item, cls.warehouse, 3, batch_no=cls.batch_a)
+		_seed_stock(cls.batch_item, cls.warehouse, 2, batch_no=cls.batch_b)
+		se = frappe.new_doc("Stock Entry")
+		se.purpose = "Material Receipt"
+		se.company = cls.company
+		se.set_stock_entry_type()
+		se.append(
+			"items",
+			{
+				"item_code": cls.serial_item,
+				"qty": len(cls.serials),
+				"t_warehouse": cls.warehouse,
+				"use_serial_batch_fields": 1,
+				"basic_rate": 10,
+				"serial_no": "\n".join(cls.serials),
+			},
+		)
+		se.insert()
+		se.submit()
+		frappe.db.commit()
+
+	def _attach(self, rows):
+		"""Attach an in-memory workbook as a private File owned by the session user."""
+		from frappe.utils.xlsxutils import make_xlsx
+
+		content = make_xlsx(rows, "opname").getvalue()
+		file = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": f"so-{uuid.uuid4().hex[:8]}.xlsx",
+				"content": content,
+				"is_private": 1,
+			}
+		).insert(ignore_permissions=True)
+		return file.file_url
+
+	def _template_data_rows(self, item_group=None):
+		self._cashier()
+		frappe.local.response = frappe._dict()
+		from pos_next.api.stock_opname import download_opname_template
+
+		download_opname_template(self.profile, item_group)
+		from io import BytesIO
+
+		from openpyxl import load_workbook
+
+		ws = load_workbook(BytesIO(frappe.local.response["filecontent"])).active
+		return [[c.value for c in row] for row in ws.iter_rows()]
+
+	def test_template_has_header_and_blind_columns(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER
+
+		rows = self._template_data_rows()
+		self.assertEqual(rows[0], TEMPLATE_HEADER)
+		data = rows[1:]
+		# Blind count: no counted qty is pre-filled.
+		self.assertTrue(all(r[5] in (None, "") for r in data))
+		batch_rows = [r for r in data if r[0] == self.batch_item]
+		self.assertEqual({r[3] for r in batch_rows}, {self.batch_a, self.batch_b})
+		serial_rows = [r for r in data if r[0] == self.serial_item]
+		self.assertEqual({r[4] for r in serial_rows}, set(self.serials))
+		self.assertEqual(len([r for r in data if r[0] == self.plain]), 1)
+
+	def test_template_item_group_filter_includes_descendants(self):
+		from pos_next.api.stock_opname import _template_rows
+
+		frappe.set_user(ADMIN)
+		parent = (
+			frappe.get_doc(
+				{
+					"doctype": "Item Group",
+					"item_group_name": f"SO-P-{uuid.uuid4().hex[:6]}",
+					"parent_item_group": "All Item Groups",
+					"is_group": 1,
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+		child = (
+			frappe.get_doc(
+				{
+					"doctype": "Item Group",
+					"item_group_name": f"SO-C-{uuid.uuid4().hex[:6]}",
+					"parent_item_group": parent,
+					"is_group": 0,
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+		other = (
+			frappe.get_doc(
+				{
+					"doctype": "Item Group",
+					"item_group_name": f"SO-Q-{uuid.uuid4().hex[:6]}",
+					"parent_item_group": "All Item Groups",
+					"is_group": 0,
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+		item = _make_test_item(item_group=child)
+		_seed_stock(item, self.warehouse, 1)
+		frappe.db.commit()
+
+		self.assertIn(item, [r[0] for r in _template_rows(self.warehouse, parent)])
+		self.assertIn(item, [r[0] for r in _template_rows(self.warehouse, child)])
+		self.assertNotIn(item, [r[0] for r in _template_rows(self.warehouse, other)])
+
+	def test_import_merges_and_keeps_rows_not_in_file(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template, save_opname
+
+		self._cashier()
+		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 3}]})
+		url = self._attach(
+			[
+				TEMPLATE_HEADER,
+				[self.other_plain, "", "", "", "", 4],
+				[self.plain, "", "", "", "", ""],
+			]
+		)
+		result = import_opname_template(self.profile, url, name=draft["name"])
+		self.assertEqual(result["applied"], 1)
+		got = get_opname(self.profile, draft["name"])
+		self.assertEqual({r["item_code"]: r["qty"] for r in got["items"]}, {self.plain: 3, self.other_plain: 4})
+
+	def test_import_zero_means_counted_none(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template
+
+		self._cashier()
+		url = self._attach([TEMPLATE_HEADER, [self.plain, "", "", "", "", 0]])
+		result = import_opname_template(self.profile, url)
+		self.assertEqual(result["applied"], 1)
+		got = get_opname(self.profile, result["name"])
+		self.assertEqual(got["items"][0]["qty"], 0)
+
+	def test_import_serial_presence_toggles(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template, save_opname
+
+		self._cashier()
+		draft = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.serial_item, "serial_nos": [self.serials[1], self.serials[2]]}]},
+		)
+		url = self._attach(
+			[
+				TEMPLATE_HEADER,
+				[self.serial_item, "", "", "", self.serials[0], 1],
+				[self.serial_item, "", "", "", self.serials[1], 0],
+			]
+		)
+		result = import_opname_template(self.profile, url, name=draft["name"])
+		self.assertEqual(result["applied"], 2)
+		row = get_opname(self.profile, draft["name"])["items"][0]
+		self.assertEqual(sorted(row["serial_nos"]), sorted([self.serials[0], self.serials[2]]))
+		self.assertEqual(row["qty"], 2)
+
+	def test_import_reports_bad_rows_and_applies_good(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
+
+		self._cashier()
+		url = self._attach(
+			[
+				TEMPLATE_HEADER,
+				[self.plain, "", "", "", "", 4],  # row 2: good
+				[f"NOPE-{uuid.uuid4().hex[:6]}", "", "", "", "", 1],  # row 3: unknown item
+				[self.batch_item, "", "", self.foreign_batch, "", 1],  # row 4: batch of another item
+				[self.serial_item, "", "", "", "NOPE-SER-1", 1],  # row 5: serial not of item
+				[self.other_plain, "", "", "", "", "abc"],  # row 6: non-numeric qty
+				[self.plain, "", "", "", "", 9],  # row 7: duplicate key
+			]
+		)
+		result = import_opname_template(self.profile, url)
+		self.assertEqual(result["applied"], 1)
+		self.assertEqual(len(result["errors"]), 5)
+		self.assertEqual(sorted(e["row"] for e in result["errors"]), [3, 4, 5, 6, 7])
+
+	def test_import_into_pending_rejected(self):
+		from pos_next.api.stock_opname import (
+			TEMPLATE_HEADER,
+			get_opname,
+			import_opname_template,
+			save_opname,
+			submit_opname,
+		)
+
+		self._cashier()
+		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, draft["name"])
+		url = self._attach([TEMPLATE_HEADER, [self.plain, "", "", "", "", 5]])
+		with self.assertRaises(frappe.ValidationError):
+			import_opname_template(self.profile, url, name=draft["name"])
+		# Rejected target is revised back to Draft and the file applies.
+		frappe.set_user(ADMIN)
+		doc = frappe.get_doc(DOCTYPE, draft["name"])
+		doc.db_set("workflow_state", STATE_REJECTED)
+		frappe.db.commit()
+		self._cashier()
+		url2 = self._attach([TEMPLATE_HEADER, [self.plain, "", "", "", "", 5]])
+		result = import_opname_template(self.profile, url2, name=draft["name"])
+		self.assertEqual(result["applied"], 1)
+		got = get_opname(self.profile, draft["name"])
+		self.assertEqual(got["workflow_state"], STATE_DRAFT)
+		self.assertEqual(got["items"][0]["qty"], 5)

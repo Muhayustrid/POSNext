@@ -24,6 +24,7 @@ from pos_next.stock_opname_setup import STATE_APPROVED, STATE_DRAFT, STATE_PENDI
 DOCTYPE = "Stock Reconciliation"
 REJECT_PREFIX = "Rejected: "
 EDITABLE_STATES = (STATE_DRAFT, STATE_REJECTED)
+TEMPLATE_HEADER = ["Item Code", "Item Name", "UOM", "Batch No", "Serial No", "Counted Qty"]
 
 
 def _parse_data(data):
@@ -372,3 +373,246 @@ def get_item_serials(pos_profile, item_code):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Opname Serials Error")
 		frappe.throw(_("Error fetching serials: {0}").format(str(e)))
+
+
+def _template_rows(warehouse, item_group=None):
+	"""Blank count rows: one per item with a Bin, per stocked batch / warehouse serial."""
+	item_codes = frappe.get_all("Bin", filters={"warehouse": warehouse}, pluck="item_code", distinct=True)
+	if not item_codes:
+		return []
+	items = frappe.get_all(
+		"Item",
+		filters={"name": ("in", item_codes), "is_stock_item": 1, "disabled": 0},
+		fields=["item_code", "item_name", "stock_uom", "item_group", "has_batch_no", "has_serial_no"],
+		order_by="item_code asc",
+	)
+	if item_group:
+		groups = set(frappe.db.get_descendants("Item Group", item_group) or [])
+		groups.add(item_group)
+		items = [i for i in items if i.item_group in groups]
+	from erpnext.stock.doctype.batch.batch import get_batch_qty
+
+	rows = []
+	for item in items:
+		if item.has_batch_no:
+			for batch in get_batch_qty(item_code=item.item_code, warehouse=warehouse) or []:
+				if (batch.get("qty") or 0) > 0:
+					rows.append([item.item_code, item.item_name, item.stock_uom, batch.get("batch_no"), "", ""])
+		elif item.has_serial_no:
+			serials = frappe.get_all(
+				"Serial No",
+				filters={"item_code": item.item_code, "warehouse": warehouse},
+				pluck="name",
+				order_by="name asc",
+			)
+			for serial in serials:
+				rows.append([item.item_code, item.item_name, item.stock_uom, "", serial, ""])
+		else:
+			rows.append([item.item_code, item.item_name, item.stock_uom, "", "", ""])
+	return rows
+
+
+@frappe.whitelist()
+def download_opname_template(pos_profile, item_group=None):
+	"""Download the blank count sheet (.xlsx) for the profile warehouse (U7)."""
+	_company, warehouse = _profile_warehouse(pos_profile)
+	from frappe.utils.xlsxutils import build_xlsx_response
+
+	return build_xlsx_response(
+		[TEMPLATE_HEADER, *_template_rows(warehouse, item_group)], f"stock-opname-{warehouse}"
+	)
+
+
+def _import_target(name, warehouse):
+	"""Resolve the doc to merge into: named, the open opname, or None (new).
+
+	Pending/Approved targets (not editable) raise; Rejected targets are returned
+	as-is and revised by the caller so U3 holds for uploads.
+	"""
+	if name:
+		doc = _get_doc(name)
+		_assert_doc_warehouse(doc, warehouse)
+	else:
+		open_name = frappe.db.get_value(DOCTYPE, {"docstatus": 0, "set_warehouse": warehouse}, "name")
+		if not open_name:
+			return None
+		doc = _get_doc(open_name)
+	if doc.workflow_state not in EDITABLE_STATES:
+		frappe.throw(_("Only a Draft or Rejected opname can be edited"), ValidationError)
+	return doc
+
+
+def _parse_import(rows, warehouse):
+	"""Validate file rows into merge ops; collect per-row errors (never abort).
+
+	Reuses `_validated_rows` per row and adds only the checks it lacks (blank
+	qty skip, serial qty 0/1, serial in this warehouse, duplicate key).
+	Returns (ops, skipped, errors).
+	"""
+	if not rows:
+		frappe.throw(_("The file is empty"), ValidationError)
+	header = [str(c).strip() if c is not None else "" for c in rows[0]]
+	missing = [h for h in TEMPLATE_HEADER if h not in header]
+	if missing:
+		frappe.throw(_("Invalid template: missing column(s) {0}").format(", ".join(missing)), ValidationError)
+	col = {h: header.index(h) for h in TEMPLATE_HEADER}
+
+	def cell(row, key):
+		i = col[key]
+		return row[i] if i < len(row) else None
+
+	ops, errors, skipped, seen = [], [], 0, set()
+	for i, row in enumerate(rows[1:], start=2):  # header is row 1
+		item_code = str(cell(row, "Item Code") or "").strip()
+		qty_cell = cell(row, "Counted Qty")
+		if not item_code or qty_cell is None or (isinstance(qty_cell, str) and not qty_cell.strip()):
+			skipped += 1
+			continue
+		try:
+			qty = float(qty_cell)
+		except (TypeError, ValueError):
+			errors.append(
+				{"row": i, "item_code": item_code, "message": _("Counted qty for {0} must be a number").format(item_code)}
+			)
+			continue
+		batch_no = str(cell(row, "Batch No") or "").strip() or None
+		serial_no = str(cell(row, "Serial No") or "").strip() or None
+		meta = _item_flags(item_code)
+		is_serial = bool(meta and meta.has_serial_no)
+		key = (item_code, serial_no if is_serial else batch_no)
+		if key in seen:
+			errors.append({"row": i, "item_code": item_code, "message": _("Duplicate row for {0}").format(item_code)})
+			continue
+		seen.add(key)
+		if is_serial:
+			if qty not in (0, 1):
+				errors.append(
+					{
+						"row": i,
+						"item_code": item_code,
+						"message": _("Serial qty for {0} must be 0 or 1").format(item_code),
+					}
+				)
+				continue
+			if not serial_no:
+				errors.append({"row": i, "item_code": item_code, "message": _("Serial no is required for {0}").format(item_code)})
+				continue
+			try:
+				_validated_rows([{"item_code": item_code, "serial_nos": [serial_no]}], warehouse)
+			except ValidationError as e:
+				errors.append({"row": i, "item_code": item_code, "message": str(e)})
+				continue
+			if frappe.db.get_value("Serial No", serial_no, "warehouse") != warehouse:
+				errors.append(
+					{"row": i, "item_code": item_code, "message": _("Serial {0} is not in this warehouse").format(serial_no)}
+				)
+				continue
+			ops.append({"item_code": item_code, "serial": serial_no, "present": bool(qty)})
+		else:
+			entry = {"item_code": item_code, "qty": qty}
+			if batch_no:
+				entry["batch_no"] = batch_no
+			try:
+				_validated_rows([entry], warehouse)
+			except ValidationError as e:
+				errors.append({"row": i, "item_code": item_code, "message": str(e)})
+				continue
+			ops.append({"item_code": item_code, "batch_no": batch_no, "qty": qty})
+	return ops, skipped, errors
+
+
+def _merge_rows(doc, ops, warehouse):
+	"""Merge file ops onto the doc's current rows (U8), keeping rows not in the file.
+
+	Key (item_code, batch_no); serial items aggregate per item: qty 1 adds the
+	serial, 0 removes it. Returns ERPNext row dicts via `_validated_rows`.
+	"""
+	current = {}
+	pre = set()
+	for row in doc.items if doc else []:
+		meta = _item_flags(row.item_code)
+		if meta and meta.has_serial_no:
+			key = (row.item_code, None)
+			current[key] = {
+				"item_code": row.item_code,
+				"serial_nos": {s.strip() for s in (row.serial_no or "").split("\n") if s.strip()},
+			}
+		else:
+			key = (row.item_code, row.batch_no)
+			current[key] = {"item_code": row.item_code, "batch_no": row.batch_no, "qty": row.qty}
+		pre.add(key)
+	for op in ops:
+		if "serial" in op:
+			entry = current.setdefault((op["item_code"], None), {"item_code": op["item_code"], "serial_nos": set()})
+			if op["present"]:
+				entry["serial_nos"].add(op["serial"])
+			else:
+				entry["serial_nos"].discard(op["serial"])
+		else:
+			current[(op["item_code"], op["batch_no"])] = {
+				"item_code": op["item_code"],
+				"batch_no": op["batch_no"],
+				"qty": op["qty"],
+			}
+	entries = []
+	for key, val in current.items():
+		if "serial_nos" in val:
+			if not val["serial_nos"] and key not in pre:
+				continue  # absent serial with no draft row: nothing to record
+			entries.append({"item_code": val["item_code"], "serial_nos": sorted(val["serial_nos"])})
+		else:
+			entries.append({"item_code": val["item_code"], "qty": val["qty"], "batch_no": val["batch_no"]})
+	if not entries:
+		return []
+	return _validated_rows(entries, warehouse)
+
+
+@frappe.whitelist()
+def import_opname_template(pos_profile, file_url, name=None):
+	"""Merge an uploaded count sheet into the open draft (U8); delete the file after."""
+	company, warehouse = _profile_warehouse(pos_profile)
+	if not file_url:
+		frappe.throw(_("Please attach a file"), ValidationError)
+	file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	if not file_name:
+		frappe.throw(_("File not found"), ValidationError)
+	if frappe.db.get_value("File", file_name, "owner") != frappe.session.user:
+		raise frappe.PermissionError(_("You can only import your own upload"))
+	try:
+		from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
+
+		rows = read_xlsx_file_from_attached_file(file_url=file_url)
+		ops, skipped, errors = _parse_import(rows, warehouse)
+		target = _import_target(name, warehouse)
+		merged = _merge_rows(target, ops, warehouse) if ops else []
+		if not merged:
+			return {"name": target.name if target else None, "applied": 0, "skipped": skipped, "errors": errors}
+		if target is None:
+			doc = frappe.new_doc(DOCTYPE)
+			doc.company = company
+			doc.purpose = "Stock Reconciliation"
+			doc.set_warehouse = warehouse
+			for row in merged:
+				doc.append("items", row)
+			doc.insert()
+		else:
+			if target.workflow_state == STATE_REJECTED:
+				apply_workflow(target, "Revise")
+				target.reload()
+				_assert_doc_warehouse(target, warehouse)
+			target.set("items", [])
+			for row in merged:
+				target.append("items", row)
+			target.save()
+			doc = target
+		return {"name": doc.name, "applied": len(ops), "skipped": skipped, "errors": errors}
+	except (ValidationError, frappe.PermissionError):
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Import Stock Opname Error")
+		frappe.throw(_("Error importing stock opname: {0}").format(str(e)))
+	finally:
+		try:
+			frappe.delete_doc("File", file_name, ignore_permissions=True)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Delete Opname Upload Error")
