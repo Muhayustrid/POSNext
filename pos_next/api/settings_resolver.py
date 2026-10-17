@@ -15,6 +15,7 @@ GLOBAL_FIELDS = (
 	"monthly_target_basis",
 	"overall_target_basis",
 	"allow_negative_stock",
+	"opname_max_backdate_days",
 	"allowed_locales",
 	"pos_invoice_naming_series",
 	"pos_opening_shift_naming_series",

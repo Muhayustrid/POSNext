@@ -21,11 +21,13 @@ from frappe.utils import (
 	flt,
 	formatdate,
 	get_datetime,
+	get_fullname,
 	get_time,
 	getdate,
 	now_datetime,
 	nowdate,
 	nowtime,
+	strip_html,
 )
 
 from pos_next.api.packages import _assert_profile_access
@@ -34,7 +36,8 @@ from pos_next.services.production import _resolve_profile
 DOCTYPE = "Stock Reconciliation"
 REJECT_PREFIX = "Rejected: "
 TEMPLATE_HEADER = ["Item Code", "Item Name", "UOM", "Batch No", "Serial No", "Counted Qty"]
-# Fallback backdate cap (days) when POS Settings has no `opname_max_backdate_days`.
+# Fallback backdate cap (days) when POS Next Global Settings has no
+# `opname_max_backdate_days`.
 MAX_BACKDATE_DAYS = 2
 
 
@@ -111,10 +114,9 @@ def _parse_data(data):
 
 
 def _max_backdate_days():
-	"""Backdate cap in days: POS Settings `opname_max_backdate_days`, else the
-	constant. The POS Settings field is not in the doctype yet, so the constant
-	(amended D6 default) applies until an admin adds it."""
-	cap = frappe.db.get_singles_dict("POS Settings").get("opname_max_backdate_days")
+	"""Backdate cap in days from POS Next Global Settings `opname_max_backdate_days`
+	(global-only), else the constant when the setting is unset/blank."""
+	cap = frappe.db.get_single_value("POS Next Global Settings", "opname_max_backdate_days")
 	return cint(cap) if cap else MAX_BACKDATE_DAYS
 
 
@@ -204,6 +206,52 @@ def _reject_reason(name):
 	if not comments:
 		return None
 	return (comments[0].content or "")[len(REJECT_PREFIX):].strip() or None
+
+
+def _activity_time(value):
+	return get_datetime(value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _activity(doc):
+	"""Oldest-first timeline: a synthetic `created` entry plus the doc's Workflow
+	(state name), Comment (reject reason, prefix stripped) and Attachment (plain
+	text, never HTML) comment rows."""
+	activity = [
+		{
+			"type": "created",
+			"user": doc.owner,
+			"user_fullname": get_fullname(doc.owner),
+			"at": _activity_time(doc.creation),
+		}
+	]
+	for row in frappe.get_all(
+		"Comment",
+		filters={
+			"reference_doctype": DOCTYPE,
+			"reference_name": doc.name,
+			"comment_type": ("in", ("Workflow", "Comment", "Attachment")),
+			# A Stock Reconciliation can reuse a deleted doc's name, leaving its
+			# comments behind; the timeline must not predate this doc's creation.
+			"creation": (">=", doc.creation),
+		},
+		fields=["content", "comment_type", "owner", "creation"],
+		order_by="creation asc",
+	):
+		content = row.content or ""
+		entry = {
+			"type": row.comment_type.lower(),
+			"user": row.owner,
+			"user_fullname": get_fullname(row.owner),
+			"at": _activity_time(row.creation),
+		}
+		if row.comment_type == "Workflow":
+			entry["state"] = content
+		elif row.comment_type == "Attachment":
+			entry["content"] = strip_html(content)
+		else:
+			entry["content"] = content[len(REJECT_PREFIX):].strip() if content.startswith(REJECT_PREFIX) else content
+		activity.append(entry)
+	return activity
 
 
 def _item_flags(item_code):
@@ -400,7 +448,13 @@ def _payload(doc):
 		# Read-only detail view header (Task 7): posting datetime + warehouse.
 		"posting_date": doc.posting_date,
 		"posting_time": doc.posting_time,
+		"set_posting_time": doc.set_posting_time,
 		"set_warehouse": doc.set_warehouse,
+		# Metadata for the Desk-style detail view (N10): who created/last changed.
+		"owner": doc.owner,
+		"owner_fullname": get_fullname(doc.owner),
+		"creation": doc.creation,
+		"modified_by_fullname": get_fullname(doc.modified_by),
 		"reject_reason": _reject_reason(doc.name) if flags["returned"] else None,
 		"editable": flags["editable"],
 		"returned": flags["returned"],
@@ -408,6 +462,7 @@ def _payload(doc):
 		"actions": _submit_actions(doc, wf),
 		"items": items,
 		"attachments": _attachments(doc.name),
+		"activity": _activity(doc),
 	}
 
 

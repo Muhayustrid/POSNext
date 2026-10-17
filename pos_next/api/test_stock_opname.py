@@ -60,6 +60,26 @@ class _StockOpnameFixture(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user(ADMIN)
+		# Bridge for the shared bench: this worktree's `opname_max_backdate_days`
+		# doctype field is not migrated in, so `frappe.db.get_single_value` cannot
+		# resolve it. A transient Custom Field stands in until the field is migrated.
+		cls._cap_custom_field = None
+		if not frappe.get_meta("POS Next Global Settings").has_field("opname_max_backdate_days"):
+			cls._cap_custom_field = (
+				frappe.get_doc(
+					{
+						"doctype": "Custom Field",
+						"dt": "POS Next Global Settings",
+						"fieldname": "opname_max_backdate_days",
+						"fieldtype": "Int",
+						"label": "Stock Opname Max Backdate Days",
+						"default": "2",
+					}
+				)
+				.insert(ignore_permissions=True)
+				.name
+			)
+			frappe.clear_cache(doctype="POS Next Global Settings")
 		cls.company = "_Test Company"
 		cls.warehouse = (
 			frappe.get_doc(
@@ -148,6 +168,14 @@ class _StockOpnameFixture(FrappeTestCase):
 	@classmethod
 	def tearDownClass(cls):
 		frappe.set_user(ADMIN)
+		if getattr(cls, "_cap_custom_field", None):
+			frappe.db.sql(
+				"DELETE FROM tabSingles WHERE doctype = %s AND field = %s",
+				("POS Next Global Settings", "opname_max_backdate_days"),
+			)
+			frappe.delete_doc("Custom Field", cls._cap_custom_field, force=True, ignore_permissions=True)
+			frappe.clear_cache(doctype="POS Next Global Settings")
+			frappe.db.commit()
 		for profile in (cls.profile, cls.foreign_profile):
 			if frappe.db.exists("POS Profile", profile):
 				frappe.delete_doc("POS Profile", profile, force=True, ignore_permissions=True)
@@ -226,6 +254,48 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		self.assertFalse(forbidden & set(got.keys()))
 		for item in got["items"]:
 			self.assertFalse(forbidden & set(item.keys()))
+
+	def test_payload_owner_fields(self):
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		got = get_opname(self.profile, payload["name"])
+		self.assertEqual(got["owner"], self.cashier)
+		self.assertEqual(got["owner_fullname"], "SO API Test")
+		self.assertTrue(got["creation"])
+		self.assertIn(int(got["set_posting_time"]), (0, 1))
+
+	def test_payload_activity_after_reject(self):
+		from pos_next.api.stock_opname import (
+			attach_opname_files,
+			get_opname,
+			save_opname,
+			submit_opname,
+		)
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, payload["name"])
+		frappe.set_user(self.stock_manager)
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		apply_workflow(doc, "Reject")
+		doc.add_comment("Comment", text="Rejected: count again")
+		frappe.db.commit()
+
+		self._cashier()
+		attach_opname_files(self.profile, payload["name"], link="https://example.com/sheet")
+		activity = get_opname(self.profile, payload["name"])["activity"]
+
+		self.assertEqual(activity[0]["type"], "created")
+		self.assertEqual(activity[0]["user"], self.cashier)
+		self.assertTrue(any(e["type"] == "workflow" and e.get("state") == STATE_PENDING_SM for e in activity))
+		self.assertTrue(any(e["type"] == "comment" and e.get("content") == "count again" for e in activity))
+		attachments = [e for e in activity if e["type"] == "attachment"]
+		self.assertTrue(attachments)
+		self.assertNotIn("<", attachments[0]["content"])
+		ats = [e["at"] for e in activity]
+		self.assertEqual(ats, sorted(ats))
 
 	def test_batch_item_requires_own_batch(self):
 		from pos_next.api.stock_opname import get_opname, save_opname
@@ -1041,6 +1111,48 @@ class TestStockOpnamePosting(_StockOpnameFixture):
 		self.assertEqual(str(doc.posting_date), ok)
 		self.assertEqual(get_time(doc.posting_time), get_time("09:00:00"))
 		self.assertEqual(doc.set_posting_time, 1)
+
+	@staticmethod
+	def _set_cap(value):
+		frappe.db.set_single_value("POS Next Global Settings", "opname_max_backdate_days", value)
+
+	def test_backdate_cap_from_global_setting(self):
+		from pos_next.api.stock_opname import save_opname
+
+		self.addCleanup(self._set_cap, "")
+		self._set_cap(5)
+		self._cashier()
+		ok = add_days(nowdate(), -4)
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.plain, "qty": 4}], "posting_date": ok, "posting_time": "09:00:00"},
+		)
+		self.assertEqual(str(frappe.get_doc(DOCTYPE, payload["name"]).posting_date), ok)
+		with self.assertRaises(frappe.ValidationError):
+			save_opname(
+				self.profile,
+				{
+					"items": [{"item_code": self.plain, "qty": 4}],
+					"posting_date": add_days(nowdate(), -6),
+					"posting_time": "09:00:00",
+				},
+			)
+
+	def test_backdate_cap_default(self):
+		from pos_next.api.stock_opname import save_opname
+
+		self.addCleanup(self._set_cap, "")
+		self._set_cap("")
+		self._cashier()
+		with self.assertRaises(frappe.ValidationError):
+			save_opname(
+				self.profile,
+				{
+					"items": [{"item_code": self.plain, "qty": 4}],
+					"posting_date": add_days(nowdate(), -3),
+					"posting_time": "09:00:00",
+				},
+			)
 
 	def test_frozen_stock_blocks_outlet(self):
 		from pos_next.api.stock_opname import save_opname

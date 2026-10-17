@@ -17,6 +17,7 @@
   "pos_closing_shift_naming_series",
   "section_break_negative_stock",
   "allow_negative_stock",
+  "opname_max_backdate_days",
   "column_break_negative_stock",
   "enable_automatic_stock_sync",
   "section_break_localization",
@@ -216,6 +217,14 @@
    "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
    "label": "Allow Negative Stock"
+  },
+  {
+   "default": "2",
+   "description": "Maximum days in the past an outlet may set the Stock Opname posting date. Blank falls back to 2.",
+   "fieldname": "opname_max_backdate_days",
+   "fieldtype": "Int",
+   "label": "Stock Opname Max Backdate Days",
+   "non_negative": 1
   },
   {
    "fieldname": "column_break_negative_stock",
@@ -1012,7 +1021,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-14 21:00:00.000000",
+ "modified": "2026-10-18 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",
