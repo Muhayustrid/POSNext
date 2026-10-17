@@ -101,6 +101,8 @@ const PLAIN_ITEM = {
 	stock_uom: "Nos",
 	qty: 3,
 	serial_nos: [],
+	has_batch_no: 0,
+	has_serial_no: 0,
 }
 
 beforeEach(() => {
@@ -302,6 +304,140 @@ describe("StockOpnameDialog", () => {
 		await findButton(wrapper, "Save").trigger("click")
 		await flushPromises()
 		expect(saveCall.mock.calls[0][0].data.items[0].serial_nos).toHaveLength(2)
+	})
+
+	it("serial item with zero ticked serials saves serial_nos empty and reloads as serial", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 0,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(ITEMS_URL, () =>
+			Promise.resolve([
+				{
+					item_code: "SER-1",
+					item_name: "Serial Item",
+					stock_uom: "Nos",
+					has_serial_no: 1,
+					has_batch_no: 0,
+				},
+			]),
+		)
+		mockCall(SERIALS_URL, () => Promise.resolve(["A", "B"]))
+		const saveCall = mockCall(SAVE_URL, () =>
+			Promise.resolve({
+				name: "SR-0001",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m2",
+				items: [
+					{
+						item_code: "SER-1",
+						item_name: "Serial Item",
+						stock_uom: "Nos",
+						qty: 0,
+						batch_no: null,
+						serial_nos: [],
+						has_serial_no: 1,
+						has_batch_no: 0,
+					},
+				],
+			}),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+		await searchItem(wrapper, "ser")
+		await findButton(wrapper, "Serial Item").trigger("click")
+		await flushPromises()
+
+		// nothing ticked: qty is 0 but the row is still a serial row, not a qty input
+		expect(wrapper.find('[data-testid="item-qty"]').text().trim()).toBe("0")
+		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(0)
+
+		await findButton(wrapper, "Save").trigger("click")
+		await flushPromises()
+		expect(saveCall.mock.calls[0][0].data.items[0].serial_nos).toEqual([])
+
+		// survives the reload as a serial row
+		expect(wrapper.find('[data-testid="item-qty"]').exists()).toBe(true)
+		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(0)
+	})
+
+	it("after Save the unticked serial is still offered", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 1,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(ITEMS_URL, () =>
+			Promise.resolve([
+				{
+					item_code: "SER-1",
+					item_name: "Serial Item",
+					stock_uom: "Nos",
+					has_serial_no: 1,
+					has_batch_no: 0,
+				},
+			]),
+		)
+		mockCall(SERIALS_URL, () => Promise.resolve(["A", "B"]))
+		mockCall(SAVE_URL, () =>
+			Promise.resolve({
+				name: "SR-0001",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m2",
+				items: [
+					{
+						item_code: "SER-1",
+						item_name: "Serial Item",
+						stock_uom: "Nos",
+						qty: 1,
+						batch_no: null,
+						serial_nos: ["A"],
+						has_serial_no: 1,
+						has_batch_no: 0,
+					},
+				],
+			}),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+		await searchItem(wrapper, "ser")
+		await findButton(wrapper, "Serial Item").trigger("click")
+		await flushPromises()
+
+		await wrapper.findAll('[data-testid="serial-option"]')[0].setValue(true) // tick A
+		await flushPromises()
+
+		await findButton(wrapper, "Save").trigger("click")
+		await flushPromises()
+
+		// the save response only carries the ticked serial; B must stay tickable
+		const serialLabels = wrapper
+			.findAll("label")
+			.filter((l) => l.find('[data-testid="serial-option"]').exists())
+		expect(serialLabels.map((l) => l.text())).toEqual(["A", "B"])
 	})
 
 	it("pending opname is read-only", async () => {

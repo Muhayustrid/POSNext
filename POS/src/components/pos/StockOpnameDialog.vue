@@ -467,19 +467,22 @@ async function loadList() {
 // Editor
 // ---------------------------------------------------------------------------
 
-// get_opname rows carry no has_serial_no flag: a serial row is the one whose
-// serial_nos list is non-empty (a counted serial item always has >= 1 serial).
+// has_serial_no is the item flag (not stock data): a serial row with zero
+// ticked serials is still a serial row and must save serial_nos: [].
 function normalizeItem(item) {
 	const serials = Array.isArray(item.serial_nos) ? item.serial_nos : []
+	const is_serial = !!item.has_serial_no || serials.length > 0
 	return {
 		item_code: item.item_code,
 		item_name: item.item_name || item.item_code,
 		stock_uom: item.stock_uom,
 		qty: item.qty,
 		batch_no: item.batch_no || null,
+		has_batch_no: item.has_batch_no,
+		has_serial_no: item.has_serial_no,
 		serial_nos: [...serials],
 		serial_options: [...serials],
-		is_serial: serials.length > 0,
+		is_serial,
 	}
 }
 
@@ -630,6 +633,8 @@ async function addItem(item) {
 			stock_uom: item.stock_uom,
 			qty: 0,
 			batch_no: null,
+			has_batch_no: item.has_batch_no,
+			has_serial_no: item.has_serial_no,
 			serial_nos: [],
 			serial_options: serials,
 			is_serial: true,
@@ -655,6 +660,8 @@ async function addItem(item) {
 			stock_uom: item.stock_uom,
 			qty: 1,
 			batch_no: null,
+			has_batch_no: item.has_batch_no,
+			has_serial_no: item.has_serial_no,
 			serial_nos: [],
 			serial_options: [],
 			is_serial: false,
@@ -732,6 +739,9 @@ async function save() {
 			},
 		})
 		applyEditor(payload)
+		// a save response only carries the ticked serials; refetch so the
+		// remaining serials of a serial item stay tickable
+		await ensureSerialOptions()
 		showSuccess(__("Stock opname saved"))
 		return true
 	} catch (err) {
