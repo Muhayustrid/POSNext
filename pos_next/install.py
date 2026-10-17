@@ -24,6 +24,7 @@ from pos_next.price_group_ownership import (
 	PROFILE_OWNER_FIELD,
 	PROFILE_PREVIOUS_PRICE_LIST_FIELD,
 )
+from pos_next.stock_opname_setup import ensure_stock_opname_workflow
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -577,6 +578,7 @@ def after_install():
 		sync_custom_fields()
 		ensure_price_group_custom_fields()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
+		ensure_stock_opname_workflow(quiet=True)
 		ensure_reject_purposes()
 		ensure_site_indexes()
 		register_default_log_clearing()
@@ -608,6 +610,7 @@ def after_migrate():
 		sync_custom_fields(quiet=True)
 		ensure_price_group_custom_fields(quiet=True)
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
+		ensure_stock_opname_workflow(quiet=True)
 		ensure_reject_purposes()
 		ensure_site_indexes()
 		register_default_log_clearing(quiet=True)

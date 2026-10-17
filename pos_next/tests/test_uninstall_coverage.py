@@ -111,6 +111,12 @@ class TestUninstallCoverage(unittest.TestCase):
             expected, deleted, "roles, workspace and its sidebar must all be deleted"
         )
 
+    def test_workflow_cleanup_covers_installed_workflow(self):
+        """uninstall must delete the workflow install.py installs."""
+        from pos_next.stock_opname_setup import WORKFLOW_NAME
+
+        self.assertIn(WORKFLOW_NAME, uninstall.UNINSTALL_WORKFLOWS)
+
     def test_fixture_docperm_roles_match_uninstall_roles(self):
         """The roles shipped via the custom_docperm fixture are exactly the
         roles the uninstall removes."""

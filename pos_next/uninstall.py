@@ -26,6 +26,7 @@ from pos_next.price_group_ownership import (
 	PROFILE_OWNER_FIELD,
 	PROFILE_PREVIOUS_PRICE_LIST_FIELD,
 )
+from pos_next.stock_opname_setup import WORKFLOW_NAME as STOCK_OPNAME_WORKFLOW
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ UNINSTALL_ROLES = ("POSNext Cashier", "POSNext Manager")
 UNINSTALL_FIXTURE_ROLES = (*UNINSTALL_ROLES, "POSNext Reject Approver")
 UNINSTALL_WORKSPACES = ("POSNext",)
 UNINSTALL_WORKSPACE_SIDEBARS = ("POSNext",)
+# Workflows created by install.after_install / after_migrate (stock_opname_setup)
+UNINSTALL_WORKFLOWS = (STOCK_OPNAME_WORKFLOW,)
 
 # Custom fields created by earlier pos_next versions outside the install
 # constants (pre-fixture era). Kept in the cleanup so old sites uninstall
@@ -90,6 +93,9 @@ def before_uninstall():
 
 		# Remove the workspace and its sidebar entry
 		remove_workspaces()
+
+		# Remove workflows installed by the app
+		remove_workflows()
 
 		# Remove print formats
 		remove_print_formats()
@@ -179,6 +185,21 @@ def remove_workspaces():
 	except Exception as e:
 		log_message(f"Error removing workspace: {e!s}", level="error")
 		frappe.log_error(title="Workspace Removal Error", message=frappe.get_traceback())
+
+
+def remove_workflows():
+	"""
+	Remove the Workflows the app installs (stock_opname_setup). Idempotent.
+	"""
+	try:
+		log_message("Removing workflows", level="info")
+		for workflow in UNINSTALL_WORKFLOWS:
+			if frappe.db.exists("Workflow", workflow):
+				frappe.delete_doc("Workflow", workflow, force=True, ignore_permissions=True)
+				log_message(f"Removed Workflow: {workflow}", level="info", indent=1)
+	except Exception as e:
+		log_message(f"Error removing workflows: {e!s}", level="error")
+		frappe.log_error(title="Workflow Removal Error", message=frappe.get_traceback())
 
 
 def remove_print_formats():
