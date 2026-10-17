@@ -649,7 +649,7 @@ function searchItems() {
 async function doSearchItems(term) {
 	const seq = ++searchSeq
 	try {
-		const rows = await call("pos_next.api.items.get_items", {
+		const rows = await call(`${API}.search_opname_items`, {
 			pos_profile: props.posProfile,
 			search_term: term,
 			start: 0,

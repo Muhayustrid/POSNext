@@ -69,7 +69,7 @@ const SERIALS_URL = "pos_next.api.stock_opname.get_item_serials"
 const IMPORT_URL = "pos_next.api.stock_opname.import_opname_template"
 const ATTACH_URL = "pos_next.api.stock_opname.attach_opname_files"
 const REMOVE_URL = "pos_next.api.stock_opname.remove_opname_attachment"
-const ITEMS_URL ="pos_next.api.items.get_items"
+const SEARCH_URL = "pos_next.api.stock_opname.search_opname_items"
 const GROUPS_URL = "pos_next.api.items.get_item_groups"
 
 function mockCall(url, impl) {
@@ -212,7 +212,7 @@ describe("StockOpnameDialog", () => {
 				},
 			]),
 		)
-		mockCall(ITEMS_URL, () =>
+		mockCall(SEARCH_URL, () =>
 			Promise.resolve([
 				{
 					item_code: "MILK",
@@ -220,6 +220,7 @@ describe("StockOpnameDialog", () => {
 					stock_uom: "Nos",
 					has_batch_no: 1,
 					has_serial_no: 0,
+					uoms: [],
 				},
 			]),
 		)
@@ -260,6 +261,46 @@ describe("StockOpnameDialog", () => {
 		}
 	})
 
+	it("pick reuses the cached search row", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 0,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		const searchCall = mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{
+					item_code: "ITEM-A",
+					item_name: "Alpha Item",
+					stock_uom: "Nos",
+					has_batch_no: 0,
+					has_serial_no: 0,
+					uoms: [],
+				},
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+
+		await searchItem(wrapper, "alpha")
+		expect(searchCall).toHaveBeenCalledTimes(1)
+		await findButton(wrapper, "Alpha Item").trigger("click")
+		await flushPromises()
+
+		// the picked row is reused from the cached results — no second search request
+		expect(searchCall).toHaveBeenCalledTimes(1)
+		expect(wrapper.text()).toContain("Alpha Item")
+	})
+
 	it("serial item qty equals ticked serials", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve([
@@ -274,7 +315,7 @@ describe("StockOpnameDialog", () => {
 				},
 			]),
 		)
-		mockCall(ITEMS_URL, () =>
+		mockCall(SEARCH_URL, () =>
 			Promise.resolve([
 				{
 					item_code: "SER-1",
@@ -282,6 +323,7 @@ describe("StockOpnameDialog", () => {
 					stock_uom: "Nos",
 					has_serial_no: 1,
 					has_batch_no: 0,
+					uoms: [],
 				},
 			]),
 		)
@@ -331,7 +373,7 @@ describe("StockOpnameDialog", () => {
 				},
 			]),
 		)
-		mockCall(ITEMS_URL, () =>
+		mockCall(SEARCH_URL, () =>
 			Promise.resolve([
 				{
 					item_code: "SER-1",
@@ -339,6 +381,7 @@ describe("StockOpnameDialog", () => {
 					stock_uom: "Nos",
 					has_serial_no: 1,
 					has_batch_no: 0,
+					uoms: [],
 				},
 			]),
 		)
@@ -398,7 +441,7 @@ describe("StockOpnameDialog", () => {
 				},
 			]),
 		)
-		mockCall(ITEMS_URL, () =>
+		mockCall(SEARCH_URL, () =>
 			Promise.resolve([
 				{
 					item_code: "SER-1",
@@ -406,6 +449,7 @@ describe("StockOpnameDialog", () => {
 					stock_uom: "Nos",
 					has_serial_no: 1,
 					has_batch_no: 0,
+					uoms: [],
 				},
 			]),
 		)
@@ -603,7 +647,7 @@ describe("StockOpnameDialog", () => {
 	})
 
 	it("upload into an unsaved new count confirms before replacing rows", async () => {
-		mockCall(ITEMS_URL, () =>
+		mockCall(SEARCH_URL, () =>
 			Promise.resolve([
 				{
 					item_code: "ITEM-A",
@@ -611,6 +655,7 @@ describe("StockOpnameDialog", () => {
 					stock_uom: "Nos",
 					has_batch_no: 0,
 					has_serial_no: 0,
+					uoms: [],
 				},
 			]),
 		)
