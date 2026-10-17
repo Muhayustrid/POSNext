@@ -50,6 +50,7 @@ doctype_js = {
 	"POS Package": "public/js/pos_package.js",
 	"POS Discount Confirmation Code": "public/js/pos_discount_code.js",
 	"POS Refund Code": "public/js/pos_refund_code.js",
+	"Stock Reconciliation": "public/js/stock_reconciliation.js",
 }
 # NOTE: POS Code Gate Group (like POS Profile Group) needs no doctype_js entry:
 # Frappe auto-loads pos_next/pos_next/doctype/<slug>/<slug>.js on the form.

@@ -215,3 +215,55 @@ class TestStockOpnameSetup(IntegrationTestCase):
 		perms = frappe.permissions.get_doc_permissions(frappe.new_doc(DOCUMENT_TYPE), user=user)
 		self.assertTrue(perms.get("submit"), "Stock Manager must keep submit")
 		self.assertTrue(perms.get("cancel"), "Stock Manager must keep cancel")
+
+	# ---------------------------------------------------- Desk (Task 5)
+
+	def _workspace(self):
+		path = (
+			Path(frappe.get_app_path("pos_next"))
+			/ "pos_next"
+			/ "workspace"
+			/ "posnext"
+			/ "posnext.json"
+		)
+		return json.loads(path.read_text(encoding="utf-8"))
+
+	def test_workspace_has_pending_shortcuts(self):
+		"""H2: one shortcut per approval stage, counting that stage's pending docs."""
+		ws = self._workspace()
+		shortcuts = [
+			s
+			for s in ws["shortcuts"]
+			if s.get("type") == "DocType" and s.get("link_to") == DOCUMENT_TYPE
+		]
+		by_label = {s["label"]: s for s in shortcuts}
+		self.assertEqual(
+			set(by_label), {"Opname: Stock Manager", "Opname: Accounts Manager"}
+		)
+		self.assertEqual(
+			json.loads(by_label["Opname: Stock Manager"]["stats_filter"]),
+			{"workflow_state": STATE_PENDING_SM},
+		)
+		self.assertEqual(
+			json.loads(by_label["Opname: Accounts Manager"]["stats_filter"]),
+			{"workflow_state": STATE_PENDING_AM},
+		)
+		for label, shortcut in by_label.items():
+			self.assertEqual(shortcut["format"], "{} Pending", f"{label} format")
+
+		# every shortcut needs a matching content block to render in the grid
+		blocks = json.loads(ws["content"])
+		shortcut_names = {
+			b["data"]["shortcut_name"] for b in blocks if b.get("type") == "shortcut"
+		}
+		for label in by_label:
+			self.assertIn(label, shortcut_names, f"{label} content block")
+
+	def test_reject_prompt_script_wired(self):
+		"""W4: Stock Reconciliation form script prompts for a reject reason."""
+		from pos_next import hooks
+
+		rel = hooks.doctype_js["Stock Reconciliation"]
+		script = (Path(frappe.get_app_path("pos_next")) / rel).read_text(encoding="utf-8")
+		self.assertIn("before_workflow_action", script)
+		self.assertIn('"Rejected: "', script)
