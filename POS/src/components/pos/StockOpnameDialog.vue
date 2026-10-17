@@ -333,7 +333,49 @@
 								</li>
 							</ul>
 						</section>
+
+						<section class="rounded-xl border border-gray-200 bg-white p-4" data-testid="opname-attachments">
+							<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Attachments") }}</h4>
+							<PurchaseAttachments
+								editable
+								:pending="editor.attachments"
+								:label="__('Attach File')"
+								:accept="OPNAME_ATTACHMENT_ACCEPT"
+								:hint="__('Image or document · max 10 MB')"
+								@add="attachFiles"
+								@remove="removeAttachment"
+							/>
+							<div class="mt-3 flex gap-2">
+								<input
+									v-model="linkInput"
+									type="text"
+									inputmode="url"
+									data-testid="attach-link"
+									:placeholder="__('Paste a link (https://...)')"
+									:aria-label="__('Link')"
+									class="min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									:class="linkInput && !linkOk ? 'border-red-400' : 'border-gray-300'"
+									@keyup.enter="attachLink"
+								/>
+								<Button variant="subtle" :loading="attaching" :disabled="!linkOk" @click="attachLink">
+									<template #prefix>
+										<FeatherIcon name="link" class="h-4 w-4" />
+									</template>
+									{{ __("Add Link") }}
+								</Button>
+							</div>
+							<p v-if="linkInput && !linkOk" class="mt-1 text-xs text-red-600">
+								{{ __("Link must start with http:// or https://") }}
+							</p>
+						</section>
 					</template>
+
+					<section
+						v-if="!editable && editor.attachments.length"
+						class="rounded-xl border border-gray-200 bg-white p-4"
+					>
+						<PurchaseAttachments :attached="editor.attachments" :label="__('Attachments')" />
+					</section>
 				</template>
 			</div>
 		</template>
@@ -361,8 +403,10 @@ import { Button, FeatherIcon, call } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
+import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
+import { ATTACHMENT_ACCEPT, fileToBase64, sanitizePickedFiles } from "@/utils/attachments"
 import { downloadXlsx } from "@/utils/downloadXlsx"
 
 const props = defineProps({
@@ -409,6 +453,11 @@ const submitting = ref(false)
 const acting = ref(false)
 const importing = ref(false)
 const importResult = ref(null)
+const attaching = ref(false)
+// opname evidence also comes as office documents (count sheets, BA)
+const OPNAME_ATTACHMENT_ACCEPT = `${ATTACHMENT_ACCEPT},.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.odt,.ods`
+const linkInput = ref("")
+const linkOk = computed(() => /^https?:\/\/\S+$/i.test(linkInput.value.trim()))
 
 const dialogTitle = computed(() => __("Stock Opname"))
 
@@ -499,6 +548,7 @@ function applyEditor(payload) {
 		modified: payload.modified,
 		reject_reason: payload.reject_reason,
 		items: (payload.items || []).map(normalizeItem),
+		attachments: payload.attachments || [],
 	}
 }
 
@@ -529,7 +579,9 @@ function openNew() {
 		modified: null,
 		reject_reason: null,
 		items: [],
+		attachments: [],
 	}
+	linkInput.value = ""
 	view.value = "editor"
 	importResult.value = null
 	batchPicker.value = null
@@ -771,6 +823,15 @@ async function submit() {
 			const ok = await save()
 			if (!ok || !editor.value.name) return
 		}
+		// a link typed but not added yet would be lost once the doc locks
+		if (linkInput.value.trim()) {
+			if (!linkOk.value) {
+				showError(__("Link must start with http:// or https://"))
+				return
+			}
+			if (!(await sendAttachments({ link: linkInput.value.trim() }))) return
+			linkInput.value = ""
+		}
 		await call(`${API}.submit_opname`, {
 			pos_profile: props.posProfile,
 			name: editor.value.name,
@@ -864,6 +925,69 @@ async function onFilePicked(event) {
 		showError(errMsg(err, "Failed to import template"))
 	} finally {
 		importing.value = false
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (files + links, stored as File rows on the opname)
+// ---------------------------------------------------------------------------
+
+// Files attach to a real doc name: a new count is saved first.
+async function ensureSaved() {
+	if (editor.value.name) return true
+	if (!editor.value.items.length) {
+		showError(__("Add at least one counted item before attaching"))
+		return false
+	}
+	return (await save()) && !!editor.value.name
+}
+
+async function sendAttachments(args) {
+	if (attaching.value || !(await ensureSaved())) return false
+	attaching.value = true
+	try {
+		editor.value.attachments =
+			(await call(`${API}.attach_opname_files`, {
+				pos_profile: props.posProfile,
+				name: editor.value.name,
+				...args,
+			})) || []
+		return true
+	} catch (err) {
+		showError(errMsg(err, "Failed to attach"))
+		return false
+	} finally {
+		attaching.value = false
+	}
+}
+
+async function attachFiles(files) {
+	const { ok, tooBig } = sanitizePickedFiles(files)
+	if (tooBig.length) showError(__("Some files exceed the 10 MB limit"))
+	if (!ok.length) return
+	const payloads = await Promise.all(
+		ok.map(async (file) => ({ file_name: file.name, filedata: await fileToBase64(file) })),
+	)
+	if (await sendAttachments({ files: JSON.stringify(payloads) }))
+		showSuccess(__("{0} attachment(s) uploaded", [ok.length]))
+}
+
+async function attachLink() {
+	if (!linkOk.value) return
+	if (await sendAttachments({ link: linkInput.value.trim() })) linkInput.value = ""
+}
+
+async function removeAttachment(row) {
+	if (!window.confirm(__("Remove this attachment?"))) return
+	try {
+		editor.value.attachments =
+			(await call(`${API}.remove_opname_attachment`, {
+				pos_profile: props.posProfile,
+				name: editor.value.name,
+				file: row.name,
+			})) || []
+	} catch (err) {
+		showError(errMsg(err, "Failed to remove attachment"))
 	}
 }
 

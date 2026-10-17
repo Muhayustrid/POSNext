@@ -10,12 +10,12 @@
 				<FeatherIcon name="paperclip" class="w-3.5 h-3.5" />
 				{{ label || __("Attachments") }}
 			</button>
-			<span class="text-xs text-gray-400">{{ __("PDF or image · max 10 MB") }}</span>
+			<span class="text-xs text-gray-400">{{ hint || __("PDF or image · max 10 MB") }}</span>
 			<input
 				ref="picker"
 				type="file"
 				multiple
-				:accept="ATTACHMENT_ACCEPT"
+				:accept="accept"
 				class="hidden"
 				data-test="attach-input"
 				@change="onPick"
@@ -73,6 +73,8 @@ const props = defineProps({
 	pending: { type: Array, default: () => [] },
 	editable: { type: Boolean, default: false },
 	label: { type: String, default: "" },
+	accept: { type: String, default: ATTACHMENT_ACCEPT },
+	hint: { type: String, default: "" },
 })
 
 const emit = defineEmits(["add", "remove"])

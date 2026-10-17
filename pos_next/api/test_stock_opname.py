@@ -388,6 +388,54 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		with self.assertRaisesRegex(frappe.ValidationError, "Self approval is not allowed"):
 			apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Approve")
 
+	def test_attach_file_and_link_then_remove(self):
+		import base64
+
+		from pos_next.api.stock_opname import (
+			attach_opname_files,
+			get_opname,
+			remove_opname_attachment,
+			save_opname,
+			submit_opname,
+		)
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		name = payload["name"]
+		self.assertEqual(payload["attachments"], [])
+		files = [{"file_name": "count.txt", "filedata": base64.b64encode(uuid.uuid4().hex.encode()).decode()}]
+		rows = attach_opname_files(self.profile, name, files=frappe.as_json(files), link="https://example.com/sheet")
+		self.assertEqual(sorted(r["file_name"] for r in rows), ["count.txt", "https://example.com/sheet"])
+		got = get_opname(self.profile, name)
+		self.assertEqual(len(got["attachments"]), 2)
+		# attaching must not bump modified, or the next Save hits the stale check
+		self.assertEqual(str(got["modified"]), str(payload["modified"]))
+		with self.assertRaises(frappe.ValidationError):
+			attach_opname_files(self.profile, name, link="javascript:alert(1)")
+		# a File of another document cannot be removed through this opname
+		frappe.set_user(ADMIN)
+		foreign = frappe.get_doc(
+			{"doctype": "File", "file_url": "https://example.com/other", "attached_to_doctype": "Item", "attached_to_name": self.plain}
+		).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "File", foreign.name, ignore_permissions=True)
+		self._cashier()
+		with self.assertRaises(frappe.PermissionError):
+			remove_opname_attachment(self.profile, name, foreign.name)
+		link_row = next(r for r in rows if r["file_name"].startswith("https://"))
+		self.assertEqual(len(remove_opname_attachment(self.profile, name, link_row["name"])), 1)
+		# pending approval: attachments are frozen
+		submit_opname(self.profile, name)
+		with self.assertRaises(frappe.ValidationError):
+			attach_opname_files(self.profile, name, link="https://example.com/late")
+
+	def test_attach_rejects_foreign_profile(self):
+		from pos_next.api.stock_opname import attach_opname_files, save_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		with self.assertRaises(frappe.PermissionError):
+			attach_opname_files(self.foreign_profile, payload["name"], link="https://example.com/x")
+
 
 class TestStockOpnameExcel(_StockOpnameFixture):
 	"""Task 4: Excel template download and upload-merge (spec U7, U8)."""

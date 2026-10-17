@@ -210,7 +210,25 @@ def _payload(doc):
 		"modified": doc.modified,
 		"reject_reason": _reject_reason(doc.name) if doc.workflow_state == STATE_REJECTED else None,
 		"items": items,
+		"attachments": _attachments(doc.name),
 	}
+
+
+def _attachments(name):
+	"""File/link rows attached to the opname, same shape as purchase_orders._attachments_summary."""
+	if not name:
+		return []
+	rows = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": DOCTYPE, "attached_to_name": name},
+		fields=["name", "file_name", "file_url", "file_size"],
+		order_by="creation asc",
+	)
+	for row in rows:
+		# a link's derived file_name is only its last path segment; show the URL
+		if (row.file_url or "").startswith(("http://", "https://")):
+			row.file_name = row.file_url
+	return rows
 
 
 @frappe.whitelist()
@@ -406,6 +424,68 @@ def delete_opname(pos_profile, name):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Delete Stock Opname Error")
 		frappe.throw(_("Error deleting stock opname: {0}").format(str(e)))
+
+
+def _editable_doc(pos_profile, name):
+	_company, warehouse = _profile_warehouse(pos_profile)
+	doc = _get_doc(name)
+	_assert_doc_warehouse(doc, warehouse)
+	if doc.workflow_state not in EDITABLE_STATES:
+		frappe.throw(_("Attachments can only change on a Draft or Rejected opname"), ValidationError)
+	return doc
+
+
+@frappe.whitelist()
+def attach_opname_files(pos_profile, name, files=None, link=None):
+	"""Attach private files (`files`: JSON list of {file_name, filedata} base64)
+	and/or one http(s) `link` to a Draft/Rejected opname; returns the attachments.
+
+	Outlet roles get no File write via the doc's controller perms, so inserts
+	run with ignore_permissions — the profile + warehouse gate is the decision.
+	"""
+	doc = _editable_doc(pos_profile, name)
+	parsed = _parse_data(files) if files else []
+	if not isinstance(parsed, list):
+		frappe.throw(_("Invalid attachment data"), ValidationError)
+	link = (link or "").strip()
+	if not parsed and not link:
+		frappe.throw(_("Add a file or a link"), ValidationError)
+	if link and not link.startswith(("http://", "https://")):
+		frappe.throw(_("Link must start with http:// or https://"), ValidationError)
+	for f in parsed:
+		if not isinstance(f, dict) or not (f.get("file_name") or "").strip() or not (f.get("filedata") or "").strip():
+			frappe.throw(_("File name and data are required"), ValidationError)
+		# base64 inflates by ~4/3; File.validate still enforces the site cap
+		if (len(f["filedata"]) * 3) // 4 > 10 * 1024 * 1024:
+			frappe.throw(_("File {0} exceeds the {1} MB limit").format(f["file_name"], 10), ValidationError)
+	for f in parsed:
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				"attached_to_doctype": DOCTYPE,
+				"attached_to_name": doc.name,
+				"file_name": f["file_name"],
+				"is_private": 1,
+				"content": f["filedata"],
+				"decode": 1,
+			}
+		).insert(ignore_permissions=True)
+	if link:
+		frappe.get_doc(
+			{"doctype": "File", "attached_to_doctype": DOCTYPE, "attached_to_name": doc.name, "file_url": link}
+		).insert(ignore_permissions=True)
+	return _attachments(doc.name)
+
+
+@frappe.whitelist()
+def remove_opname_attachment(pos_profile, name, file):
+	"""Delete one attachment of a Draft/Rejected opname; returns the attachments."""
+	doc = _editable_doc(pos_profile, name)
+	owner = frappe.db.get_value("File", file, ["attached_to_doctype", "attached_to_name"], as_dict=True)
+	if not owner or owner.attached_to_doctype != DOCTYPE or owner.attached_to_name != doc.name:
+		raise frappe.PermissionError(_("Attachment {0} is not on stock opname {1}").format(file, doc.name))
+	frappe.delete_doc("File", file, ignore_permissions=True)
+	return _attachments(doc.name)
 
 
 @frappe.whitelist()

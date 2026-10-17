@@ -67,7 +67,9 @@ const SAVE_URL = "pos_next.api.stock_opname.save_opname"
 const BATCHES_URL = "pos_next.api.stock_opname.get_item_batches"
 const SERIALS_URL = "pos_next.api.stock_opname.get_item_serials"
 const IMPORT_URL = "pos_next.api.stock_opname.import_opname_template"
-const ITEMS_URL = "pos_next.api.items.get_items"
+const ATTACH_URL = "pos_next.api.stock_opname.attach_opname_files"
+const REMOVE_URL = "pos_next.api.stock_opname.remove_opname_attachment"
+const ITEMS_URL ="pos_next.api.items.get_items"
 const GROUPS_URL = "pos_next.api.items.get_item_groups"
 
 function mockCall(url, impl) {
@@ -684,5 +686,102 @@ describe("StockOpnameDialog", () => {
 		expect(payload.data.name).toBe("SR-0001")
 		expect(payload.data.modified).toBe("2026-01-01 09:00:00")
 		expect(payload.data.items).toHaveLength(1)
+	})
+
+	it("adds a link and removes an attachment on an editable count", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{ name: "SR-0001", workflow_state: "Draft", docstatus: 0, item_count: 1, modified: "m1" },
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-0001",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m1",
+				items: [PLAIN_ITEM],
+				attachments: [{ name: "F1", file_name: "sheet.pdf", file_url: "/private/files/sheet.pdf" }],
+			}),
+		)
+		const attachCall = mockCall(ATTACH_URL, () =>
+			Promise.resolve([
+				{ name: "F1", file_name: "sheet.pdf", file_url: "/private/files/sheet.pdf" },
+				{ name: "F2", file_name: "https://drive.example/x", file_url: "https://drive.example/x" },
+			]),
+		)
+		const removeCall = mockCall(REMOVE_URL, () => Promise.resolve([]))
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.find('[data-test="attach-input"]').attributes("accept")).toContain(".docx")
+		const link = wrapper.find('[data-testid="attach-link"]')
+		await link.setValue("ftp://nope")
+		expect(wrapper.text()).toContain("Link must start with http:// or https://")
+		await link.setValue("https://drive.example/x")
+		await findButton(wrapper, "Add Link").trigger("click")
+		await flushPromises()
+		expect(attachCall.mock.calls[0][0]).toMatchObject({ name: "SR-0001", link: "https://drive.example/x" })
+		expect(wrapper.text()).toContain("https://drive.example/x")
+
+		await wrapper.find('button[aria-label="Remove"]').trigger("click")
+		await flushPromises()
+		expect(removeCall.mock.calls[0][0]).toMatchObject({ name: "SR-0001", file: "F1" })
+		expect(wrapper.find('[data-test="attachment-list"]').exists()).toBe(false)
+	})
+
+	it("submit attaches a typed link that was not added yet", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{ name: "SR-0001", workflow_state: "Draft", docstatus: 0, item_count: 1, modified: "m1" },
+			]),
+		)
+		const draft = { name: "SR-0001", workflow_state: "Draft", docstatus: 0, modified: "m1", items: [PLAIN_ITEM], attachments: [] }
+		mockCall(GET_URL, () => Promise.resolve(draft))
+		mockCall(SAVE_URL, () => Promise.resolve(draft))
+		const order = []
+		const attachCall = mockCall(ATTACH_URL, () => {
+			order.push("attach")
+			return Promise.resolve([])
+		})
+		mockCall("pos_next.api.stock_opname.submit_opname", () => {
+			order.push("submit")
+			return Promise.resolve({})
+		})
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+
+		await wrapper.find('[data-testid="attach-link"]').setValue("https://drive.example/x")
+		await findButton(wrapper, "Submit").trigger("click")
+		await flushPromises()
+		expect(attachCall.mock.calls[0][0]).toMatchObject({ name: "SR-0001", link: "https://drive.example/x" })
+		expect(order).toEqual(["attach", "submit"])
+	})
+
+	it("pending count shows attachments read-only", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{ name: "SR-0002", workflow_state: "Approval Pending by Stock Manager", docstatus: 0, item_count: 1, modified: "m1" },
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-0002",
+				workflow_state: "Approval Pending by Stock Manager",
+				docstatus: 0,
+				modified: "m1",
+				items: [PLAIN_ITEM],
+				attachments: [{ name: "F1", file_name: "sheet.pdf", file_url: "/private/files/sheet.pdf" }],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0002").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("sheet.pdf")
+		expect(wrapper.find('[data-testid="attach-link"]').exists()).toBe(false)
+		expect(wrapper.find('button[aria-label="Remove"]').exists()).toBe(false)
 	})
 })
