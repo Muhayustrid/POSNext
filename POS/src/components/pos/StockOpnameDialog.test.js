@@ -883,4 +883,158 @@ describe("StockOpnameDialog", () => {
 		expect(data.posting_date).toBe(today)
 		expect(data.posting_time).toBe(timeValue)
 	})
+
+	it("uom select changes the sent custom fields", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 0,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{
+					item_code: "MILK",
+					item_name: "Milk",
+					stock_uom: "Nos",
+					has_batch_no: 0,
+					has_serial_no: 0,
+					uoms: [{ uom: "Pack", conversion_factor: 12 }],
+				},
+			]),
+		)
+		const saveCall = mockCall(SAVE_URL, () =>
+			Promise.resolve({
+				name: "SR-0001",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m2",
+				items: [],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+
+		await searchItem(wrapper, "milk")
+		await findButton(wrapper, "Milk").trigger("click")
+		await flushPromises()
+
+		const select = wrapper.find('[data-testid="uom-select"]')
+		expect(select.exists()).toBe(true)
+		await select.setValue("Pack")
+		await wrapper.find('[data-testid="qty-input"]').setValue(2)
+
+		await findButton(wrapper, "Save").trigger("click")
+		await flushPromises()
+		const item = saveCall.mock.calls[0][0].data.items[0]
+		expect(item.custom_uom).toBe("Pack")
+		expect(item.custom_qty_after).toBe(2)
+	})
+
+	it("serial rows show uom read-only", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 0,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{
+					item_code: "SER-1",
+					item_name: "Serial Item",
+					stock_uom: "Nos",
+					has_serial_no: 1,
+					has_batch_no: 0,
+					uoms: [{ uom: "Pack", conversion_factor: 12 }],
+				},
+			]),
+		)
+		mockCall(SERIALS_URL, () => Promise.resolve(["A", "B"]))
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+		await searchItem(wrapper, "ser")
+		await findButton(wrapper, "Serial Item").trigger("click")
+		await flushPromises()
+
+		// serials are counted by ticking, never in a converted UOM
+		expect(wrapper.find('[data-testid="uom-select"]').exists()).toBe(false)
+		const readOnly = wrapper.find('[data-testid="uom-readonly"]')
+		expect(readOnly.exists()).toBe(true)
+		expect(readOnly.text()).toBe("Nos")
+	})
+
+	it("removing a middle row keeps per-row state", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 0,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+				{ item_code: "ITEM-B", item_name: "Beta Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+				{ item_code: "ITEM-C", item_name: "Gamma Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+
+		for (const [term, name] of [
+			["alpha", "Alpha Item"],
+			["beta", "Beta Item"],
+			["gamma", "Gamma Item"],
+		]) {
+			await searchItem(wrapper, term)
+			await findButton(wrapper, name).trigger("click")
+			await flushPromises()
+		}
+
+		let qtyInputs = wrapper.findAll('[data-testid="qty-input"]')
+		expect(qtyInputs).toHaveLength(3)
+		await qtyInputs[0].setValue(11)
+		await qtyInputs[1].setValue(22)
+		await qtyInputs[2].setValue(33)
+		await flushPromises()
+
+		const firstEl = qtyInputs[0].element
+		const thirdEl = qtyInputs[2].element
+
+		// remove the middle row (Beta)
+		await wrapper.findAll('button[aria-label="Remove item"]')[1].trigger("click")
+		await flushPromises()
+
+		qtyInputs = wrapper.findAll('[data-testid="qty-input"]')
+		expect(qtyInputs).toHaveLength(2)
+		// keyed rows survive the splice: Alpha keeps its node, Gamma moves up intact
+		expect(qtyInputs[0].element).toBe(firstEl)
+		expect(qtyInputs[1].element).toBe(thirdEl)
+		expect(qtyInputs[0].element.value).toBe("11")
+		expect(qtyInputs[1].element.value).toBe("33")
+	})
 })

@@ -171,24 +171,63 @@
 							<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Counted Items") }}</h4>
 
 							<div
-								v-for="(row, idx) in editor.items"
-								:key="idx"
-								class="border-b border-gray-100 px-4 py-2 last:border-b-0"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-x-3"
 							>
-								<div class="flex items-center gap-2">
-									<span class="hidden w-5 text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
-									<div class="min-w-0 flex-1">
-										<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
-										<p class="truncate text-xs text-gray-400">
-											<span v-if="row.item_code !== row.item_name">{{ row.item_code }}</span>
-											<span v-if="row.batch_no" class="text-gray-500">{{ __("Batch") }}: {{ row.batch_no }}</span>
-										</p>
-									</div>
+								<span>#</span>
+								<span>{{ __("Item") }}</span>
+								<span>{{ __("Batch") }}</span>
+								<span>{{ __("UOM") }}</span>
+								<span>{{ __("Qty") }}</span>
+								<span></span>
+							</div>
+
+							<div
+								v-for="(row, idx) in editor.items"
+								:key="row.key"
+								class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-y-0 md:py-1.5"
+							>
+								<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
+
+								<div class="col-span-2 min-w-0 md:col-span-1">
+									<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
+									<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
+										{{ row.item_code }}
+									</p>
+								</div>
+
+								<div class="min-w-0">
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Batch") }}</span>
+									<span class="truncate text-xs text-gray-500">{{ row.batch_no }}</span>
+								</div>
+
+								<div class="min-w-0">
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
+									<!-- serials are counted by ticking, never in a converted UOM -->
+									<span
+										v-if="row.is_serial"
+										data-testid="uom-readonly"
+										class="block truncate text-sm text-gray-500"
+									>
+										{{ row.stock_uom }}
+									</span>
+									<select
+										v-else
+										v-model="row.uom"
+										data-testid="uom-select"
+										:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
+										class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									>
+										<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
+									</select>
+								</div>
+
+								<div class="min-w-0">
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
 									<!-- serial qty is the number of ticked serials, never typed -->
 									<span
 										v-if="row.is_serial"
 										data-testid="item-qty"
-										class="w-16 text-end text-sm tabular-nums text-gray-900"
+										class="block text-end text-sm tabular-nums text-gray-900"
 									>
 										{{ row.serial_nos.length }}
 									</span>
@@ -201,21 +240,22 @@
 										inputmode="decimal"
 										data-testid="qty-input"
 										:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
-										class="w-20 rounded-md border border-gray-300 px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+										class="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 									/>
-									<button
-										type="button"
-										class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
-										:aria-label="__('Remove item')"
-										:title="__('Remove item')"
-										@click="editor.items.splice(idx, 1)"
-									>
-										<FeatherIcon name="x" class="h-4 w-4" />
-									</button>
 								</div>
 
+								<button
+									type="button"
+									class="flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+									:aria-label="__('Remove item')"
+									:title="__('Remove item')"
+									@click="editor.items.splice(idx, 1)"
+								>
+									<FeatherIcon name="x" class="h-4 w-4" />
+								</button>
+
 								<!-- serial tick list: tick the serials physically present -->
-								<div v-if="row.is_serial" class="mt-2 md:ms-7">
+								<div v-if="row.is_serial" class="col-span-2 mt-2 md:col-span-6">
 									<ul class="flex flex-wrap gap-x-4 gap-y-1">
 										<li v-for="s in row.serial_options" :key="s">
 											<label class="flex items-center gap-1.5 text-sm text-gray-700">
@@ -550,23 +590,46 @@ async function loadList() {
 // Editor
 // ---------------------------------------------------------------------------
 
+// Stable per-row key: index keys shift state when a middle row is removed.
+let rowSeq = 0
+function blankRow(fields = {}) {
+	return {
+		key: ++rowSeq,
+		item_code: "",
+		item_name: "",
+		stock_uom: "",
+		uom: "",
+		uoms: [],
+		qty: 0,
+		batch_no: null,
+		has_batch_no: 0,
+		has_serial_no: 0,
+		serial_nos: [],
+		serial_options: [],
+		is_serial: false,
+		...fields,
+	}
+}
+
 // has_serial_no is the item flag (not stock data): a serial row with zero
 // ticked serials is still a serial row and must save serial_nos: [].
 function normalizeItem(item) {
 	const serials = Array.isArray(item.serial_nos) ? item.serial_nos : []
 	const is_serial = !!item.has_serial_no || serials.length > 0
-	return {
+	return blankRow({
 		item_code: item.item_code,
 		item_name: item.item_name || item.item_code,
 		stock_uom: item.stock_uom,
-		qty: item.qty,
+		// Count UOM roundtrip: a saved count restores its UOM and counted qty.
+		uom: item.custom_uom || item.stock_uom,
+		qty: item.custom_qty_after ?? item.qty,
 		batch_no: item.batch_no || null,
 		has_batch_no: item.has_batch_no,
 		has_serial_no: item.has_serial_no,
 		serial_nos: [...serials],
 		serial_options: [...serials],
 		is_serial,
-	}
+	})
 }
 
 function localDate() {
@@ -720,6 +783,15 @@ function clearSearch() {
 	itemResults.value = []
 }
 
+// The search endpoint already excludes the stock UOM; offer it first.
+function uomOptionsOf(row) {
+	return [...new Set([row.stock_uom, ...(row.uoms || [])].filter(Boolean))]
+}
+
+function altUoms(item) {
+	return (item.uoms || []).map((u) => u.uom)
+}
+
 async function addItem(item) {
 	clearSearch()
 	if (item.has_serial_no) {
@@ -729,18 +801,17 @@ async function addItem(item) {
 				pos_profile: props.posProfile,
 				item_code: item.item_code,
 			})) || []
-		editor.value.items.push({
-			item_code: item.item_code,
-			item_name: item.item_name || item.item_code,
-			stock_uom: item.stock_uom,
-			qty: 0,
-			batch_no: null,
-			has_batch_no: item.has_batch_no,
-			has_serial_no: item.has_serial_no,
-			serial_nos: [],
-			serial_options: serials,
-			is_serial: true,
-		})
+		editor.value.items.push(
+			blankRow({
+				item_code: item.item_code,
+				item_name: item.item_name || item.item_code,
+				stock_uom: item.stock_uom,
+				has_batch_no: item.has_batch_no,
+				has_serial_no: item.has_serial_no,
+				serial_options: serials,
+				is_serial: true,
+			}),
+		)
 	} else if (item.has_batch_no) {
 		const batches =
 			(await call(`${API}.get_item_batches`, {
@@ -751,23 +822,24 @@ async function addItem(item) {
 			item_code: item.item_code,
 			item_name: item.item_name || item.item_code,
 			stock_uom: item.stock_uom,
+			uoms: altUoms(item),
 			batches,
 			selected: [],
 		}
 	} else {
 		if (editor.value.items.some((r) => r.item_code === item.item_code)) return
-		editor.value.items.push({
-			item_code: item.item_code,
-			item_name: item.item_name || item.item_code,
-			stock_uom: item.stock_uom,
-			qty: 1,
-			batch_no: null,
-			has_batch_no: item.has_batch_no,
-			has_serial_no: item.has_serial_no,
-			serial_nos: [],
-			serial_options: [],
-			is_serial: false,
-		})
+		editor.value.items.push(
+			blankRow({
+				item_code: item.item_code,
+				item_name: item.item_name || item.item_code,
+				stock_uom: item.stock_uom,
+				uom: item.stock_uom,
+				uoms: altUoms(item),
+				qty: 1,
+				has_batch_no: item.has_batch_no,
+				has_serial_no: item.has_serial_no,
+			}),
+		)
 	}
 }
 
@@ -781,18 +853,17 @@ function addBatchRows() {
 			)
 		)
 			continue
-		editor.value.items.push({
-			item_code: picker.item_code,
-			item_name: picker.item_name,
-			stock_uom: picker.stock_uom,
-			qty: 0,
-			batch_no,
-			has_batch_no: 1,
-			has_serial_no: 0,
-			serial_nos: [],
-			serial_options: [],
-			is_serial: false,
-		})
+		editor.value.items.push(
+			blankRow({
+				item_code: picker.item_code,
+				item_name: picker.item_name,
+				stock_uom: picker.stock_uom,
+				uom: picker.stock_uom,
+				uoms: picker.uoms || [],
+				batch_no,
+				has_batch_no: 1,
+			}),
+		)
 	}
 	batchPicker.value = null
 }
@@ -821,7 +892,13 @@ function buildItems() {
 			qty: r.is_serial ? r.serial_nos.length : Number(r.qty) || 0,
 		}
 		if (r.batch_no) out.batch_no = r.batch_no
-		if (r.is_serial) out.serial_nos = [...r.serial_nos]
+		if (r.is_serial) {
+			// serial rows never carry a count UOM (serials are ticked)
+			out.serial_nos = [...r.serial_nos]
+		} else {
+			out.custom_uom = r.uom || r.stock_uom
+			out.custom_qty_after = Number(r.qty) || 0
+		}
 		return out
 	})
 }
