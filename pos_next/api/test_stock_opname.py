@@ -486,6 +486,8 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user(ADMIN)
+		# Count UOM for the Excel import tests: Pack x12, Dus absent (rejected).
+		cls.uom_item = _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": 12}])
 		# Stock in cls.warehouse so every fixture item has a Bin there (the
 		# template source). Plain + batch via _seed_stock; serials need a
 		# serial_no column on the receipt row.
@@ -717,6 +719,48 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		got = get_opname(self.profile, draft["name"])
 		self.assertEqual(got["workflow_state"], STATE_DRAFT)
 		self.assertEqual(got["items"][0]["qty"], 5)
+
+	def test_import_supports_uom_column(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template
+
+		self._cashier()
+		url = self._attach([TEMPLATE_HEADER, [self.uom_item, "", "Pack", "", "", 2]])
+		result = import_opname_template(self.profile, url)
+		self.assertEqual(result["errors"], [])
+		self.assertEqual(result["applied"], 1)
+		row = get_opname(self.profile, result["name"])["items"][0]
+		self.assertEqual(row["custom_uom"], "Pack")
+		self.assertEqual(row["custom_qty_after"], 2)
+		self.assertEqual(row["qty"], 24)  # 2 Pack x 12
+
+	def test_import_rejects_unknown_uom_per_row(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
+
+		self._cashier()
+		url = self._attach(
+			[
+				TEMPLATE_HEADER,
+				[self.uom_item, "", "Dus", "", "", 1],  # row 2: UOM not on the item
+				[self.plain, "", "", "", "", 4],  # row 3: good, still applies
+			]
+		)
+		result = import_opname_template(self.profile, url)
+		self.assertEqual(result["applied"], 1)
+		self.assertEqual(len(result["errors"]), 1)
+		err = result["errors"][0]
+		self.assertEqual(err["row"], 2)
+		self.assertEqual(err["item_code"], self.uom_item)
+		self.assertIn("Dus", err["message"])
+
+	def test_import_serial_row_rejects_uom(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
+
+		self._cashier()
+		url = self._attach([TEMPLATE_HEADER, [self.serial_item, "", "Pack", "", self.serials[0], 1]])
+		result = import_opname_template(self.profile, url)
+		self.assertEqual(result["applied"], 0)
+		self.assertEqual(len(result["errors"]), 1)
+		self.assertIn(self.serial_item, result["errors"][0]["message"])
 
 
 class TestStockOpnameUom(_StockOpnameFixture):

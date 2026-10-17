@@ -841,6 +841,9 @@ def _parse_import(rows, warehouse):
 			continue
 		batch_no = str(cell(row, "Batch No") or "").strip() or None
 		serial_no = str(cell(row, "Serial No") or "").strip() or None
+		# Count UOM column: stock UOM or blank -> native qty as before; any other
+		# UOM is validated (and converted) per row by `_validated_rows`.
+		uom_cell = str(cell(row, "UOM") or "").strip() or None
 		meta = _item_flags(item_code)
 		is_serial = bool(meta and meta.has_serial_no)
 		key = (item_code, serial_no if is_serial else batch_no)
@@ -861,8 +864,13 @@ def _parse_import(rows, warehouse):
 			if not serial_no:
 				errors.append({"row": i, "item_code": item_code, "message": _("Serial no is required for {0}").format(item_code)})
 				continue
+			entry = {"item_code": item_code, "serial_nos": [serial_no]}
+			if uom_cell:
+				# Serial rows count serials, never a UOM: `_validated_rows` rejects
+				# this per row rather than silently importing it as native qty.
+				entry["custom_uom"] = uom_cell
 			try:
-				_validated_rows([{"item_code": item_code, "serial_nos": [serial_no]}], warehouse)
+				_validated_rows([entry], warehouse)
 			except ValidationError as e:
 				errors.append({"row": i, "item_code": item_code, "message": str(e)})
 				continue
@@ -876,12 +884,19 @@ def _parse_import(rows, warehouse):
 			entry = {"item_code": item_code, "qty": qty}
 			if batch_no:
 				entry["batch_no"] = batch_no
+			if uom_cell:
+				entry["custom_uom"] = uom_cell
+				entry["custom_qty_after"] = qty
 			try:
 				_validated_rows([entry], warehouse)
 			except ValidationError as e:
 				errors.append({"row": i, "item_code": item_code, "message": str(e)})
 				continue
-			ops.append({"item_code": item_code, "batch_no": batch_no, "qty": qty})
+			op = {"item_code": item_code, "batch_no": batch_no, "qty": qty}
+			if uom_cell:
+				op["custom_uom"] = uom_cell
+				op["custom_qty_after"] = qty
+			ops.append(op)
 	return ops, skipped, errors
 
 
@@ -907,6 +922,8 @@ def _merge_rows(doc, ops, warehouse):
 				"item_code": row.item_code,
 				"batch_no": row.batch_no,
 				"qty": row.qty,
+				"custom_uom": row.get("custom_uom"),
+				"custom_qty_after": row.get("custom_qty_after"),
 			}
 	for op in ops:
 		if "serial" in op:
@@ -920,13 +937,21 @@ def _merge_rows(doc, ops, warehouse):
 				"item_code": op["item_code"],
 				"batch_no": op["batch_no"],
 				"qty": op["qty"],
+				"custom_uom": op.get("custom_uom"),
+				"custom_qty_after": op.get("custom_qty_after"),
 			}
 	entries = []
 	for val in current.values():
 		if "serial_nos" in val:
 			entries.append({"item_code": val["item_code"], "serial_nos": sorted(val["serial_nos"])})
 		else:
-			entries.append({"item_code": val["item_code"], "qty": val["qty"], "batch_no": val["batch_no"]})
+			entry = {"item_code": val["item_code"], "qty": val["qty"], "batch_no": val["batch_no"]}
+			# Carry a count UOM through the merge so a UOM row is not silently
+			# re-imported as a stock-UOM count.
+			if val.get("custom_uom"):
+				entry["custom_uom"] = val["custom_uom"]
+				entry["custom_qty_after"] = val["custom_qty_after"]
+			entries.append(entry)
 	if not entries:
 		return [], 0
 	applied = sum(1 for op in ops if (op["item_code"], None if "serial" in op else op["batch_no"]) in current)
