@@ -22,6 +22,7 @@ from frappe.utils import cint
 
 from pos_next.install import mirror_standard_perms_for_custom_doctypes
 from pos_next.stock_opname_setup import (
+	HQ_ROLES,
 	OUTLET_ROLES,
 	STATE_APPROVED,
 	STATE_CANCELLED,
@@ -114,6 +115,15 @@ class TestStockOpnameSetup(IntegrationTestCase):
 		# recreate our workflow if it existed before and the test deleted it
 		if WORKFLOW_NAME in self._wf_baseline and not frappe.db.exists("Workflow", WORKFLOW_NAME):
 			ensure_stock_opname_workflow(quiet=True)
+
+	# ------------------------------------------------------------------ constants
+
+	def test_role_tuples_match_spec(self):
+		self.assertEqual(OUTLET_ROLES, ("POSNext Cashier", "POSNext Manager"))
+		self.assertEqual(
+			HQ_ROLES,
+			("Stock Manager", "Accounts Manager", "System Manager", "Administrator"),
+		)
 
 	# ------------------------------------------------------------------ workflow
 

@@ -28,7 +28,7 @@ STATE_APPROVED = "Approved"
 STATE_CANCELLED = "Cancelled"
 
 OUTLET_ROLES = ("POSNext Cashier", "POSNext Manager")
-HQ_ROLES = ("Stock Manager", "Accounts Manager")
+HQ_ROLES = ("Stock Manager", "Accounts Manager", "System Manager", "Administrator")
 
 # (state, doc_status, edit roles). allow_edit is the first role of the row —
 # the Desk client only reads it for button display; the real scoping is the
