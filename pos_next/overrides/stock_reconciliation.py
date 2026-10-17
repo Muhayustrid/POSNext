@@ -55,6 +55,14 @@ class CustomStockReconciliation(StockReconciliation):
 			frappe.throw(
 				_("Warehouse {0} already has an open stock opname: {1}").format(self.set_warehouse, open_name)
 			)
+		# Blind count: the warehouse_app hook fills system-derived custom_qty_before
+		# and custom_qty_difference_per_uom in before_validate; on a draft they would
+		# leak the system qty to the outlet. Clear them — the hook recomputes both on
+		# the submit that posts stock (HQ still reads system qty via get_system_qty).
+		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
+			for row in self.items:
+				row.custom_qty_before = 0
+				row.custom_qty_difference_per_uom = 0
 		super().validate()
 
 	def submit(self):

@@ -83,14 +83,62 @@ def _item_flags(item_code):
 	)
 
 
+def _counted_qty(value, item_code):
+	"""Parse a counted qty into a finite float >= 0, per-row error otherwise."""
+	try:
+		qty = float(value)
+	except (TypeError, ValueError):
+		frappe.throw(_("Counted qty for {0} must be a number").format(item_code), ValidationError)
+	if not math.isfinite(qty) or qty < 0:
+		frappe.throw(_("Counted qty for {0} must be zero or more").format(item_code), ValidationError)
+	return qty
+
+
+def _uom_factor(item_code, custom_uom, stock_uom, has_uom_field):
+	"""Factor from `custom_uom` to the stock UOM (1 when equal), else reject the row.
+
+	Mirrors warehouse_app `apply_sr_inventory_uom`: the stock UOM is factor 1,
+	any other UOM must be on the item's UOM Conversion table. Without the
+	warehouse_app custom fields a non-stock UOM cannot be recorded, so it is
+	rejected per row rather than posted as a stock-UOM count.
+	"""
+	if custom_uom == stock_uom:
+		return 1
+	if not has_uom_field:
+		frappe.throw(
+			_("UOM {0} for {1} needs the warehouse_app UOM fields, which are missing on this site").format(
+				custom_uom, item_code
+			),
+			ValidationError,
+		)
+	factor = frappe.db.get_value("UOM Conversion Detail", {"parent": item_code, "uom": custom_uom}, "conversion_factor")
+	if not factor:
+		frappe.throw(
+			_("UOM {0} for {1} is invalid: use the stock UOM or add it to the item's UOM Conversion table").format(
+				custom_uom, item_code
+			),
+			ValidationError,
+		)
+	return factor
+
+
 def _validated_rows(items, warehouse):
 	"""Validate outlet count rows; return ERPNext row dicts ready to append.
 
 	Raises ValidationError with a per-row message (item code named, unknown
 	serials listed) so Task 4 (Excel import) can report them per row.
+
+	A row counted in a non-stock UOM (`custom_uom` + `custom_qty_after`) is
+	converted to native qty here with the same factor the warehouse_app hook
+	`apply_sr_inventory_uom` recomputes on save; the `custom_*` fields are only
+	written when the Stock Reconciliation Item meta has them (warehouse_app
+	installed), otherwise a non-stock UOM is rejected per row.
 	"""
 	if not isinstance(items, list) or not items:
 		frappe.throw(_("At least one counted item is required"), ValidationError)
+	sr_meta = frappe.get_meta("Stock Reconciliation Item")
+	has_uom_field = sr_meta.has_field("custom_uom")
+	qty_precision = sr_meta.get_field("qty").precision
 	seen = set()
 	rows = []
 	for entry in items:
@@ -115,6 +163,19 @@ def _validated_rows(items, warehouse):
 		# Dedupe within the row: a scan box double-Enter (or crafted payload)
 		# must not inflate qty or write the same serial twice.
 		serial_nos = list(dict.fromkeys(serial_nos))
+		# Count UOM self-conversion: native qty = custom_qty_after * factor.
+		# Serial rows count serials, never a UOM.
+		custom_uom = (entry.get("custom_uom") or "").strip()
+		custom_after = None
+		factor = 1
+		if custom_uom:
+			if has_serial:
+				frappe.throw(
+					_("UOM {0} cannot be used for serial item {1}; count serials instead").format(custom_uom, item_code),
+					ValidationError,
+				)
+			custom_after = _counted_qty(entry.get("custom_qty_after", entry.get("qty")), item_code)
+			factor = _uom_factor(item_code, custom_uom, meta.stock_uom, has_uom_field)
 		if has_batch:
 			if not batch_no:
 				frappe.throw(_("Batch is required for {0}").format(item_code), ValidationError)
@@ -122,13 +183,7 @@ def _validated_rows(items, warehouse):
 				frappe.throw(_("Batch {0} does not belong to {1}").format(batch_no, item_code), ValidationError)
 			if frappe.db.get_value("Batch", batch_no, "disabled"):
 				frappe.throw(_("Batch {0} is disabled").format(batch_no), ValidationError)
-			qty = entry.get("qty")
-			try:
-				qty = float(qty)
-			except (TypeError, ValueError):
-				frappe.throw(_("Counted qty for {0} must be a number").format(item_code), ValidationError)
-			if not math.isfinite(qty) or qty < 0:
-				frappe.throw(_("Counted qty for {0} must be zero or more").format(item_code), ValidationError)
+			qty = flt(custom_after * factor, qty_precision) if custom_after is not None else _counted_qty(entry.get("qty"), item_code)
 		elif has_serial:
 			unknown = [
 				s
@@ -155,13 +210,7 @@ def _validated_rows(items, warehouse):
 		else:
 			if batch_no or serial_nos:
 				frappe.throw(_("{0} has no batch or serial; send only qty").format(item_code), ValidationError)
-			qty = entry.get("qty")
-			try:
-				qty = float(qty)
-			except (TypeError, ValueError):
-				frappe.throw(_("Counted qty for {0} must be a number").format(item_code), ValidationError)
-			if not math.isfinite(qty) or qty < 0:
-				frappe.throw(_("Counted qty for {0} must be zero or more").format(item_code), ValidationError)
+			qty = flt(custom_after * factor, qty_precision) if custom_after is not None else _counted_qty(entry.get("qty"), item_code)
 		key = (item_code, batch_no)
 		if key in seen:
 			frappe.throw(_("Duplicate row for {0}").format(item_code), ValidationError)
@@ -173,6 +222,10 @@ def _validated_rows(items, warehouse):
 			"batch_no": batch_no,
 			"use_serial_batch_fields": 1,
 		}
+		if custom_uom and has_uom_field:
+			row["custom_uom"] = custom_uom
+			row["custom_qty_after"] = custom_after
+			row["custom_conversion_factor"] = factor
 		if has_serial:
 			# Empty count reconciles against all current serials (ERPNext
 			# rejects use_serial_batch_fields rows without serial_no).
@@ -191,16 +244,21 @@ def _payload(doc):
 			meta_cache[row.item_code] = _item_flags(row.item_code)
 		meta = meta_cache[row.item_code] or {}
 		serials = [s.strip() for s in (row.serial_no or "").split("\n") if s.strip()]
+		stock_uom = row.stock_uom or meta.get("stock_uom")
+		custom_uom = row.get("custom_uom")
 		items.append(
 			{
 				"item_code": row.item_code,
 				"item_name": row.item_name or meta.get("item_name"),
-				"stock_uom": row.stock_uom or meta.get("stock_uom"),
+				"stock_uom": stock_uom,
 				"qty": row.qty,
 				"batch_no": row.batch_no,
 				"serial_nos": serials,
 				"has_batch_no": int(bool(meta.get("has_batch_no"))),
 				"has_serial_no": int(bool(meta.get("has_serial_no"))),
+				# Count UOM roundtrip: native rows fall back to stock UOM / qty.
+				"custom_uom": custom_uom or stock_uom,
+				"custom_qty_after": row.get("custom_qty_after") if custom_uom else row.qty,
 			}
 		)
 	return {
@@ -519,6 +577,74 @@ def get_item_serials(pos_profile, item_code):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Opname Serials Error")
 		frappe.throw(_("Error fetching serials: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def search_opname_items(pos_profile, search_term=None, start=0, limit=10):
+	"""Blind item search for the count sheet: enabled stock items only.
+
+	Word-AND match over name/item_name/item_group/description (FULLTEXT when the
+	index exists, substring LIKE otherwise) plus an exact barcode match. Joins
+	no stock table on purpose: an item with zero stock is still returned and no
+	system quantity ever leaves the server (blind count, spec U4).
+	"""
+	_profile_warehouse(pos_profile)
+	from pos_next.api.items import _item_fulltext_index_exists, build_item_search_condition
+
+	try:
+		conditions = ["i.disabled = 0", "i.is_stock_item = 1"]
+		params = []
+		term = (search_term or "").strip()
+		if term:
+			words = [w for w in term.split() if w]
+			word_condition, word_params = build_item_search_condition(
+				words, fulltext_available=_item_fulltext_index_exists()
+			)
+			# Exact barcode OR, added only when a barcode equals the term: the OR
+			# otherwise stops MariaDB using the FULLTEXT index (probe as get_items).
+			if frappe.db.sql("SELECT 1 FROM `tabItem Barcode` WHERE barcode = %s LIMIT 1", (term,)):
+				word_condition = (
+					f"(({word_condition}) OR i.name IN "
+					"(SELECT parent FROM `tabItem Barcode` WHERE barcode = %s))"
+				)
+				word_params.append(term)
+			conditions.append(word_condition)
+			params.extend(word_params)
+
+		rows = frappe.db.sql(
+			f"""
+			SELECT i.name AS item_code, i.item_name, i.stock_uom, i.has_batch_no, i.has_serial_no
+			FROM `tabItem` i
+			WHERE {" AND ".join(conditions)}
+			ORDER BY i.item_name ASC
+			LIMIT %s OFFSET %s
+			""",
+			tuple([*params, int(limit), int(start)]),
+			as_dict=True,
+		)
+
+		uom_map = {}
+		codes = [r.item_code for r in rows]
+		if codes:
+			for row in frappe.get_all(
+				"UOM Conversion Detail",
+				filters={"parent": ["in", codes]},
+				fields=["parent", "uom", "conversion_factor"],
+			):
+				uom_map.setdefault(row.parent, []).append(
+					{"uom": row.uom, "conversion_factor": row.conversion_factor}
+				)
+		for row in rows:
+			row["has_batch_no"] = int(bool(row["has_batch_no"]))
+			row["has_serial_no"] = int(bool(row["has_serial_no"]))
+			# the stock UOM is offered separately by the UI; keep alternatives only
+			row["uoms"] = [u for u in uom_map.get(row["item_code"], []) if u["uom"] != row["stock_uom"]]
+		return rows
+	except (ValidationError, frappe.PermissionError):
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Search Opname Items Error")
+		frappe.throw(_("Error searching items: {0}").format(str(e)))
 
 
 def _template_rows(warehouse, item_group=None):

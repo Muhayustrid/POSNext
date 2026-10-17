@@ -173,8 +173,22 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		got = get_opname(self.profile, payload["name"])
 		self.assertEqual(
 			set(got["items"][0].keys()),
-			{"item_code", "item_name", "stock_uom", "qty", "batch_no", "serial_nos", "has_batch_no", "has_serial_no"},
+			{
+				"item_code",
+				"item_name",
+				"stock_uom",
+				"qty",
+				"batch_no",
+				"serial_nos",
+				"has_batch_no",
+				"has_serial_no",
+				"custom_uom",
+				"custom_qty_after",
+			},
 		)
+		# native row: the count UOM falls back to stock UOM / native qty
+		self.assertEqual(got["items"][0]["custom_uom"], got["items"][0]["stock_uom"])
+		self.assertEqual(got["items"][0]["custom_qty_after"], 4)
 		self.assertEqual(payload["items"], got["items"])
 		qtys = {r["item_code"]: r["qty"] for r in got["items"]}
 		self.assertEqual(qtys, {self.plain: 4, self.other_plain: 0})
@@ -677,6 +691,137 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		self.assertEqual(got["items"][0]["qty"], 5)
 
 
+class TestStockOpnameUom(_StockOpnameFixture):
+	"""Task 2: outlet counts entered in a non-stock UOM convert to native qty.
+
+	The item carries a ``Pack`` UOM Conversion (x12); ``Dus`` exists as a UOM
+	but is not on the item, so it must be rejected per row.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		cls.uom_item = _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": 12}])
+		frappe.db.commit()
+
+	def test_uom_converts_to_native_qty(self):
+		from pos_next.api.stock_opname import _validated_rows, save_opname
+
+		row = _validated_rows(
+			[{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}], self.warehouse
+		)[0]
+		self.assertEqual(row["qty"], 24)
+		self.assertEqual(row["custom_uom"], "Pack")
+		self.assertEqual(row["custom_qty_after"], 2)
+		self.assertEqual(row["custom_conversion_factor"], 12)
+		# The warehouse_app hook recomputes qty from the stored custom fields on
+		# save; the persisted native qty must stay 2 Pack x 12.
+		self._cashier()
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}]},
+		)
+		stored = frappe.get_doc(DOCTYPE, payload["name"]).items[0]
+		self.assertEqual(stored.qty, 24)
+		self.assertEqual(stored.custom_uom, "Pack")
+		self.assertEqual(stored.custom_qty_after, 2)
+
+	def test_unknown_uom_rejected_per_row(self):
+		from pos_next.api.stock_opname import _validated_rows
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			_validated_rows(
+				[{"item_code": self.uom_item, "custom_uom": "Dus", "custom_qty_after": 1}], self.warehouse
+			)
+		self.assertIn(self.uom_item, str(ctx.exception))
+		self.assertIn("Dus", str(ctx.exception))
+
+	def test_serial_row_rejects_custom_uom(self):
+		from pos_next.api.stock_opname import _validated_rows
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			_validated_rows(
+				[
+					{
+						"item_code": self.serial_item,
+						"serial_nos": [self.serials[0]],
+						"custom_uom": "Pack",
+						"custom_qty_after": 1,
+					}
+				],
+				self.warehouse,
+			)
+		self.assertIn(self.serial_item, str(ctx.exception))
+
+	def test_missing_custom_fields_still_posts_stock_qty(self):
+		from unittest import mock
+
+		from pos_next.api.stock_opname import _validated_rows
+
+		real_meta = frappe.get_meta("Stock Reconciliation Item")
+		real_get_meta = frappe.get_meta
+
+		class _NoUomMeta:
+			def has_field(self, fieldname):
+				return fieldname != "custom_uom" and real_meta.has_field(fieldname)
+
+			def get_field(self, fieldname):
+				return real_meta.get_field(fieldname)
+
+		def fake_get_meta(doctype, *args, **kwargs):
+			if doctype == "Stock Reconciliation Item":
+				return _NoUomMeta()
+			return real_get_meta(doctype, *args, **kwargs)
+
+		with mock.patch.object(frappe, "get_meta", fake_get_meta):
+			# A non-stock UOM cannot be represented without the custom fields:
+			# reject per row rather than post it as a stock-UOM count.
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				_validated_rows(
+					[{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}], self.warehouse
+				)
+			self.assertIn(self.uom_item, str(ctx.exception))
+			self.assertIn("UOM", str(ctx.exception))
+			row = _validated_rows([{"item_code": self.plain, "qty": 5}], self.warehouse)[0]
+		self.assertEqual(row["qty"], 5)
+		self.assertNotIn("custom_uom", row)
+		self.assertNotIn("custom_qty_after", row)
+		self.assertNotIn("custom_conversion_factor", row)
+
+	def test_payload_roundtrips_uom(self):
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}]},
+		)
+		row = get_opname(self.profile, payload["name"])["items"][0]
+		self.assertEqual(row["custom_uom"], "Pack")
+		self.assertEqual(row["custom_qty_after"], 2)
+		self.assertEqual(row["qty"], 24)
+
+	def test_draft_clears_hook_system_qty_fields(self):
+		from frappe.utils import flt
+
+		from pos_next.api.stock_opname import save_opname
+
+		# 24 native = 2 Pack in stock, so the warehouse_app hook fills a non-zero
+		# custom_qty_before / difference on the draft; the outlet must never see it.
+		_seed_stock(self.uom_item, self.warehouse, 24)
+		frappe.db.commit()
+		self._cashier()
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 3}]},
+		)
+		frappe.set_user(ADMIN)
+		row = frappe.get_doc(DOCTYPE, payload["name"]).items[0]
+		self.assertEqual(flt(row.custom_qty_before), 0)
+		self.assertEqual(flt(row.custom_qty_difference_per_uom), 0)
+
+
 class TestStockOpnameSystemQty(_StockOpnameFixture):
 	"""HQ `get_system_qty`: live system qty/difference for a draft opname.
 
@@ -749,3 +894,43 @@ class TestStockOpnameSystemQty(_StockOpnameFixture):
 		)
 		self.assertEqual(after.current_qty, 0)
 		self.assertEqual(before, after)
+
+
+class TestStockOpnameSearch(_StockOpnameFixture):
+	"""Task 4 blind search: no system qty, zero-stock items included, barcode match."""
+
+	@staticmethod
+	def _token(item_code):
+		# The unique single-token tail of the generated code ("PRD-T-xxxx": the
+		# fulltext index tokenizes on the dashes).
+		return item_code.rsplit("-", 1)[-1]
+
+	def _search(self, term, **kwargs):
+		from pos_next.api.stock_opname import search_opname_items
+
+		self._cashier()
+		return search_opname_items(self.profile, search_term=term, **kwargs)
+
+	def test_blind_search_has_no_system_qty(self):
+		rows = self._search(self._token(self.plain))
+		row = next(r for r in rows if r["item_code"] == self.plain)
+		# exactly the fields the count UI needs — never actual_qty/current_qty
+		self.assertEqual(
+			set(row.keys()),
+			{"item_code", "item_name", "stock_uom", "has_batch_no", "has_serial_no", "uoms"},
+		)
+
+	def test_blind_search_finds_zero_stock_item(self):
+		# No stock is seeded in this class: the item has no Bin row yet is returned.
+		rows = self._search(self._token(self.plain))
+		self.assertIn(self.plain, [r["item_code"] for r in rows])
+
+	def test_blind_search_barcode_match(self):
+		frappe.set_user(ADMIN)
+		barcode = f"BC{uuid.uuid4().hex[:10]}"
+		item = frappe.get_doc("Item", self.plain)
+		item.append("barcodes", {"barcode": barcode})
+		item.save(ignore_permissions=True)
+		frappe.db.commit()
+		rows = self._search(barcode)
+		self.assertIn(self.plain, [r["item_code"] for r in rows])
