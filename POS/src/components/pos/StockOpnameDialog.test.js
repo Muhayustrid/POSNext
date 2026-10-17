@@ -247,6 +247,15 @@ describe("StockOpnameDialog", () => {
 		expect(wrapper.text()).toContain("B1")
 		expect(wrapper.text()).toContain("B2")
 		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(2)
+
+		// added rows carry the batch flags: client logic branching on them
+		// must not misclassify the row between add and save
+		const added = wrapper.vm.$.setupState.editor.items.filter((r) => r.batch_no)
+		expect(added).toHaveLength(2)
+		for (const row of added) {
+			expect(row.has_batch_no).toBe(1)
+			expect(row.has_serial_no).toBe(0)
+		}
 	})
 
 	it("serial item qty equals ticked serials", async () => {
@@ -513,6 +522,123 @@ describe("StockOpnameDialog", () => {
 
 		expect(wrapper.text()).toContain("Row 3")
 		expect(wrapper.text()).toContain("Row 7")
+	})
+
+	it("Continue opens the editable count, not a pending one", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-PEND",
+					posting_date: "2026-01-05",
+					workflow_state: "Approval Pending by Stock Manager",
+					docstatus: 0,
+					item_count: 1,
+					modified: "m1",
+					reject_reason: null,
+				},
+				{
+					name: "SR-DRAFT",
+					posting_date: "2026-01-06",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 1,
+					modified: "m2",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-DRAFT",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m2",
+				items: [PLAIN_ITEM],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+
+		const cont = findButton(wrapper, "Continue")
+		expect(cont).toBeTruthy()
+		expect(findButton(wrapper, "New Count")).toBeUndefined()
+		await cont.trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("Alpha Item")
+	})
+
+	it("no Continue and no New Count while only a pending count exists", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-PEND",
+					posting_date: "2026-01-05",
+					workflow_state: "Approval Pending by Stock Manager",
+					docstatus: 0,
+					item_count: 1,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-PEND",
+				workflow_state: "Approval Pending by Stock Manager",
+				docstatus: 0,
+				modified: "m1",
+				items: [PLAIN_ITEM],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+
+		expect(findButton(wrapper, "Continue")).toBeUndefined()
+		expect(findButton(wrapper, "New Count")).toBeUndefined()
+		// the pending row still opens read-only
+		await findButton(wrapper, "SR-PEND").trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("Alpha Item")
+		expect(findButton(wrapper, "Save")).toBeUndefined()
+	})
+
+	it("upload into an unsaved new count confirms before replacing rows", async () => {
+		mockCall(ITEMS_URL, () =>
+			Promise.resolve([
+				{
+					item_code: "ITEM-A",
+					item_name: "Alpha Item",
+					stock_uom: "Nos",
+					has_batch_no: 0,
+					has_serial_no: 0,
+				},
+			]),
+		)
+		const importCall = mockCall(IMPORT_URL, () =>
+			Promise.resolve({ name: null, applied: 0, skipped: 0, errors: [] }),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Count").trigger("click")
+		await flushPromises()
+		await searchItem(wrapper, "alpha")
+		await findButton(wrapper, "Alpha Item").trigger("click")
+		await flushPromises()
+
+		const input = wrapper.find('input[type="file"]')
+		const pick = async () => {
+			Object.defineProperty(input.element, "files", {
+				value: [new File(["x"], "count.xlsx")],
+				configurable: true,
+			})
+			await input.trigger("change")
+			await flushPromises()
+		}
+
+		window.confirm = vi.fn(() => false)
+		await pick()
+		expect(importCall).not.toHaveBeenCalled()
+
+		window.confirm = vi.fn(() => true)
+		await pick()
+		expect(importCall).toHaveBeenCalled()
 	})
 
 	it("save sends modified for conflict detection", async () => {

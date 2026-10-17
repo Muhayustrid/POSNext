@@ -19,7 +19,7 @@
 							</template>
 							{{ __("Continue") }}
 						</Button>
-						<Button v-else variant="solid" @click="openNew">
+						<Button v-else-if="!hasOpenOpname" variant="solid" @click="openNew">
 							<template #prefix>
 								<FeatherIcon name="plus" class="h-4 w-4" />
 							</template>
@@ -442,8 +442,13 @@ const editable = computed(
 		["Draft", "Rejected"].includes(editor.value.workflow_state),
 )
 
-// One open count per warehouse: any docstatus-0 opname blocks starting a new one.
-const openOpname = computed(() => opnames.value.find((o) => !o.docstatus))
+// Continue opens only an editable count; a Pending opname opens read-only.
+const openOpname = computed(() =>
+	opnames.value.find((o) => !o.docstatus && ["Draft", "Rejected"].includes(o.workflow_state)),
+)
+
+// One open count per warehouse: any docstatus-0 opname blocks starting a new one (D5).
+const hasOpenOpname = computed(() => opnames.value.some((o) => !o.docstatus))
 
 // ---------------------------------------------------------------------------
 // List
@@ -685,6 +690,8 @@ function addBatchRows() {
 			stock_uom: picker.stock_uom,
 			qty: 0,
 			batch_no,
+			has_batch_no: 1,
+			has_serial_no: 0,
 			serial_nos: [],
 			serial_options: [],
 			is_serial: false,
@@ -828,6 +835,10 @@ async function onFilePicked(event) {
 	const file = event.target.files?.[0]
 	event.target.value = ""
 	if (!file) return
+	// An unsaved new count would be replaced wholesale by the upload: confirm.
+	if (!editor.value?.name && editor.value?.items?.length) {
+		if (!window.confirm(__("Uploading replaces the unsaved rows. Upload anyway?"))) return
+	}
 	importing.value = true
 	importResult.value = null
 	try {
