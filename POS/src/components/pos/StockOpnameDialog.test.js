@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 
 // Route call() by API url, same pattern as RejectRequestDialog.test.js.
@@ -113,10 +113,27 @@ async function clickConfirm(wrapper) {
 	await flushPromises()
 }
 
-/** Type a search term and let the 350 ms trailing debounce fire. */
-async function searchItem(wrapper, term) {
-	await wrapper.find('input[placeholder="Search item..."]').setValue(term)
+/** Click Add Row and return the new row's Item link input. */
+async function addRow(wrapper) {
+	await findButton(wrapper, "Add Row").trigger("click")
+	await flushPromises()
+	return wrapper.findAll('[data-testid="row-item-input"]').at(-1)
+}
+
+/** Type a term in the last added row and let the 350 ms debounce fire. */
+async function searchRow(wrapper, term) {
+	const input = await addRow(wrapper)
+	await input.setValue(term)
 	await new Promise((r) => setTimeout(r, 400))
+	await flushPromises()
+}
+
+/** Click the search result whose text contains `text`. */
+async function pickResult(wrapper, text) {
+	const btn = wrapper
+		.findAll('[data-testid="row-item-result"]')
+		.find((b) => b.text().includes(text))
+	await btn.trigger("click")
 	await flushPromises()
 }
 
@@ -183,6 +200,9 @@ beforeEach(() => {
 		}),
 	)
 })
+
+// a failing fake-timer test must not leak the clock into the next one
+afterEach(() => vi.useRealTimers())
 
 describe("StockOpnameDialog list", () => {
 	it("renders the Desk list header and clickable rows", async () => {
@@ -327,7 +347,7 @@ describe("StockOpnameDialog doc page", () => {
 		expect(wrapper.text()).toContain("Alpha Item")
 		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(0)
 		expect(wrapper.find('[data-testid="uom-select"]').exists()).toBe(false)
-		expect(wrapper.find('input[placeholder="Search item..."]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="row-item-input"]').exists()).toBe(false)
 		expect(wrapper.text()).not.toContain("Add Row")
 	})
 
@@ -601,19 +621,165 @@ describe("StockOpnameDialog dirty guard", () => {
 })
 
 describe("StockOpnameDialog item grid", () => {
-	it("batch item adds one row per picked batch", async () => {
+	it("Add Row appends a link-search row that fills from a picked result", async () => {
 		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
 		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
 		mockCall(SEARCH_URL, () =>
 			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		// the old bottom search box is gone
+		expect(wrapper.find('input[aria-label="Add item"]').exists()).toBe(false)
+
+		await searchRow(wrapper, "alpha")
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(1)
+		await pickResult(wrapper, "Alpha Item")
+
+		expect(wrapper.text()).toContain("Alpha Item")
+		expect(wrapper.find('[data-testid="uom-select"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="qty-input"]').element.value).toBe("1")
+		// picking resolves the link field: the input is replaced by the item text
+		expect(wrapper.find('[data-testid="row-item-input"]').exists()).toBe(false)
+	})
+
+	it("debounces the per-row item search", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		const searchCall = mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ROTI", item_name: "Roti", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await addRow(wrapper)
+
+		vi.useFakeTimers()
+		await wrapper.find('[data-testid="row-item-input"]').setValue("ROTI")
+		expect(searchCall).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(350)
+		expect(searchCall).toHaveBeenCalledTimes(1)
+		expect(searchCall.mock.calls[0][0]).toMatchObject({ search_term: "ROTI" })
+		vi.useRealTimers()
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(1)
+	})
+
+	it("Enter on an exact item_code match fills the row (barcode)", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ROTI-001", item_name: "Roti Manis", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await searchRow(wrapper, "ROTI-001")
+
+		await wrapper.find('[data-testid="row-item-input"]').trigger("keyup.enter")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("Roti Manis")
+		expect(wrapper.find('[data-testid="qty-input"]').element.value).toBe("1")
+	})
+
+	it("Enter fills the row when it lands before the debounce (barcode)", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		const searchCall = mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ROTI-001", item_name: "Roti Manis", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await addRow(wrapper)
+
+		vi.useFakeTimers()
+		await wrapper.find('[data-testid="row-item-input"]').setValue("ROTI-001")
+		// the debounce has not fired: Enter must look the exact code up itself
+		expect(searchCall).not.toHaveBeenCalled()
+		await wrapper.find('[data-testid="row-item-input"]').trigger("keyup.enter")
+		await vi.advanceTimersByTimeAsync(0)
+		expect(searchCall).toHaveBeenCalledTimes(1)
+		vi.useRealTimers()
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("Roti Manis")
+		expect(wrapper.find('[data-testid="qty-input"]').element.value).toBe("1")
+	})
+
+	it("keeps only one row dropdown open", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, (params) =>
+			Promise.resolve([
 				{
-					item_code: "MILK",
-					item_name: "Milk",
+					item_code: params.search_term.toUpperCase(),
+					item_name: `${params.search_term} item`,
 					stock_uom: "Nos",
-					has_batch_no: 1,
+					has_batch_no: 0,
 					has_serial_no: 0,
 					uoms: [],
 				},
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await searchRow(wrapper, "alpha")
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(1)
+
+		// searching in a second row closes the first row's dropdown
+		await searchRow(wrapper, "beta")
+		const results = wrapper.findAll('[data-testid="row-item-result"]')
+		expect(results).toHaveLength(1)
+		expect(results[0].text()).toContain("beta item")
+	})
+
+	it("closes the dropdown on Escape and, after a delay, on blur", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await searchRow(wrapper, "alpha")
+		await wrapper.find('[data-testid="row-item-input"]').trigger("keyup.escape")
+		await flushPromises()
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(0)
+
+		// blur closes too, but only after a delay so a result click still lands
+		await wrapper.find('[data-testid="row-item-input"]').setValue("alpha")
+		await new Promise((r) => setTimeout(r, 400))
+		await flushPromises()
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(1)
+
+		vi.useFakeTimers()
+		await wrapper.find('[data-testid="row-item-input"]').trigger("blur")
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(1)
+		await vi.advanceTimersByTimeAsync(200)
+		vi.useRealTimers()
+		await flushPromises()
+		expect(wrapper.findAll('[data-testid="row-item-result"]')).toHaveLength(0)
+	})
+
+	it("batch item uses a row select and blocks Save until a batch is picked", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "MILK", item_name: "Milk", stock_uom: "Nos", has_batch_no: 1, has_serial_no: 0, uoms: [] },
 			]),
 		)
 		mockCall(BATCHES_URL, () =>
@@ -622,34 +788,106 @@ describe("StockOpnameDialog item grid", () => {
 				{ batch_no: "B2", expiry_date: "2026-02-01" },
 			]),
 		)
+		const saveCall = mockCall(SAVE_URL, () => Promise.resolve({ ...DRAFT_DOC }))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await searchRow(wrapper, "milk")
+		await pickResult(wrapper, "Milk")
+
+		// the separate batch picker panel is gone; the row itself selects the batch
+		expect(wrapper.find('[data-testid="batch-picker"]').exists()).toBe(false)
+		const select = wrapper.find('[data-testid="row-batch-select"]')
+		expect(select.exists()).toBe(true)
+		expect(select.findAll("option").map((o) => o.text())).toEqual(["Select batch", "B1", "B2"])
+		// a batch row starts at qty 0
+		expect(wrapper.find('[data-testid="qty-input"]').element.value).toBe("0")
+
+		// no batch picked: error toast, no save call
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+		expect(saveCall).not.toHaveBeenCalled()
+		expect(toasts.log.some((m) => m.includes("Choose a batch"))).toBe(true)
+
+		// picking a batch unblocks the save
+		await select.setValue("B1")
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+		expect(saveCall).toHaveBeenCalledTimes(1)
+		expect(saveCall.mock.calls[0][0].data.items[0]).toMatchObject({
+			item_code: "MILK",
+			batch_no: "B1",
+		})
+	})
+
+	it("rejects a duplicate plain item and clears the row", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
 
-		await searchItem(wrapper, "milk")
-		await findButton(wrapper, "Milk").trigger("click")
+		await searchRow(wrapper, "alpha")
+		await pickResult(wrapper, "Alpha Item")
+		await searchRow(wrapper, "alpha")
+		await pickResult(wrapper, "Alpha Item")
+
+		expect(toasts.log.some((m) => m.includes("already in the list"))).toBe(true)
+		// one filled row plus the cleared link row
+		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(1)
+		expect(wrapper.findAll('[data-testid="row-item-input"]')).toHaveLength(1)
+	})
+
+	it("rejects a duplicate item+batch and clears the row", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "MILK", item_name: "Milk", stock_uom: "Nos", has_batch_no: 1, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		mockCall(BATCHES_URL, () => Promise.resolve([{ batch_no: "B1" }, { batch_no: "B2" }]))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await searchRow(wrapper, "milk")
+		await pickResult(wrapper, "Milk")
+		await wrapper.findAll('[data-testid="row-batch-select"]')[0].setValue("B1")
+
+		// same item, another row: allowed until the same batch is picked
+		await searchRow(wrapper, "milk")
+		await pickResult(wrapper, "Milk")
+		await wrapper.findAll('[data-testid="row-batch-select"]')[1].setValue("B1")
 		await flushPromises()
 
-		// a batch picker lists the item's batches, no free-text batch field
-		const options = wrapper.findAll('[data-testid="batch-option"]')
-		expect(options).toHaveLength(2)
-		expect(wrapper.find('input[placeholder*="Batch"]').exists()).toBe(false)
+		expect(toasts.log.some((m) => m.includes("already in the list"))).toBe(true)
+		expect(wrapper.findAll('[data-testid="row-batch-select"]')).toHaveLength(1)
+		expect(wrapper.findAll('[data-testid="row-item-input"]')).toHaveLength(1)
+	})
 
-		for (const opt of options) await opt.setValue(true)
-		await findButton(wrapper, "Add").trigger("click")
+	it("drops blank rows from the save payload", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const saveCall = mockCall(SAVE_URL, () => Promise.resolve({ ...DRAFT_DOC }))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await searchRow(wrapper, "alpha")
+		await pickResult(wrapper, "Alpha Item")
+		await addRow(wrapper) // left blank
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
 		await flushPromises()
 
-		expect(wrapper.text()).toContain("B1")
-		expect(wrapper.text()).toContain("B2")
-		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(2)
-
-		// added rows carry the batch flags: client logic branching on them
-		// must not misclassify the row between add and save
-		const added = wrapper.vm.$.setupState.editor.items.filter((r) => r.batch_no)
-		expect(added).toHaveLength(2)
-		for (const row of added) {
-			expect(row.has_batch_no).toBe(1)
-			expect(row.has_serial_no).toBe(0)
-		}
+		expect(saveCall.mock.calls[0][0].data.items).toHaveLength(1)
+		expect(saveCall.mock.calls[0][0].data.items[0].item_code).toBe("ITEM-A")
 	})
 
 	it("pick reuses the cached search row", async () => {
@@ -670,10 +908,9 @@ describe("StockOpnameDialog item grid", () => {
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
 
-		await searchItem(wrapper, "alpha")
+		await searchRow(wrapper, "alpha")
 		expect(searchCall).toHaveBeenCalledTimes(1)
-		await findButton(wrapper, "Alpha Item").trigger("click")
-		await flushPromises()
+		await pickResult(wrapper, "Alpha Item")
 
 		// the picked row is reused from the cached results — no second search request
 		expect(searchCall).toHaveBeenCalledTimes(1)
@@ -711,8 +948,8 @@ describe("StockOpnameDialog item grid", () => {
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
 
-		await searchItem(wrapper, "ser")
-		await findButton(wrapper, "Serial Item").trigger("click")
+		await searchRow(wrapper, "ser")
+		await pickResult(wrapper, "Serial Item")
 		await flushPromises()
 
 		const serials = wrapper.findAll('[data-testid="serial-option"]')
@@ -769,8 +1006,8 @@ describe("StockOpnameDialog item grid", () => {
 
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
-		await searchItem(wrapper, "ser")
-		await findButton(wrapper, "Serial Item").trigger("click")
+		await searchRow(wrapper, "ser")
+		await pickResult(wrapper, "Serial Item")
 		await flushPromises()
 
 		// nothing ticked: qty is 0 but the row is still a serial row, not a qty input
@@ -826,8 +1063,8 @@ describe("StockOpnameDialog item grid", () => {
 
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
-		await searchItem(wrapper, "ser")
-		await findButton(wrapper, "Serial Item").trigger("click")
+		await searchRow(wrapper, "ser")
+		await pickResult(wrapper, "Serial Item")
 		await flushPromises()
 
 		await wrapper.findAll('[data-testid="serial-option"]')[0].setValue(true) // tick A
@@ -872,8 +1109,8 @@ describe("StockOpnameDialog item grid", () => {
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
 
-		await searchItem(wrapper, "milk")
-		await findButton(wrapper, "Milk").trigger("click")
+		await searchRow(wrapper, "milk")
+		await pickResult(wrapper, "Milk")
 		await flushPromises()
 
 		const select = wrapper.find('[data-testid="uom-select"]')
@@ -906,8 +1143,8 @@ describe("StockOpnameDialog item grid", () => {
 		mockCall(SERIALS_URL, () => Promise.resolve(["A", "B"]))
 		const wrapper = await mountOpenDialog()
 		await openSavedDoc(wrapper)
-		await searchItem(wrapper, "ser")
-		await findButton(wrapper, "Serial Item").trigger("click")
+		await searchRow(wrapper, "ser")
+		await pickResult(wrapper, "Serial Item")
 		await flushPromises()
 
 		// serials are counted by ticking, never in a converted UOM
@@ -935,9 +1172,8 @@ describe("StockOpnameDialog item grid", () => {
 			["beta", "Beta Item"],
 			["gamma", "Gamma Item"],
 		]) {
-			await searchItem(wrapper, term)
-			await findButton(wrapper, name).trigger("click")
-			await flushPromises()
+			await searchRow(wrapper, term)
+			await pickResult(wrapper, name)
 		}
 
 		let qtyInputs = wrapper.findAll('[data-testid="qty-input"]')
@@ -1014,9 +1250,8 @@ describe("StockOpnameDialog excel upload", () => {
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "New Count").trigger("click")
 		await flushPromises()
-		await searchItem(wrapper, "alpha")
-		await findButton(wrapper, "Alpha Item").trigger("click")
-		await flushPromises()
+		await searchRow(wrapper, "alpha")
+		await pickResult(wrapper, "Alpha Item")
 
 		const input = wrapper.find('input[accept=".xlsx"]')
 		const pick = async () => {

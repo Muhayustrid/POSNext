@@ -314,10 +314,44 @@
 
 						<!-- editable -->
 						<template v-else>
+							<!-- Excel tools sit above the grid (N4) -->
+							<div
+								data-testid="grid-toolbar"
+								class="flex flex-wrap items-end justify-end gap-3 border-t border-gray-200 px-4 py-3"
+							>
+								<div>
+									<label for="so-item-group" class="mb-1 block text-xs font-medium text-gray-700">
+										{{ __("Item Group") }}
+									</label>
+									<select
+										id="so-item-group"
+										v-model="itemGroup"
+										class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									>
+										<option value="">{{ __("All item groups") }}</option>
+										<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
+											{{ g.item_group }}
+										</option>
+									</select>
+								</div>
+								<Button variant="subtle" @click="downloadTemplate">
+									<template #prefix>
+										<FeatherIcon name="download" class="h-4 w-4" />
+									</template>
+									{{ __("Download Template") }}
+								</Button>
+								<label
+									class="cursor-pointer rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+								>
+									<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
+									{{ importing ? __("Uploading...") : __("Upload") }}
+								</label>
+							</div>
+
 							<div
 								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-x-3"
 							>
-								<span>#</span>
+								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("Batch") }}</span>
 								<span>{{ __("UOM") }}</span>
@@ -325,227 +359,181 @@
 								<span></span>
 							</div>
 
-							<div
-								v-for="(row, idx) in editor.items"
-								:key="row.key"
-								class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-y-0 md:py-1.5"
-							>
-								<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
-
-								<div class="col-span-2 min-w-0 md:col-span-1">
-									<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
-									<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
-										{{ row.item_code }}
-									</p>
-								</div>
-
-								<div class="min-w-0">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Batch") }}</span>
-									<span class="truncate text-xs text-gray-500">{{ row.batch_no }}</span>
-								</div>
-
-								<div class="min-w-0">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
-									<!-- serials are counted by ticking, never in a converted UOM -->
-									<span
-										v-if="row.is_serial"
-										data-testid="uom-readonly"
-										class="block truncate text-sm text-gray-500"
-									>
-										{{ row.stock_uom }}
-									</span>
-									<select
-										v-else
-										v-model="row.uom"
-										data-testid="uom-select"
-										:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
-										class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-									>
-										<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
-									</select>
-								</div>
-
-								<div class="min-w-0">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
-									<!-- serial qty is the number of ticked serials, never typed -->
-									<span
-										v-if="row.is_serial"
-										data-testid="item-qty"
-										class="block text-end text-sm tabular-nums text-gray-900"
-									>
-										{{ row.serial_nos.length }}
-									</span>
-									<input
-										v-else
-										v-model.number="row.qty"
-										type="number"
-										min="0"
-										step="any"
-										inputmode="decimal"
-										data-testid="qty-input"
-										:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
-										class="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-									/>
-								</div>
-
-								<button
-									type="button"
-									class="flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
-									:aria-label="__('Remove item')"
-									:title="__('Remove item')"
-									@click="editor.items.splice(idx, 1)"
-								>
-									<FeatherIcon name="x" class="h-4 w-4" />
-								</button>
-
-								<!-- serial tick list: tick the serials physically present -->
-								<div v-if="row.is_serial" class="col-span-2 mt-2 md:col-span-6">
-									<ul class="flex flex-wrap gap-x-4 gap-y-1">
-										<li v-for="s in row.serial_options" :key="s">
-											<label class="flex items-center gap-1.5 text-sm text-gray-700">
-												<input
-													type="checkbox"
-													data-testid="serial-option"
-													:checked="row.serial_nos.includes(s)"
-													@change="toggleSerial(row, s)"
-												/>
-												{{ s }}
-											</label>
-										</li>
-									</ul>
-									<input
-										type="text"
-										:placeholder="__('Scan serial...')"
-										:aria-label="__('Scan serial')"
-										class="mt-1 w-full max-w-xs rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-										@keyup.enter="scanSerial(row, $event)"
-									/>
-								</div>
-							</div>
-
-							<!-- batch picker: one row per picked batch, no free-text batch -->
-							<div
-								v-if="batchPicker"
-								data-testid="batch-picker"
-								class="border-t border-gray-200 bg-gray-50 px-4 py-3"
-							>
-								<p class="mb-2 text-sm font-medium text-gray-900">
-									{{ __("Pick batches for {0}", [batchPicker.item_name]) }}
-								</p>
-								<div class="flex flex-col gap-1.5">
-									<label
-										v-for="b in batchPicker.batches"
-										:key="b.batch_no"
-										class="flex items-center gap-2 text-sm text-gray-700"
-									>
-										<input
-											type="checkbox"
-											data-testid="batch-option"
-											:value="b.batch_no"
-											v-model="batchPicker.selected"
-										/>
-										<span>{{ b.batch_no }}<span v-if="b.expiry_date"> — {{ formatDate(b.expiry_date) }}</span></span>
-									</label>
-									<p v-if="!batchPicker.batches.length" class="text-xs text-gray-500">
-										{{ __("No enabled batch for this item") }}
-									</p>
-								</div>
-								<div class="mt-3 flex justify-end gap-2">
-									<Button variant="subtle" size="sm" @click="batchPicker = null">{{ __("Cancel") }}</Button>
-									<Button
-										variant="solid"
-										size="sm"
-										:disabled="!batchPicker.selected.length"
-										@click="addBatchRows"
-									>
-										{{ __("Add") }}
-									</Button>
-								</div>
-							</div>
-
-							<div class="relative px-4 py-3">
-								<div class="relative">
-									<FeatherIcon
-										name="search"
-										class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-									/>
-									<input
-										v-model="itemSearch"
-										type="text"
-										:placeholder="__('Search item...')"
-										:aria-label="__('Add item')"
-										class="w-full rounded-lg border border-dashed border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-										@input="searchItems"
-										@keyup.enter="addExactMatch"
-									/>
-								</div>
+							<div data-testid="grid-rows">
 								<div
-									v-if="itemResults.length"
-									class="absolute inset-x-4 top-[3.25rem] z-10 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+									v-for="(row, idx) in editor.items"
+									:key="row.key"
+									class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-y-0 md:py-1.5"
 								>
-									<button
-										v-for="i in itemResults"
-										:key="i.item_code"
-										type="button"
-										class="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none"
-										@click="addItem(i)"
-									>
-										<span class="truncate text-gray-900">{{ i.item_name || i.item_code }}</span>
-										<span v-if="i.item_name && i.item_name !== i.item_code" class="shrink-0 text-xs text-gray-400">
-											{{ i.item_code }}
+									<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
+
+									<!-- Item cell: a link field until an item is picked -->
+									<div class="relative col-span-2 min-w-0 md:col-span-1">
+										<template v-if="row.item_code">
+											<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
+											<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
+												{{ row.item_code }}
+											</p>
+										</template>
+										<template v-else>
+											<input
+												v-model="row.search"
+												type="text"
+												data-testid="row-item-input"
+												:placeholder="__('Search item...')"
+												:aria-label="__('Item')"
+												class="w-full rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+												@input="searchRow(row)"
+												@keyup.enter="addExactMatch(row)"
+												@keyup.escape="closeResults(row)"
+												@blur="blurRow(row)"
+											/>
+											<div
+												v-if="row.results.length"
+												class="absolute inset-x-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+											>
+												<button
+													v-for="i in row.results"
+													:key="i.item_code"
+													type="button"
+													data-testid="row-item-result"
+													class="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none"
+													@click="pickItem(row, i)"
+												>
+													<span class="truncate text-gray-900">{{ i.item_name || i.item_code }}</span>
+													<span v-if="i.item_name && i.item_name !== i.item_code" class="shrink-0 text-xs text-gray-400">
+														{{ i.item_code }}
+													</span>
+												</button>
+											</div>
+										</template>
+									</div>
+
+									<!-- Batch cell: a select once the picked item needs a batch -->
+									<div class="min-w-0">
+										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Batch") }}</span>
+										<select
+											v-if="row.has_batch_no"
+											v-model="row.batch_no"
+											data-testid="row-batch-select"
+											:aria-label="`${row.item_name || row.item_code} — ${__('Batch')}`"
+											class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											@change="checkBatchDuplicate(row)"
+										>
+											<option :value="null">{{ __("Select batch") }}</option>
+											<option v-for="b in row.batches" :key="b.batch_no" :value="b.batch_no">
+												{{ b.batch_no }}
+											</option>
+										</select>
+										<span v-else class="truncate text-xs text-gray-500">{{ row.batch_no }}</span>
+									</div>
+
+									<div class="min-w-0">
+										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
+										<!-- serials are counted by ticking, never in a converted UOM -->
+										<span
+											v-if="row.is_serial"
+											data-testid="uom-readonly"
+											class="block truncate text-sm text-gray-500"
+										>
+											{{ row.stock_uom }}
 										</span>
+										<select
+											v-else-if="row.item_code"
+											v-model="row.uom"
+											data-testid="uom-select"
+											:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
+											class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+										>
+											<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
+										</select>
+									</div>
+
+									<div class="min-w-0">
+										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+										<!-- serial qty is the number of ticked serials, never typed -->
+										<span
+											v-if="row.is_serial"
+											data-testid="item-qty"
+											class="block text-end text-sm tabular-nums text-gray-900"
+										>
+											{{ row.serial_nos.length }}
+										</span>
+										<input
+											v-else-if="row.item_code"
+											v-model.number="row.qty"
+											type="number"
+											min="0"
+											step="any"
+											inputmode="decimal"
+											data-testid="qty-input"
+											:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
+											class="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+										/>
+									</div>
+
+									<button
+										type="button"
+										class="flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+										:aria-label="__('Remove item')"
+										:title="__('Remove item')"
+										@click="editor.items.splice(idx, 1)"
+									>
+										<FeatherIcon name="x" class="h-4 w-4" />
 									</button>
+
+									<!-- serial tick list: tick the serials physically present -->
+									<div v-if="row.is_serial" class="col-span-2 mt-2 md:col-span-6">
+										<ul class="flex flex-wrap gap-x-4 gap-y-1">
+											<li v-for="s in row.serial_options" :key="s">
+												<label class="flex items-center gap-1.5 text-sm text-gray-700">
+													<input
+														type="checkbox"
+														data-testid="serial-option"
+														:checked="row.serial_nos.includes(s)"
+														@change="toggleSerial(row, s)"
+													/>
+													{{ s }}
+												</label>
+											</li>
+										</ul>
+										<input
+											type="text"
+											:placeholder="__('Scan serial...')"
+											:aria-label="__('Scan serial')"
+											class="mt-1 w-full max-w-xs rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											@keyup.enter="scanSerial(row, $event)"
+										/>
+									</div>
 								</div>
-								<p v-if="!editor.items.length" class="mt-2 text-xs text-gray-400">
+							</div>
+
+							<!-- Add Row footer -->
+							<div class="flex flex-wrap items-center gap-3 px-4 py-3">
+								<Button variant="subtle" data-testid="add-row" @click="addRow">
+									<template #prefix>
+										<FeatherIcon name="plus" class="h-4 w-4" />
+									</template>
+									{{ __("Add Row") }}
+								</Button>
+								<p v-if="!editor.items.length" class="text-xs text-gray-400">
 									{{ __("Search and add only the items you physically counted.") }}
 								</p>
 							</div>
 
-							<!-- Excel count sheet -->
-							<div class="border-t border-gray-200 px-4 py-3">
-								<h5 class="mb-1 text-sm font-semibold text-gray-900">{{ __("Excel Template") }}</h5>
-								<p class="mb-3 text-xs text-gray-500">
-									{{ __("Download the count sheet, fill Counted Qty, then upload it back.") }}
-								</p>
-								<div class="flex flex-wrap items-end gap-3">
-									<div>
-										<label for="so-item-group" class="mb-1 block text-xs font-medium text-gray-700">
-											{{ __("Item Group") }}
-										</label>
-										<select
-											id="so-item-group"
-											v-model="itemGroup"
-											class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-										>
-											<option value="">{{ __("All item groups") }}</option>
-											<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
-												{{ g.item_group }}
-											</option>
-										</select>
-									</div>
-									<Button variant="subtle" @click="downloadTemplate">
-										<template #prefix>
-											<FeatherIcon name="download" class="h-4 w-4" />
-										</template>
-										{{ __("Download Template") }}
-									</Button>
-									<label
-										class="cursor-pointer rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-									>
-										<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
-										{{ importing ? __("Uploading...") : __("Upload") }}
-									</label>
-								</div>
-								<ul v-if="importResult?.errors?.length" data-testid="import-errors" class="mt-3 space-y-1">
-									<li
-										v-for="e in importResult.errors"
-										:key="`${e.row}-${e.item_code}`"
-										class="text-xs text-red-600"
-									>
-										{{ __("Row {0}: {1} — {2}", [e.row, e.item_code, e.message]) }}
-									</li>
-								</ul>
-							</div>
+							<ul
+								v-if="importResult?.errors?.length"
+								data-testid="import-errors"
+								class="space-y-1 border-t border-gray-200 px-4 py-3"
+							>
+								<li
+									v-for="e in importResult.errors"
+									:key="`${e.row}-${e.item_code}`"
+									class="text-xs text-red-600"
+								>
+									{{ __("Row {0}: {1} — {2}", [e.row, e.item_code, e.message]) }}
+								</li>
+							</ul>
 						</template>
 					</section>
 
@@ -627,7 +615,7 @@
 
 <script setup>
 import { Button, FeatherIcon, call } from "frappe-ui"
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import ConfirmDialog from "../common/ConfirmDialog.vue"
 import RefreshButton from "@/components/common/RefreshButton.vue"
@@ -672,9 +660,6 @@ const editor = ref(null)
 // JSON snapshot of the editable fields at load / last save; drives `dirty`
 const snapshot = ref(null)
 
-const itemSearch = ref("")
-const itemResults = ref([])
-const batchPicker = ref(null)
 const itemGroups = ref([])
 const itemGroup = ref("")
 
@@ -800,6 +785,10 @@ function blankRow(fields = {}) {
 		serial_nos: [],
 		serial_options: [],
 		is_serial: false,
+		// per-row link-field search state (search term + dropdown results)
+		search: "",
+		results: [],
+		batches: [],
 		...fields,
 	}
 }
@@ -890,7 +879,6 @@ async function openDoc(name) {
 	view.value = "doc"
 	loadingDetail.value = true
 	importResult.value = null
-	batchPicker.value = null
 	linkInput.value = ""
 	clearSearch()
 	try {
@@ -899,6 +887,7 @@ async function openDoc(name) {
 		)
 		if (!itemGroups.value.length) loadGroups()
 		ensureSerialOptions()
+		ensureBatchOptions()
 	} catch (err) {
 		showError(errMsg(err, "Failed to load stock opname"))
 		goList()
@@ -932,7 +921,6 @@ function openNew() {
 	linkInput.value = ""
 	view.value = "doc"
 	importResult.value = null
-	batchPicker.value = null
 	actionsMenuOpen.value = false
 	docMenuOpen.value = false
 	clearSearch()
@@ -958,7 +946,6 @@ function goList() {
 	editor.value = null
 	snapshot.value = null
 	importResult.value = null
-	batchPicker.value = null
 	linkInput.value = ""
 	clearSearch()
 	actionsMenuOpen.value = false
@@ -982,6 +969,27 @@ async function ensureSerialOptions() {
 			)
 		} catch {
 			// options stay as the loaded ticked serials
+		}
+	}
+}
+
+// A loaded batch row only knows its own batch; fetch the full list so another
+// batch of the same item stays selectable.
+async function ensureBatchOptions() {
+	for (const row of editor.value?.items || []) {
+		if (!row.has_batch_no) continue
+		try {
+			const batches =
+				(await call(`${API}.get_item_batches`, {
+					pos_profile: props.posProfile,
+					item_code: row.item_code,
+				})) || []
+			// keep a saved batch selectable even if the endpoint omits it (disabled)
+			if (row.batch_no && !batches.some((b) => b.batch_no === row.batch_no))
+				batches.unshift({ batch_no: row.batch_no })
+			row.batches = batches
+		} catch {
+			// options stay as whatever was loaded
 		}
 	}
 }
@@ -1028,18 +1036,24 @@ function activityLabel(entry) {
 let searchTimer = null
 let searchSeq = 0
 
-function searchItems() {
+onBeforeUnmount(() => clearTimeout(searchTimer))
+
+// One shared debounce timer and sequence guard across rows: only the last
+// keystroke's search lands, and its results land on the row that started it.
+function searchRow(row) {
 	clearTimeout(searchTimer)
-	const term = itemSearch.value.trim()
+	// only one dropdown open at a time
+	for (const r of editor.value.items) if (r !== row) r.results = []
+	row.results = []
+	const term = row.search.trim()
 	if (!term) {
 		searchSeq++
-		itemResults.value = []
 		return
 	}
-	searchTimer = setTimeout(() => doSearchItems(term), 350)
+	searchTimer = setTimeout(() => doSearchRow(row, term), 350)
 }
 
-async function doSearchItems(term) {
+async function doSearchRow(row, term) {
 	const seq = ++searchSeq
 	try {
 		const rows = await call(`${API}.search_opname_items`, {
@@ -1048,24 +1062,52 @@ async function doSearchItems(term) {
 			start: 0,
 			limit: 10,
 		})
-		if (seq === searchSeq) itemResults.value = rows || []
+		if (seq !== searchSeq) return null
+		row.results = rows || []
+		return row.results
 	} catch (err) {
 		if (seq === searchSeq) showError(errMsg(err, "Failed to search items"))
+		return null
 	}
 }
 
-// Barcode scan: Enter picks the exact item_code from the current results.
-function addExactMatch() {
-	const term = itemSearch.value.trim()
-	const exact = itemResults.value.find((i) => i.item_code === term)
-	if (exact) addItem(exact)
+function closeResults(row) {
+	clearTimeout(searchTimer)
+	row.results = []
+}
+
+// blur fires before a click on a result: closing is delayed so the click lands
+function blurRow(row) {
+	setTimeout(() => {
+		row.results = []
+	}, 200)
+}
+
+// Barcode scan: Enter picks the exact item_code. A scanner types + Enter faster
+// than the debounce, so look the code up now when the results are still empty.
+async function addExactMatch(row) {
+	const term = row.search.trim()
+	if (!term) return
+	let exact = row.results.find((i) => i.item_code === term)
+	if (!exact) {
+		clearTimeout(searchTimer)
+		const rows = await doSearchRow(row, term)
+		exact = rows?.find((i) => i.item_code === term)
+	}
+	if (exact) pickItem(row, exact)
 }
 
 function clearSearch() {
 	searchSeq++
 	clearTimeout(searchTimer)
-	itemSearch.value = ""
-	itemResults.value = []
+	for (const row of editor.value?.items || []) {
+		row.search = ""
+		row.results = []
+	}
+}
+
+function addRow() {
+	editor.value.items.push(blankRow())
 }
 
 // The search endpoint already excludes the stock UOM; offer it first.
@@ -1077,80 +1119,71 @@ function altUoms(item) {
 	return (item.uoms || []).map((u) => u.uom)
 }
 
-async function addItem(item) {
-	clearSearch()
+function setRow(row, fields) {
+	Object.assign(row, blankRow({ ...fields, key: row.key }))
+}
+
+function clearRow(row) {
+	Object.assign(row, blankRow({ key: row.key }))
+}
+
+// Fills the row from a picked search result; a batch row keeps batch_no empty
+// until the user picks a batch in the row's select.
+async function pickItem(row, item) {
+	clearTimeout(searchTimer)
+	searchSeq++
+	row.search = ""
+	row.results = []
+	const label = item.item_name || item.item_code
+	if (
+		!item.has_batch_no &&
+		editor.value.items.some((r) => r !== row && r.item_code === item.item_code)
+	) {
+		showError(__("{0} is already in the list", [label]))
+		clearRow(row)
+		return
+	}
+	const base = {
+		item_code: item.item_code,
+		item_name: label,
+		stock_uom: item.stock_uom,
+		uom: item.stock_uom,
+		uoms: altUoms(item),
+		has_batch_no: item.has_batch_no,
+		has_serial_no: item.has_serial_no,
+	}
 	if (item.has_serial_no) {
-		if (editor.value.items.some((r) => r.item_code === item.item_code)) return
 		const serials =
 			(await call(`${API}.get_item_serials`, {
 				pos_profile: props.posProfile,
 				item_code: item.item_code,
 			})) || []
-		editor.value.items.push(
-			blankRow({
-				item_code: item.item_code,
-				item_name: item.item_name || item.item_code,
-				stock_uom: item.stock_uom,
-				has_batch_no: item.has_batch_no,
-				has_serial_no: item.has_serial_no,
-				serial_options: serials,
-				is_serial: true,
-			}),
-		)
+		setRow(row, { ...base, serial_options: serials, is_serial: true })
 	} else if (item.has_batch_no) {
 		const batches =
 			(await call(`${API}.get_item_batches`, {
 				pos_profile: props.posProfile,
 				item_code: item.item_code,
 			})) || []
-		batchPicker.value = {
-			item_code: item.item_code,
-			item_name: item.item_name || item.item_code,
-			stock_uom: item.stock_uom,
-			uoms: altUoms(item),
-			batches,
-			selected: [],
-		}
+		// one batch per row: qty starts at 0 until a batch is counted
+		setRow(row, { ...base, qty: 0, batches })
 	} else {
-		if (editor.value.items.some((r) => r.item_code === item.item_code)) return
-		editor.value.items.push(
-			blankRow({
-				item_code: item.item_code,
-				item_name: item.item_name || item.item_code,
-				stock_uom: item.stock_uom,
-				uom: item.stock_uom,
-				uoms: altUoms(item),
-				qty: 1,
-				has_batch_no: item.has_batch_no,
-				has_serial_no: item.has_serial_no,
-			}),
-		)
+		setRow(row, { ...base, qty: 1 })
 	}
 }
 
-function addBatchRows() {
-	const picker = batchPicker.value
-	if (!picker) return
-	for (const batch_no of picker.selected) {
-		if (
-			editor.value.items.some(
-				(r) => r.item_code === picker.item_code && r.batch_no === batch_no,
-			)
+// Same item_code + batch_no twice is the batch duplicate guard.
+function checkBatchDuplicate(row) {
+	if (!row.batch_no) return
+	const dup = editor.value.items.some(
+		(r) => r !== row && r.item_code === row.item_code && r.batch_no === row.batch_no,
+	)
+	if (dup) {
+		showError(
+			__("{0} batch {1} is already in the list", [row.item_name || row.item_code, row.batch_no]),
 		)
-			continue
-		editor.value.items.push(
-			blankRow({
-				item_code: picker.item_code,
-				item_name: picker.item_name,
-				stock_uom: picker.stock_uom,
-				uom: picker.stock_uom,
-				uoms: picker.uoms || [],
-				batch_no,
-				has_batch_no: 1,
-			}),
-		)
+		clearRow(row)
 	}
-	batchPicker.value = null
 }
 
 function toggleSerial(row, serial) {
@@ -1171,21 +1204,24 @@ function scanSerial(row, event) {
 }
 
 function buildItems() {
-	return editor.value.items.map((r) => {
-		const out = {
-			item_code: r.item_code,
-			qty: r.is_serial ? r.serial_nos.length : Number(r.qty) || 0,
-		}
-		if (r.batch_no) out.batch_no = r.batch_no
-		if (r.is_serial) {
-			// serial rows never carry a count UOM (serials are ticked)
-			out.serial_nos = [...r.serial_nos]
-		} else {
-			out.custom_uom = r.uom || r.stock_uom
-			out.custom_qty_after = Number(r.qty) || 0
-		}
-		return out
-	})
+	// an Add Row row without a picked item is not a count
+	return editor.value.items
+		.filter((r) => r.item_code)
+		.map((r) => {
+			const out = {
+				item_code: r.item_code,
+				qty: r.is_serial ? r.serial_nos.length : Number(r.qty) || 0,
+			}
+			if (r.batch_no) out.batch_no = r.batch_no
+			if (r.is_serial) {
+				// serial rows never carry a count UOM (serials are ticked)
+				out.serial_nos = [...r.serial_nos]
+			} else {
+				out.custom_uom = r.uom || r.stock_uom
+				out.custom_qty_after = Number(r.qty) || 0
+			}
+			return out
+		})
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,6 +1230,12 @@ function buildItems() {
 
 async function save() {
 	if (saving.value) return false
+	// a batch row without a batch is an invalid count: block the save
+	const missingBatch = editor.value.items.find((r) => r.item_code && r.has_batch_no && !r.batch_no)
+	if (missingBatch) {
+		showError(__("Choose a batch for {0}", [missingBatch.item_name || missingBatch.item_code]))
+		return false
+	}
 	saving.value = true
 	try {
 		const data = {
@@ -1215,6 +1257,7 @@ async function save() {
 		// a save response only carries the ticked serials; refetch so the
 		// remaining serials of a serial item stay tickable
 		await ensureSerialOptions()
+		await ensureBatchOptions()
 		showSuccess(__("Stock opname saved"))
 		return true
 	} catch (err) {
@@ -1346,6 +1389,7 @@ async function onFilePicked(event) {
 				}),
 			)
 			ensureSerialOptions()
+			ensureBatchOptions()
 		}
 		showSuccess(__("Template imported"))
 	} catch (err) {
