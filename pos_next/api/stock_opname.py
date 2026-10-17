@@ -338,6 +338,10 @@ def _payload(doc):
 		"workflow_state": doc.workflow_state,
 		"docstatus": doc.docstatus,
 		"modified": doc.modified,
+		# Read-only detail view header (Task 7): posting datetime + warehouse.
+		"posting_date": doc.posting_date,
+		"posting_time": doc.posting_time,
+		"set_warehouse": doc.set_warehouse,
 		"reject_reason": _reject_reason(doc.name) if doc.workflow_state == STATE_REJECTED else None,
 		"items": items,
 		"attachments": _attachments(doc.name),

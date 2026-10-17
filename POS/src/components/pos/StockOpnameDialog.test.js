@@ -830,6 +830,56 @@ describe("StockOpnameDialog", () => {
 		expect(wrapper.find('button[aria-label="Remove"]').exists()).toBe(false)
 	})
 
+	it("read-only view shows header info and attachments", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0002",
+					posting_date: "2026-01-05",
+					workflow_state: "Approval Pending by Stock Manager",
+					docstatus: 0,
+					item_count: 1,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-0002",
+				workflow_state: "Approval Pending by Stock Manager",
+				docstatus: 0,
+				modified: "m1",
+				posting_date: "2026-01-05",
+				posting_time: "09:30:00",
+				set_warehouse: "Stores - TC",
+				items: [{ ...PLAIN_ITEM, custom_uom: "Pack", custom_qty_after: 2 }],
+				attachments: [
+					{
+						name: "F1",
+						file_name: "sheet.pdf",
+						file_url: "/private/files/sheet.pdf",
+					},
+				],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0002").trigger("click")
+		await flushPromises()
+
+		// header card: doc number, status, posting date/time, warehouse
+		expect(wrapper.text()).toContain("SR-0002")
+		expect(wrapper.text()).toContain("Approval Pending by Stock Manager")
+		expect(wrapper.text()).toContain("05/01/26")
+		expect(wrapper.text()).toContain("Stores - TC")
+		// items table shows the counted qty in its count UOM
+		expect(wrapper.text()).toContain("Alpha Item")
+		expect(wrapper.text()).toContain("Pack")
+		// attachments read-only
+		expect(wrapper.text()).toContain("sheet.pdf")
+		expect(wrapper.find('[data-testid="attach-link"]').exists()).toBe(false)
+	})
+
 	it("editor shows posting date/time inputs defaulting to today+now, and save carries them", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve([

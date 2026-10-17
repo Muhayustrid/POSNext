@@ -194,6 +194,33 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		qtys = {r["item_code"]: r["qty"] for r in got["items"]}
 		self.assertEqual(qtys, {self.plain: 4, self.other_plain: 0})
 
+	def test_payload_has_header_fields(self):
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		got = get_opname(self.profile, payload["name"])
+		# read-only detail view header: posting datetime + warehouse (Task 7)
+		self.assertEqual(str(got["posting_date"]), str(nowdate()))
+		self.assertIsNotNone(got["posting_time"])
+		self.assertEqual(got["set_warehouse"], self.warehouse)
+		# the blind-count forbidden fields must not leak at header or item level
+		forbidden = {
+			"current_qty",
+			"current_valuation_rate",
+			"quantity_difference",
+			"amount_difference",
+			"custom_qty_before",
+			"custom_qty_difference_per_uom",
+			"custom_valuation_rate_per_uom",
+			"custom_conversion_factor",
+			"difference_amount",
+			"expense_account",
+		}
+		self.assertFalse(forbidden & set(got.keys()))
+		for item in got["items"]:
+			self.assertFalse(forbidden & set(item.keys()))
+
 	def test_batch_item_requires_own_batch(self):
 		from pos_next.api.stock_opname import get_opname, save_opname
 

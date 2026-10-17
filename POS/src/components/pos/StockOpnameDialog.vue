@@ -112,24 +112,65 @@
 					<section
 						v-if="!editable"
 						class="rounded-xl border border-gray-200 bg-white"
+						data-testid="opname-detail"
 					>
+						<!-- header card: number, status, posting datetime, warehouse -->
+						<div
+							class="grid grid-cols-2 gap-x-4 gap-y-3 border-b border-gray-200 px-4 py-3 md:grid-cols-4"
+						>
+							<div class="min-w-0">
+								<p class="text-xs text-gray-500">{{ __("Document") }}</p>
+								<p class="truncate text-sm font-semibold text-gray-900">{{ editor.name }}</p>
+							</div>
+							<div class="min-w-0">
+								<p class="text-xs text-gray-500">{{ __("Status") }}</p>
+								<span :class="statusPill(stateLabel(editor))">{{ __(stateLabel(editor)) }}</span>
+							</div>
+							<div class="min-w-0">
+								<p class="text-xs text-gray-500">{{ __("Posting Date") }}</p>
+								<p class="truncate text-sm text-gray-900">
+									{{ formatDate(editor.posting_date) }} · {{ formatTime(editor.posting_time) }}
+								</p>
+							</div>
+							<div class="min-w-0">
+								<p class="text-xs text-gray-500">{{ __("Warehouse") }}</p>
+								<p class="truncate text-sm text-gray-900">{{ editor.set_warehouse }}</p>
+							</div>
+						</div>
+
 						<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
 						<div
-							class="grid grid-cols-[minmax(0,1fr)_5rem] gap-3 border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500"
+							class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-x-3"
 						>
 							<span>{{ __("Item") }}</span>
+							<span>{{ __("UOM") }}</span>
 							<span class="text-end">{{ __("Qty") }}</span>
 						</div>
 						<div
 							v-for="(row, idx) in editor.items"
 							:key="idx"
-							class="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-3 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0"
+							class="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-y-0 md:py-1.5"
 						>
-							<span class="truncate text-gray-900">
-								{{ row.item_name || row.item_code }}
-								<span v-if="row.batch_no" class="text-xs text-gray-400"> — {{ row.batch_no }}</span>
-							</span>
-							<span class="text-end tabular-nums">{{ row.is_serial ? row.serial_nos.length : row.qty }}</span>
+							<div class="col-span-2 min-w-0 md:col-span-1">
+								<p class="truncate text-gray-900">{{ row.item_name || row.item_code }}</p>
+								<p v-if="row.batch_no" class="truncate text-xs text-gray-400">
+									{{ __("Batch") }}: {{ row.batch_no }}
+								</p>
+								<p
+									v-else-if="row.is_serial && row.serial_nos.length"
+									class="truncate text-xs text-gray-400"
+								>
+									{{ row.serial_nos.join(", ") }}
+								</p>
+							</div>
+							<div class="min-w-0">
+								<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
+								<span class="truncate text-gray-500">{{ row.uom }}</span>
+							</div>
+							<div class="min-w-0">
+								<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+								<span class="block text-end tabular-nums">{{ row.qty }}</span>
+							</div>
 						</div>
 						<p v-if="!editor.items.length" class="px-4 py-4 text-center text-sm text-gray-500">
 							{{ __("No items") }}
@@ -487,7 +528,7 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue"])
 
 const { showSuccess, showError } = useToast()
-const { formatDate } = useFormatters()
+const { formatDate, formatTime } = useFormatters()
 
 const show = ref(props.modelValue)
 watch(
@@ -651,6 +692,7 @@ function applyEditor(payload) {
 		docstatus: payload.docstatus,
 		modified: payload.modified,
 		reject_reason: payload.reject_reason,
+		set_warehouse: payload.set_warehouse,
 		posting_date: payload.posting_date || localDate(),
 		posting_time: (payload.posting_time || localTime()).slice(0, 5),
 		items: (payload.items || []).map(normalizeItem),
