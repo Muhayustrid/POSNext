@@ -1,0 +1,109 @@
+# Copyright (c) 2026, BrainWise and contributors
+# For license information, please see license.txt
+
+"""Stock Opname: blind-count override + outlet scoping for Stock Reconciliation.
+
+Outlets count physical stock without seeing system quantities. ERPNext's
+`remove_items_with_no_change` would delete counted rows that equal system
+stock (leaking the system qty and blocking all-correct counts), so drafts keep
+every row; filtering still runs on submit. One open opname per warehouse, and
+the workflow state is persisted before ERPNext's background submit (>100 rows)
+reloads the doc from DB.
+
+Outlet-only users (no HQ role) are scoped to the warehouse of a POS Profile
+they are a `POS Profile User` of, via `permission_query_conditions` (list view)
+and `has_permission` (controller denies; it cannot grant).
+"""
+
+import frappe
+from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import (
+	EmptyStockReconciliationItemsError,
+	StockReconciliation,
+)
+from frappe import _
+
+from pos_next.stock_opname_setup import HQ_ROLES
+
+DOCTYPE = "Stock Reconciliation"
+
+
+class CustomStockReconciliation(StockReconciliation):
+	def remove_items_with_no_change(self):
+		# Drafts keep every counted row (blind count); filter only on submit.
+		if self.docstatus == 0 and self._action != "submit":
+			return
+		try:
+			super().remove_items_with_no_change()
+		except EmptyStockReconciliationItemsError:
+			frappe.throw(
+				_(
+					"Every counted quantity matches the system stock; nothing to adjust. Reject or delete this opname."
+				),
+				EmptyStockReconciliationItemsError,
+			)
+
+	def validate(self):
+		if (
+			self.is_new()
+			and self.set_warehouse
+			and frappe.db.exists(DOCTYPE, {"docstatus": 0, "set_warehouse": self.set_warehouse})
+		):
+			open_name = frappe.db.get_value(
+				DOCTYPE, {"docstatus": 0, "set_warehouse": self.set_warehouse}, "name"
+			)
+			frappe.throw(
+				_("Warehouse {0} already has an open stock opname: {1}").format(self.set_warehouse, open_name)
+			)
+		super().validate()
+
+	def submit(self):
+		# The background worker reloads from DB, losing the in-memory
+		# workflow state apply_workflow just set — persist it first.
+		if len(self.items) > 100 and frappe.db.exists("Workflow", {"document_type": DOCTYPE, "is_active": 1}):
+			self.db_set("workflow_state", self.workflow_state, update_modified=False)
+		super().submit()
+
+
+def outlet_warehouses(user=None):
+	"""Warehouses of POS Profiles `user` is a `POS Profile User` of."""
+	user = user or frappe.session.user
+	profiles = frappe.get_all(
+		"POS Profile User",
+		filters={"user": user, "parenttype": "POS Profile"},
+		pluck="parent",
+	)
+	if not profiles:
+		return []
+	return [
+		w for w in frappe.get_all("POS Profile", filters={"name": ["in", profiles]}, pluck="warehouse") if w
+	]
+
+
+def is_hq_user(user=None):
+	"""True when `user` holds any HQ role (four-eyes for everyone, spec W1)."""
+	user = user or frappe.session.user
+	return bool(set(frappe.get_roles(user)) & set(HQ_ROLES))
+
+
+def get_permission_query_conditions(user):
+	if is_hq_user(user):
+		return ""
+	warehouses = outlet_warehouses(user)
+	if not warehouses:
+		return "1=0"
+	escaped = ", ".join(frappe.db.escape(w) for w in warehouses)
+	return f"`tabStock Reconciliation`.set_warehouse in ({escaped})"
+
+
+def has_permission(doc, ptype=None, user=None):
+	"""Controller: deny outlet users outside their warehouses; HQ defers.
+
+	Note: the framework treats a falsy controller result (including None)
+	as deny, so HQ must return True — controllers can only deny, never grant.
+	"""
+	if is_hq_user(user):
+		return True
+	warehouse = doc.get("set_warehouse")
+	if not warehouse:
+		return True
+	return bool(warehouse in outlet_warehouses(user)) or False
