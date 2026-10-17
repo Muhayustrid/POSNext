@@ -183,6 +183,15 @@
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
 					/>
+					<StockOpnameDialog
+						v-else-if="activeView === 'stock-opname'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						class="h-full"
+						v-bind="$attrs"
+						@update:model-value="closeIfHidden"
+					/>
 					<PurchaseOrderDialog
 						v-else-if="activeView === 'purchase-order'"
 						embedded
@@ -222,6 +231,7 @@ import ShiftDashboard from "@/components/sale/ShiftDashboard.vue"
 import ProductsView from "@/components/sale/ProductsView.vue"
 import ProductionDialog from "@/components/pos/ProductionDialog.vue"
 import RejectRequestDialog from "@/components/pos/RejectRequestDialog.vue"
+import StockOpnameDialog from "@/components/pos/StockOpnameDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
 
@@ -240,6 +250,7 @@ const props = defineProps({
 	draftInvoices: { type: Array, default: () => [] },
 	canPurchaseOrder: { type: Boolean, default: false },
 	canProduction: { type: Boolean, default: false },
+	canStockOpname: { type: Boolean, default: false },
 	isOffline: { type: Boolean, default: false },
 })
 
@@ -260,6 +271,8 @@ const visibleItems = computed(() =>
 			(!item.requiresProduction || (props.canProduction && !props.isOffline)) &&
 			(!item.requiresPurchaseOrder ||
 				(props.canPurchaseOrder && !props.isOffline)) &&
+			(!item.requiresStockOpname ||
+				(props.canStockOpname && !props.isOffline)) &&
 			(!item.requiresOnline || !props.isOffline),
 	),
 )

@@ -50,6 +50,7 @@ const viewStubs = {
 		template: `<div data-testid="view-reject-request" />`,
 	},
 	PurchaseOrderDialog: { template: `<div data-testid="view-purchase-order" />` },
+	StockOpnameDialog: { template: `<div data-testid="view-stock-opname" />` },
 }
 
 function mountShell(props = {}) {
@@ -73,11 +74,17 @@ function sidebarLabels(wrapper) {
 		.map((b) => b.text())
 }
 
-function availableLabels(canProduction, canPurchaseOrder, isOffline = false) {
+function availableLabels(
+	canProduction,
+	canPurchaseOrder,
+	isOffline = false,
+	canStockOpname = false,
+) {
 	return MANAGEMENT_MENU.filter(
 		(i) =>
 			(!i.requiresProduction || (canProduction && !isOffline)) &&
 			(!i.requiresPurchaseOrder || (canPurchaseOrder && !isOffline)) &&
+			(!i.requiresStockOpname || (canStockOpname && !isOffline)) &&
 			(!i.requiresOnline || !isOffline),
 	).map((i) => i.label)
 }
@@ -123,6 +130,21 @@ describe("POSMenuDialog menu", () => {
 		expect(labels).not.toContain("Production")
 		expect(labels).not.toContain("Purchase Order")
 		expect(labels).toEqual(availableLabels(true, true, true))
+		wrapper.unmount()
+	})
+
+	it("hides stock opname without permission or while offline", () => {
+		let wrapper = mountShell({ open: true, canStockOpname: false })
+		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname")
+		wrapper.unmount()
+
+		wrapper = mountShell({ open: true, canStockOpname: true })
+		expect(sidebarLabels(wrapper)).toContain("Stock Opname")
+		expect(sidebarLabels(wrapper)).toEqual(availableLabels(false, false, false, true))
+		wrapper.unmount()
+
+		wrapper = mountShell({ open: true, canStockOpname: true, isOffline: true })
+		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname")
 		wrapper.unmount()
 	})
 
