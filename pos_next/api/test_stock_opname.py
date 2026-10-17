@@ -17,6 +17,7 @@ import frappe
 from frappe.exceptions import TimestampMismatchError
 from frappe.model.workflow import WorkflowTransitionError, apply_workflow
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import add_days, get_time, nowdate
 
 from pos_next.api.test_production import _make_test_item, _seed_stock
 from pos_next.stock_opname_setup import STATE_APPROVED, STATE_DRAFT, STATE_PENDING_SM, STATE_REJECTED
@@ -934,3 +935,78 @@ class TestStockOpnameSearch(_StockOpnameFixture):
 		frappe.db.commit()
 		rows = self._search(barcode)
 		self.assertIn(self.plain, [r["item_code"] for r in rows])
+
+
+class TestStockOpnamePosting(_StockOpnameFixture):
+	"""Task 5: guarded posting date/time on outlet save and submit (amended D6)."""
+
+	def _save(self, **extra):
+		from pos_next.api.stock_opname import save_opname
+
+		self._cashier()
+		payload = {"items": [{"item_code": self.plain, "qty": 4}]}
+		payload.update(extra)
+		return save_opname(self.profile, payload)
+
+	def test_future_posting_rejected(self):
+		# tomorrow is a future datetime in the site timezone -> rejected
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._save(posting_date=add_days(nowdate(), 1), posting_time="10:00:00")
+		self.assertIn("future", str(ctx.exception).lower())
+
+	def test_backdate_beyond_cap_rejected(self):
+		# default cap is 2 days: 5 days back is rejected, 2 days back is accepted
+		with self.assertRaises(frappe.ValidationError):
+			self._save(posting_date=add_days(nowdate(), -5), posting_time="09:00:00")
+		ok = add_days(nowdate(), -2)
+		payload = self._save(posting_date=ok, posting_time="09:00:00")
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		self.assertEqual(str(doc.posting_date), ok)
+		self.assertEqual(get_time(doc.posting_time), get_time("09:00:00"))
+		self.assertEqual(doc.set_posting_time, 1)
+
+	def test_frozen_stock_blocks_outlet(self):
+		from pos_next.api.stock_opname import save_opname
+
+		prev = frappe.db.get_singles_dict("Stock Settings")
+		self.addCleanup(
+			frappe.db.set_single_value, "Stock Settings", "stock_frozen_upto", prev.get("stock_frozen_upto") or ""
+		)
+		self.addCleanup(
+			frappe.db.set_single_value, "Stock Settings", "stock_auth_role", prev.get("stock_auth_role") or ""
+		)
+		frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", nowdate())
+		frappe.db.set_single_value("Stock Settings", "stock_auth_role", "Stock Manager")
+		frappe.clear_cache(doctype="Stock Settings")
+
+		yesterday = add_days(nowdate(), -1)
+		# the outlet user has no stock_auth_role -> blocked on a frozen date
+		with self.assertRaises(frappe.ValidationError):
+			self._save(posting_date=yesterday, posting_time="09:00:00")
+		# a user holding the auth role (Administrator holds every role) may post it
+		frappe.set_user(ADMIN)
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.plain, "qty": 4}], "posting_date": yesterday, "posting_time": "09:00:00"},
+		)
+		self.assertEqual(str(frappe.get_doc(DOCTYPE, payload["name"]).posting_date), yesterday)
+
+	def test_submit_preserves_outlet_date(self):
+		from pos_next.api.stock_opname import submit_opname
+
+		yesterday = add_days(nowdate(), -1)
+		payload = self._save(posting_date=yesterday, posting_time="08:30:00")
+		submit_opname(self.profile, payload["name"])
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		self.assertEqual(str(doc.posting_date), yesterday)
+		self.assertEqual(get_time(doc.posting_time), get_time("08:30:00"))
+		self.assertEqual(doc.set_posting_time, 1)
+
+	def test_submit_stamps_now_when_unset(self):
+		from pos_next.api.stock_opname import submit_opname
+
+		payload = self._save()
+		submit_opname(self.profile, payload["name"])
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		self.assertEqual(str(doc.posting_date), str(nowdate()))
+		self.assertEqual(doc.set_posting_time, 1)

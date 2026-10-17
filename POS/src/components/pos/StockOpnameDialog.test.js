@@ -829,4 +829,58 @@ describe("StockOpnameDialog", () => {
 		expect(wrapper.find('[data-testid="attach-link"]').exists()).toBe(false)
 		expect(wrapper.find('button[aria-label="Remove"]').exists()).toBe(false)
 	})
+
+	it("editor shows posting date/time inputs defaulting to today+now, and save carries them", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					name: "SR-0001",
+					posting_date: "2026-01-05",
+					workflow_state: "Draft",
+					docstatus: 0,
+					item_count: 1,
+					modified: "m1",
+					reject_reason: null,
+				},
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-0001",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m1",
+				items: [PLAIN_ITEM],
+			}),
+		)
+		const saveCall = mockCall(SAVE_URL, () =>
+			Promise.resolve({
+				name: "SR-0001",
+				workflow_state: "Draft",
+				docstatus: 0,
+				modified: "m2",
+				items: [PLAIN_ITEM],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "SR-0001").trigger("click")
+		await flushPromises()
+
+		const dateInput = wrapper.find('[data-testid="posting-date-input"]')
+		const timeInput = wrapper.find('[data-testid="posting-time-input"]')
+		expect(dateInput.exists()).toBe(true)
+		expect(timeInput.exists()).toBe(true)
+
+		const now = new Date()
+		const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+		expect(dateInput.element.value).toBe(today)
+		const timeValue = timeInput.element.value
+		expect(timeValue).toMatch(/^\d{2}:\d{2}/)
+
+		await findButton(wrapper, "Save").trigger("click")
+		await flushPromises()
+		const data = saveCall.mock.calls[0][0].data
+		expect(data.posting_date).toBe(today)
+		expect(data.posting_time).toBe(timeValue)
+	})
 })

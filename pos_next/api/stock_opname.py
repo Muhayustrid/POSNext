@@ -15,7 +15,18 @@ import math
 import frappe
 from frappe import ValidationError, _
 from frappe.model.workflow import apply_workflow
-from frappe.utils import flt, nowdate, nowtime
+from frappe.utils import (
+	add_days,
+	cint,
+	flt,
+	formatdate,
+	get_datetime,
+	get_time,
+	getdate,
+	now_datetime,
+	nowdate,
+	nowtime,
+)
 
 from pos_next.api.packages import _assert_profile_access
 from pos_next.services.production import _resolve_profile
@@ -25,6 +36,8 @@ DOCTYPE = "Stock Reconciliation"
 REJECT_PREFIX = "Rejected: "
 EDITABLE_STATES = (STATE_DRAFT, STATE_REJECTED)
 TEMPLATE_HEADER = ["Item Code", "Item Name", "UOM", "Batch No", "Serial No", "Counted Qty"]
+# Fallback backdate cap (days) when POS Settings has no `opname_max_backdate_days`.
+MAX_BACKDATE_DAYS = 2
 
 
 def _parse_data(data):
@@ -38,6 +51,65 @@ def _parse_data(data):
 	if isinstance(data, dict):
 		return data
 	frappe.throw(_("Invalid opname data"), ValidationError)
+
+
+def _max_backdate_days():
+	"""Backdate cap in days: POS Settings `opname_max_backdate_days`, else the
+	constant. The POS Settings field is not in the doctype yet, so the constant
+	(amended D6 default) applies until an admin adds it."""
+	cap = frappe.db.get_singles_dict("POS Settings").get("opname_max_backdate_days")
+	return cint(cap) if cap else MAX_BACKDATE_DAYS
+
+
+def _guarded_posting(data):
+	"""Parse and guard `posting_date`/`posting_time` from an outlet save.
+
+	Returns (date, time) strings, or (None, None) when the outlet set no posting
+	datetime (the doc keeps its own / ERPNext's default). Rejects malformed
+	input, datetimes in the future and backdates older than the cap. The future
+	check uses the site timezone's `now_datetime()`, never the browser clock.
+	"""
+	date_raw = data.get("posting_date")
+	time_raw = data.get("posting_time")
+	if not date_raw and not time_raw:
+		return None, None
+	try:
+		posting_date = getdate(date_raw) if date_raw else getdate(nowdate())
+		posting_time = get_time(time_raw) if time_raw else get_time(nowtime())
+	except Exception:
+		frappe.throw(_("Invalid posting date or time"), ValidationError)
+	# Both sides are naive site-local datetimes: the stored posting value and
+	# now_datetime() (site timezone), so the comparison is TZ-correct.
+	if get_datetime(f"{posting_date} {posting_time}") > now_datetime():
+		frappe.throw(_("Posting date/time cannot be in the future"), ValidationError)
+	cap = _max_backdate_days()
+	if getdate(posting_date) < add_days(getdate(nowdate()), -cap):
+		frappe.throw(_("Posting date cannot be more than {0} day(s) in the past").format(cap), ValidationError)
+	return posting_date, posting_time
+
+
+def _assert_not_frozen(posting_date):
+	"""Mirror ERPNext's stock-freeze check for the outlet user (amended D6).
+
+	An outlet user without Stock Settings `stock_auth_role` cannot post a Stock
+	Reconciliation dated on/before `stock_frozen_upto` or older than
+	`stock_frozen_upto_days`; a user holding the role may.
+	"""
+	settings = frappe.get_cached_doc("Stock Settings")
+	roles = frappe.get_roles()
+	if settings.stock_frozen_upto and getdate(posting_date) <= getdate(settings.stock_frozen_upto):
+		if settings.stock_auth_role not in roles:
+			frappe.throw(
+				_("Stock transactions before {0} are frozen").format(formatdate(settings.stock_frozen_upto)),
+				ValidationError,
+			)
+	frozen_days = cint(settings.stock_frozen_upto_days)
+	if frozen_days and add_days(getdate(posting_date), frozen_days) <= getdate(nowdate()):
+		if settings.stock_auth_role not in roles:
+			frappe.throw(
+				_("Not allowed to update stock transactions older than {0}").format(frozen_days),
+				ValidationError,
+			)
 
 
 def _profile_warehouse(pos_profile):
@@ -403,6 +475,7 @@ def save_opname(pos_profile, data):
 	"""Create or update a Draft/Rejected opname; Rejected revises to Draft first."""
 	company, warehouse = _profile_warehouse(pos_profile)
 	data = _parse_data(data)
+	posting_date, posting_time = _guarded_posting(data)
 	try:
 		name = data.get("name")
 		if name:
@@ -416,9 +489,11 @@ def save_opname(pos_profile, data):
 				raise frappe.TimestampMismatchError(
 					_("This count changed on another device (modified, reload). Reload before saving.")
 				)
-			# Validate before any Revise transition, so invalid rows cannot leave
-			# a Rejected doc flipped to Draft with nothing applied.
+			# Validate before any Revise transition, so invalid rows (or a frozen
+			# posting date) cannot leave a Rejected doc flipped to Draft with
+			# nothing applied.
 			rows = _validated_rows(data.get("items"), warehouse)
+			_assert_not_frozen(posting_date or doc.posting_date or nowdate())
 			if doc.workflow_state == STATE_REJECTED:
 				apply_workflow(doc, "Revise")
 				doc.reload()
@@ -426,15 +501,24 @@ def save_opname(pos_profile, data):
 			doc.set("items", [])
 			for row in rows:
 				doc.append("items", row)
+			if posting_date:
+				doc.posting_date = posting_date
+				doc.posting_time = posting_time
+				doc.set_posting_time = 1
 			doc.save()
 		else:
 			rows = _validated_rows(data.get("items"), warehouse)
+			_assert_not_frozen(posting_date or nowdate())
 			doc = frappe.new_doc(DOCTYPE)
 			doc.company = company
 			doc.purpose = "Stock Reconciliation"
 			doc.set_warehouse = warehouse
 			for row in rows:
 				doc.append("items", row)
+			if posting_date:
+				doc.posting_date = posting_date
+				doc.posting_time = posting_time
+				doc.set_posting_time = 1
 			doc.insert()
 		return _payload(doc)
 	except (ValidationError, frappe.PermissionError):
@@ -446,15 +530,19 @@ def save_opname(pos_profile, data):
 
 @frappe.whitelist()
 def submit_opname(pos_profile, name):
-	"""Stamp posting now, then workflow-Submit a Draft to pending approval."""
+	"""Preserve an outlet-set posting date, else stamp now; workflow-Submit to pending."""
 	_company, warehouse = _profile_warehouse(pos_profile)
 	try:
 		doc = _get_doc(name)
 		_assert_doc_warehouse(doc, warehouse)
 		if doc.workflow_state != STATE_DRAFT:
 			frappe.throw(_("Only a Draft opname can be submitted"), ValidationError)
-		doc.posting_date = nowdate()
-		doc.posting_time = nowtime()
+		_assert_not_frozen(doc.posting_date or nowdate())
+		# Preserve an outlet backdate (save already capped and guarded it); only
+		# stamp now when the posting date is still the save-moment default (today).
+		if getdate(doc.posting_date or nowdate()) >= getdate(nowdate()):
+			doc.posting_date = nowdate()
+			doc.posting_time = nowtime()
 		doc.set_posting_time = 1
 		doc.save()
 		apply_workflow(doc, "Submit")

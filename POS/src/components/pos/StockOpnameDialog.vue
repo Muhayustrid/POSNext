@@ -138,6 +138,35 @@
 
 					<!-- editable -->
 					<template v-else>
+						<section
+							class="flex flex-wrap items-end gap-4 rounded-xl border border-gray-200 bg-white px-4 py-3"
+						>
+							<div>
+								<label for="so-posting-date" class="mb-1 block text-xs font-medium text-gray-700">
+									{{ __("Posting Date") }}
+								</label>
+								<input
+									id="so-posting-date"
+									v-model="editor.posting_date"
+									type="date"
+									data-testid="posting-date-input"
+									class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+								/>
+							</div>
+							<div>
+								<label for="so-posting-time" class="mb-1 block text-xs font-medium text-gray-700">
+									{{ __("Time") }}
+								</label>
+								<input
+									id="so-posting-time"
+									v-model="editor.posting_time"
+									type="time"
+									data-testid="posting-time-input"
+									class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+								/>
+							</div>
+						</section>
+
 						<section class="rounded-xl border border-gray-200 bg-white">
 							<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Counted Items") }}</h4>
 
@@ -540,6 +569,18 @@ function normalizeItem(item) {
 	}
 }
 
+function localDate() {
+	const d = new Date()
+	const m = String(d.getMonth() + 1).padStart(2, "0")
+	const day = String(d.getDate()).padStart(2, "0")
+	return `${d.getFullYear()}-${m}-${day}`
+}
+
+function localTime() {
+	const d = new Date()
+	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+}
+
 function applyEditor(payload) {
 	editor.value = {
 		name: payload.name,
@@ -547,6 +588,8 @@ function applyEditor(payload) {
 		docstatus: payload.docstatus,
 		modified: payload.modified,
 		reject_reason: payload.reject_reason,
+		posting_date: payload.posting_date || localDate(),
+		posting_time: (payload.posting_time || localTime()).slice(0, 5),
 		items: (payload.items || []).map(normalizeItem),
 		attachments: payload.attachments || [],
 	}
@@ -578,6 +621,8 @@ function openNew() {
 		docstatus: 0,
 		modified: null,
 		reject_reason: null,
+		posting_date: localDate(),
+		posting_time: localTime(),
 		items: [],
 		attachments: [],
 	}
@@ -795,6 +840,8 @@ async function save() {
 				name: editor.value.name || undefined,
 				modified: editor.value.modified || undefined,
 				items: buildItems(),
+				posting_date: editor.value.posting_date || undefined,
+				posting_time: editor.value.posting_time || undefined,
 			},
 		})
 		applyEditor(payload)
