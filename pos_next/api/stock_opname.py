@@ -671,7 +671,7 @@ def submit_opname(pos_profile, name, action=None):
 		_assert_doc_warehouse(doc, warehouse)
 		wf = _workflow()
 		if wf is None:
-			frappe.throw(_("No active workflow"), ValidationError)
+			frappe.throw(_("No active workflow for Stock Reconciliation; ask HQ to activate one"), ValidationError)
 		actions = _submit_actions(doc, wf)
 		if not actions:
 			frappe.throw(_("You are not allowed to submit this count, ask HQ"), ValidationError)

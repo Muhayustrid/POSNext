@@ -1272,6 +1272,28 @@ describe("StockOpnameDialog excel upload", () => {
 		await clickConfirm(wrapper)
 		expect(importCall).toHaveBeenCalled()
 	})
+
+	it("confirms before an upload over a saved draft with unsaved edits", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		const importCall = mockCall(IMPORT_URL, () =>
+			Promise.resolve({ name: "SR-0001", applied: 0, skipped: 0, errors: [] }),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await wrapper.find('[data-testid="qty-input"]').setValue(9)
+		await flushPromises()
+
+		const input = wrapper.find('input[accept=".xlsx"]')
+		Object.defineProperty(input.element, "files", {
+			value: [new File(["x"], "count.xlsx")],
+		})
+		await input.trigger("change")
+		await flushPromises()
+
+		expect(confirmDialog(wrapper).props("modelValue")).toBe(true)
+		await clickCancel(wrapper)
+		expect(importCall).not.toHaveBeenCalled()
+	})
 })
 
 describe("StockOpnameDialog save and attachments", () => {

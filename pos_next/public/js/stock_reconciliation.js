@@ -18,7 +18,7 @@ frappe.ui.form.on("Stock Reconciliation", {
 		// workflow.js freezes before this hook; the freeze overlay sits above the
 		// prompt and swallows its clicks, so lift it while the prompt is open.
 		frappe.dom.unfreeze();
-		return prompt_reject_reason().then((reason) => {
+		return prompt_reject_reason(__(frm.selected_workflow_action)).then((reason) => {
 			// re-take the freeze workflow.js releases after apply_workflow
 			frappe.dom.freeze();
 			return frappe
@@ -57,7 +57,7 @@ function is_return_transition(frm) {
 
 // Resolves with the reason, rejects when the prompt is cancelled (Frappe then
 // aborts the transition because before_workflow_action rejected).
-function prompt_reject_reason() {
+function prompt_reject_reason(action) {
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		const settle = (fn, value) => {
@@ -68,12 +68,12 @@ function prompt_reject_reason() {
 		const d = frappe.prompt(
 			[{ fieldname: "reason", fieldtype: "Small Text", label: __("Reason"), reqd: 1 }],
 			() => {},
-			__("Reject Stock Opname"),
-			__("Reject")
+			action,
+			action
 		);
 		// frappe.prompt hides the dialog before its callback runs, so the submit
 		// path settles before hide(); on_hide then only catches a cancel.
-		d.set_primary_action(__("Reject"), () => {
+		d.set_primary_action(action, () => {
 			const values = d.get_values();
 			if (!values) return; // required reason missing: keep the dialog open
 			settle(resolve, values.reason);

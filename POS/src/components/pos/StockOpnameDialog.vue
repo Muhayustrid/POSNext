@@ -1361,8 +1361,8 @@ async function onFilePicked(event) {
 	const file = event.target.files?.[0]
 	event.target.value = ""
 	if (!file) return
-	// An unsaved new count would be replaced wholesale by the upload: confirm.
-	if (!editor.value?.name && editor.value?.items?.length) {
+	// The upload replaces the rows wholesale: confirm when it would drop unsaved edits.
+	if ((!editor.value?.name && editor.value?.items?.length) || dirty.value) {
 		const ok = await confirmAsk({
 			title: __("Uploading replaces the unsaved rows. Upload anyway?"),
 			confirmLabel: __("Upload"),
