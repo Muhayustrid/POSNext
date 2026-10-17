@@ -691,6 +691,7 @@
 				:draft-invoices="draftsStore.drafts"
 				:can-purchase-order="canPurchaseOrder"
 				:can-production="canProduction"
+				:can-stock-opname="canStockOpname"
 				:is-offline="offlineStore.isOffline"
 				@menu-selected="handlePOSMenuSelected"
 				@view-invoice="handleViewInvoice"
@@ -3454,6 +3455,9 @@ const { hasPermission: canProduction } = usePermissionCheck("POS Production Log"
 
 // Purchase Order
 const { hasPermission: canPurchaseOrder } = usePermissionCheck("Purchase Order", "create");
+
+// Stock Opname (count sheet → HQ approval)
+const { hasPermission: canStockOpname } = usePermissionCheck("Stock Reconciliation", "create");
 
 // Stock moved on finish/close/cancel — refresh the catalog quietly; the
 // Production dialog already shows its own per-action toast.

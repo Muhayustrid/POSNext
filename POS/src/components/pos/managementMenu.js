@@ -67,6 +67,14 @@ export const MANAGEMENT_MENU = [
 		requiresOnline: true,
 	},
 	{
+		id: "stock-opname",
+		icon: "check-square",
+		label: __("Stock Opname"),
+		group: "stock",
+		requiresOnline: true,
+		requiresStockOpname: true,
+	},
+	{
 		id: "promotions",
 		icon: "tag",
 		label: __("Promotions"),
