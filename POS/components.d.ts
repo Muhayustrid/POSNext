@@ -14,6 +14,7 @@ declare module 'vue' {
     BottomSheet: typeof import('./src/components/common/BottomSheet.vue')['default']
     CheckboxField: typeof import('./src/components/settings/CheckboxField.vue')['default']
     ClearCacheOverlay: typeof import('./src/components/common/ClearCacheOverlay.vue')['default']
+    ConfirmDialog: typeof import('./src/components/common/ConfirmDialog.vue')['default']
     CountryCodeSelector: typeof import('./src/components/common/CountryCodeSelector.vue')['default']
     CouponDialog: typeof import('./src/components/sale/CouponDialog.vue')['default']
     CouponManagement: typeof import('./src/components/sale/CouponManagement.vue')['default']

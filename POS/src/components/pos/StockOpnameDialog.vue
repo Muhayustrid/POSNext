@@ -8,12 +8,10 @@
 			<!-- LIST -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-3">
-					<p class="text-sm text-gray-500">
-						{{ __("Count physical stock and send it to Head Office for approval") }}
-					</p>
+					<h3 class="text-base font-semibold text-gray-900">{{ __("Stock Opname") }}</h3>
 					<div class="flex items-center gap-2">
 						<RefreshButton :loading="loading" @click="loadList()" />
-						<Button v-if="openOpname" variant="solid" @click="openEditor(openOpname.name)">
+						<Button v-if="openOpname" variant="solid" @click="openDoc(openOpname.name)">
 							<template #prefix>
 								<FeatherIcon name="edit-2" class="h-4 w-4" />
 							</template>
@@ -28,16 +26,7 @@
 					</div>
 				</div>
 
-				<div class="rounded-xl border border-gray-200 bg-white">
-					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_7rem_6rem_12rem] md:gap-x-3"
-					>
-						<span>{{ __("Document") }}</span>
-						<span>{{ __("Date") }}</span>
-						<span class="text-end">{{ __("Items") }}</span>
-						<span>{{ __("Status") }}</span>
-					</div>
-
+				<div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
 					<div v-if="loading && !opnames.length" class="divide-y divide-gray-100">
 						<span class="sr-only">{{ __("Loading...") }}</span>
 						<div v-for="n in 3" :key="n" class="flex animate-pulse gap-4 px-4 py-3">
@@ -50,44 +39,62 @@
 						<p class="text-sm font-medium text-gray-900">{{ __("No stock opname yet") }}</p>
 						<p class="mt-1 text-xs text-gray-500">{{ __("Start one with New Count") }}</p>
 					</div>
-					<div v-else class="divide-y divide-gray-100">
-						<button
-							v-for="o in opnames"
-							:key="o.name"
-							type="button"
-							class="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 text-start transition-colors hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none md:grid-cols-[minmax(0,1.4fr)_7rem_6rem_12rem] md:gap-y-0"
-							@click="openEditor(o.name)"
-						>
-							<span class="truncate text-sm font-semibold text-gray-900">{{ o.name }}</span>
-							<span class="justify-self-end md:order-last md:justify-self-start">
-								<span :class="statusPill(stateLabel(o))">{{ __(stateLabel(o)) }}</span>
-							</span>
-							<span class="text-xs text-gray-500 md:text-sm md:text-gray-700">
-								{{ formatDate(o.posting_date) }}
-							</span>
-							<span class="col-span-2 text-sm tabular-nums text-gray-900 md:col-span-1 md:text-end">
-								{{ o.item_count }}
-							</span>
-							<span
-								v-if="stateLabel(o) === 'Rejected' && o.reject_reason"
-								class="col-span-2 text-xs text-red-600 md:col-span-4"
+					<table v-else class="w-full text-sm">
+						<thead>
+							<tr
+								data-testid="list-header"
+								class="border-b border-gray-200 bg-gray-50 text-xs font-medium text-gray-500"
 							>
-								{{ o.reject_reason }}
-							</span>
-						</button>
-					</div>
+								<th class="px-4 py-2 text-start font-medium">{{ __("ID") }}</th>
+								<th class="px-4 py-2 text-start font-medium">{{ __("Status") }}</th>
+								<th class="px-4 py-2 text-start font-medium">{{ __("Posting Date") }}</th>
+								<th class="px-4 py-2 text-end font-medium">{{ __("Items") }}</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-gray-100">
+							<tr
+								v-for="o in opnames"
+								:key="o.name"
+								tabindex="0"
+								data-testid="opname-row"
+								class="cursor-pointer transition-colors hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
+								@click="openDoc(o.name)"
+								@keydown.enter="openDoc(o.name)"
+							>
+								<td class="px-4 py-3 font-semibold text-gray-900">
+									{{ o.name }}
+									<p v-if="o.returned && o.reject_reason" class="text-xs font-normal text-red-600">
+										{{ o.reject_reason }}
+									</p>
+								</td>
+								<td class="px-4 py-3">
+									<span class="inline-flex items-center gap-1.5">
+										<span
+											data-testid="status-dot"
+											:class="['h-2 w-2 shrink-0 rounded-full', toneClass(o)]"
+										></span>
+										<span class="text-gray-700">{{ o.workflow_state }}</span>
+									</span>
+								</td>
+								<td class="px-4 py-3 text-gray-700">{{ formatDate(o.posting_date) }}</td>
+								<td class="px-4 py-3 text-end tabular-nums text-gray-900">{{ o.item_count }}</td>
+							</tr>
+						</tbody>
+					</table>
 				</div>
 			</div>
 
-			<!-- EDITOR -->
+			<!-- DOC PAGE -->
 			<div v-else class="mx-auto flex w-full max-w-6xl flex-col gap-4">
 				<div v-if="loadingDetail" class="py-10 text-center text-sm text-gray-500">
 					{{ __("Loading...") }}
 				</div>
 				<template v-else-if="editor">
-					<div class="flex flex-wrap items-center gap-2">
+					<!-- header: back, breadcrumb, indicator, actions -->
+					<div data-testid="doc-header" class="flex flex-wrap items-center gap-2">
 						<button
 							type="button"
+							data-testid="doc-back"
 							class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
 							:aria-label="__('Back')"
 							:title="__('Back')"
@@ -95,122 +102,218 @@
 						>
 							<FeatherIcon name="arrow-left" class="h-4 w-4" />
 						</button>
-						<h3 class="truncate text-base font-semibold text-gray-900">
-							{{ editor.name || __("New Count") }}
-						</h3>
-						<span :class="statusPill(stateLabel(editor))">{{ __(stateLabel(editor)) }}</span>
+						<nav class="flex min-w-0 items-center gap-1.5 text-sm">
+							<span class="text-gray-500">{{ __("Stock Opname") }}</span>
+							<span class="text-gray-300">/</span>
+							<span class="truncate font-semibold text-gray-900">
+								{{ editor.name || __("New Count") }}
+							</span>
+						</nav>
+						<span v-if="editor.workflow_state" class="inline-flex items-center gap-1.5">
+							<span
+								data-testid="status-dot"
+								:class="['h-2 w-2 shrink-0 rounded-full', toneClass(editor)]"
+							></span>
+							<span class="text-sm text-gray-700">{{ editor.workflow_state }}</span>
+						</span>
+
+						<div class="ms-auto flex items-center gap-2">
+							<Button
+								v-if="primaryMode === 'save'"
+								variant="solid"
+								data-testid="primary-action"
+								:loading="saving"
+								@click="save"
+							>
+								{{ __("Save") }}
+							</Button>
+							<Button
+								v-else-if="primaryMode === 'submit'"
+								variant="solid"
+								data-testid="primary-action"
+								:loading="submitting"
+								@click="submitAction(actions[0])"
+							>
+								{{ actions[0] }}
+							</Button>
+							<div v-else-if="primaryMode === 'actions'" class="relative">
+								<Button
+									variant="solid"
+									data-testid="primary-action"
+									@click="actionsMenuOpen = !actionsMenuOpen"
+								>
+									{{ __("Actions") }}
+									<template #suffix>
+										<FeatherIcon name="chevron-down" class="h-4 w-4" />
+									</template>
+								</Button>
+								<div
+									v-if="actionsMenuOpen"
+									data-testid="actions-menu"
+									class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+								>
+									<button
+										v-for="a in actions"
+										:key="a"
+										type="button"
+										class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
+										@click="submitAction(a)"
+									>
+										{{ a }}
+									</button>
+								</div>
+							</div>
+
+							<div v-if="editable && editor.name" class="relative">
+								<button
+									type="button"
+									data-testid="doc-menu-button"
+									class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+									:aria-label="__('More actions')"
+									:title="__('More actions')"
+									@click="docMenuOpen = !docMenuOpen"
+								>
+									<FeatherIcon name="more-horizontal" class="h-4 w-4" />
+								</button>
+								<div
+									v-if="docMenuOpen"
+									data-testid="doc-menu"
+									class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+								>
+									<button
+										type="button"
+										data-testid="doc-menu-delete"
+										class="block w-full px-3 py-2 text-start text-sm text-red-600 hover:bg-red-50"
+										@click="remove"
+									>
+										{{ __("Delete") }}
+									</button>
+								</div>
+							</div>
+						</div>
 					</div>
 
 					<p
-						v-if="stateLabel(editor) === 'Rejected' && editor.reject_reason"
+						v-if="editor.returned && editor.reject_reason"
 						class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
 					>
 						{{ __("Rejected by Head Office") }}: {{ editor.reject_reason }}
 					</p>
 
-					<!-- read-only for pending / approved / cancelled -->
-					<section
-						v-if="!editable"
-						class="rounded-xl border border-gray-200 bg-white"
-						data-testid="opname-detail"
-					>
-						<!-- header card: number, status, posting datetime, warehouse -->
+					<!-- Details -->
+					<section data-testid="opname-detail" class="rounded-xl border border-gray-200 bg-white">
+						<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Details") }}</h4>
 						<div
-							class="grid grid-cols-2 gap-x-4 gap-y-3 border-b border-gray-200 px-4 py-3 md:grid-cols-4"
+							class="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-200 px-4 py-3 md:grid-cols-3"
 						>
 							<div class="min-w-0">
-								<p class="text-xs text-gray-500">{{ __("Document") }}</p>
-								<p class="truncate text-sm font-semibold text-gray-900">{{ editor.name }}</p>
+								<p class="text-xs text-gray-500">{{ __("ID") }}</p>
+								<p class="truncate text-sm font-semibold text-gray-900">
+									{{ editor.name || __("New Count") }}
+								</p>
 							</div>
 							<div class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Status") }}</p>
-								<span :class="statusPill(stateLabel(editor))">{{ __(stateLabel(editor)) }}</span>
-							</div>
-							<div class="min-w-0">
-								<p class="text-xs text-gray-500">{{ __("Posting Date") }}</p>
-								<p class="truncate text-sm text-gray-900">
-									{{ formatDate(editor.posting_date) }} · {{ formatTime(editor.posting_time) }}
-								</p>
+								<span v-if="editor.workflow_state" class="inline-flex items-center gap-1.5">
+									<span :class="['h-2 w-2 shrink-0 rounded-full', toneClass(editor)]"></span>
+									<span class="text-sm text-gray-700">{{ editor.workflow_state }}</span>
+								</span>
 							</div>
 							<div class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Warehouse") }}</p>
 								<p class="truncate text-sm text-gray-900">{{ editor.set_warehouse }}</p>
 							</div>
-						</div>
-
-						<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
-						<div
-							class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-x-3"
-						>
-							<span>{{ __("Item") }}</span>
-							<span>{{ __("UOM") }}</span>
-							<span class="text-end">{{ __("Qty") }}</span>
-						</div>
-						<div
-							v-for="(row, idx) in editor.items"
-							:key="idx"
-							class="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-y-0 md:py-1.5"
-						>
-							<div class="col-span-2 min-w-0 md:col-span-1">
-								<p class="truncate text-gray-900">{{ row.item_name || row.item_code }}</p>
-								<p v-if="row.batch_no" class="truncate text-xs text-gray-400">
-									{{ __("Batch") }}: {{ row.batch_no }}
-								</p>
-								<p
-									v-else-if="row.is_serial && row.serial_nos.length"
-									class="truncate text-xs text-gray-400"
-								>
-									{{ row.serial_nos.join(", ") }}
+							<div class="col-span-2 min-w-0">
+								<p class="text-xs text-gray-500">{{ __("Posting Date") }}</p>
+								<template v-if="editable">
+									<label class="mb-1 flex items-center gap-1.5 text-xs text-gray-700">
+										<input
+											v-model="editor.set_posting_time"
+											type="checkbox"
+											data-testid="posting-toggle"
+										/>
+										{{ __("Edit Posting Date and Time") }}
+									</label>
+									<div class="flex flex-wrap gap-2">
+										<input
+											v-model="editor.posting_date"
+											type="date"
+											data-testid="posting-date-input"
+											:disabled="!editor.set_posting_time"
+											class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-400"
+										/>
+										<input
+											v-model="editor.posting_time"
+											type="time"
+											data-testid="posting-time-input"
+											:disabled="!editor.set_posting_time"
+											class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-400"
+										/>
+									</div>
+								</template>
+								<p v-else class="truncate text-sm text-gray-900">
+									{{ formatDate(editor.posting_date) }} · {{ formatTime(editor.posting_time) }}
 								</p>
 							</div>
 							<div class="min-w-0">
-								<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
-								<span class="truncate text-gray-500">{{ row.uom }}</span>
+								<p class="text-xs text-gray-500">{{ __("Created By") }}</p>
+								<p class="truncate text-sm text-gray-900">{{ editor.owner_fullname }}</p>
+								<p class="truncate text-xs text-gray-400">{{ formatDateTime(editor.creation) }}</p>
 							</div>
 							<div class="min-w-0">
-								<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
-								<span class="block text-end tabular-nums">{{ row.qty }}</span>
+								<p class="text-xs text-gray-500">{{ __("Last Modified") }}</p>
+								<p class="truncate text-sm text-gray-900">{{ editor.modified_by_fullname }}</p>
+								<p class="truncate text-xs text-gray-400">{{ formatDateTime(editor.modified) }}</p>
 							</div>
 						</div>
-						<p v-if="!editor.items.length" class="px-4 py-4 text-center text-sm text-gray-500">
-							{{ __("No items") }}
-						</p>
 					</section>
 
-					<!-- editable -->
-					<template v-else>
-						<section
-							class="flex flex-wrap items-end gap-4 rounded-xl border border-gray-200 bg-white px-4 py-3"
-						>
-							<div>
-								<label for="so-posting-date" class="mb-1 block text-xs font-medium text-gray-700">
-									{{ __("Posting Date") }}
-								</label>
-								<input
-									id="so-posting-date"
-									v-model="editor.posting_date"
-									type="date"
-									data-testid="posting-date-input"
-									class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-								/>
-							</div>
-							<div>
-								<label for="so-posting-time" class="mb-1 block text-xs font-medium text-gray-700">
-									{{ __("Time") }}
-								</label>
-								<input
-									id="so-posting-time"
-									v-model="editor.posting_time"
-									type="time"
-									data-testid="posting-time-input"
-									class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-								/>
-							</div>
-						</section>
+					<!-- Items -->
+					<section class="rounded-xl border border-gray-200 bg-white">
+						<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
 
-						<section class="rounded-xl border border-gray-200 bg-white">
-							<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Counted Items") }}</h4>
+						<!-- read-only -->
+						<template v-if="!editable">
+							<div
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-x-3"
+							>
+								<span>{{ __("Item") }}</span>
+								<span>{{ __("UOM") }}</span>
+								<span class="text-end">{{ __("Qty") }}</span>
+							</div>
+							<div
+								v-for="(row, idx) in editor.items"
+								:key="idx"
+								class="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-y-0 md:py-1.5"
+							>
+								<div class="col-span-2 min-w-0 md:col-span-1">
+									<p class="truncate text-gray-900">{{ row.item_name || row.item_code }}</p>
+									<p v-if="row.batch_no" class="truncate text-xs text-gray-400">
+										{{ __("Batch") }}: {{ row.batch_no }}
+									</p>
+									<p
+										v-else-if="row.is_serial && row.serial_nos.length"
+										class="truncate text-xs text-gray-400"
+									>
+										{{ row.serial_nos.join(", ") }}
+									</p>
+								</div>
+								<div class="min-w-0">
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
+									<span class="truncate text-gray-500">{{ row.uom }}</span>
+								</div>
+								<div class="min-w-0">
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+									<span class="block text-end tabular-nums">{{ row.qty }}</span>
+								</div>
+							</div>
+							<p v-if="!editor.items.length" class="px-4 py-4 text-center text-sm text-gray-500">
+								{{ __("No items") }}
+							</p>
+						</template>
 
+						<!-- editable -->
+						<template v-else>
 							<div
 								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-x-3"
 							>
@@ -397,64 +500,70 @@
 									{{ __("Search and add only the items you physically counted.") }}
 								</p>
 							</div>
-						</section>
 
-						<section class="rounded-xl border border-gray-200 bg-white p-4">
-							<h4 class="mb-1 text-sm font-semibold text-gray-900">{{ __("Excel Template") }}</h4>
-							<p class="mb-3 text-xs text-gray-500">
-								{{ __("Download the count sheet, fill Counted Qty, then upload it back.") }}
-							</p>
-							<div class="flex flex-wrap items-end gap-3">
-								<div>
-									<label for="so-item-group" class="mb-1 block text-xs font-medium text-gray-700">
-										{{ __("Item Group") }}
-									</label>
-									<select
-										id="so-item-group"
-										v-model="itemGroup"
-										class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							<!-- Excel count sheet -->
+							<div class="border-t border-gray-200 px-4 py-3">
+								<h5 class="mb-1 text-sm font-semibold text-gray-900">{{ __("Excel Template") }}</h5>
+								<p class="mb-3 text-xs text-gray-500">
+									{{ __("Download the count sheet, fill Counted Qty, then upload it back.") }}
+								</p>
+								<div class="flex flex-wrap items-end gap-3">
+									<div>
+										<label for="so-item-group" class="mb-1 block text-xs font-medium text-gray-700">
+											{{ __("Item Group") }}
+										</label>
+										<select
+											id="so-item-group"
+											v-model="itemGroup"
+											class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+										>
+											<option value="">{{ __("All item groups") }}</option>
+											<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
+												{{ g.item_group }}
+											</option>
+										</select>
+									</div>
+									<Button variant="subtle" @click="downloadTemplate">
+										<template #prefix>
+											<FeatherIcon name="download" class="h-4 w-4" />
+										</template>
+										{{ __("Download Template") }}
+									</Button>
+									<label
+										class="cursor-pointer rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
 									>
-										<option value="">{{ __("All item groups") }}</option>
-										<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
-											{{ g.item_group }}
-										</option>
-									</select>
+										<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
+										{{ importing ? __("Uploading...") : __("Upload") }}
+									</label>
 								</div>
-								<Button variant="subtle" @click="downloadTemplate">
-									<template #prefix>
-										<FeatherIcon name="download" class="h-4 w-4" />
-									</template>
-									{{ __("Download Template") }}
-								</Button>
-								<label
-									class="cursor-pointer rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-								>
-									<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
-									{{ importing ? __("Uploading...") : __("Upload") }}
-								</label>
+								<ul v-if="importResult?.errors?.length" data-testid="import-errors" class="mt-3 space-y-1">
+									<li
+										v-for="e in importResult.errors"
+										:key="`${e.row}-${e.item_code}`"
+										class="text-xs text-red-600"
+									>
+										{{ __("Row {0}: {1} — {2}", [e.row, e.item_code, e.message]) }}
+									</li>
+								</ul>
 							</div>
-							<ul v-if="importResult?.errors?.length" data-testid="import-errors" class="mt-3 space-y-1">
-								<li
-									v-for="e in importResult.errors"
-									:key="`${e.row}-${e.item_code}`"
-									class="text-xs text-red-600"
-								>
-									{{ __("Row {0}: {1} — {2}", [e.row, e.item_code, e.message]) }}
-								</li>
-							</ul>
-						</section>
+						</template>
+					</section>
 
-						<section class="rounded-xl border border-gray-200 bg-white p-4" data-testid="opname-attachments">
-							<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Attachments") }}</h4>
-							<PurchaseAttachments
-								editable
-								:pending="editor.attachments"
-								:label="__('Attach File')"
-								:accept="OPNAME_ATTACHMENT_ACCEPT"
-								:hint="__('Image or document · max 10 MB')"
-								@add="attachFiles"
-								@remove="removeAttachment"
-							/>
+					<!-- Attachments -->
+					<section class="rounded-xl border border-gray-200 bg-white p-4" data-testid="opname-attachments">
+						<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Attachments") }}</h4>
+						<PurchaseAttachments
+							v-if="editable"
+							editable
+							:pending="editor.attachments"
+							:label="__('Attach File')"
+							:accept="OPNAME_ATTACHMENT_ACCEPT"
+							:hint="__('Image or document · max 10 MB')"
+							@add="attachFiles"
+							@remove="removeAttachment"
+						/>
+						<PurchaseAttachments v-else :attached="editor.attachments" />
+						<template v-if="editable">
 							<div class="mt-3 flex gap-2">
 								<input
 									v-model="linkInput"
@@ -477,41 +586,50 @@
 							<p v-if="linkInput && !linkOk" class="mt-1 text-xs text-red-600">
 								{{ __("Link must start with http:// or https://") }}
 							</p>
-						</section>
-					</template>
+						</template>
+					</section>
 
+					<!-- Activity -->
 					<section
-						v-if="!editable && editor.attachments.length"
+						v-if="editor.activity?.length"
+						data-testid="opname-activity"
 						class="rounded-xl border border-gray-200 bg-white p-4"
 					>
-						<PurchaseAttachments :attached="editor.attachments" :label="__('Attachments')" />
+						<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Activity") }}</h4>
+						<ul class="space-y-2">
+							<li
+								v-for="(entry, i) in editor.activity"
+								:key="i"
+								data-testid="activity-entry"
+								class="flex flex-wrap items-baseline gap-x-2 text-sm"
+							>
+								<span class="font-medium text-gray-900">{{ entry.user_fullname || entry.user }}</span>
+								<span class="text-gray-700">{{ activityLabel(entry) }}</span>
+								<span class="text-xs text-gray-400" :title="entry.at">{{ relativeTime(entry.at) }}</span>
+							</li>
+						</ul>
 					</section>
 				</template>
 			</div>
 		</template>
-
-		<template #actions>
-			<div
-				v-if="view === 'editor' && editable && editor"
-				class="mx-auto flex w-full max-w-6xl justify-between gap-2"
-			>
-				<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-				<div class="flex gap-2">
-					<Button v-if="editor.name" variant="subtle" theme="red" :loading="acting" @click="remove">
-						{{ __("Delete") }}
-					</Button>
-					<Button variant="subtle" :loading="saving" @click="save">{{ __("Save") }}</Button>
-					<Button variant="solid" :loading="submitting" @click="submit">{{ __("Submit") }}</Button>
-				</div>
-			</div>
-		</template>
 	</DialogHost>
+
+	<ConfirmDialog
+		v-model="confirm.open"
+		:title="confirm.title"
+		:message="confirm.message"
+		:confirm-label="confirm.confirmLabel"
+		:destructive="confirm.destructive"
+		@confirm="resolveConfirm(true)"
+		@cancel="resolveConfirm(false)"
+	/>
 </template>
 
 <script setup>
 import { Button, FeatherIcon, call } from "frappe-ui"
-import { computed, ref, watch } from "vue"
+import { computed, reactive, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
+import ConfirmDialog from "../common/ConfirmDialog.vue"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useFormatters } from "@/composables/useFormatters"
@@ -528,7 +646,7 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue"])
 
 const { showSuccess, showError } = useToast()
-const { formatDate, formatTime } = useFormatters()
+const { formatDate, formatTime, formatDateTime } = useFormatters()
 
 const show = ref(props.modelValue)
 watch(
@@ -545,12 +663,14 @@ watch(show, (v) => emit("update:modelValue", v))
 
 const API = "pos_next.api.stock_opname"
 
-// view: "list" | "editor"
+// view: "list" | "doc"
 const view = ref("list")
 const opnames = ref([])
 const loading = ref(false)
 const loadingDetail = ref(false)
 const editor = ref(null)
+// JSON snapshot of the editable fields at load / last save; drives `dirty`
+const snapshot = ref(null)
 
 const itemSearch = ref("")
 const itemResults = ref([])
@@ -564,6 +684,8 @@ const acting = ref(false)
 const importing = ref(false)
 const importResult = ref(null)
 const attaching = ref(false)
+const actionsMenuOpen = ref(false)
+const docMenuOpen = ref(false)
 // opname evidence also comes as office documents (count sheets, BA)
 const OPNAME_ATTACHMENT_ACCEPT = `${ATTACHMENT_ACCEPT},.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.odt,.ods`
 const linkInput = ref("")
@@ -571,39 +693,69 @@ const linkOk = computed(() => /^https?:\/\/\S+$/i.test(linkInput.value.trim()))
 
 const dialogTitle = computed(() => __("Stock Opname"))
 
-const STATUS_TONES = {
-	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	"Approval Pending by Stock Manager": "bg-blue-50 text-blue-700 ring-blue-200",
-	"Approval Pending by Accounts Manager":
-		"bg-blue-50 text-blue-700 ring-blue-200",
-	Rejected: "bg-red-50 text-red-700 ring-red-200",
-	Approved: "bg-green-50 text-green-700 ring-green-200",
-	Processing: "bg-blue-50 text-blue-700 ring-blue-200",
-	Cancelled: "bg-gray-50 text-gray-500 ring-gray-200",
+// ---------------------------------------------------------------------------
+// Confirmation dialog (promise helper over the shared ConfirmDialog)
+// ---------------------------------------------------------------------------
+
+const confirm = reactive({
+	open: false,
+	title: "",
+	message: "",
+	confirmLabel: "",
+	destructive: false,
+})
+let confirmResolve = null
+
+// cancel may fire twice on overlay/Esc: resolving once keeps the promise honest
+function confirmAsk({ title, message = "", confirmLabel = "", destructive = false }) {
+	confirm.title = title
+	confirm.message = message
+	confirm.confirmLabel = confirmLabel
+	confirm.destructive = destructive
+	confirm.open = true
+	return new Promise((resolve) => {
+		confirmResolve = resolve
+	})
 }
 
-function statusPill(label) {
-	return [
-		"inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-		STATUS_TONES[label] || "bg-gray-50 text-gray-700 ring-gray-200",
-	]
+function resolveConfirm(value) {
+	confirm.open = false
+	const resolve = confirmResolve
+	confirmResolve = null
+	if (resolve) resolve(value)
 }
 
-// Approved but still docstatus 0 -> ERPNext is submitting it in the background.
-function stateLabel(row) {
-	if (row?.workflow_state === "Approved" && !row.docstatus) return "Processing"
-	return row?.workflow_state || "Draft"
+// ---------------------------------------------------------------------------
+// Status indicator (tones derived from payload flags, never from state names)
+// ---------------------------------------------------------------------------
+
+// initial/returned red, other open states orange, background submit blue,
+// submitted green, cancelled grey
+function toneClass(row) {
+	if (!row) return "bg-gray-400"
+	if (row.docstatus === 1) return "bg-green-500"
+	if (row.docstatus === 2) return "bg-gray-400"
+	if (row.processing) return "bg-blue-500"
+	if (row.returned || row.editable) return "bg-red-500"
+	return "bg-orange-400"
 }
 
-const editable = computed(
-	() =>
-		!!editor.value &&
-		["Draft", "Rejected"].includes(editor.value.workflow_state),
-)
+const editable = computed(() => !!editor.value?.editable)
+const actions = computed(() => editor.value?.actions || [])
 
-// Continue opens only an editable count; a Pending opname opens read-only.
+// One primary action like Desk: Save while there is something to save, else
+// the single workflow action, else an Actions dropdown.
+const primaryMode = computed(() => {
+	if (!editor.value || !editable.value) return null
+	if (!editor.value.name || dirty.value) return "save"
+	if (actions.value.length === 1) return "submit"
+	if (actions.value.length > 1) return "actions"
+	return null
+})
+
+// Continue opens only an editable count; a pending opname opens read-only.
 const openOpname = computed(() =>
-	opnames.value.find((o) => !o.docstatus && ["Draft", "Rejected"].includes(o.workflow_state)),
+	opnames.value.find((o) => !o.docstatus && o.editable),
 )
 
 // One open count per warehouse: any docstatus-0 opname blocks starting a new one (D5).
@@ -628,7 +780,7 @@ async function loadList() {
 }
 
 // ---------------------------------------------------------------------------
-// Editor
+// Doc page
 // ---------------------------------------------------------------------------
 
 // Stable per-row key: index keys shift state when a middle row is removed.
@@ -685,6 +837,26 @@ function localTime() {
 	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
 }
 
+function snapshotOf() {
+	const e = editor.value
+	if (!e) return null
+	return JSON.stringify({
+		items: buildItems(),
+		set_posting_time: e.set_posting_time ? 1 : 0,
+		posting_date: e.posting_date || "",
+		posting_time: e.posting_time || "",
+	})
+}
+
+const dirty = computed(() => {
+	if (!editor.value || snapshot.value === null) return false
+	return snapshotOf() !== snapshot.value
+})
+
+function takeSnapshot() {
+	snapshot.value = snapshotOf()
+}
+
 function applyEditor(payload) {
 	editor.value = {
 		name: payload.name,
@@ -695,16 +867,32 @@ function applyEditor(payload) {
 		set_warehouse: payload.set_warehouse,
 		posting_date: payload.posting_date || localDate(),
 		posting_time: (payload.posting_time || localTime()).slice(0, 5),
+		// display-only prefill: only a ticked box sends posting fields (N5)
+		set_posting_time: !!payload.set_posting_time,
+		owner: payload.owner,
+		owner_fullname: payload.owner_fullname,
+		creation: payload.creation,
+		modified_by_fullname: payload.modified_by_fullname,
+		editable: !!payload.editable,
+		returned: !!payload.returned,
+		processing: !!payload.processing,
+		actions: payload.actions || [],
+		activity: payload.activity || [],
 		items: (payload.items || []).map(normalizeItem),
 		attachments: payload.attachments || [],
 	}
+	actionsMenuOpen.value = false
+	docMenuOpen.value = false
+	takeSnapshot()
 }
 
-async function openEditor(name) {
-	view.value = "editor"
+async function openDoc(name) {
+	view.value = "doc"
 	loadingDetail.value = true
 	importResult.value = null
 	batchPicker.value = null
+	linkInput.value = ""
+	clearSearch()
 	try {
 		applyEditor(
 			await call(`${API}.get_opname`, { pos_profile: props.posProfile, name }),
@@ -713,7 +901,7 @@ async function openEditor(name) {
 		ensureSerialOptions()
 	} catch (err) {
 		showError(errMsg(err, "Failed to load stock opname"))
-		backToList()
+		goList()
 	} finally {
 		loadingDetail.value = false
 	}
@@ -722,28 +910,59 @@ async function openEditor(name) {
 function openNew() {
 	editor.value = {
 		name: null,
-		workflow_state: "Draft",
+		workflow_state: "",
 		docstatus: 0,
 		modified: null,
 		reject_reason: null,
+		set_warehouse: "",
 		posting_date: localDate(),
 		posting_time: localTime(),
+		set_posting_time: false,
+		owner_fullname: "",
+		creation: null,
+		modified_by_fullname: "",
+		editable: true,
+		returned: false,
+		processing: false,
+		actions: [],
+		activity: [],
 		items: [],
 		attachments: [],
 	}
 	linkInput.value = ""
-	view.value = "editor"
+	view.value = "doc"
 	importResult.value = null
 	batchPicker.value = null
-	itemSearch.value = ""
-	itemResults.value = []
+	actionsMenuOpen.value = false
+	docMenuOpen.value = false
+	clearSearch()
 	if (!itemGroups.value.length) loadGroups()
+	takeSnapshot()
 }
 
-function backToList() {
+// Guarded: leaving with unsaved edits would lose them silently (N2).
+async function backToList() {
+	if (editable.value && dirty.value) {
+		const ok = await confirmAsk({
+			title: __("Discard unsaved changes?"),
+			message: __("Your edits will be lost."),
+			confirmLabel: __("Discard"),
+			destructive: true,
+		})
+		if (!ok) return
+	}
+	goList()
+}
+
+function goList() {
 	editor.value = null
+	snapshot.value = null
 	importResult.value = null
 	batchPicker.value = null
+	linkInput.value = ""
+	clearSearch()
+	actionsMenuOpen.value = false
+	docMenuOpen.value = false
 	view.value = "list"
 	loadList()
 }
@@ -776,6 +995,30 @@ async function loadGroups() {
 	} catch {
 		itemGroups.value = [] // the filter is optional; the sheet still works
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Activity timeline
+// ---------------------------------------------------------------------------
+
+function relativeTime(value) {
+	if (!value) return ""
+	// "YYYY-MM-DD HH:MM:SS" parses as Invalid Date on Safari
+	const then = new Date(String(value).replace(" ", "T")).getTime()
+	if (Number.isNaN(then)) return ""
+	const minutes = Math.floor((Date.now() - then) / 60000)
+	if (minutes < 1) return __("just now")
+	if (minutes < 60) return __("{0} minutes ago", [minutes])
+	const hours = Math.floor(minutes / 60)
+	if (hours < 24) return __("{0} hours ago", [hours])
+	return __("{0} days ago", [Math.floor(hours / 24)])
+}
+
+function activityLabel(entry) {
+	if (entry.type === "created") return __("Created")
+	if (entry.type === "workflow") return entry.state || __("Status updated")
+	if (entry.type === "attachment") return __("Attachment added")
+	return entry.content || ""
 }
 
 // ---------------------------------------------------------------------------
@@ -953,15 +1196,20 @@ async function save() {
 	if (saving.value) return false
 	saving.value = true
 	try {
+		const data = {
+			name: editor.value.name || undefined,
+			modified: editor.value.modified || undefined,
+			items: buildItems(),
+		}
+		// posting fields only when the user opted in (N5)
+		if (editor.value.set_posting_time) {
+			data.set_posting_time = 1
+			data.posting_date = editor.value.posting_date || undefined
+			data.posting_time = editor.value.posting_time || undefined
+		}
 		const payload = await call(`${API}.save_opname`, {
 			pos_profile: props.posProfile,
-			data: {
-				name: editor.value.name || undefined,
-				modified: editor.value.modified || undefined,
-				items: buildItems(),
-				posting_date: editor.value.posting_date || undefined,
-				posting_time: editor.value.posting_time || undefined,
-			},
+			data,
 		})
 		applyEditor(payload)
 		// a save response only carries the ticked serials; refetch so the
@@ -978,17 +1226,17 @@ async function save() {
 	}
 }
 
-async function submit() {
-	if (submitting.value) return
-	if (!window.confirm(__("After submitting you cannot edit until HQ decides")))
-		return
+async function submitAction(action) {
+	if (submitting.value || !action) return
+	actionsMenuOpen.value = false
+	const ok = await confirmAsk({
+		title: __("Submit Stock Opname"),
+		message: __("After submitting you cannot edit until HQ decides"),
+		confirmLabel: action,
+	})
+	if (!ok) return
 	submitting.value = true
 	try {
-		// persist the current count first (a Rejected doc revises back to Draft)
-		if (!editor.value.name || editable.value) {
-			const ok = await save()
-			if (!ok || !editor.value.name) return
-		}
 		// a link typed but not added yet would be lost once the doc locks
 		if (linkInput.value.trim()) {
 			if (!linkOk.value) {
@@ -1001,9 +1249,10 @@ async function submit() {
 		await call(`${API}.submit_opname`, {
 			pos_profile: props.posProfile,
 			name: editor.value.name,
+			action,
 		})
 		showSuccess(__("Stock opname submitted"))
-		backToList()
+		goList()
 	} catch (err) {
 		showError(errMsg(err, "Failed to submit stock opname"))
 	} finally {
@@ -1012,8 +1261,15 @@ async function submit() {
 }
 
 async function remove() {
-	if (acting.value || !editor.value.name) return
-	if (!window.confirm(__("Delete this stock opname?"))) return
+	if (acting.value || !editor.value?.name) return
+	docMenuOpen.value = false
+	const ok = await confirmAsk({
+		title: __("Delete Stock Opname"),
+		message: __("Delete this stock opname?"),
+		confirmLabel: __("Delete"),
+		destructive: true,
+	})
+	if (!ok) return
 	acting.value = true
 	try {
 		await call(`${API}.delete_opname`, {
@@ -1021,7 +1277,7 @@ async function remove() {
 			name: editor.value.name,
 		})
 		showSuccess(__("Stock opname deleted"))
-		backToList()
+		goList()
 	} catch (err) {
 		showError(errMsg(err, "Failed to delete stock opname"))
 	} finally {
@@ -1064,7 +1320,12 @@ async function onFilePicked(event) {
 	if (!file) return
 	// An unsaved new count would be replaced wholesale by the upload: confirm.
 	if (!editor.value?.name && editor.value?.items?.length) {
-		if (!window.confirm(__("Uploading replaces the unsaved rows. Upload anyway?"))) return
+		const ok = await confirmAsk({
+			title: __("Uploading replaces the unsaved rows. Upload anyway?"),
+			confirmLabel: __("Upload"),
+			destructive: true,
+		})
+		if (!ok) return
 	}
 	importing.value = true
 	importResult.value = null
@@ -1144,7 +1405,12 @@ async function attachLink() {
 }
 
 async function removeAttachment(row) {
-	if (!window.confirm(__("Remove this attachment?"))) return
+	const ok = await confirmAsk({
+		title: __("Remove this attachment?"),
+		confirmLabel: __("Remove"),
+		destructive: true,
+	})
+	if (!ok) return
 	try {
 		editor.value.attachments =
 			(await call(`${API}.remove_opname_attachment`, {
