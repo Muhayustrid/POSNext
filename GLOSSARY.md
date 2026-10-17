@@ -27,3 +27,13 @@ _Avoid_: sync failure, price error
 **Receipt Template**:
 The single customer-receipt layout ("POS Next Receipt"); online and offline receipts must look the same.
 _Avoid_: print format (when meaning the layout), offline template
+
+### Stock
+
+**Stock Opname**:
+An outlet's physical stock count, entered in the POS app as a draft Stock Reconciliation and approved by HQ in Desk; only approval moves stock and GL.
+_Avoid_: stock count, inventory count, stock take
+
+**Blind Count**:
+A count where the outlet enters only the quantity on the shelf and never sees the system quantity, valuation rate or difference.
+_Avoid_: unguided count, open count
