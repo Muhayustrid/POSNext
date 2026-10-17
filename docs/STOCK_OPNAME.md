@@ -17,9 +17,18 @@ shelf.
 
 ## Setup
 
-The workflow is installed by the app on install and on every `bench migrate`
-(idempotent; it never overwrites a workflow of the same name). It governs **all**
-Stock Reconciliations on the site, including ones created directly in Desk.
+The app installs a workflow named `POS Next Stock Opname` on install and on
+every `bench migrate`, but only when the site has no **active** Stock
+Reconciliation workflow (and none already named `POS Next Stock Opname`). A site
+running its own active Stock Reconciliation workflow keeps it — POS Next adapts
+to whatever workflow is active (see *Changing the workflow*). The active
+workflow governs **all** Stock Reconciliations on the site, including ones
+created directly in Desk.
+
+Outlets may backdate a count up to **Stock Opname Max Backdate Days** days in the
+past. The setting lives on **POS Next Global Settings** (default 2). A blank or
+`0` value falls back to the default of 2, so the cap cannot be narrowed to
+same-day-only from this setting.
 
 Approval needs roles that ERPNext does not grant by default. Configure the
 approver users before the first count:
@@ -56,21 +65,34 @@ warehouse is the warehouse of a POS Profile they are assigned to.
 
 ## Outlet flow (POS app)
 
-1. **Stock Opname** in the menu (group *Stock & Supply*, online only).
-2. **New count** — either:
-   - enter items by hand: search an item, type the counted quantity; batch items
-     pick from the item's enabled batches (one row per batch); serial items are
-     ticked from the serials currently in the warehouse; or
-   - **download the Excel template**, fill it in, and upload it (see below).
+The screen is a Desk-style list → document: a list of the warehouse's counts,
+then a full document page.
+
+1. **Stock Opname** in the menu (group *Stock & Supply*, online only). Click a
+   list row (or **New Count** / **Continue**) to open the document page.
+2. The page shows **Details**, **Items**, **Attachments** and an **Activity**
+   timeline. Add counted items with **Add Row** in the item grid — type or scan
+   an item code and press Enter on an exact code/barcode match. Each batch is one
+   row (add the same item again for another batch); serial items tick the serials
+   currently in the warehouse. You can also **download the Excel template**, fill
+   it in and upload it (see below).
 3. **Save** keeps a Draft. Only counted items become rows — uncounted items are
    left untouched (they are never zeroed).
-4. **Submit** stamps the posting date/time as *now* and moves the document to
-   *Approval Pending by Stock Manager*.
+4. The posting date/time defaults to the moment New Count was pressed. Tick
+   **Edit Posting Date and Time** to change it (within the backdate cap, see
+   *Setup*).
+5. The page has **one primary button**: **Save** while the count is new or has
+   unsaved edits, then the workflow action (e.g. **Submit**) once it is saved.
+   Submitting moves the document to the first approval stage, keeping an
+   outlet-set posting date or stamping *now* when it was left at the default.
+   **Delete** lives in the **⋯** menu of a saved, editable count; every
+   destructive step asks for confirmation.
 
-The list shows each opname's name, posting date, state and item count. Drafts and
-Rejected opnames can be opened, edited and deleted. Pending and Approved opnames
-are read-only. An Approved opname that is still posting (large counts, see
-below) shows **Processing**.
+The list shows each opname's ID, status, posting date and item count, with the
+reject reason under returned rows. A count is editable from POS only while it is
+in the workflow's **initial** state, or in a **returned** state if your role may
+send it back to the initial state; approval stages are read-only. An Approved
+opname that is still posting (large counts, see below) shows **Processing**.
 
 One warehouse can have only one open opname at a time: starting a new count while
 a Draft exists is refused until the previous one is submitted or deleted.
@@ -114,8 +136,8 @@ approval stage.
 
 ## Workflow states and transitions
 
-Workflow `POS Next Stock Opname`, on doctype `Stock Reconciliation`, driven by
-the `workflow_state` field.
+Workflow `POS Next Stock Opname` (the one the app installs), on doctype `Stock
+Reconciliation`, driven by the `workflow_state` field.
 
 | State | docstatus | Who may edit |
 |---|---|---|
@@ -138,6 +160,36 @@ the `workflow_state` field.
 
 "Self approval: no" means the person who created the document cannot approve or
 reject it — a second person must act.
+
+## Changing the workflow
+
+POS Next does not hardcode state or action names. The initial state, which
+states are *returned*, which are editable, the submit actions and the
+**Processing** flag are all derived from the **active** Stock Reconciliation
+workflow. Admins may rename, add or remove states and actions, as long as the
+shape stays recognisable:
+
+- The **first** state listed is the *initial* state — where a new count starts,
+  and the state outlets edit and submit from.
+- A **returned** state is a docstatus-0 state, other than the initial one, that
+  has a transition back to the initial state. The outlet may edit a returned
+  count only if their role is allowed on that back-to-initial transition; saving
+  it applies that transition first (a generic "revise").
+- Outlet roles must be allowed on the submit transitions out of the initial
+  state, otherwise the outlet is told "you are not allowed to submit this count,
+  ask HQ".
+- **Approval stages** (docstatus-0 states with no transition back to initial) are
+  read-only from POS — not editable, deletable or importable.
+- Approval must end in a **docstatus-1** state. A count shows **Processing**
+  while it is docstatus 0 in a state whose workflow doc status is 1 (the
+  background submit of large counts).
+- The Desk reject-reason prompt appears on **any** transition into a returned
+  state (not only one named "Reject"); the outlet sees the latest reason while
+  the count is in that state, and HQ free-text comments are shown to the outlet
+  in the **Activity** timeline.
+
+With **no active workflow**, listing, saving and deleting still work; submitting
+fails with *No active workflow for Stock Reconciliation; ask HQ to activate one*.
 
 ## Excel template
 
