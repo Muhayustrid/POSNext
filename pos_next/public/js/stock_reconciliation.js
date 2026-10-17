@@ -22,8 +22,13 @@ frappe.ui.form.on("Stock Reconciliation", {
 
 	before_workflow_action(frm) {
 		if (frm.selected_workflow_action !== "Reject") return;
-		return prompt_reject_reason().then((reason) =>
-			frappe
+		// workflow.js freezes before this hook; the freeze overlay sits above the
+		// prompt and swallows its clicks, so lift it while the prompt is open.
+		frappe.dom.unfreeze();
+		return prompt_reject_reason().then((reason) => {
+			// re-take the freeze workflow.js releases after apply_workflow
+			frappe.dom.freeze();
+			return frappe
 				.xcall("frappe.desk.form.utils.add_comment", {
 					reference_doctype: frm.doctype,
 					reference_name: frm.doc.name,
@@ -36,8 +41,8 @@ frappe.ui.form.on("Stock Reconciliation", {
 					// failed comment must release the freeze itself.
 					frappe.dom.unfreeze();
 					throw err;
-				})
-		);
+				});
+		});
 	},
 });
 
@@ -65,13 +70,8 @@ function prompt_reject_reason() {
 			settle(resolve, values.reason);
 			d.hide();
 		});
-		d.on_hide = () => {
-			if (settled) return;
-			// workflow.js only unfreezes on the apply_workflow path, so release
-			// the freeze it took before triggering this handler.
-			frappe.dom.unfreeze();
-			settle(reject);
-		};
+		// cancel: the freeze was already lifted before the prompt opened
+		d.on_hide = () => settle(reject);
 	});
 }
 
