@@ -41,6 +41,11 @@ approver users before the first count:
   In short, an Accounts Manager approver who handles batch/serial counts should
   hold **Accounts Manager + Accounts User + Stock User**.
 
+  An Accounts Manager who only *reviews* a batch/serial opname at the AM stage
+  also needs **Stock User** just to open it: the form reads the Serial and Batch
+  Bundle, so without it Desk shows a `PermissionError` before Approve is even
+  reached.
+
 A user who should only count — not approve — needs just **POSNext Cashier** (or
 POSNext Manager). Outlet roles get read/write/create/delete on Stock
 Reconciliation and read/write/create on Serial and Batch Bundle, but **no
@@ -84,9 +89,13 @@ workflow buttons drive the stages:
 Rejecting requires a reason. It is stored as a Comment on the document and the
 outlet sees the latest reason on the Rejected opname.
 
-While a count is still a Draft, HQ sees **blank current qty and difference**
-columns in Desk — ERPNext fills them only on submit. This is deliberate: the
-columns stay empty so nobody can infer the system quantity from a draft.
+While a count is still a Draft, the Desk **current qty** column reads **0** —
+the app's override skips ERPNext's no-change filter, the only place a draft
+would otherwise be filled with the system quantity — so a draft never exposes
+the real on-hand quantity. The **valuation rate** is filled, and the
+**difference** column shows the counted value (counted qty × rate, because the
+current side is 0), not the true system difference. The real system qty and
+difference appear only on submit.
 
 The **POSNext** workspace shows two shortcuts with pending counts, one per
 approval stage.

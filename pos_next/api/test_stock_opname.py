@@ -223,6 +223,48 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		self.assertEqual(got["items"][0]["qty"], 0)
 		self.assertEqual(got["items"][0]["serial_nos"], [])
 
+	def test_serial_row_duplicate_serials_deduped(self):
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		payload = save_opname(
+			self.profile,
+			{
+				"items": [
+					{"item_code": self.serial_item, "serial_nos": [self.serials[0], self.serials[0], self.serials[1]]}
+				]
+			},
+		)
+		got = get_opname(self.profile, payload["name"])
+		self.assertEqual(got["items"][0]["qty"], 2)
+		self.assertEqual(got["items"][0]["serial_nos"].count(self.serials[0]), 1)
+
+	def test_save_invalid_on_rejected_stays_rejected(self):
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		frappe.set_user(ADMIN)
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		doc.db_set("workflow_state", STATE_REJECTED)
+		frappe.db.commit()
+		self._cashier()
+		fresh = get_opname(self.profile, payload["name"])
+		# A batch item without a batch is invalid: the save must fail before any
+		# Revise transition, so the doc stays Rejected (I2).
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			save_opname(
+				self.profile,
+				{
+					"name": payload["name"],
+					"modified": fresh["modified"],
+					"items": [{"item_code": self.batch_item, "qty": 1}],
+				},
+			)
+		self.assertIn(self.batch_item, str(ctx.exception))
+		frappe.set_user(ADMIN)
+		self.assertEqual(frappe.db.get_value(DOCTYPE, payload["name"], "workflow_state"), STATE_REJECTED)
+
 	def test_submit_sets_posting_now_and_state(self):
 		from pos_next.api.stock_opname import save_opname, submit_opname
 
@@ -311,11 +353,12 @@ class TestStockOpnameApi(_StockOpnameFixture):
 			self.profile,
 			{"name": payload["name"], "modified": first["modified"], "items": [{"item_code": self.plain, "qty": 5}]},
 		)
-		with self.assertRaises(TimestampMismatchError):
+		with self.assertRaises(TimestampMismatchError) as ctx:
 			save_opname(
 				self.profile,
 				{"name": payload["name"], "modified": first["modified"], "items": [{"item_code": self.plain, "qty": 6}]},
 			)
+		self.assertIn("modified, reload", str(ctx.exception))
 
 	def test_cashier_cannot_approve(self):
 		from pos_next.api.stock_opname import save_opname, submit_opname

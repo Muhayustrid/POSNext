@@ -112,6 +112,9 @@ def _validated_rows(items, warehouse):
 			serial_nos = [s.strip() for s in serial_nos.replace(",", "\n").split("\n") if s.strip()]
 		if not isinstance(serial_nos, list):
 			frappe.throw(_("serial_nos for {0} must be a list").format(item_code), ValidationError)
+		# Dedupe within the row: a scan box double-Enter (or crafted payload)
+		# must not inflate qty or write the same serial twice.
+		serial_nos = list(dict.fromkeys(serial_nos))
 		if has_batch:
 			if not batch_no:
 				frappe.throw(_("Batch is required for {0}").format(item_code), ValidationError)
@@ -276,13 +279,18 @@ def save_opname(pos_profile, data):
 			if "modified" not in data or not data.get("modified"):
 				frappe.throw(_("modified is required to save an existing opname"), ValidationError)
 			if str(doc.modified) != str(data["modified"]):
-				raise frappe.TimestampMismatchError
+				raise frappe.TimestampMismatchError(
+					_("This count changed on another device (modified, reload). Reload before saving.")
+				)
+			# Validate before any Revise transition, so invalid rows cannot leave
+			# a Rejected doc flipped to Draft with nothing applied.
+			rows = _validated_rows(data.get("items"), warehouse)
 			if doc.workflow_state == STATE_REJECTED:
 				apply_workflow(doc, "Revise")
 				doc.reload()
 				_assert_doc_warehouse(doc, warehouse)
 			doc.set("items", [])
-			for row in _validated_rows(data.get("items"), warehouse):
+			for row in rows:
 				doc.append("items", row)
 			doc.save()
 		else:

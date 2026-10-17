@@ -5,13 +5,20 @@ frappe.ui.form.on("Stock Reconciliation", {
 	before_workflow_action(frm) {
 		if (frm.selected_workflow_action !== "Reject") return;
 		return prompt_reject_reason().then((reason) =>
-			frappe.xcall("frappe.desk.form.utils.add_comment", {
-				reference_doctype: frm.doctype,
-				reference_name: frm.doc.name,
-				content: "Rejected: " + reason,
-				comment_email: frappe.session.user,
-				comment_by: frappe.session.user_fullname,
-			})
+			frappe
+				.xcall("frappe.desk.form.utils.add_comment", {
+					reference_doctype: frm.doctype,
+					reference_name: frm.doc.name,
+					content: "Rejected: " + reason,
+					comment_email: frappe.session.user,
+					comment_by: frappe.session.user_fullname,
+				})
+				.catch((err) => {
+					// workflow.js only unfreezes on the apply_workflow path, so a
+					// failed comment must release the freeze itself.
+					frappe.dom.unfreeze();
+					throw err;
+				})
 		);
 	},
 });

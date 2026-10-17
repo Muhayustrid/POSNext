@@ -856,7 +856,7 @@
   "read": 1,
   "report": 1,
   "role": "POSNext Cashier",
-  "select": 0,
+  "select": 1,
   "share": 0,
   "submit": 0,
   "write": 1
@@ -882,7 +882,7 @@
   "read": 1,
   "report": 1,
   "role": "POSNext Manager",
-  "select": 0,
+  "select": 1,
   "share": 0,
   "submit": 0,
   "write": 1
@@ -908,7 +908,7 @@
   "read": 1,
   "report": 0,
   "role": "POSNext Cashier",
-  "select": 0,
+  "select": 1,
   "share": 0,
   "submit": 0,
   "write": 1
@@ -934,7 +934,7 @@
   "read": 1,
   "report": 0,
   "role": "POSNext Manager",
-  "select": 0,
+  "select": 1,
   "share": 0,
   "submit": 0,
   "write": 1

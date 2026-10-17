@@ -206,6 +206,14 @@ class TestStockOpnameSetup(IntegrationTestCase):
 			self.assertEqual(cint(row["create"]), 1, f"{role} must create")
 			self.assertEqual(cint(row["write"]), 1, f"{role} must write")
 			self.assertEqual(cint(row["read"]), 1, f"{role} must read")
+			self.assertEqual(cint(row["select"]), 1, f"{role} Stock Reconciliation must use select=1")
+
+		# Serial and Batch Bundle rows (serial-empty opname saves a bundle) use
+		# the same select=1 as every sibling outlet row.
+		by_role_sabb = {r["role"]: r for r in rows if r.get("parent") == "Serial and Batch Bundle"}
+		self.assertEqual(set(by_role_sabb), set(OUTLET_ROLES), "one Serial and Batch Bundle row per outlet role")
+		for role, row in by_role_sabb.items():
+			self.assertEqual(cint(row["select"]), 1, f"{role} Serial and Batch Bundle must use select=1")
 
 	def test_stock_manager_keeps_standard_perms(self):
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
@@ -267,3 +275,6 @@ class TestStockOpnameSetup(IntegrationTestCase):
 		script = (Path(frappe.get_app_path("pos_next")) / rel).read_text(encoding="utf-8")
 		self.assertIn("before_workflow_action", script)
 		self.assertIn('"Rejected: "', script)
+		# the xcall that stores the comment must release the Desk freeze on failure
+		self.assertIn(".catch", script)
+		self.assertIn("unfreeze", script)
