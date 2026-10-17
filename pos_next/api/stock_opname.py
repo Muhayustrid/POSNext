@@ -14,7 +14,7 @@ import math
 
 import frappe
 from frappe import ValidationError, _
-from frappe.model.workflow import apply_workflow
+from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name
 from frappe.utils import (
 	add_days,
 	cint,
@@ -30,14 +30,71 @@ from frappe.utils import (
 
 from pos_next.api.packages import _assert_profile_access
 from pos_next.services.production import _resolve_profile
-from pos_next.stock_opname_setup import STATE_APPROVED, STATE_DRAFT, STATE_PENDING_SM, STATE_REJECTED
 
 DOCTYPE = "Stock Reconciliation"
 REJECT_PREFIX = "Rejected: "
-EDITABLE_STATES = (STATE_DRAFT, STATE_REJECTED)
 TEMPLATE_HEADER = ["Item Code", "Item Name", "UOM", "Batch No", "Serial No", "Counted Qty"]
 # Fallback backdate cap (days) when POS Settings has no `opname_max_backdate_days`.
 MAX_BACKDATE_DAYS = 2
+
+
+def _workflow():
+	"""Active Stock Reconciliation workflow doc, or None when none is active."""
+	if not get_workflow_name(DOCTYPE):
+		return None
+	return get_workflow(DOCTYPE)
+
+
+def _initial_state(wf):
+	"""First state of the workflow: where a new doc starts."""
+	return wf.states[0].state
+
+
+def _returned_states(wf):
+	"""Draft states a transition can send back to the initial state."""
+	initial = _initial_state(wf)
+	back = {t.state for t in wf.transitions if t.next_state == initial}
+	return {
+		s.state for s in wf.states if s.state != initial and cint(s.doc_status) == 0 and s.state in back
+	}
+
+
+def _back_transition(wf, state, roles):
+	"""Action of the first `state -> initial` transition allowed for one of `roles`."""
+	initial = _initial_state(wf)
+	for transition in wf.transitions:
+		if transition.state == state and transition.next_state == initial and transition.allowed in roles:
+			return transition.action
+	return None
+
+
+def _state_flags(doc_or_row, wf, roles):
+	"""editable / returned / processing for a doc or list row, from the workflow.
+
+	Without an active workflow a draft stays editable and nothing is returned.
+	`editable` (spec N14) is the initial state, or a returned state this user may
+	send back — never an approval stage, whatever its `allow_edit` role says.
+	"""
+	docstatus = cint(doc_or_row.get("docstatus"))
+	if wf is None:
+		return {"editable": docstatus == 0, "returned": False, "processing": False}
+	state = doc_or_row.get("workflow_state")
+	state_rows = [s for s in wf.states if s.state == state]
+	returned = state in _returned_states(wf)
+	revivable = returned and _back_transition(wf, state, roles) is not None
+	return {
+		"editable": docstatus == 0 and (state == _initial_state(wf) or revivable),
+		"returned": returned,
+		# approved but not yet submitted (the >100-row background submit window)
+		"processing": docstatus == 0 and any(cint(s.doc_status) == 1 for s in state_rows),
+	}
+
+
+def _submit_actions(doc, wf):
+	"""Actions the user may apply to submit, from the initial state only."""
+	if wf is None or doc.is_new() or doc.get("workflow_state") != _initial_state(wf):
+		return []
+	return [transition["action"] for transition in get_transitions(doc)]
 
 
 def _parse_data(data):
@@ -309,6 +366,8 @@ def _validated_rows(items, warehouse):
 
 
 def _payload(doc):
+	wf = _workflow()
+	flags = _state_flags(doc, wf, frappe.get_roles())
 	meta_cache = {}
 	items = []
 	for row in doc.items:
@@ -342,7 +401,11 @@ def _payload(doc):
 		"posting_date": doc.posting_date,
 		"posting_time": doc.posting_time,
 		"set_warehouse": doc.set_warehouse,
-		"reject_reason": _reject_reason(doc.name) if doc.workflow_state == STATE_REJECTED else None,
+		"reject_reason": _reject_reason(doc.name) if flags["returned"] else None,
+		"editable": flags["editable"],
+		"returned": flags["returned"],
+		"processing": flags["processing"],
+		"actions": _submit_actions(doc, wf),
 		"items": items,
 		"attachments": _attachments(doc.name),
 	}
@@ -377,9 +440,12 @@ def list_opnames(pos_profile):
 			order_by="creation desc",
 			limit=50,
 		)
+		wf = _workflow()
+		roles = frappe.get_roles()
 		out = []
 		for row in rows:
 			item_count = frappe.db.count("Stock Reconciliation Item", {"parent": row.name})
+			flags = _state_flags(row, wf, roles)
 			out.append(
 				{
 					"name": row.name,
@@ -389,8 +455,10 @@ def list_opnames(pos_profile):
 					"docstatus": row.docstatus,
 					"item_count": item_count,
 					"modified": row.modified,
-					"reject_reason": _reject_reason(row.name) if row.workflow_state == STATE_REJECTED else None,
-					"processing": row.workflow_state == STATE_APPROVED and row.docstatus == 0,
+					"reject_reason": _reject_reason(row.name) if flags["returned"] else None,
+					"editable": flags["editable"],
+					"returned": flags["returned"],
+					"processing": flags["processing"],
 				}
 			)
 		return out
@@ -476,7 +544,7 @@ def get_system_qty(name):
 
 @frappe.whitelist()
 def save_opname(pos_profile, data):
-	"""Create or update a Draft/Rejected opname; Rejected revises to Draft first."""
+	"""Create or update an editable opname; a returned one revises to initial first."""
 	company, warehouse = _profile_warehouse(pos_profile)
 	data = _parse_data(data)
 	posting_date, posting_time = _guarded_posting(data)
@@ -485,21 +553,27 @@ def save_opname(pos_profile, data):
 		if name:
 			doc = _get_doc(name)
 			_assert_doc_warehouse(doc, warehouse)
-			if doc.workflow_state not in EDITABLE_STATES:
-				frappe.throw(_("Only a Draft or Rejected opname can be edited"), ValidationError)
+			wf = _workflow()
+			roles = frappe.get_roles()
+			flags = _state_flags(doc, wf, roles)
+			if not flags["editable"]:
+				frappe.throw(_("This stock opname can no longer be edited"), ValidationError)
 			if "modified" not in data or not data.get("modified"):
 				frappe.throw(_("modified is required to save an existing opname"), ValidationError)
 			if str(doc.modified) != str(data["modified"]):
 				raise frappe.TimestampMismatchError(
 					_("This count changed on another device (modified, reload). Reload before saving.")
 				)
-			# Validate before any Revise transition, so invalid rows (or a frozen
-			# posting date) cannot leave a Rejected doc flipped to Draft with
+			# Validate before any back transition, so invalid rows (or a frozen
+			# posting date) cannot leave a returned doc flipped to initial with
 			# nothing applied.
 			rows = _validated_rows(data.get("items"), warehouse)
 			_assert_not_frozen(posting_date or doc.posting_date or nowdate())
-			if doc.workflow_state == STATE_REJECTED:
-				apply_workflow(doc, "Revise")
+			if flags["returned"]:
+				back = _back_transition(wf, doc.workflow_state, roles)
+				if not back:
+					frappe.throw(_("You cannot revise this count"), ValidationError)
+				apply_workflow(doc, back)
 				doc.reload()
 				_assert_doc_warehouse(doc, warehouse)
 			doc.set("items", [])
@@ -533,14 +607,26 @@ def save_opname(pos_profile, data):
 
 
 @frappe.whitelist()
-def submit_opname(pos_profile, name):
-	"""Preserve an outlet-set posting date, else stamp now; workflow-Submit to pending."""
+def submit_opname(pos_profile, name, action=None):
+	"""Preserve an outlet-set posting date, else stamp now; apply the workflow's
+	submit action from the initial state to send it to the first approval stage."""
 	_company, warehouse = _profile_warehouse(pos_profile)
 	try:
 		doc = _get_doc(name)
 		_assert_doc_warehouse(doc, warehouse)
-		if doc.workflow_state != STATE_DRAFT:
-			frappe.throw(_("Only a Draft opname can be submitted"), ValidationError)
+		wf = _workflow()
+		if wf is None:
+			frappe.throw(_("No active workflow"), ValidationError)
+		actions = _submit_actions(doc, wf)
+		if not actions:
+			frappe.throw(_("You are not allowed to submit this count, ask HQ"), ValidationError)
+		if action:
+			if action not in actions:
+				frappe.throw(_("{0} is not a valid action for this count").format(action), ValidationError)
+		elif len(actions) == 1:
+			action = actions[0]
+		else:
+			frappe.throw(_("Choose an action: {0}").format(", ".join(actions)), ValidationError)
 		_assert_not_frozen(doc.posting_date or nowdate())
 		# Preserve an outlet backdate (save already capped and guarded it); only
 		# stamp now when the posting date is still the save-moment default (today).
@@ -549,7 +635,7 @@ def submit_opname(pos_profile, name):
 			doc.posting_time = nowtime()
 		doc.set_posting_time = 1
 		doc.save()
-		apply_workflow(doc, "Submit")
+		apply_workflow(doc, action)
 		doc.reload()
 		return {"name": doc.name, "workflow_state": doc.workflow_state}
 	except (ValidationError, frappe.PermissionError):
@@ -561,13 +647,13 @@ def submit_opname(pos_profile, name):
 
 @frappe.whitelist()
 def delete_opname(pos_profile, name):
-	"""Delete a Draft or Rejected opname."""
+	"""Delete an editable opname."""
 	_company, warehouse = _profile_warehouse(pos_profile)
 	try:
 		doc = _get_doc(name)
 		_assert_doc_warehouse(doc, warehouse)
-		if doc.workflow_state not in EDITABLE_STATES:
-			frappe.throw(_("Only a Draft or Rejected opname can be deleted"), ValidationError)
+		if not _state_flags(doc, _workflow(), frappe.get_roles())["editable"]:
+			frappe.throw(_("This stock opname can no longer be deleted"), ValidationError)
 		frappe.delete_doc(DOCTYPE, name)
 	except (ValidationError, frappe.PermissionError):
 		raise
@@ -580,8 +666,8 @@ def _editable_doc(pos_profile, name):
 	_company, warehouse = _profile_warehouse(pos_profile)
 	doc = _get_doc(name)
 	_assert_doc_warehouse(doc, warehouse)
-	if doc.workflow_state not in EDITABLE_STATES:
-		frappe.throw(_("Attachments can only change on a Draft or Rejected opname"), ValidationError)
+	if not _state_flags(doc, _workflow(), frappe.get_roles())["editable"]:
+		frappe.throw(_("Attachments can only change on an editable opname"), ValidationError)
 	return doc
 
 
@@ -790,8 +876,8 @@ def download_opname_template(pos_profile, item_group=None):
 def _import_target(name, warehouse):
 	"""Resolve the doc to merge into: named, the open opname, or None (new).
 
-	Pending/Approved targets (not editable) raise; Rejected targets are returned
-	as-is and revised by the caller so U3 holds for uploads.
+	Non-editable targets raise; returned targets are handed back as-is and
+	revised by the caller so U3 holds for uploads.
 	"""
 	if name:
 		doc = _get_doc(name)
@@ -801,8 +887,8 @@ def _import_target(name, warehouse):
 		if not open_name:
 			return None
 		doc = _get_doc(open_name)
-	if doc.workflow_state not in EDITABLE_STATES:
-		frappe.throw(_("Only a Draft or Rejected opname can be edited"), ValidationError)
+	if not _state_flags(doc, _workflow(), frappe.get_roles())["editable"]:
+		frappe.throw(_("This stock opname can no longer be edited"), ValidationError)
 	return doc
 
 
@@ -989,8 +1075,13 @@ def import_opname_template(pos_profile, file_url, name=None):
 				doc.append("items", row)
 			doc.insert()
 		else:
-			if target.workflow_state == STATE_REJECTED:
-				apply_workflow(target, "Revise")
+			wf = _workflow()
+			roles = frappe.get_roles()
+			if _state_flags(target, wf, roles)["returned"]:
+				back = _back_transition(wf, target.workflow_state, roles)
+				if not back:
+					frappe.throw(_("You cannot revise this count"), ValidationError)
+				apply_workflow(target, back)
 				target.reload()
 				_assert_doc_warehouse(target, warehouse)
 			target.set("items", [])

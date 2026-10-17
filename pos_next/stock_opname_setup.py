@@ -6,8 +6,8 @@
 Outlets submit draft Stock Reconciliations; HQ approves them through a Frappe
 Workflow (`POS Next Stock Opname`). `ensure_stock_opname_workflow` is
 idempotent: it creates the workflow (and its Workflow States / Action Masters)
-once and never overwrites an existing workflow of that name. Called from
-install.after_install / after_migrate and the v2_23_0 patch.
+once and never displaces an admin's own active Stock Reconciliation workflow.
+Called from install.after_install / after_migrate and the v2_23_0 patch.
 
 Constants here (state names, roles, the function) are consumed by later
 Stock Opname tasks — keep them in sync with .scratch/stock-opname/spec.md.
@@ -99,13 +99,18 @@ def _backfill_workflow_state():
 def ensure_stock_opname_workflow(quiet=False):
 	"""Create the `POS Next Stock Opname` workflow once; return True if created.
 
-	Idempotent: an existing workflow of that name is never modified (returns
-	False). The Accounts Manager perm is (re)ensured on every call, guarded by
-	existence, so a manually-created workflow still gets the approval perm.
+	Idempotent, and never displaces a workflow the admin is using: an existing
+	workflow of that name (never recreate a duplicate) or any active workflow on
+	Stock Reconciliation (the admin's own) makes this a no-op that returns False.
+	An unrelated inactive workflow is left alone and does not block creation. The
+	Accounts Manager perm is (re)ensured on every call, guarded by existence, so a
+	manually-created workflow still gets the approval perm.
 	"""
 	_ensure_accounts_manager_perm()
 
 	if frappe.db.exists("Workflow", WORKFLOW_NAME):
+		return False
+	if frappe.db.exists("Workflow", {"document_type": DOCUMENT_TYPE, "is_active": 1}):
 		return False
 
 	_ensure_masters()

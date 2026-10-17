@@ -160,7 +160,8 @@ class TestStockOpnameSetup(IntegrationTestCase):
 		row = next(t for t in wf.transitions if t.state == STATE_PENDING_SM and t.action == "Approve")
 		self.assertEqual(row.allowed, "System Manager")
 
-	def test_deactivates_other_active_workflow(self):
+	def test_existing_other_workflow_not_displaced(self):
+		"""An admin's own Stock Reconciliation workflow is never touched."""
 		other = "_T SR WF"
 		if frappe.db.exists("Workflow", other):
 			frappe.delete_doc("Workflow", other, force=True, ignore_permissions=True)
@@ -177,8 +178,30 @@ class TestStockOpnameSetup(IntegrationTestCase):
 		if frappe.db.exists("Workflow", WORKFLOW_NAME):
 			frappe.delete_doc("Workflow", WORKFLOW_NAME, force=True, ignore_permissions=True)
 
-		ensure_stock_opname_workflow(quiet=True)
+		self.assertFalse(ensure_stock_opname_workflow(quiet=True))
+		self.assertFalse(frappe.db.exists("Workflow", WORKFLOW_NAME))
+		self.assertEqual(cint(frappe.db.get_value("Workflow", other, "is_active")), 1)
 
+	def test_inactive_other_workflow_does_not_block(self):
+		"""A dormant Stock Reconciliation workflow is left alone, not a blocker."""
+		other = "_T SR WF Off"
+		if frappe.db.exists("Workflow", other):
+			frappe.delete_doc("Workflow", other, force=True, ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Workflow",
+				"workflow_name": other,
+				"document_type": DOCUMENT_TYPE,
+				"workflow_state_field": "workflow_state",
+				"is_active": 0,
+				"states": [{"state": STATE_DRAFT, "doc_status": 0, "allow_edit": "System Manager"}],
+			}
+		).insert(ignore_permissions=True)
+		if frappe.db.exists("Workflow", WORKFLOW_NAME):
+			frappe.delete_doc("Workflow", WORKFLOW_NAME, force=True, ignore_permissions=True)
+
+		self.assertTrue(ensure_stock_opname_workflow(quiet=True))
+		self.assertTrue(frappe.db.exists("Workflow", WORKFLOW_NAME))
 		self.assertEqual(cint(frappe.db.get_value("Workflow", other, "is_active")), 0)
 
 	# --------------------------------------------------------------- permissions

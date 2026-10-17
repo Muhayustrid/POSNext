@@ -5,15 +5,8 @@ frappe.ui.form.on("Stock Reconciliation", {
 	refresh(frm) {
 		// HQ-only: show the live system qty the outlet cannot see, so approval is
 		// not blind. Display only; the endpoint re-checks the role server-side.
-		const open_states = [
-			"Draft",
-			"Approval Pending by Stock Manager",
-			"Approval Pending by Accounts Manager",
-			"Rejected",
-		];
 		if (
 			frm.doc.docstatus !== 0 ||
-			!open_states.includes(frm.doc.workflow_state) ||
 			!frappe.user.has_role(["Stock Manager", "Accounts Manager", "System Manager"])
 		)
 			return;
@@ -21,7 +14,7 @@ frappe.ui.form.on("Stock Reconciliation", {
 	},
 
 	before_workflow_action(frm) {
-		if (frm.selected_workflow_action !== "Reject") return;
+		if (!is_return_transition(frm)) return;
 		// workflow.js freezes before this hook; the freeze overlay sits above the
 		// prompt and swallows its clicks, so lift it while the prompt is open.
 		frappe.dom.unfreeze();
@@ -45,6 +38,22 @@ frappe.ui.form.on("Stock Reconciliation", {
 		});
 	},
 });
+
+// A workflow action "returns" the count when its target state has a transition
+// back to the initial state (states[0]); only those prompt for a reason.
+function is_return_transition(frm) {
+	frappe.workflow.setup(frm.doctype);
+	const wf = frappe.workflow.workflows[frm.doctype];
+	if (!wf || !wf.states || !wf.states.length) return false;
+	const initial = wf.states[0].state;
+	const returned_states = new Set(
+		(wf.transitions || []).filter((t) => t.next_state === initial).map((t) => t.state)
+	);
+	const transition = (wf.transitions || []).find(
+		(t) => t.state === frm.doc.workflow_state && t.action === frm.selected_workflow_action
+	);
+	return !!transition && returned_states.has(transition.next_state);
+}
 
 // Resolves with the reason, rejects when the prompt is cancelled (Frappe then
 // aborts the transition because before_workflow_action rejected).

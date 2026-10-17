@@ -20,7 +20,13 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, get_time, nowdate
 
 from pos_next.api.test_production import _make_test_item, _seed_stock
-from pos_next.stock_opname_setup import STATE_APPROVED, STATE_DRAFT, STATE_PENDING_SM, STATE_REJECTED
+from pos_next.stock_opname_setup import (
+	STATE_APPROVED,
+	STATE_DRAFT,
+	STATE_PENDING_SM,
+	STATE_REJECTED,
+	WORKFLOW_NAME,
+)
 
 ADMIN = "Administrator"
 DOCTYPE = "Stock Reconciliation"
@@ -1081,3 +1087,227 @@ class TestStockOpnamePosting(_StockOpnameFixture):
 		doc = frappe.get_doc(DOCTYPE, payload["name"])
 		self.assertEqual(str(doc.posting_date), str(nowdate()))
 		self.assertEqual(doc.set_posting_time, 1)
+
+
+# Admin-defined flow replacing `POS Next Stock Opname` for the class below:
+# Open -> Area Check -> HQ Check -> Done, with a Returned branch back to Open.
+CUSTOM_WORKFLOW = "SO Test Flow"
+CUSTOM_STATES = (
+	("Open", 0, "POSNext Cashier"),
+	("Area Check", 0, "Stock Manager"),
+	("HQ Check", 0, "Stock Manager"),
+	("Done", 1, "Accounts Manager"),
+	("Returned", 0, "POSNext Cashier"),
+	("Void", 2, "Stock Manager"),
+)
+CUSTOM_TRANSITIONS = (
+	("Open", "Send", "Area Check", "POSNext Cashier"),
+	("Area Check", "Pass", "HQ Check", "Stock Manager"),
+	("HQ Check", "Pass", "Done", "Stock Manager"),
+	("Area Check", "Return", "Returned", "Stock Manager"),
+	("Area Check", "Return", "Returned", "Accounts Manager"),
+	("HQ Check", "Return", "Returned", "Stock Manager"),
+	("HQ Check", "Return", "Returned", "Accounts Manager"),
+	("Returned", "Fix", "Open", "POSNext Cashier"),
+)
+
+
+class TestStockOpnameCustomWorkflow(_StockOpnameFixture):
+	"""Task 1: the API follows the *active* workflow, never hardcoded states.
+
+	An admin-defined flow (states/actions nothing like the shipped one) drives
+	editable/returned/actions; activating it deactivates `POS Next Stock
+	Opname`, which tearDownClass restores.
+	"""
+
+	@classmethod
+	def _remove_workflow(cls):
+		frappe.set_user(ADMIN)
+		if frappe.db.exists("Workflow", CUSTOM_WORKFLOW):
+			frappe.delete_doc("Workflow", CUSTOM_WORKFLOW, force=True, ignore_permissions=True)
+		frappe.cache.hdel("workflow", DOCTYPE)
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		cls._remove_workflow()
+		# The custom state names need Workflow State masters: the doc's
+		# workflow_state is a Link and would fail validation without them.
+		cls._created_states = []
+		for state, _doc_status, _role in CUSTOM_STATES:
+			if not frappe.db.exists("Workflow State", state):
+				frappe.get_doc({"doctype": "Workflow State", "workflow_state_name": state}).insert(
+					ignore_permissions=True
+				)
+				cls._created_states.append(state)
+		# ignore_links: the custom action names have no Workflow Action Master rows.
+		frappe.get_doc(
+			{
+				"doctype": "Workflow",
+				"workflow_name": CUSTOM_WORKFLOW,
+				"document_type": DOCTYPE,
+				"workflow_state_field": "workflow_state",
+				"is_active": 1,
+				"send_email_alert": 0,
+				"states": [
+					{"state": state, "doc_status": doc_status, "allow_edit": role}
+					for state, doc_status, role in CUSTOM_STATES
+				],
+				"transitions": [
+					{"state": frm, "action": action, "next_state": to, "allowed": role, "allow_self_approval": 1}
+					for frm, action, to, role in CUSTOM_TRANSITIONS
+				],
+			}
+		).insert(ignore_permissions=True, ignore_links=True)
+		# Activating this flow deactivated `POS Next Stock Opname`; refresh the cache.
+		frappe.cache.hdel("workflow", DOCTYPE)
+		_seed_stock(cls.plain, cls.warehouse, 5)
+		frappe.db.commit()
+
+	@classmethod
+	def tearDownClass(cls):
+		cls._remove_workflow()
+		for state in getattr(cls, "_created_states", []):
+			if frappe.db.exists("Workflow State", state):
+				frappe.delete_doc("Workflow State", state, force=True, ignore_permissions=True)
+		if frappe.db.exists("Workflow", WORKFLOW_NAME):
+			frappe.db.set_value("Workflow", WORKFLOW_NAME, "is_active", 1)
+		frappe.cache.hdel("workflow", DOCTYPE)
+		frappe.db.commit()
+		super().tearDownClass()
+
+	def tearDown(self):
+		# This flow can submit the doc (docstatus 1); the shared teardown only
+		# deletes drafts, so cancel the submitted ones first.
+		frappe.set_user(ADMIN)
+		for name in frappe.get_all(
+			DOCTYPE,
+			{"docstatus": 1, "set_warehouse": ("in", [self.warehouse, self.foreign_warehouse])},
+			pluck="name",
+		):
+			frappe.get_doc(DOCTYPE, name).cancel()
+		super().tearDown()
+
+	def test_custom_flow_full_cycle(self):
+		from pos_next.api.stock_opname import get_opname, save_opname, submit_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self.assertTrue(payload["editable"])
+		self.assertEqual(payload["actions"], ["Send"])
+
+		result = submit_opname(self.profile, payload["name"], action="Send")
+		self.assertEqual(result["workflow_state"], "Area Check")
+		got = get_opname(self.profile, payload["name"])
+		self.assertFalse(got["editable"])
+		self.assertEqual(got["actions"], [])
+
+		# HQ returns the count with a reason comment
+		frappe.set_user(self.stock_manager)
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		apply_workflow(doc, "Return")
+		doc.add_comment("Comment", text="Rejected: too low")
+		frappe.db.commit()
+
+		self._cashier()
+		got = get_opname(self.profile, payload["name"])
+		self.assertTrue(got["returned"])
+		self.assertTrue(got["editable"])
+		self.assertEqual(got["reject_reason"], "too low")
+
+		again = save_opname(
+			self.profile,
+			{"name": payload["name"], "modified": got["modified"], "items": [{"item_code": self.plain, "qty": 6}]},
+		)
+		self.assertEqual(again["workflow_state"], "Open")
+
+		submit_opname(self.profile, payload["name"], action="Send")
+
+		frappe.set_user(self.stock_manager)
+		apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Pass")  # Area Check -> HQ Check
+		apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Pass")  # HQ Check -> Done (submits)
+		doc = frappe.get_doc(DOCTYPE, payload["name"])
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(doc.workflow_state, "Done")
+
+	def test_list_flags_for_extra_stage(self):
+		from pos_next.api.stock_opname import list_opnames, save_opname, submit_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, payload["name"], action="Send")
+		frappe.set_user(self.stock_manager)
+		apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Pass")  # -> HQ Check
+		frappe.db.commit()
+
+		self._cashier()
+		row = next(r for r in list_opnames(self.profile) if r["name"] == payload["name"])
+		self.assertEqual(row["workflow_state"], "HQ Check")
+		self.assertFalse(row["editable"])
+		self.assertFalse(row["returned"])
+		self.assertFalse(row["processing"])
+
+	def test_pending_stage_not_editable_for_hq(self):
+		"""Spec N14: an approval stage is never editable, even for its allow_edit role."""
+		from pos_next.api.stock_opname import get_opname, save_opname, submit_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, payload["name"], action="Send")  # -> Area Check
+
+		# Stock Manager holds Area Check's allow_edit role; give it access to the
+		# profile too, so it reaches the editability check like a real HQ user.
+		row = frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": self.stock_manager,
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "POS Profile User", row.name, force=1, ignore_permissions=True)
+		frappe.set_user(self.stock_manager)
+		got = get_opname(self.profile, payload["name"])
+		self.assertEqual(got["workflow_state"], "Area Check")
+		self.assertFalse(got["editable"])
+		with self.assertRaisesRegex(frappe.ValidationError, "can no longer be edited"):
+			save_opname(
+				self.profile,
+				{
+					"name": payload["name"],
+					"modified": payload["modified"],
+					"items": [{"item_code": self.plain, "qty": 9}],
+				},
+			)
+
+	def test_submit_with_unknown_action_rejected(self):
+		from pos_next.api.stock_opname import save_opname, submit_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		with self.assertRaises(frappe.ValidationError):
+			submit_opname(self.profile, payload["name"], action="Pass")
+
+	def test_no_active_workflow(self):
+		from pos_next.api.stock_opname import save_opname, submit_opname
+
+		def restore():
+			frappe.set_user(ADMIN)
+			frappe.db.set_value("Workflow", CUSTOM_WORKFLOW, "is_active", 1)
+			frappe.cache.hdel("workflow", DOCTYPE)
+			frappe.db.commit()
+
+		self.addCleanup(restore)
+		frappe.set_user(ADMIN)
+		frappe.db.set_value("Workflow", {"document_type": DOCTYPE}, "is_active", 0)
+		frappe.cache.hdel("workflow", DOCTYPE)
+		frappe.db.commit()
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self.assertTrue(payload["editable"])
+		self.assertEqual(payload["actions"], [])
+		with self.assertRaisesRegex(frappe.ValidationError, "No active workflow"):
+			submit_opname(self.profile, payload["name"])
