@@ -627,3 +627,77 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		got = get_opname(self.profile, draft["name"])
 		self.assertEqual(got["workflow_state"], STATE_DRAFT)
 		self.assertEqual(got["items"][0]["qty"], 5)
+
+
+class TestStockOpnameSystemQty(_StockOpnameFixture):
+	"""HQ `get_system_qty`: live system qty/difference for a draft opname.
+
+	Seeds stock so the numbers are known (basic_rate 10). Display only: the
+	endpoint is HQ-only and must not persist anything (U4 blind count).
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user(ADMIN)
+		_seed_stock(cls.plain, cls.warehouse, 5)
+		_seed_stock(cls.batch_item, cls.warehouse, 3, batch_no=cls.batch_a)
+		_seed_stock(cls.batch_item, cls.warehouse, 2, batch_no=cls.batch_b)
+		frappe.db.commit()
+
+	def _draft(self, items):
+		from pos_next.api.stock_opname import save_opname
+
+		self._cashier()
+		return save_opname(self.profile, {"items": items})["name"]
+
+	def test_hq_gets_system_qty_and_difference(self):
+		from pos_next.api.stock_opname import get_system_qty
+
+		name = self._draft([{"item_code": self.plain, "qty": 4}])
+		frappe.set_user(self.stock_manager)
+		row = get_system_qty(name)["items"][0]
+		self.assertEqual(row["counted_qty"], 4)
+		self.assertEqual(row["system_qty"], 5)
+		self.assertEqual(row["difference_qty"], -1)
+		self.assertEqual(row["valuation_rate"], 10)
+		self.assertEqual(row["amount_difference"], -10)
+
+	def test_batch_row_returns_that_batch_qty(self):
+		from pos_next.api.stock_opname import get_system_qty
+
+		name = self._draft([{"item_code": self.batch_item, "qty": 1, "batch_no": self.batch_a}])
+		frappe.set_user(self.stock_manager)
+		row = get_system_qty(name)["items"][0]
+		self.assertEqual(row["batch_no"], self.batch_a)
+		self.assertEqual(row["system_qty"], 3)
+		self.assertEqual(row["difference_qty"], -2)
+
+	def test_outlet_cashier_denied(self):
+		from pos_next.api.stock_opname import get_system_qty
+
+		name = self._draft([{"item_code": self.plain, "qty": 4}])
+		self._cashier()
+		with self.assertRaises(frappe.PermissionError):
+			get_system_qty(name)
+
+	def test_db_row_values_unchanged(self):
+		from pos_next.api.stock_opname import get_system_qty
+
+		name = self._draft([{"item_code": self.plain, "qty": 4}])
+		before = frappe.db.get_value(
+			"Stock Reconciliation Item",
+			{"parent": name},
+			["current_qty", "amount_difference"],
+			as_dict=True,
+		)
+		frappe.set_user(self.stock_manager)
+		get_system_qty(name)
+		after = frappe.db.get_value(
+			"Stock Reconciliation Item",
+			{"parent": name},
+			["current_qty", "amount_difference"],
+			as_dict=True,
+		)
+		self.assertEqual(after.current_qty, 0)
+		self.assertEqual(before, after)

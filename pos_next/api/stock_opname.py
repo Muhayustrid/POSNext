@@ -15,7 +15,7 @@ import math
 import frappe
 from frappe import ValidationError, _
 from frappe.model.workflow import apply_workflow
-from frappe.utils import nowdate, nowtime
+from frappe.utils import flt, nowdate, nowtime
 
 from pos_next.api.packages import _assert_profile_access
 from pos_next.services.production import _resolve_profile
@@ -262,6 +262,64 @@ def get_opname(pos_profile, name):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Stock Opname Error")
 		frappe.throw(_("Error fetching stock opname: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_system_qty(name):
+	"""HQ-only live system qty/difference per row of a draft opname (display only).
+
+	Mirrors the helper ERPNext runs on submit (`get_stock_balance_for`), so the
+	numbers match what approval posts. Read-only: nothing is persisted, so an
+	outlet user can never reach the system quantities (spec U4, P3).
+	"""
+	from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import get_stock_balance_for
+
+	from pos_next.overrides.stock_reconciliation import is_hq_user
+
+	if not is_hq_user(frappe.session.user):
+		raise frappe.PermissionError(_("Only HQ users can view system quantities"))
+	doc = _get_doc(name)
+	if not frappe.has_permission(DOCTYPE, "read", doc):
+		raise frappe.PermissionError(_("You don't have access to stock opname {0}").format(name))
+	if doc.docstatus != 0:
+		frappe.throw(
+			_("This stock opname is submitted; it already shows the system quantities."), ValidationError
+		)
+	posting_date = doc.posting_date or nowdate()
+	posting_time = doc.posting_time or nowtime()
+	items = []
+	for row in doc.items:
+		item_dict = get_stock_balance_for(
+			row.item_code,
+			row.warehouse,
+			posting_date,
+			posting_time,
+			batch_no=row.batch_no,
+			row=row,
+			company=doc.company,
+		)
+		counted_qty = flt(row.qty)
+		system_qty = flt(item_dict.get("qty"))
+		valuation_rate = flt(item_dict.get("rate"))
+		difference_qty = counted_qty - system_qty
+		items.append(
+			{
+				"idx": row.idx,
+				"item_code": row.item_code,
+				"item_name": row.item_name,
+				"batch_no": row.batch_no,
+				"counted_qty": counted_qty,
+				"system_qty": system_qty,
+				"difference_qty": difference_qty,
+				"valuation_rate": valuation_rate,
+				"amount_difference": flt(difference_qty * valuation_rate),
+			}
+		)
+	return {
+		"name": doc.name,
+		"currency": frappe.get_cached_value("Company", doc.company, "default_currency"),
+		"items": items,
+	}
 
 
 @frappe.whitelist()

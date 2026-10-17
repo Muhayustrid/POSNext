@@ -82,6 +82,10 @@ workflow buttons drive the stages:
 
 1. **Stock Manager** reviews the count and presses **Approve** (or **Reject**).
 2. **Accounts Manager** gives the final **Approve** (or **Reject**).
+
+A **Show System Qty** button on the form shows the live system qty and
+difference per row while the count is still open, so approval is not blind
+(see below). It is display only.
 3. On final approval the document is submitted: stock is adjusted, Stock Ledger
    Entries are written and the GL is posted against the Company's stock
    adjustment account.
@@ -96,6 +100,14 @@ the real on-hand quantity. The **valuation rate** is filled, and the
 **difference** column shows the counted value (counted qty × rate, because the
 current side is 0), not the true system difference. The real system qty and
 difference appear only on submit.
+
+Because of that, HQ approves blind unless it asks. The **Show System Qty**
+button on the form (visible only to Stock Manager, Accounts Manager or System
+Manager, and only while the count is a Draft, Rejected or pending) opens a
+read-only table of counted qty, live system qty, the difference and the value
+difference per row. The numbers are computed with the same helper submit uses,
+so they match what approval will post; nothing is saved, and outlet users never
+see them.
 
 The **POSNext** workspace shows two shortcuts with pending counts, one per
 approval stage.

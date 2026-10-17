@@ -278,3 +278,12 @@ class TestStockOpnameSetup(IntegrationTestCase):
 		# the xcall that stores the comment must release the Desk freeze on failure
 		self.assertIn(".catch", script)
 		self.assertIn("unfreeze", script)
+
+	def test_system_qty_button_script_wired(self):
+		"""HQ Show System Qty button: endpoint + role gate in the form script."""
+		from pos_next import hooks
+
+		rel = hooks.doctype_js["Stock Reconciliation"]
+		script = (Path(frappe.get_app_path("pos_next")) / rel).read_text(encoding="utf-8")
+		self.assertIn("get_system_qty", script)
+		self.assertIn("has_role", script)

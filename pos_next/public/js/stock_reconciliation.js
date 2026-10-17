@@ -2,6 +2,24 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on("Stock Reconciliation", {
+	refresh(frm) {
+		// HQ-only: show the live system qty the outlet cannot see, so approval is
+		// not blind. Display only; the endpoint re-checks the role server-side.
+		const open_states = [
+			"Draft",
+			"Approval Pending by Stock Manager",
+			"Approval Pending by Accounts Manager",
+			"Rejected",
+		];
+		if (
+			frm.doc.docstatus !== 0 ||
+			!open_states.includes(frm.doc.workflow_state) ||
+			!frappe.user.has_role(["Stock Manager", "Accounts Manager", "System Manager"])
+		)
+			return;
+		frm.add_custom_button(__("Show System Qty"), () => show_system_qty(frm));
+	},
+
 	before_workflow_action(frm) {
 		if (frm.selected_workflow_action !== "Reject") return;
 		return prompt_reject_reason().then((reason) =>
@@ -55,4 +73,44 @@ function prompt_reject_reason() {
 			settle(reject);
 		};
 	});
+}
+
+// Read-only table of live system qty vs the counted qty (HQ approval aid).
+function show_system_qty(frm) {
+	frappe
+		.call({
+			method: "pos_next.api.stock_opname.get_system_qty",
+			args: { name: frm.doc.name },
+		})
+		.then((r) => {
+			if (!r.message) return;
+			const currency = r.message.currency;
+			const rows = r.message.items
+				.map(
+					(row) => `<tr>
+				<td>${frappe.utils.escape_html(row.item_name || row.item_code)}</td>
+				<td>${frappe.utils.escape_html(row.batch_no || "")}</td>
+				<td class="text-right">${format_number(row.counted_qty)}</td>
+				<td class="text-right">${format_number(row.system_qty)}</td>
+				<td class="text-right">${format_number(row.difference_qty)}</td>
+				<td class="text-right">${format_currency(row.amount_difference, currency)}</td>
+			</tr>`
+				)
+				.join("");
+			frappe.msgprint({
+				title: __("System Quantity (live)"),
+				wide: true,
+				message: `<table class="table table-bordered table-sm">
+				<thead><tr>
+					<th>${__("Item")}</th>
+					<th>${__("Batch")}</th>
+					<th class="text-right">${__("Counted")}</th>
+					<th class="text-right">${__("System")}</th>
+					<th class="text-right">${__("Difference")}</th>
+					<th class="text-right">${__("Amount difference")}</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>`,
+			});
+		});
 }
