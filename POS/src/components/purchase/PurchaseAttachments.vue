@@ -3,7 +3,7 @@
 		<div v-if="editable" class="flex items-center gap-2">
 			<button
 				type="button"
-				class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+				class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2.5 py-1 text-xs rounded-full border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
 				data-test="attach-button"
 				@click="picker?.click()"
 			>

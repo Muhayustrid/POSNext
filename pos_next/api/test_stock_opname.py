@@ -219,6 +219,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 				"has_serial_no",
 				"custom_uom",
 				"custom_qty_after",
+				"uoms",
 			},
 		)
 		# native row: the count UOM falls back to stock UOM / native qty
@@ -874,6 +875,32 @@ class TestStockOpnameUom(_StockOpnameFixture):
 		self.assertEqual(stored.qty, 24)
 		self.assertEqual(stored.custom_uom, "Pack")
 		self.assertEqual(stored.custom_qty_after, 2)
+
+	def test_payload_offers_alt_uoms(self):
+		"""A reloaded count keeps its UOM options (search sends the same shape)."""
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}]},
+		)
+		row = get_opname(self.profile, payload["name"])["items"][0]
+		self.assertEqual([u["uom"] for u in row["uoms"]], ["Pack"])
+
+	def test_list_paginates(self):
+		from pos_next.api.stock_opname import list_opnames, save_opname
+
+		self._cashier()
+		first = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 1}]})
+		# close it without posting stock, so the one-open-count guard allows a second
+		frappe.db.set_value(DOCTYPE, first["name"], "docstatus", 2)
+		save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 2}]})
+		all_rows = list_opnames(self.profile)
+		self.assertGreaterEqual(len(all_rows), 2)
+		page1 = list_opnames(self.profile, start=0, page_length=1)
+		page2 = list_opnames(self.profile, start=1, page_length=1)
+		self.assertEqual([r["name"] for r in page1 + page2], [r["name"] for r in all_rows[:2]])
 
 	def test_unknown_uom_rejected_per_row(self):
 		from pos_next.api.stock_opname import _validated_rows

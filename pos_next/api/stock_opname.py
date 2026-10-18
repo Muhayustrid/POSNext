@@ -417,6 +417,14 @@ def _payload(doc):
 	wf = _workflow()
 	flags = _state_flags(doc, wf, frappe.get_roles())
 	meta_cache = {}
+	# alt UOMs per item, same shape as search_opname_items, so a reloaded row can still switch UOM
+	uom_map = {}
+	for u in frappe.get_all(
+		"UOM Conversion Detail",
+		filters={"parent": ["in", list({r.item_code for r in doc.items}) or [""]]},
+		fields=["parent", "uom", "conversion_factor"],
+	):
+		uom_map.setdefault(u.parent, []).append({"uom": u.uom, "conversion_factor": u.conversion_factor})
 	items = []
 	for row in doc.items:
 		if row.item_code not in meta_cache:
@@ -438,6 +446,7 @@ def _payload(doc):
 				# Count UOM roundtrip: native rows fall back to stock UOM / qty.
 				"custom_uom": custom_uom or stock_uom,
 				"custom_qty_after": row.get("custom_qty_after") if custom_uom else row.qty,
+				"uoms": [u for u in uom_map.get(row.item_code, []) if u["uom"] != stock_uom],
 			}
 		)
 	return {
@@ -484,8 +493,8 @@ def _attachments(name):
 
 
 @frappe.whitelist()
-def list_opnames(pos_profile):
-	"""Newest-first opnames of the profile warehouse (limit 50)."""
+def list_opnames(pos_profile, start=0, page_length=50):
+	"""Newest-first opnames of the profile warehouse, one page at a time."""
 	_company, warehouse = _profile_warehouse(pos_profile)
 	try:
 		rows = frappe.get_all(
@@ -493,7 +502,8 @@ def list_opnames(pos_profile):
 			filters={"set_warehouse": warehouse},
 			fields=["name", "posting_date", "posting_time", "workflow_state", "docstatus", "modified"],
 			order_by="creation desc",
-			limit=50,
+			limit_start=max(cint(start), 0),
+			limit_page_length=min(max(cint(page_length), 1), 100),
 		)
 		wf = _workflow()
 		roles = frappe.get_roles()

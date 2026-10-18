@@ -257,8 +257,33 @@ describe("StockOpnameDialog list", () => {
 			]),
 		)
 		const wrapper = await mountOpenDialog()
+		// Continue lives on the editable row itself, not in the list header
+		expect(listRow(wrapper, "SR-DRAFT").find('[data-testid="row-continue"]').exists()).toBe(true)
 		expect(findButton(wrapper, "Continue")).toBeTruthy()
 		expect(findButton(wrapper, "New Count")).toBeUndefined()
+	})
+
+	it("pages the list 20 rows at a time", async () => {
+		const rows = (start, n) =>
+			Array.from({ length: n }, (_, i) => ({
+				...ROW_DRAFT,
+				name: `SR-${String(start + i).padStart(3, "0")}`,
+				docstatus: 1,
+				editable: false,
+			}))
+		const listCall = mockCall(LIST_URL, (params) =>
+			Promise.resolve(params.start ? rows(20, 3) : rows(0, 21)),
+		)
+		const wrapper = await mountOpenDialog()
+		expect(listCall.mock.calls[0][0]).toMatchObject({ start: 0, page_length: 21 })
+		expect(wrapper.findAll('[data-testid="opname-row"]')).toHaveLength(20)
+
+		await findButton(wrapper, "Next").trigger("click")
+		await flushPromises()
+		expect(listCall.mock.calls.at(-1)[0]).toMatchObject({ start: 20, page_length: 21 })
+		expect(wrapper.findAll('[data-testid="opname-row"]')).toHaveLength(3)
+		expect(findButton(wrapper, "Next").attributes("disabled")).toBeDefined()
+		expect(findButton(wrapper, "Previous").attributes("disabled")).toBeUndefined()
 	})
 
 	it("blocks New Count while only a non-editable open count exists", async () => {
@@ -1135,6 +1160,29 @@ describe("StockOpnameDialog item grid", () => {
 		const item = saveCall.mock.calls[0][0].data.items[0]
 		expect(item.custom_uom).toBe("Pack")
 		expect(item.custom_qty_after).toBe(2)
+	})
+
+	it("a reloaded alt-UOM row can still switch UOM", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				items: [
+					{
+						...PLAIN_ITEM,
+						custom_uom: "Pack",
+						custom_qty_after: 2,
+						uoms: [{ uom: "Pack", conversion_factor: 12 }],
+					},
+				],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		const select = wrapper.find('[data-testid="uom-select"]')
+		expect(select.findAll("option").map((o) => o.text())).toEqual(["Nos", "Pack"])
+		expect(select.element.value).toBe("Pack")
 	})
 
 	it("serial rows show uom read-only", async () => {

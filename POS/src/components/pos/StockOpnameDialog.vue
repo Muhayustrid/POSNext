@@ -7,19 +7,10 @@
 		<template #body-content>
 			<!-- LIST -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<p class="text-sm text-gray-500">
-						{{ opnames.length ? __("Total: {0}", [opnames.length]) : "" }}
-					</p>
+				<div class="flex flex-wrap items-center justify-end gap-3">
 					<div class="flex items-center gap-2">
 						<RefreshButton :loading="loading" @click="loadList()" />
-						<Button v-if="openOpname" variant="solid" @click="openDoc(openOpname.name)">
-							<template #prefix>
-								<FeatherIcon name="edit-2" class="h-4 w-4" />
-							</template>
-							{{ __("Continue") }}
-						</Button>
-						<Button v-else-if="!hasOpenOpname" variant="solid" @click="openNew">
+						<Button v-if="page === 0 && !hasOpenOpname" variant="solid" @click="openNew">
 							<template #prefix>
 								<FeatherIcon name="plus" class="h-4 w-4" />
 							</template>
@@ -45,12 +36,13 @@
 						<thead>
 							<tr
 								data-testid="list-header"
-								class="border-b border-gray-200 bg-gray-50 text-xs font-medium text-gray-500"
+								class="hidden border-b border-gray-200 bg-gray-50 text-xs font-medium text-gray-500 md:table-row"
 							>
 								<th class="px-4 py-2 text-start font-medium">{{ __("ID") }}</th>
 								<th class="px-4 py-2 text-start font-medium">{{ __("Status") }}</th>
 								<th class="px-4 py-2 text-start font-medium">{{ __("Posting Date") }}</th>
 								<th class="px-4 py-2 text-end font-medium">{{ __("Items") }}</th>
+								<th class="w-px px-4 py-2"><span class="sr-only">{{ __("Actions") }}</span></th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-gray-100">
@@ -59,17 +51,21 @@
 								:key="o.name"
 								tabindex="0"
 								data-testid="opname-row"
-								class="cursor-pointer transition-colors hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
+								class="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 transition-colors hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50 md:table-row md:p-0"
 								@click="openDoc(o.name)"
 								@keydown.enter="openDoc(o.name)"
 							>
-								<td class="px-4 py-3 font-semibold text-gray-900">
+								<td class="col-span-2 min-w-0 break-all font-semibold text-gray-900 md:break-normal md:px-4 md:py-3">
 									{{ o.name }}
-									<p v-if="o.returned && o.reject_reason" class="text-xs font-normal text-red-600">
+									<p
+										v-if="o.returned && o.reject_reason"
+										class="line-clamp-2 text-xs font-normal text-red-600"
+										:title="o.reject_reason"
+									>
 										{{ o.reject_reason }}
 									</p>
 								</td>
-								<td class="px-4 py-3">
+								<td class="md:px-4 md:py-3">
 									<span class="inline-flex items-center gap-1.5">
 										<span
 											data-testid="status-dot"
@@ -78,11 +74,41 @@
 										<span class="text-gray-700">{{ o.workflow_state }}</span>
 									</span>
 								</td>
-								<td class="px-4 py-3 text-gray-700">{{ formatDate(o.posting_date) }}</td>
-								<td class="px-4 py-3 text-end tabular-nums text-gray-900">{{ o.item_count }}</td>
+								<td class="text-end text-gray-700 md:px-4 md:py-3 md:text-start">{{ formatDate(o.posting_date) }}</td>
+								<td class="text-xs tabular-nums text-gray-500 md:px-4 md:py-3 md:text-end md:text-sm md:text-gray-900">
+									<span class="md:hidden">{{ __("{0} items", [o.item_count]) }}</span>
+									<span class="hidden md:inline">{{ o.item_count }}</span>
+								</td>
+								<td class="text-end empty:hidden md:px-4 md:py-3 md:empty:table-cell">
+									<Button
+										v-if="!o.docstatus && o.editable"
+										data-testid="row-continue"
+										size="sm"
+										variant="solid"
+										@click.stop="openDoc(o.name)"
+									>
+										<template #prefix>
+											<FeatherIcon name="edit-2" class="h-3.5 w-3.5" />
+										</template>
+										{{ __("Continue") }}
+									</Button>
+								</td>
 							</tr>
 						</tbody>
 					</table>
+				</div>
+				<div
+					v-if="page > 0 || hasMore"
+					data-testid="list-pager"
+					class="flex items-center justify-end gap-2 text-sm"
+				>
+					<Button :disabled="loading || page === 0" @click="goPage(page - 1)">
+						{{ __("Previous") }}
+					</Button>
+					<span class="px-1 tabular-nums text-gray-500">{{ __("Page {0}", [page + 1]) }}</span>
+					<Button :disabled="loading || !hasMore" @click="goPage(page + 1)">
+						{{ __("Next") }}
+					</Button>
 				</div>
 			</div>
 
@@ -210,7 +236,7 @@
 						>
 							<div class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("ID") }}</p>
-								<p class="truncate text-sm font-semibold text-gray-900">
+								<p class="break-all text-sm font-semibold text-gray-900 md:break-normal">
 									{{ editor.name || __("New Count") }}
 								</p>
 							</div>
@@ -341,7 +367,7 @@
 									<span class="truncate text-gray-700">{{ row.uom }}</span>
 								</div>
 								<div class="min-w-0">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+									<span class="mb-0.5 block text-end text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
 									<span class="block text-end tabular-nums">{{ row.qty }}</span>
 								</div>
 							</div>
@@ -374,7 +400,7 @@
 								<div
 									v-for="(row, idx) in editor.items"
 									:key="row.key"
-									class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_7rem_2rem] md:gap-y-0 md:py-1.5"
+									class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_7rem_2rem] md:gap-y-0 md:py-1.5"
 								>
 									<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
 
@@ -421,7 +447,7 @@
 									</div>
 
 									<!-- Batch cell: a select once the picked item needs a batch -->
-									<div class="min-w-0">
+									<div class="col-span-3 min-w-0 md:col-span-1" :class="{ 'hidden md:block': !row.has_batch_no && !row.batch_no }">
 										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Batch") }}</span>
 										<select
 											v-if="row.has_batch_no"
@@ -460,8 +486,8 @@
 										</select>
 									</div>
 
-									<div class="min-w-0">
-										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+									<div class="col-span-2 min-w-0 md:col-span-1">
+										<span class="mb-0.5 block text-end text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
 										<!-- serial qty is the number of ticked serials, never typed -->
 										<span
 											v-if="row.is_serial"
@@ -485,7 +511,7 @@
 
 									<button
 										type="button"
-										class="flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+										class="col-start-3 row-start-1 flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600 md:col-start-auto md:row-start-auto"
 										:aria-label="__('Remove item')"
 										:title="__('Remove item')"
 										@click="editor.items.splice(idx, 1)"
@@ -494,7 +520,7 @@
 									</button>
 
 									<!-- serial tick list: tick the serials physically present -->
-									<div v-if="row.is_serial" class="col-span-2 mt-2 md:col-span-6">
+									<div v-if="row.is_serial" class="col-span-3 mt-2 md:col-span-6">
 										<ul class="flex flex-wrap gap-x-4 gap-y-1">
 											<li v-for="s in row.serial_options" :key="s">
 												<label class="flex items-center gap-1.5 text-sm text-gray-700">
@@ -595,19 +621,50 @@
 						data-testid="opname-activity"
 						class="rounded-xl border border-gray-200 bg-white p-4"
 					>
-						<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Activity") }}</h4>
-						<ul class="space-y-2">
+						<h4 class="mb-4 text-sm font-semibold text-gray-900">{{ __("Activity") }}</h4>
+						<ol class="relative">
 							<li
 								v-for="(entry, i) in editor.activity"
 								:key="i"
 								data-testid="activity-entry"
-								class="flex flex-wrap items-baseline gap-x-2 text-sm"
+								class="relative flex gap-3 pb-4 last:pb-0"
 							>
-								<span class="font-medium text-gray-900">{{ entry.user_fullname || entry.user }}</span>
-								<span class="text-gray-700">{{ activityLabel(entry) }}</span>
-								<span class="text-xs text-gray-400" :title="entry.at">{{ relativeTime(entry.at) }}</span>
+								<!-- connector line between markers -->
+								<span
+									v-if="i < editor.activity.length - 1"
+									class="absolute start-3.5 top-7 -bottom-0 w-px bg-gray-200"
+									aria-hidden="true"
+								></span>
+								<span
+									:class="[
+										'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-4 ring-white',
+										activityTone(entry),
+									]"
+									aria-hidden="true"
+								>
+									<FeatherIcon :name="activityIcon(entry)" class="h-3.5 w-3.5" />
+								</span>
+								<div class="min-w-0 flex-1 pt-1">
+									<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+										<p class="min-w-0 text-gray-600">
+											<span class="font-medium text-gray-900">{{ entry.user_fullname || entry.user }}</span>
+											<template v-if="entry.type !== 'comment'">
+												&middot; <span>{{ activityLabel(entry) }}</span>
+											</template>
+										</p>
+										<time class="shrink-0 text-xs text-gray-400" :title="formatDateTime(entry.at)">
+											{{ relativeTime(entry.at) }}
+										</time>
+									</div>
+									<p
+										v-if="entry.type === 'comment'"
+										class="mt-1.5 whitespace-pre-line break-words rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+									>
+										{{ activityLabel(entry) }}
+									</p>
+								</div>
 							</li>
-						</ul>
+						</ol>
 					</section>
 				</template>
 			</div>
@@ -655,6 +712,7 @@ watch(
 		show.value = v
 		if (v) {
 			view.value = "list"
+			page.value = 0
 			loadList()
 		}
 	},
@@ -666,6 +724,9 @@ const API = "pos_next.api.stock_opname"
 // view: "list" | "doc"
 const view = ref("list")
 const opnames = ref([])
+const PAGE_SIZE = 20
+const page = ref(0)
+const hasMore = ref(false)
 const loading = ref(false)
 const loadingDetail = ref(false)
 const editor = ref(null)
@@ -750,12 +811,8 @@ const primaryMode = computed(() => {
 	return null
 })
 
-// Continue opens only an editable count; a pending opname opens read-only.
-const openOpname = computed(() =>
-	opnames.value.find((o) => !o.docstatus && o.editable),
-)
-
 // One open count per warehouse: any docstatus-0 opname blocks starting a new one (D5).
+// The server blocks a second open count, so the open one is always the newest (page 0).
 const hasOpenOpname = computed(() => opnames.value.some((o) => !o.docstatus))
 
 // ---------------------------------------------------------------------------
@@ -766,14 +823,25 @@ async function loadList() {
 	if (!props.posProfile) return
 	loading.value = true
 	try {
-		opnames.value =
-			(await call(`${API}.list_opnames`, { pos_profile: props.posProfile })) ||
-			[]
+		// one extra row tells whether a next page exists
+		const rows =
+			(await call(`${API}.list_opnames`, {
+				pos_profile: props.posProfile,
+				start: page.value * PAGE_SIZE,
+				page_length: PAGE_SIZE + 1,
+			})) || []
+		hasMore.value = rows.length > PAGE_SIZE
+		opnames.value = rows.slice(0, PAGE_SIZE)
 	} catch (err) {
 		showError(errMsg(err, "Failed to load stock opname"))
 	} finally {
 		loading.value = false
 	}
+}
+
+function goPage(n) {
+	page.value = Math.max(n, 0)
+	loadList()
 }
 
 // ---------------------------------------------------------------------------
@@ -816,6 +884,7 @@ function normalizeItem(item) {
 		stock_uom: item.stock_uom,
 		// Count UOM roundtrip: a saved count restores its UOM and counted qty.
 		uom: item.custom_uom || item.stock_uom,
+		uoms: altUoms(item),
 		qty: item.custom_qty_after ?? item.qty,
 		batch_no: item.batch_no || null,
 		has_batch_no: item.has_batch_no,
@@ -1032,6 +1101,19 @@ function relativeTime(value) {
 	const hours = Math.floor(minutes / 60)
 	if (hours < 24) return __("{0} hours ago", [hours])
 	return __("{0} days ago", [Math.floor(hours / 24)])
+}
+
+function activityIcon(entry) {
+	if (entry.type === "created") return "plus"
+	if (entry.type === "workflow") return "git-commit"
+	if (entry.type === "attachment") return "paperclip"
+	return "message-square"
+}
+
+function activityTone(entry) {
+	if (entry.type === "created") return "bg-blue-50 text-blue-600"
+	if (entry.type === "comment") return "bg-red-50 text-red-600"
+	return "bg-gray-100 text-gray-600"
 }
 
 function activityLabel(entry) {
