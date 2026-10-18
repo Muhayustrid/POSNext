@@ -2,7 +2,7 @@
 	<DialogHost
 		v-model:show="show"
 		:embedded="embedded"
-		:options="{ title: dialogTitle, size: view === 'receive' ? 'lg' : '4xl' }"
+		:options="{ title: dialogTitle, size: '4xl' }"
 	>
 		<template #body-content>
 			<!-- LIST VIEW -->
@@ -89,17 +89,17 @@
 						<div
 							v-for="order in orders"
 							:key="order.name"
-							class="cursor-pointer px-4 py-3 transition-colors hover:bg-gray-50"
-							:class="{ 'bg-gray-50': expandedOrder === order.name }"
+							tabindex="0"
+							class="cursor-pointer px-4 py-3 transition-colors hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
 							:data-test="`po-${order.name}`"
-							@click="toggleOrder(order)"
+							@click="openDoc(order.name)"
+							@keydown.enter="openDoc(order.name)"
 						>
 							<div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:gap-y-0 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3">
 								<div class="flex min-w-0 items-center gap-1.5 md:order-1">
 									<FeatherIcon
 										name="chevron-right"
-										class="h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform"
-										:class="{ 'rotate-90': expandedOrder === order.name }"
+										class="h-3.5 w-3.5 shrink-0 text-gray-400"
 									/>
 									<span class="truncate text-sm font-semibold text-gray-900">{{ order.name }}</span>
 									<span
@@ -147,7 +147,7 @@
 										v-if="order.docstatus === 0 && canSubmitPO"
 										type="button"
 										class="rounded px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-										@click="submitOrder(order)"
+										@click="submitDoc(order.name)"
 									>
 										{{ __("Submit") }}
 									</button>
@@ -169,7 +169,7 @@
 										v-if="order.docstatus === 1 && canCancelPO && !isFactoryLinked(order)"
 										type="button"
 										class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-										@click="cancelOrder(order)"
+										@click="cancelDoc(order)"
 									>
 										{{ __("Cancel") }}
 									</button>
@@ -184,120 +184,381 @@
 									</button>
 								</div>
 							</div>
-
-							<!-- item peek: lazy-loaded once per order, cached for the session -->
-							<div
-								v-if="expandedOrder === order.name"
-								class="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-1 md:ms-5"
-								@click.stop
-							>
-								<div
-									v-if="loadingDetail && !orderDetails[order.name]"
-									class="py-2 text-center text-xs text-gray-400"
-								>
-									{{ __("Loading...") }}
-								</div>
-								<div
-									v-else-if="orderDetails[order.name]?.items?.length"
-									class="divide-y divide-gray-100"
-								>
-									<div
-										v-for="row in orderDetails[order.name].items"
-										:key="row.name"
-										class="flex items-center justify-between gap-3 py-1.5 text-xs"
-									>
-										<span class="min-w-0 truncate text-gray-700">
-											{{ row.item_name || row.item_code }}
-										</span>
-										<span class="shrink-0 font-medium tabular-nums text-gray-900">
-											{{ formatQty(row.qty) }} {{ row.uom }}
-										</span>
-									</div>
-								</div>
-								<p v-else class="py-2 text-center text-xs text-gray-400">
-									{{ __("No items") }}
-								</p>
-								<div v-if="orderDetails[order.name]?.attachments?.length" class="pb-2">
-									<PurchaseAttachments
-										:attached="orderDetails[order.name].attachments"
-										:label="__('Attachments')"
-									/>
-								</div>
-							</div>
 						</div>
 					</div>
 				</div>
 			</div>
 
-			<!-- RECEIVE VIEW -->
-			<div v-else-if="view === 'receive'" class="flex flex-col gap-3">
-				<div class="flex items-end justify-between gap-3">
-					<div class="min-w-0">
-						<p class="text-sm font-semibold text-gray-900 truncate">
-							{{ receive.supplier_name }}
-						</p>
-						<p class="text-xs text-gray-500 mt-0.5 truncate">{{ receive.supplier }}</p>
-						<p
-							v-if="receive.inter_company_reference"
-							class="text-xs text-gray-400 mt-0.5 truncate"
+			<!-- DOC VIEW -->
+			<div v-else-if="view === 'doc'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<PurchaseDocView
+					:title="__('Purchase Order')"
+					kind="po"
+					:doc="currentDoc"
+					:loading="loadingDoc"
+					:can-attach="canAttachPO"
+					:pending-files="[]"
+					@back="goList"
+					@attach-add="onDocAttachAdd"
+					@open-erpnext="openInErpnext(currentDoc)"
+				>
+					<template #actions>
+						<template v-if="currentDoc?.docstatus === 0">
+							<Button
+								variant="subtle"
+								data-testid="doc-edit"
+								@click="openEdit(currentDoc)"
+							>
+								{{ __("Edit") }}
+							</Button>
+							<Button
+								v-if="canSubmitPO"
+								variant="solid"
+								data-testid="primary-action"
+								:loading="submitting"
+								@click="submitDoc(currentDoc?.name)"
+							>
+								{{ __("Submit") }}
+							</Button>
+						</template>
+						<Button
+							v-else-if="
+								currentDoc?.docstatus === 1 &&
+								(currentDoc?.per_received < 100 || currentDoc?.per_received == null) &&
+								(!poDefaults?.receive_requires_delivery_note || currentDoc?.delivery_ready) &&
+								canReceivePR
+							"
+							variant="solid"
+							data-testid="primary-action"
+							data-test="receive-button"
+							@click="openReceive(currentDoc)"
 						>
-							{{ __("From Delivery Note: {0}", [receive.inter_company_reference]) }}
-						</p>
-					</div>
-					<div>
-						<label for="pr-posting-date" class="block text-xs font-medium text-gray-600 mb-1">
-							{{ __("Posting Date") }}
-						</label>
-						<input
-							id="pr-posting-date"
-							v-model="receive.posting_date"
-							type="date"
-							data-test="receive-posting-date"
-							class="px-3 py-2 text-sm border border-gray-300 rounded-lg"
-						/>
+							{{ __("Receive") }}
+						</Button>
+
+						<div v-if="currentDoc?.name" class="relative">
+							<button
+								type="button"
+								data-testid="doc-menu-button"
+								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+								:aria-label="__('More actions')"
+								:title="__('More actions')"
+								@click="docMenuOpen = !docMenuOpen"
+							>
+								<FeatherIcon name="more-horizontal" class="h-4 w-4" />
+							</button>
+							<div
+								v-if="docMenuOpen"
+								data-testid="doc-menu"
+								class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+							>
+								<button
+									v-if="currentDoc?.docstatus === 1 && canCancelPO && !isFactoryLinked(currentDoc)"
+									type="button"
+									data-testid="doc-menu-cancel"
+									class="block w-full px-3 py-2 text-start text-sm text-red-600 hover:bg-red-50"
+									@click="cancelDoc(currentDoc); docMenuOpen = false"
+								>
+									{{ __("Cancel") }}
+								</button>
+								<button
+									type="button"
+									data-testid="doc-menu-open-erpnext"
+									class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
+									@click="openInErpnext(currentDoc); docMenuOpen = false"
+								>
+									{{ __("Open in ERPNext") }}
+								</button>
+							</div>
+						</div>
+					</template>
+
+					<template #after-items>
+						<section
+							v-if="currentDoc?.receipts?.length"
+							data-testid="linked-receipts"
+							class="rounded-xl border border-gray-200 bg-white p-4"
+						>
+							<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Purchase Receipts") }}</h4>
+							<div class="divide-y divide-gray-100">
+								<div
+									v-for="pr in currentDoc.receipts"
+									:key="pr.name"
+									class="flex cursor-pointer items-center justify-between py-2.5 transition-colors hover:bg-gray-50"
+									data-testid="linked-receipt-row"
+									@click="openReceiptDoc(pr.name)"
+								>
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-medium text-gray-900">{{ pr.name }}</span>
+										<span :class="statusPill(pr.workflow_state || pr.status)">
+											{{ __(pr.workflow_state || pr.status) }}
+										</span>
+									</div>
+									<div class="flex items-center gap-2 text-xs text-gray-500">
+										<span>{{ formatDate(pr.posting_date) }}</span>
+										<FeatherIcon name="chevron-right" class="h-4 w-4 text-gray-400" />
+									</div>
+								</div>
+							</div>
+						</section>
+					</template>
+				</PurchaseDocView>
+			</div>
+
+			<!-- RECEIPT DETAIL VIEW (from PO linked receipt) -->
+			<div v-else-if="view === 'receipt'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<PurchaseDocView
+					:title="__('Purchase Order / {0}', [currentDoc?.name || ''])"
+					kind="pr"
+					:doc="currentReceiptDoc"
+					:loading="loadingReceiptDoc"
+					:can-attach="currentReceiptDoc?.docstatus === 0"
+					:pending-files="[]"
+					@back="view = 'doc'"
+					@attach-add="onReceiptAttachAdd"
+					@open-erpnext="openInErpnext(currentReceiptDoc)"
+				>
+					<template #actions>
+						<Button
+							v-if="canSubmitPR && currentReceiptDoc?.editable && (currentReceiptDoc?.submit_actions?.length || 0) <= 1"
+							variant="solid"
+							data-testid="primary-action"
+							:loading="submittingReceipt"
+							@click="submitReceiptDoc(currentReceiptDoc?.submit_actions?.[0])"
+						>
+							{{ currentReceiptDoc?.submit_actions?.[0] || __("Submit") }}
+						</Button>
+						<div
+							v-else-if="canSubmitPR && currentReceiptDoc?.editable && (currentReceiptDoc?.submit_actions?.length || 0) > 1"
+							class="relative"
+						>
+							<Button
+								variant="solid"
+								data-testid="primary-action"
+								@click="receiptActionsMenuOpen = !receiptActionsMenuOpen"
+							>
+								{{ __("Actions") }}
+								<template #suffix>
+									<FeatherIcon name="chevron-down" class="h-4 w-4" />
+								</template>
+							</Button>
+							<div
+								v-if="receiptActionsMenuOpen"
+								data-testid="actions-menu"
+								class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+							>
+								<button
+									v-for="a in currentReceiptDoc.submit_actions"
+									:key="a"
+									type="button"
+									class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
+									@click="submitReceiptDoc(a)"
+								>
+									{{ a }}
+								</button>
+							</div>
+						</div>
+
+						<div v-if="currentReceiptDoc?.name" class="relative">
+							<button
+								type="button"
+								data-testid="doc-menu-button"
+								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+								:aria-label="__('More actions')"
+								:title="__('More actions')"
+								@click="receiptMenuOpen = !receiptMenuOpen"
+							>
+								<FeatherIcon name="more-horizontal" class="h-4 w-4" />
+							</button>
+							<div
+								v-if="receiptMenuOpen"
+								data-testid="doc-menu"
+								class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+							>
+								<button
+									type="button"
+									data-testid="doc-menu-open-erpnext"
+									class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
+									@click="openInErpnext(currentReceiptDoc); receiptMenuOpen = false"
+								>
+									{{ __("Open in ERPNext") }}
+								</button>
+							</div>
+						</div>
+					</template>
+				</PurchaseDocView>
+			</div>
+
+			<!-- RECEIVE VIEW -->
+			<div v-else-if="view === 'receive'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<!-- Header bar -->
+				<div data-testid="doc-header" class="flex flex-wrap items-center gap-2">
+					<button
+						type="button"
+						data-testid="receive-back"
+						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						:aria-label="__('Back')"
+						:title="__('Back')"
+						@click="backFromReceive"
+					>
+						<FeatherIcon name="arrow-left" class="h-4 w-4" />
+					</button>
+					<nav class="flex min-w-0 items-center gap-1.5 text-sm">
+						<span class="text-gray-500">{{ __("Purchase Order") }}</span>
+						<span class="text-gray-300">/</span>
+						<span class="truncate font-semibold text-gray-900">
+							{{ receive.po_name }}
+						</span>
+						<span class="text-gray-300">/</span>
+						<span class="text-gray-500">{{ __("Receive") }}</span>
+					</nav>
+
+					<div class="ms-auto flex items-center gap-2">
+						<Button
+							variant="solid"
+							data-testid="receive-save"
+							:disabled="hasExcessQty || saving"
+							:loading="saving"
+							@click="saveReceipt"
+						>
+							{{ __("Save") }}
+						</Button>
 					</div>
 				</div>
 
-				<div v-if="receive.items.length" class="overflow-x-auto">
-					<table class="w-full text-sm" data-test="receive-table">
-						<thead>
-							<tr class="text-xs text-gray-500 uppercase">
-								<th class="py-1 text-start">{{ __("Item") }}</th>
-								<th class="py-1 text-start w-16">{{ __("Ordered") }}</th>
-								<th class="py-1 text-start w-16">{{ __("Received") }}</th>
-								<th class="py-1 text-start w-16">{{ __("Remaining") }}</th>
-								<th class="py-1 text-start w-20">{{ __("Qty") }}</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr
-								v-for="row in receive.items"
-								:key="row.purchase_order_item"
-								class="border-t border-gray-100"
+				<!-- Info Card -->
+				<section class="rounded-xl border border-gray-200 bg-white p-4">
+					<div class="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4">
+						<div class="min-w-0">
+							<p class="text-xs text-gray-500">{{ __("Supplier") }}</p>
+							<p
+								class="truncate text-sm font-semibold text-gray-900"
+								data-testid="receive-supplier"
 							>
-								<td class="py-1.5 pe-2">
-									<div class="truncate max-w-[180px]">{{ row.item_name }}</div>
-									<div class="text-xs text-gray-400">{{ row.uom }}</div>
-								</td>
-								<td class="py-1.5 pe-2">{{ row.ordered_qty }}</td>
-								<td class="py-1.5 pe-2">{{ row.received_qty }}</td>
-								<td class="py-1.5 pe-2">{{ row.pending_qty }}</td>
-								<td class="py-1.5 pe-2">
-									<input
-										v-model.number="row.qty"
-										data-test="receive-qty"
-										type="number"
-										min="0"
-										step="any"
-										:aria-label="`${row.item_name} — ${__('Qty')}`"
-										class="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-									/>
-								</td>
-							</tr>
+								{{ receive.supplier_name || receive.supplier }}
+							</p>
+						</div>
+						<div class="min-w-0">
+							<p class="text-xs text-gray-500">{{ __("Purchase Order") }}</p>
+							<p class="truncate text-sm text-gray-900">{{ receive.po_name }}</p>
+						</div>
+						<div v-if="receive.inter_company_reference" class="min-w-0">
+							<p class="text-xs text-gray-500">{{ __("Delivery Note") }}</p>
+							<p class="truncate text-sm text-gray-900">
+								{{ receive.inter_company_reference }}
+							</p>
+						</div>
+						<div v-if="receive.set_warehouse" class="min-w-0">
+							<p class="text-xs text-gray-500">{{ __("Warehouse") }}</p>
+							<p class="truncate text-sm text-gray-900">{{ receive.set_warehouse }}</p>
+						</div>
+						<div class="col-span-2 min-w-0 md:col-span-1">
+							<label
+								for="pr-posting-date"
+								class="block text-xs text-gray-500 mb-1"
+							>
+								{{ __("Posting Date") }}
+							</label>
+							<input
+								id="pr-posting-date"
+								v-model="receive.posting_date"
+								type="date"
+								data-test="receive-posting-date"
+								class="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							/>
+						</div>
+					</div>
+				</section>
+
+				<!-- Items Table Card -->
+				<section class="rounded-xl border border-gray-200 bg-white p-4">
+					<div class="mb-3 flex items-center justify-between gap-2">
+						<h4 class="text-sm font-semibold text-gray-900">
+							{{ __("Items to Receive") }}
+						</h4>
+						<div class="flex items-center gap-2">
+							<Button
+								variant="subtle"
+								size="sm"
+								data-testid="fill-remaining"
+								@click="fillRemaining"
+							>
+								{{ __("Fill remaining") }}
+							</Button>
+							<Button
+								variant="subtle"
+								size="sm"
+								data-testid="clear-qtys"
+								@click="clearReceiveQtys"
+							>
+								{{ __("Clear") }}
+							</Button>
+						</div>
+					</div>
+
+					<div v-if="receive.items.length" class="overflow-x-auto">
+						<table class="w-full text-sm" data-test="receive-table">
+							<thead>
+								<tr class="border-b border-gray-200 text-xs font-medium uppercase text-gray-500">
+									<th class="py-2 text-start">{{ __("Item") }}</th>
+									<th class="py-2 text-end">{{ __("Ordered") }}</th>
+									<th class="py-2 text-end">{{ __("Received") }}</th>
+									<th class="py-2 text-end">{{ __("Remaining") }}</th>
+									<th class="py-2 text-end w-40">{{ __("Qty") }}</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-gray-100">
+								<tr
+									v-for="row in receive.items"
+									:key="row.purchase_order_item || row.item_code"
+								>
+									<td class="py-2.5 pe-3">
+										<div class="font-medium text-gray-900">
+											{{ row.item_name || row.item_code }}
+										</div>
+										<div v-if="row.item_name && row.item_code" class="text-xs text-gray-500">
+											{{ row.item_code }}
+										</div>
+									</td>
+									<td class="py-2.5 px-3 text-end tabular-nums text-gray-700">
+										{{ row.ordered_qty }}
+									</td>
+									<td class="py-2.5 px-3 text-end tabular-nums text-gray-700">
+										{{ row.received_qty }}
+									</td>
+									<td class="py-2.5 px-3 text-end tabular-nums text-gray-700">
+										{{ row.pending_qty }}
+									</td>
+									<td class="py-2.5 ps-3 text-end">
+										<div class="flex items-center justify-end gap-1.5">
+											<input
+												v-model.number="row.qty"
+												data-test="receive-qty"
+												data-testid="receive-qty"
+												type="number"
+												min="0"
+												step="any"
+												:aria-label="`${row.item_name} — ${__('Qty')}`"
+												class="w-28 rounded-lg border border-gray-300 px-2 py-1 text-end text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											/>
+											<span class="text-xs text-gray-500">{{ row.uom }}</span>
+										</div>
+										<div
+											v-if="Number(row.qty || 0) > Number(row.pending_qty || 0)"
+											data-testid="excess-warning"
+											class="mt-1 text-xs text-amber-600"
+										>
+											{{ __("More than remaining ({0})", [row.pending_qty]) }}
+										</div>
+									</td>
+								</tr>
 							</tbody>
 						</table>
 					</div>
+				</section>
 
+				<!-- Attachments -->
+				<section class="rounded-xl border border-gray-200 bg-white p-4">
 					<PurchaseAttachments
 						editable
 						:pending="receivePending"
@@ -305,24 +566,51 @@
 						@add="onAttachAdd($event, receivePending)"
 						@remove="(row) => removeAttachment(receivePending, row)"
 					/>
-				</div>
+				</section>
+			</div>
 
 			<!-- FORM VIEW -->
 			<div v-else class="mx-auto flex w-full max-w-6xl flex-col gap-4">
-				<div class="flex items-center gap-2">
+				<div class="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
+						data-testid="doc-back"
 						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
 						:aria-label="__('Back')"
 						:title="__('Back')"
-						@click="view = 'list'"
+						@click="backFromForm"
 					>
 						<FeatherIcon name="arrow-left" class="h-4 w-4" />
 					</button>
-					<h3 class="truncate text-base font-semibold text-gray-900">
-						{{ form.name || __("New Purchase Order") }}
-					</h3>
+					<nav class="flex min-w-0 items-center gap-1.5 text-sm">
+						<span class="text-gray-500">{{ __("Purchase Order") }}</span>
+						<span class="text-gray-300">/</span>
+						<span class="truncate font-semibold text-gray-900">
+							{{ form.name || __("New Purchase Order") }}
+						</span>
+					</nav>
 					<span v-if="form.name" :class="statusPill('Draft')">{{ __("Draft") }}</span>
+
+					<div class="ms-auto flex items-center gap-2">
+						<Button
+							v-if="formPrimaryMode === 'save'"
+							variant="solid"
+							data-testid="primary-action"
+							:loading="saving"
+							@click="save(false)"
+						>
+							{{ __("Save") }}
+						</Button>
+						<Button
+							v-else-if="canSubmitPO"
+							variant="solid"
+							data-testid="primary-action"
+							:loading="submitting"
+							@click="submitDoc(form.name)"
+						>
+							{{ __("Submit") }}
+						</Button>
+					</div>
 				</div>
 
 				<!-- A — order information -->
@@ -567,52 +855,37 @@
 		</template>
 
 		<template #actions>
-			<div
-				v-if="view === 'form'"
-				class="mx-auto flex w-full max-w-6xl flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between"
-			>
-				<Button variant="subtle" class="w-full sm:w-auto" @click="view = 'list'">{{ __("Back") }}</Button>
-				<div class="flex gap-2">
-					<Button variant="subtle" class="flex-1 sm:flex-none" :loading="saving" @click="save(false)">
-						{{ __("Save Draft") }}
-					</Button>
-					<Button v-if="canSubmitPO" variant="solid" class="flex-1 sm:flex-none" :loading="saving" @click="save(true)">
-						{{ __("Save & Submit") }}
-					</Button>
-				</div>
-			</div>
-			<div v-else-if="view === 'receive'" class="flex justify-between items-center w-full">
-				<Button variant="subtle" @click="view = 'list'">{{ __("Back") }}</Button>
-				<div class="flex gap-2">
-					<Button variant="subtle" :loading="saving" @click="saveReceipt(false)">
-						{{ __("Save Draft") }}
-					</Button>
-					<Button v-if="canSubmitPR" variant="solid" :loading="saving" @click="saveReceipt(true)">
-						{{ __("Submit Receipt") }}
-					</Button>
-				</div>
-			</div>
-			<div v-else-if="!embedded" class="flex justify-end w-full">
+			<div v-if="view === 'list' && !embedded" class="flex justify-end w-full">
 				<Button variant="subtle" @click="show = false">{{ __("Close") }}</Button>
 			</div>
 		</template>
 	</DialogHost>
+
+	<ConfirmDialog
+		v-model="confirm.open"
+		:title="confirm.title"
+		:message="confirm.message"
+		:confirm-label="confirm.confirmLabel"
+		:destructive="confirm.destructive"
+		@confirm="resolveConfirm(true)"
+		@cancel="resolveConfirm(false)"
+	/>
 </template>
 
 <script setup>
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue"
+import PurchaseDocView from "@/components/purchase/PurchaseDocView.vue"
+import { __ } from "@/utils/translation"
 import { useToast } from "@/composables/useToast"
 import { useFormatters } from "@/composables/useFormatters"
 import { usePermissions } from "@/composables/usePermissions"
-import {
-	sanitizePickedFiles,
-	uploadPurchaseFiles,
-} from "@/utils/attachments"
+import { sanitizePickedFiles, uploadPurchaseFiles } from "@/utils/attachments"
 import { call, serverErrorMessage } from "@/utils/apiWrapper"
 import { parseError } from "@/utils/errorHandler"
 import { Button, FeatherIcon } from "frappe-ui"
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, nextTick, reactive, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 
@@ -626,7 +899,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(["update:modelValue"])
-
 
 const { showSuccess, showError, showInfo } = useToast()
 const { formatDate } = useFormatters()
@@ -652,6 +924,60 @@ const API = "pos_next.api.purchase_orders"
 const PR_API = "pos_next.api.purchase_receipts"
 
 const view = ref("list")
+const currentDoc = ref(null)
+const loadingDoc = ref(false)
+const submitting = ref(false)
+const docMenuOpen = ref(false)
+
+const currentReceiptDoc = ref(null)
+const loadingReceiptDoc = ref(false)
+const submittingReceipt = ref(false)
+const receiptActionsMenuOpen = ref(false)
+const receiptMenuOpen = ref(false)
+
+const canAttachPO = computed(() => {
+	if (!currentDoc.value) return false
+	const d = currentDoc.value
+	return (
+		d.docstatus === 0 ||
+		d.status === "To Receive" ||
+		d.status === "To Receive and Bill"
+	)
+})
+
+// Confirmation Dialog
+const confirm = reactive({
+	open: false,
+	title: "",
+	message: "",
+	confirmLabel: "",
+	destructive: false,
+})
+let confirmResolve = null
+
+function confirmAsk({
+	title,
+	message = "",
+	confirmLabel = "",
+	destructive = false,
+}) {
+	confirm.title = title
+	confirm.message = message
+	confirm.confirmLabel = confirmLabel
+	confirm.destructive = destructive
+	confirm.open = true
+	return new Promise((resolve) => {
+		confirmResolve = resolve
+	})
+}
+
+function resolveConfirm(value) {
+	confirm.open = false
+	if (confirmResolve) {
+		confirmResolve(value)
+		confirmResolve = null
+	}
+}
 
 // AutocompleteSelect only fires @search while typing; without a preload the
 // dropdowns open empty and look broken. Prime the top options on form entry.
@@ -686,10 +1012,6 @@ const STATUS_TONES = {
 
 const orders = ref([])
 const loadingOrders = ref(false)
-// expand-to-peek: item rows are fetched once per order and cached
-const expandedOrder = ref(null)
-const orderDetails = ref({})
-const loadingDetail = ref(false)
 const searchTerm = ref("")
 const statusFilter = ref("")
 let listTimer = null
@@ -702,7 +1024,9 @@ const poDefaults = ref(null)
 async function loadPoDefaults() {
 	if (poDefaults.value) return poDefaults.value
 	try {
-		poDefaults.value = await call(`${API}.get_po_defaults`, { pos_profile: props.posProfile })
+		poDefaults.value = await call(`${API}.get_po_defaults`, {
+			pos_profile: props.posProfile,
+		})
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 		poDefaults.value = {}
@@ -748,7 +1072,9 @@ function statusPill(status) {
 // the selling-company SO side, and a factory-linked PO must not be cancelled
 // from the POS (the factory plans against it).
 function isFactoryLinked(order) {
-	return Boolean(order.is_internal_supplier && order.inter_company_order_reference)
+	return Boolean(
+		order.is_internal_supplier && order.inter_company_order_reference,
+	)
 }
 
 async function loadOrders() {
@@ -783,48 +1109,183 @@ function formatQty(value) {
 	return Number(value || 0).toLocaleString("id-ID")
 }
 
-async function toggleOrder(order) {
-	if (expandedOrder.value === order.name) {
-		expandedOrder.value = null
-		return
-	}
-	expandedOrder.value = order.name
-	if (orderDetails.value[order.name]) return
-	loadingDetail.value = true
+async function submitDoc(name) {
+	if (submitting.value || !name) return
+	const ok = await confirmAsk({
+		title: __("Submit Purchase Order"),
+		message: __(
+			"Submit {0}? Once submitted, you can receive goods against it.",
+			[name],
+		),
+		confirmLabel: __("Submit"),
+	})
+	if (!ok) return
+	submitting.value = true
 	try {
-		const res = await call(`${API}.get_purchase_order`, { name: order.name })
-		// full summary — items feed the peek, attachments ride along
-		orderDetails.value[order.name] = res || {}
+		const res = await call(`${API}.submit_purchase_order`, { name })
+		showSuccess(__("Purchase Order {0} submitted", [res?.name || name]))
+		await loadOrders()
+		await openDoc(res?.name || name)
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
-		expandedOrder.value = null
 	} finally {
-		loadingDetail.value = false
+		submitting.value = false
 	}
 }
 
-async function submitOrder(order) {
+async function cancelDoc(doc) {
+	const name = typeof doc === "string" ? doc : doc?.name
+	if (!name) return
+	const ok = await confirmAsk({
+		title: __("Cancel Purchase Order"),
+		message: __("Cancel {0}? This cannot be undone.", [name]),
+		confirmLabel: __("Cancel Purchase Order"),
+		destructive: true,
+	})
+	if (!ok) return
 	try {
-		const res = await call(`${API}.submit_purchase_order`, { name: order.name })
-		showSuccess(__("Purchase Order {0} submitted", [res?.name || order.name]))
+		const res = await call(`${API}.cancel_purchase_order`, { name })
+		showSuccess(__("Purchase Order {0} cancelled", [res?.name || name]))
+		if (currentDoc.value?.name === name) {
+			await reloadDoc(name)
+		}
 		await loadOrders()
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 	}
 }
 
-async function cancelOrder(order) {
+function openInErpnext(doc) {
+	const name = typeof doc === "string" ? doc : doc?.name
+	if (!name) return
+	const doctype =
+		view.value === "receipt" || doc?.doctype === "Purchase Receipt"
+			? "purchase-receipt"
+			: "purchase-order"
+	window.open(`/app/${doctype}/${name}`, "_blank")
+}
+
+async function openDoc(name) {
+	view.value = "doc"
+	loadingDoc.value = true
+	docMenuOpen.value = false
+	currentDoc.value = { name }
 	try {
-		const res = await call(`${API}.cancel_purchase_order`, { name: order.name })
-		showSuccess(__("Purchase Order {0} cancelled", [res?.name || order.name]))
-		await loadOrders()
+		const res = await call(`${API}.get_purchase_order`, { name })
+		currentDoc.value = res || { name }
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	} finally {
+		loadingDoc.value = false
+	}
+}
+
+async function reloadDoc(name = currentDoc.value?.name) {
+	if (!name) return
+	try {
+		const res = await call(`${API}.get_purchase_order`, { name })
+		currentDoc.value = res || currentDoc.value
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 	}
 }
 
-function openInErpnext(order) {
-	window.open(`/app/purchase-order/${order.name}`, "_blank")
+function goList() {
+	view.value = "list"
+	currentDoc.value = null
+	docMenuOpen.value = false
+}
+
+async function onDocAttachAdd(files) {
+	if (!currentDoc.value?.name) return
+	const { ok, tooBig } = sanitizePickedFiles(files)
+	if (tooBig.length) {
+		showError(__("File {0} exceeds the {1} MB limit", [tooBig[0].name, 10]))
+	}
+	if (!ok.length) return
+	try {
+		await uploadPurchaseFiles("Purchase Order", currentDoc.value.name, ok)
+		showSuccess(__("{0} attachment(s) uploaded", [ok.length]))
+		await reloadDoc(currentDoc.value.name)
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
+}
+
+async function openReceiptDoc(name) {
+	view.value = "receipt"
+	loadingReceiptDoc.value = true
+	receiptActionsMenuOpen.value = false
+	receiptMenuOpen.value = false
+	currentReceiptDoc.value = { name }
+	try {
+		const res = await call(`${PR_API}.get_purchase_receipt`, { name })
+		currentReceiptDoc.value = res || { name }
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	} finally {
+		loadingReceiptDoc.value = false
+	}
+}
+
+async function reloadReceiptDoc(name = currentReceiptDoc.value?.name) {
+	if (!name) return
+	try {
+		const res = await call(`${PR_API}.get_purchase_receipt`, { name })
+		currentReceiptDoc.value = res || currentReceiptDoc.value
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
+}
+
+async function submitReceiptDoc(action) {
+	if (submittingReceipt.value || !currentReceiptDoc.value?.name) return
+	receiptActionsMenuOpen.value = false
+	const name = currentReceiptDoc.value.name
+	const ok = await confirmAsk({
+		title: __("Submit Purchase Receipt"),
+		message: __(
+			"Submit {0}? Stock will be updated and the receipt can no longer be edited.",
+			[name],
+		),
+		confirmLabel: action || __("Submit"),
+	})
+	if (!ok) return
+	submittingReceipt.value = true
+	try {
+		const res = await call(`${PR_API}.submit_purchase_receipt`, {
+			name,
+			action: action || undefined,
+		})
+		showSuccess(__("Purchase Receipt {0} submitted", [res?.name || name]))
+		await reloadReceiptDoc(name)
+		await reloadDoc()
+		await loadOrders()
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	} finally {
+		submittingReceipt.value = false
+	}
+}
+
+async function onReceiptAttachAdd(files) {
+	if (!currentReceiptDoc.value?.name) return
+	const { ok, tooBig } = sanitizePickedFiles(files)
+	if (tooBig.length) {
+		showError(__("File {0} exceeds the {1} MB limit", [tooBig[0].name, 10]))
+	}
+	if (!ok.length) return
+	try {
+		await uploadPurchaseFiles(
+			"Purchase Receipt",
+			currentReceiptDoc.value.name,
+			ok,
+		)
+		showSuccess(__("{0} attachment(s) uploaded", [ok.length]))
+		await reloadReceiptDoc(currentReceiptDoc.value.name)
+	} catch (error) {
+		showError(parseError(error)?.message || serverErrorMessage(error))
+	}
 }
 
 // ---------- attachments (evidence files held client-side until save) ----------
@@ -833,7 +1294,8 @@ const receivePending = ref([])
 
 function onAttachAdd(files, target) {
 	const { ok, tooBig } = sanitizePickedFiles(files)
-	if (tooBig.length) showError(__("File {0} exceeds the {1} MB limit", [tooBig[0].name, 10]))
+	if (tooBig.length)
+		showError(__("File {0} exceeds the {1} MB limit", [tooBig[0].name, 10]))
 	target.push(...ok)
 }
 
@@ -869,14 +1331,35 @@ const receive = ref({
 	items: [],
 })
 
+const hasExcessQty = computed(() => {
+	return (receive.value?.items || []).some(
+		(row) => Number(row.qty || 0) > Number(row.pending_qty || 0),
+	)
+})
+
+function fillRemaining() {
+	for (const row of receive.value.items) {
+		row.qty = row.pending_qty
+	}
+}
+
+function clearReceiveQtys() {
+	for (const row of receive.value.items) {
+		row.qty = 0
+	}
+}
+
+function backFromReceive() {
+	if (currentDoc.value?.name) {
+		view.value = "doc"
+	} else {
+		view.value = "list"
+	}
+}
+
 async function openReceive(order) {
 	try {
-		// internal supplier POs draft from the factory DN, everyone else
-		// straight from the PO
-		const method = order.is_internal_supplier
-			? `${PR_API}.get_intercompany_receipt_draft`
-			: `${PR_API}.get_purchase_receipt_draft`
-		const d = await call(method, {
+		const d = await call(`${PR_API}.get_intercompany_receipt_draft`, {
 			po_name: order.name,
 		})
 		receive.value = {
@@ -888,8 +1371,6 @@ async function openReceive(order) {
 			currency: d?.currency || props.currency || "",
 			set_warehouse: d?.set_warehouse || "",
 			inter_company_reference: d?.inter_company_reference || null,
-			// default each row to what is still owed; the mapper only returns
-			// rows with a pending qty
 			items: (d?.items || []).map((row) => ({ ...row, qty: row.pending_qty })),
 		}
 		view.value = "receive"
@@ -898,16 +1379,13 @@ async function openReceive(order) {
 	}
 }
 
-async function saveReceipt(submitAfter) {
-	// rows left at 0 are "not receiving this now", not "receive nothing" —
-	// drop them; the mapper links (purchase_order / purchase_order_item /
-	// delivery_note_item) ride along on every row that is sent
+async function saveReceipt() {
+	if (hasExcessQty.value) return
 	const items = receive.value.items
 		.filter((row) => Number(row.qty) > 0)
 		.map((row) => ({
 			item_code: row.item_code,
 			qty: Number(row.qty),
-			rate: row.rate,
 			uom: row.uom,
 			warehouse: row.warehouse,
 			purchase_order: row.purchase_order,
@@ -932,18 +1410,17 @@ async function saveReceipt(submitAfter) {
 			payload.inter_company_reference = receive.value.inter_company_reference
 		const res = await call(`${PR_API}.save_purchase_receipt`, {
 			data: JSON.stringify(payload),
-			submit: submitAfter ? 1 : 0,
+			submit: 0,
 		})
-		showSuccess(
-			submitAfter
-				? __("Purchase Receipt {0} submitted", [res?.name])
-				: __("Purchase Receipt {0} saved", [res?.name]),
-		)
+		showSuccess(__("Purchase Receipt {0} saved", [res?.name]))
 		await uploadAfterSave("Purchase Receipt", res?.name, receivePending.value)
 		receivePending.value = []
-		delete orderDetails.value[res?.name]
-		view.value = "list"
 		await loadOrders()
+		if (res?.name) {
+			await openReceiptDoc(res.name)
+		} else {
+			view.value = "list"
+		}
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 	} finally {
@@ -977,12 +1454,23 @@ const form = ref(blankForm())
 // stable v-for keys: rows are inserted/removed mid-list
 let rowSeq = 0
 function itemRow(fields = {}) {
-	return { key: ++rowSeq, item_code: "", item_name: "", qty: 1, uom: "", uoms: [], rate: 0, ...fields }
+	return {
+		key: ++rowSeq,
+		item_code: "",
+		item_name: "",
+		qty: 1,
+		uom: "",
+		uoms: [],
+		rate: 0,
+		...fields,
+	}
 }
 const itemsRef = ref(null)
 // field errors appear only after the first save attempt
 const triedSave = ref(false)
-const filledItems = computed(() => form.value.items.filter((row) => row.item_code))
+const filledItems = computed(() =>
+	form.value.items.filter((row) => row.item_code),
+)
 // mixed UOMs never sum into one number — one line per UOM
 const qtyByUom = computed(() => {
 	const totals = new Map()
@@ -1005,6 +1493,61 @@ const errors = computed(() => {
 		out.schedule_date = __("Required By cannot be before Transaction Date")
 	return out
 })
+function formSnapshotOf() {
+	return JSON.stringify({
+		supplier: form.value.supplier || "",
+		transaction_date: form.value.transaction_date || "",
+		schedule_date: form.value.schedule_date || "",
+		remarks: form.value.remarks || "",
+		taxes_and_charges: form.value.taxes_and_charges || "",
+		set_warehouse: form.value.set_warehouse || "",
+		items: (form.value.items || [])
+			.filter((i) => i.item_code)
+			.map((i) => ({
+				item_code: i.item_code,
+				qty: Number(i.qty) || 0,
+				uom: i.uom || "",
+			})),
+	})
+}
+
+const formSnapshot = ref(null)
+
+function takeFormSnapshot() {
+	formSnapshot.value = formSnapshotOf()
+}
+
+const isFormDirty = computed(() => {
+	if (formSnapshot.value === null) return false
+	return formSnapshotOf() !== formSnapshot.value
+})
+
+const formPrimaryMode = computed(() => {
+	if (!form.value.name || isFormDirty.value) return "save"
+	return "submit"
+})
+
+async function backFromForm() {
+	if (!form.value.name && isFormDirty.value) {
+		const ok = await confirmAsk({
+			title: __("Discard changes?"),
+			message: __(
+				"You have unsaved changes. Are you sure you want to discard them?",
+			),
+			confirmLabel: __("Discard"),
+			destructive: true,
+		})
+		if (!ok) return
+	}
+	if (form.value.name) {
+		view.value = "doc"
+		await reloadDoc(form.value.name)
+	} else {
+		view.value = "list"
+		currentDoc.value = null
+	}
+}
+
 const supplierOptions = ref([])
 const itemOptions = ref([])
 const loadingSuppliers = ref(false)
@@ -1034,6 +1577,7 @@ async function openNew() {
 	form.value.set_warehouse = d?.warehouse || ""
 	seedSupplierOption(d?.supplier, d?.supplier_name)
 	if (d?.supplier) await onSupplierSelect(d.supplier)
+	takeFormSnapshot()
 }
 
 async function openEdit(order) {
@@ -1065,6 +1609,7 @@ async function openEdit(order) {
 		}
 		seedSupplierOption(d?.supplier, d?.supplier_name)
 		view.value = "form"
+		takeFormSnapshot()
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 	}
@@ -1180,7 +1725,8 @@ async function fetchItemDetails(code, uom, qty) {
 // Add Item appends an empty row (ERPNext grid style) and focuses its search;
 // an existing empty row is reused instead of stacking blanks
 async function addItemRow() {
-	if (!form.value.items.some((row) => !row.item_code)) form.value.items.push(itemRow())
+	if (!form.value.items.some((row) => !row.item_code))
+		form.value.items.push(itemRow())
 	await nextTick()
 	itemsRef.value?.querySelector("[data-blank-row] input")?.focus()
 }
@@ -1193,10 +1739,14 @@ async function onItemPick(code, row) {
 	if (!code || !row) return
 	// picking an item already on the order bumps that row instead of adding
 	// a duplicate line
-	const existing = form.value.items.find((r) => r !== row && r.item_code === code)
+	const existing = form.value.items.find(
+		(r) => r !== row && r.item_code === code,
+	)
 	if (existing) {
 		existing.qty = (Number(existing.qty) || 0) + 1
-		showInfo(__("{0} is already on this order — qty increased", [existing.item_name]))
+		showInfo(
+			__("{0} is already on this order — qty increased", [existing.item_name]),
+		)
 		return
 	}
 	row.loading = true
@@ -1263,16 +1813,20 @@ async function save(submitAfter) {
 			pos_profile: props.posProfile,
 			submit: submitAfter ? 1 : 0,
 		})
+		const poName = res?.name || form.value.name
 		showSuccess(
 			submitAfter
-				? __("Purchase Order {0} submitted", [res?.name])
-				: __("Purchase Order {0} saved", [res?.name]),
+				? __("Purchase Order {0} submitted", [poName])
+				: __("Purchase Order {0} saved", [poName]),
 		)
-		await uploadAfterSave("Purchase Order", res?.name, formPending.value)
+		await uploadAfterSave("Purchase Order", poName, formPending.value)
 		formPending.value = []
-		delete orderDetails.value[res?.name]
-		view.value = "list"
 		await loadOrders()
+		if (poName) {
+			await openDoc(poName)
+		} else {
+			view.value = "list"
+		}
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 	} finally {

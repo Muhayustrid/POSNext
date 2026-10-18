@@ -10,7 +10,7 @@
 				<FeatherIcon name="paperclip" class="w-3.5 h-3.5" />
 				{{ label || __("Attachments") }}
 			</button>
-			<span class="text-xs text-gray-400">{{ hint || __("PDF or image · max 10 MB") }}</span>
+			<span class="text-xs text-gray-400">{{ hint || __("PDF, image, Excel or CSV · max 10 MB") }}</span>
 			<input
 				ref="picker"
 				type="file"

@@ -69,33 +69,59 @@ vi.mock("@/components/common/AutocompleteSelect.vue", async () => {
 	}
 })
 
+vi.mock("@/utils/attachments", async (importOriginal) => {
+	const actual = await importOriginal()
+	return {
+		...actual,
+		uploadPurchaseFiles: (doctype, name, files) =>
+			mocks.call("pos_next.api.purchase_orders.attach_purchase_files", {
+				doctype,
+				name,
+				files,
+			}),
+	}
+})
+
 vi.mock("frappe-ui", async () => {
 	const { defineComponent, h } = await import("vue")
 	const Button = defineComponent({
 		name: "Button",
-		props: ["variant", "theme", "loading"],
-		setup(_, { slots }) {
-			return () => h("button", { type: "button" }, slots.default?.())
+		props: ["variant", "theme", "loading", "disabled"],
+		setup(props, { slots }) {
+			return () =>
+				h(
+					"button",
+					{ type: "button", disabled: !!props.disabled },
+					slots.default?.(),
+				)
 		},
 	})
 	const Dialog = defineComponent({
 		name: "Dialog",
 		props: { modelValue: Boolean, options: Object },
-		setup(_, { slots }) {
+		emits: ["update:modelValue", "close"],
+		setup(props, { slots }) {
 			return () =>
-				h("div", { "data-test": "dialog" }, [
-					slots["body-content"]?.(),
-					slots.actions?.(),
-				])
+				props.modelValue !== false
+					? h("div", { "data-test": "dialog" }, [
+							slots["body-content"]?.(),
+							slots.actions?.(),
+						])
+					: null
 		},
 	})
 	const FeatherIcon = defineComponent({
 		name: "FeatherIcon",
 		props: ["name"],
+		setup(props) {
+			return () => h("span", { "data-icon": props.name })
+		},
 	})
 	return { Button, Dialog, FeatherIcon }
 })
 
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue"
+import PurchaseDocView from "@/components/purchase/PurchaseDocView.vue"
 import PurchaseOrderDialog from "./PurchaseOrderDialog.vue"
 
 const DRAFT_ORDER = {
@@ -117,20 +143,19 @@ const SUBMITTED_ORDER = {
 	per_received: 0,
 }
 
-	const FULLY_RECEIVED_ORDER = {
-		...SUBMITTED_ORDER,
-		name: "PO-2026-00003",
-		status: "To Bill",
-		per_received: 100,
-	}
+const FULLY_RECEIVED_ORDER = {
+	...SUBMITTED_ORDER,
+	name: "PO-2026-00003",
+	status: "To Bill",
+	per_received: 100,
+}
 
-	const INTERNAL_ORDER = {
-		...SUBMITTED_ORDER,
-		name: "PO-2026-00004",
-		is_internal_supplier: 1,
-		inter_company_order_reference: "SO-2026-00001",
-	}
-
+const INTERNAL_ORDER = {
+	...SUBMITTED_ORDER,
+	name: "PO-2026-00004",
+	is_internal_supplier: 1,
+	inter_company_order_reference: "SO-2026-00001",
+}
 
 const PR_DRAFT = {
 	supplier: "SUP-1",
@@ -190,9 +215,19 @@ function button(wrapper, text) {
 	return wrapper.findAll("button").find((b) => b.text() === text)
 }
 
+function confirmDialog(wrapper) {
+	return wrapper.findComponent(ConfirmDialog)
+}
+
+async function clickConfirm(wrapper) {
+	confirmDialog(wrapper).vm.$emit("confirm")
+	await flushPromises()
+}
+
 // Fill the form until it is saveable: supplier selected + one item row at qty 3.
-	async function fillForm(wrapper) {
-	mocks.call.mockImplementation(async (method) => {
+async function fillForm(wrapper) {
+	const prevImpl = mocks.call.getMockImplementation()
+	mocks.call.mockImplementation(async (method, params) => {
 		if (method.includes("get_supplier_details"))
 			return {
 				supplier_name: "Roti Ltd",
@@ -216,6 +251,7 @@ function button(wrapper, text) {
 				rate: 90,
 				warehouse: "WH-1",
 			}
+		if (prevImpl) return prevImpl(method, params)
 		return {}
 	})
 	await autocomplete(wrapper, "Search supplier...").vm.$emit(
@@ -267,14 +303,39 @@ describe("PurchaseOrderDialog", () => {
 		)
 	})
 
-	it("expands an order to peek its items and caches the detail", async () => {
+	it("row click opens PO doc with items and linked receipts", async () => {
 		mocks.call.mockImplementation(async (method) => {
-			if (method.includes("get_purchase_orders")) return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
 			if (method.includes("get_purchase_order"))
 				return {
+					name: "PO-2026-00002",
+					supplier: "SUP-1",
+					supplier_name: "Roti Ltd",
+					status: "To Receive and Bill",
+					docstatus: 1,
 					items: [
-						{ name: "row-1", item_code: "ITEM-1", item_name: "Roti Tawar", qty: 3, uom: "Pcs" },
-						{ name: "row-2", item_code: "ITEM-2", item_name: "Bolu Pandan", qty: 2, uom: "Box" },
+						{
+							name: "row-1",
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 3,
+							uom: "Pcs",
+						},
+						{
+							name: "row-2",
+							item_code: "ITEM-2",
+							item_name: "Bolu Pandan",
+							qty: 2,
+							uom: "Box",
+						},
+					],
+					receipts: [
+						{
+							name: "PR-2026-00001",
+							posting_date: "2026-09-20",
+							status: "Draft",
+						},
 					],
 				}
 			return {}
@@ -282,7 +343,7 @@ describe("PurchaseOrderDialog", () => {
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		expect(wrapper.text()).not.toContain("Roti Tawar")
+		expect(wrapper.find('[data-testid="doc-header"]').exists()).toBe(false)
 		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
 		await flushPromises()
 
@@ -290,20 +351,374 @@ describe("PurchaseOrderDialog", () => {
 			"pos_next.api.purchase_orders.get_purchase_order",
 			{ name: "PO-2026-00002" },
 		)
+		expect(wrapper.find('[data-testid="doc-header"]').exists()).toBe(true)
 		expect(wrapper.text()).toContain("Roti Tawar")
-		expect(wrapper.text()).toContain("3 Pcs")
+		expect(wrapper.text()).toContain("Bolu Pandan")
+		expect(wrapper.find('[data-testid="linked-receipts"]').exists()).toBe(true)
+		expect(wrapper.text()).toContain("PR-2026-00001")
+	})
 
-		// collapse, then expand again — served from cache, no second fetch
+	it("attaching on a submitted To Receive PO uploads and reloads", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					name: "PO-2026-00002",
+					status: "To Receive and Bill",
+					docstatus: 1,
+					items: [],
+					attachments: [],
+				}
+			if (method.includes("attach_purchase_files"))
+				return [{ name: "f1", file_url: "/files/f1.pdf" }]
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
 		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
 		await flushPromises()
-		expect(wrapper.text()).not.toContain("Roti Tawar")
+
+		const docView = wrapper.findComponent(PurchaseDocView)
+		expect(docView.props("canAttach")).toBe(true)
+		await docView.vm.$emit("attach-add", [
+			new File(["dummy"], "note.pdf", { type: "application/pdf" }),
+		])
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.attach_purchase_files",
+			expect.objectContaining({
+				doctype: "Purchase Order",
+				name: "PO-2026-00002",
+			}),
+		)
+		expect(mocks.toast.success).toHaveBeenCalledWith("1 attachment(s) uploaded")
+	})
+
+	it("Draft doc shows Edit and Submit in doc-header", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [DRAFT_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					...DRAFT_ORDER,
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 2,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await wrapper.find(`[data-test="po-${DRAFT_ORDER.name}"]`).trigger("click")
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="doc-edit"]').exists()).toBe(true)
+		const primary = wrapper.find('[data-testid="primary-action"]')
+		expect(primary.exists()).toBe(true)
+		expect(primary.text()).toBe("Submit")
+
+		await wrapper.find('[data-testid="doc-edit"]').trigger("click")
+		await flushPromises()
+		expect(
+			wrapper.find('input[placeholder="Search supplier..."]').exists(),
+		).toBe(true)
+		expect(wrapper.text()).toContain(DRAFT_ORDER.name)
+	})
+
+	it("new form primary reads Save; after save view is doc and primary reads Submit", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders")) return { orders: [] }
+			if (method.includes("save_purchase_order"))
+				return { name: "PO-2026-00099" }
+			if (method.includes("get_purchase_order"))
+				return {
+					name: "PO-2026-00099",
+					status: "Draft",
+					docstatus: 0,
+					supplier: "SUP-1",
+					supplier_name: "Roti Ltd",
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 3,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await flushPromises()
+
+		const primary = wrapper.find('[data-testid="primary-action"]')
+		expect(primary.text()).toBe("Save")
+
+		await fillForm(wrapper)
+		await primary.trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.save_purchase_order",
+			expect.objectContaining({ submit: 0 }),
+		)
+		expect(wrapper.find('[data-testid="doc-header"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toBe("Submit")
+	})
+
+	it("editing a saved Draft flips primary back to Save", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [DRAFT_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					...DRAFT_ORDER,
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 2,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await wrapper.find(`[data-test="po-${DRAFT_ORDER.name}"]`).trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-testid="doc-edit"]').trigger("click")
+		await flushPromises()
+
+		// Clean form: primary action is Submit
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toBe("Submit")
+
+		// Modify qty -> dirty -> primary flips to Save
+		await wrapper.find('[data-test="item-qty"]').setValue(5)
+		await flushPromises()
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toBe("Save")
+	})
+
+	it("removing tax template on clean Draft flips primary back to Save", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [DRAFT_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					...DRAFT_ORDER,
+					taxes_and_charges: "Standard Tax - TC",
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 2,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await wrapper.find(`[data-test="po-${DRAFT_ORDER.name}"]`).trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-testid="doc-edit"]').trigger("click")
+		await flushPromises()
+
+		// Clean form with tax template: primary action is Submit
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toBe("Submit")
+		expect(wrapper.text()).toContain("Standard Tax - TC")
+
+		// Remove tax template -> dirty -> primary flips to Save
+		const removeBtn = wrapper
+			.findAll("button")
+			.find((b) => b.text() === "Remove")
+		expect(removeBtn).toBeDefined()
+		await removeBtn.trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toBe("Save")
+	})
+
+	it("Back from dirty form shows last saved doc without calling save", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [DRAFT_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					...DRAFT_ORDER,
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 2,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await wrapper.find(`[data-test="po-${DRAFT_ORDER.name}"]`).trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-testid="doc-edit"]').trigger("click")
+		await flushPromises()
+
+		await wrapper.find('[data-test="item-qty"]').setValue(9)
+		await flushPromises()
+
 		mocks.call.mockClear()
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).not.toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.save_purchase_order",
+			expect.anything(),
+		)
+		expect(wrapper.find('[data-testid="doc-header"]').exists()).toBe(true)
+		expect(wrapper.text()).toContain(DRAFT_ORDER.name)
+	})
+
+	it("clicking a linked receipt opens the receipt view", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					name: "PO-2026-00002",
+					status: "To Receive and Bill",
+					docstatus: 1,
+					items: [],
+					receipts: [
+						{
+							name: "PR-2026-00001",
+							posting_date: "2026-09-20",
+							status: "Draft",
+							docstatus: 0,
+						},
+					],
+				}
+			if (method.includes("get_purchase_receipt"))
+				return {
+					name: "PR-2026-00001",
+					posting_date: "2026-09-20",
+					status: "Draft",
+					docstatus: 0,
+					editable: true,
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 3,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
 		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
 		await flushPromises()
-		expect(wrapper.text()).toContain("Roti Tawar")
-		expect(mocks.call).not.toHaveBeenCalledWith(
-			"pos_next.api.purchase_orders.get_purchase_order",
-			expect.anything(),
+
+		await wrapper.find('[data-testid="linked-receipt-row"]').trigger("click")
+		await flushPromises()
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_receipts.get_purchase_receipt",
+			{ name: "PR-2026-00001" },
+		)
+		expect(wrapper.text()).toContain("PR-2026-00001")
+		// Back returns to PO doc view
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("PO-2026-00002")
+	})
+
+	it("PO with a Draft linked receipt still shows Receive and lists the draft with a Draft pill", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					name: "PO-2026-00002",
+					status: "To Receive and Bill",
+					docstatus: 1,
+					per_received: 50,
+					items: [],
+					receipts: [
+						{
+							name: "PR-2026-00001",
+							posting_date: "2026-09-20",
+							status: "Draft",
+							docstatus: 0,
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
+		await flushPromises()
+
+		// Primary Receive button is still visible
+		const receiveBtn = wrapper.find('[data-testid="primary-action"]')
+		expect(receiveBtn.exists()).toBe(true)
+		expect(receiveBtn.text()).toBe("Receive")
+
+		// Linked receipts shows the draft PR with Draft text
+		const linked = wrapper.find('[data-testid="linked-receipts"]')
+		expect(linked.exists()).toBe(true)
+		expect(linked.text()).toContain("Draft")
+	})
+
+	it("no Save Draft text rendered", async () => {
+		mocks.call.mockResolvedValue({ orders: [DRAFT_ORDER] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		expect(wrapper.text()).not.toContain("Save Draft")
+
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).not.toContain("Save Draft")
+	})
+
+	it("Cancel hidden for factory-linked PO", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [INTERNAL_ORDER, SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return {
+					...INTERNAL_ORDER,
+					items: [],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await wrapper
+			.find(`[data-test="po-${INTERNAL_ORDER.name}"]`)
+			.trigger("click")
+		await flushPromises()
+
+		// Open more actions menu
+		await wrapper.find('[data-testid="doc-menu-button"]').trigger("click")
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="doc-menu-cancel"]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="doc-menu-open-erpnext"]').exists()).toBe(
+			true,
 		)
 	})
 
@@ -378,7 +793,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockImplementation(async (method) =>
 			method.includes("save_purchase_order") ? { name: "PO-2026-00003" } : {},
 		)
-		await button(wrapper, "Save Draft").trigger("click")
+		await button(wrapper, "Save").trigger("click")
 		await flushPromises()
 
 		const saveCall = mocks.call.mock.calls.find(([m]) =>
@@ -443,7 +858,10 @@ describe("PurchaseOrderDialog", () => {
 		const uomSelect = wrapper.find('[data-test="item-uom"]')
 		expect(uomSelect.exists()).toBe(true)
 		expect(uomSelect.element.value).toBe("Nos")
-		expect([...uomSelect.element.options].map((o) => o.value)).toEqual(["Nos", "Box"])
+		expect([...uomSelect.element.options].map((o) => o.value)).toEqual([
+			"Nos",
+			"Box",
+		])
 	})
 
 	it("changing the UOM re-prices in it and remembers the pick per item", async () => {
@@ -463,12 +881,19 @@ describe("PurchaseOrderDialog", () => {
 			expect.objectContaining({ item_code: "ITEM-1", uom: "Box" }),
 		)
 		// …and the pick is remembered in this browser for the next PO
-		expect(JSON.parse(localStorage.getItem("posNext.poUom"))).toEqual({ "ITEM-1": "Box" })
+		expect(JSON.parse(localStorage.getItem("posNext.poUom"))).toEqual({
+			"ITEM-1": "Box",
+		})
 
 		// a fresh pick for the same item starts from the remembered UOM
-		await wrapper.find('[data-test="items-table"] button[aria-label="Remove"]').trigger("click")
+		await wrapper
+			.find('[data-test="items-table"] button[aria-label="Remove"]')
+			.trigger("click")
 		await wrapper.find('[data-test="add-item"]').trigger("click")
-		await autocomplete(wrapper, "Search item...").vm.$emit("update:modelValue", "ITEM-1")
+		await autocomplete(wrapper, "Search item...").vm.$emit(
+			"update:modelValue",
+			"ITEM-1",
+		)
 		await flushPromises()
 		const lastFetch = mocks.call.mock.calls
 			.filter(([m]) => m.includes("get_purchase_item_details"))
@@ -484,7 +909,10 @@ describe("PurchaseOrderDialog", () => {
 		await fillForm(wrapper)
 
 		await wrapper.find('[data-test="add-item"]').trigger("click")
-		await autocomplete(wrapper, "Search item...").vm.$emit("update:modelValue", "ITEM-1")
+		await autocomplete(wrapper, "Search item...").vm.$emit(
+			"update:modelValue",
+			"ITEM-1",
+		)
 		await flushPromises()
 
 		const qty = wrapper.findAll('[data-test="item-qty"]')
@@ -500,16 +928,20 @@ describe("PurchaseOrderDialog", () => {
 		await fillForm(wrapper)
 		await wrapper.find('[data-test="item-qty"]').setValue(0)
 
-		await button(wrapper, "Save Draft").trigger("click")
+		await button(wrapper, "Save").trigger("click")
 		await flushPromises()
-		expect(mocks.toast.error).toHaveBeenCalledWith("Quantity must be greater than 0")
+		expect(mocks.toast.error).toHaveBeenCalledWith(
+			"Quantity must be greater than 0",
+		)
 
 		await wrapper.find('[data-test="item-qty"]').setValue(2)
 		await wrapper.find("#po-transaction-date").setValue("2026-10-08")
 		await wrapper.find("#po-schedule-date").setValue("2026-10-01")
-		await button(wrapper, "Save Draft").trigger("click")
+		await button(wrapper, "Save").trigger("click")
 		await flushPromises()
-		expect(wrapper.text()).toContain("Required By cannot be before Transaction Date")
+		expect(wrapper.text()).toContain(
+			"Required By cannot be before Transaction Date",
+		)
 		expect(mocks.call).not.toHaveBeenCalledWith(
 			"pos_next.api.purchase_orders.save_purchase_order",
 			expect.anything(),
@@ -540,17 +972,23 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockImplementation(async (method) =>
 			method.includes("save_purchase_order") ? { name: "PO-2026-00004" } : {},
 		)
-		await button(wrapper, "Save Draft").trigger("click")
+		await button(wrapper, "Save").trigger("click")
 		await flushPromises()
 
-		const saveCall = mocks.call.mock.calls.find(([m]) => m.includes("save_purchase_order"))
+		const saveCall = mocks.call.mock.calls.find(([m]) =>
+			m.includes("save_purchase_order"),
+		)
 		expect(JSON.parse(saveCall[1].data).buying_price_list).toBe("PL-IC")
 	})
 
-	it("Save Draft posts the full payload with submit: 0", async () => {
+	it("Save posts the full payload with submit: 0", async () => {
 		mocks.call.mockImplementation((method) => {
 			if (method.includes("get_po_defaults"))
-				return Promise.resolve({ supplier: null, supplier_name: null, warehouse: "WH-1" })
+				return Promise.resolve({
+					supplier: null,
+					supplier_name: null,
+					warehouse: "WH-1",
+				})
 			return Promise.resolve({ orders: [] })
 		})
 		const wrapper = mountOpen()
@@ -561,7 +999,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockImplementation(async (method) =>
 			method.includes("save_purchase_order") ? { name: "PO-2026-00002" } : {},
 		)
-		await button(wrapper, "Save Draft").trigger("click")
+		await button(wrapper, "Save").trigger("click")
 		await flushPromises()
 
 		const saveCall = mocks.call.mock.calls.find(([method]) =>
@@ -601,7 +1039,7 @@ describe("PurchaseOrderDialog", () => {
 				})
 			return {}
 		})
-		await button(wrapper, "Save Draft").trigger("click")
+		await button(wrapper, "Save").trigger("click")
 		await flushPromises()
 
 		expect(mocks.toast.error).toHaveBeenCalledWith(
@@ -650,9 +1088,9 @@ describe("PurchaseOrderDialog", () => {
 		expect(button(wrapper, "Submit")).toBeUndefined()
 
 		await button(wrapper, "New Purchase Order").trigger("click")
-		// form: no Save & Submit in the footer
-		expect(button(wrapper, "Save & Submit")).toBeUndefined()
-		expect(button(wrapper, "Save Draft")).toBeDefined()
+		// form: primary action is Save; no Submit
+		expect(button(wrapper, "Submit")).toBeUndefined()
+		expect(button(wrapper, "Save")).toBeDefined()
 
 		// with the permission the buttons appear
 		mocks.perms.submit = true
@@ -662,15 +1100,16 @@ describe("PurchaseOrderDialog", () => {
 		await flushPromises()
 		expect(button(wrapper, "Submit")).toBeDefined()
 		await button(wrapper, "New Purchase Order").trigger("click")
-		expect(button(wrapper, "Save & Submit")).toBeDefined()
+		expect(button(wrapper, "Save")).toBeDefined()
 	})
 
 	// ---------- purchase receipts ----------
 
 	function mockPrFlow() {
 		mocks.call.mockImplementation(async (method) => {
-			if (method.includes("get_purchase_orders")) return { orders: [SUBMITTED_ORDER] }
-			if (method.includes("get_purchase_receipt_draft")) return PR_DRAFT
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_intercompany_receipt_draft")) return PR_DRAFT
 			return {}
 		})
 	}
@@ -714,7 +1153,11 @@ describe("PurchaseOrderDialog", () => {
 		expect(wrapper.text()).toContain("Factory SO")
 
 		// an internal PO whose factory SO hasn't been made yet: no badge
-		const notYetLinked = { ...INTERNAL_ORDER, name: "PO-2026-00005", inter_company_order_reference: null }
+		const notYetLinked = {
+			...INTERNAL_ORDER,
+			name: "PO-2026-00005",
+			inter_company_order_reference: null,
+		}
 		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER, notYetLinked] })
 		await wrapper.setProps({ modelValue: false })
 		await flushPromises()
@@ -752,6 +1195,158 @@ describe("PurchaseOrderDialog", () => {
 		expect(buttons[0].text()).toBe("Receive")
 	})
 
+	it("Receive always calls get_intercompany_receipt_draft", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_receipts.get_intercompany_receipt_draft",
+			{ po_name: "PO-2026-00002" },
+		)
+	})
+
+	it("supplier name rendered once", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		const supplierEl = wrapper.find('[data-testid="receive-supplier"]')
+		expect(supplierEl.exists()).toBe(true)
+		expect(supplierEl.text()).toBe("Roti Ltd")
+		expect(wrapper.find('[data-testid="receive-supplier-code"]').exists()).toBe(
+			false,
+		)
+	})
+
+	it("renders delivery note reference without double label in receive info", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_intercompany_receipt_draft"))
+				return { ...PR_DRAFT, inter_company_reference: "MAT-DN-2026-00001" }
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		expect(wrapper.text()).toContain("Delivery Note")
+		expect(wrapper.text()).toContain("MAT-DN-2026-00001")
+		expect(wrapper.text()).not.toContain("From Delivery Note:")
+	})
+
+	it("Fill remaining sets every qty to pending, Clear sets 0", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
+		expect(qtyInputs[0].element.value).toBe("6")
+		expect(qtyInputs[1].element.value).toBe("5")
+
+		await wrapper.find('[data-testid="clear-qtys"]').trigger("click")
+		expect(qtyInputs[0].element.value).toBe("0")
+		expect(qtyInputs[1].element.value).toBe("0")
+
+		await wrapper.find('[data-testid="fill-remaining"]').trigger("click")
+		expect(qtyInputs[0].element.value).toBe("6")
+		expect(qtyInputs[1].element.value).toBe("5")
+	})
+
+	it("qty over remaining shows warning and blocks Save", async () => {
+		mockPrFlow()
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		const saveBtn = wrapper.find('[data-testid="receive-save"]')
+		expect(saveBtn.attributes("disabled")).toBeUndefined()
+
+		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
+		await qtyInputs[0].setValue(10)
+
+		expect(wrapper.find('[data-testid="excess-warning"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="excess-warning"]').text()).toContain(
+			"More than remaining (6)",
+		)
+		expect(saveBtn.attributes("disabled")).toBeDefined()
+
+		await qtyInputs[0].setValue(6)
+		expect(wrapper.find('[data-testid="excess-warning"]').exists()).toBe(false)
+		expect(saveBtn.attributes("disabled")).toBeUndefined()
+	})
+
+	it("Save posts submit 0 without rate and opens the receipt view with Submit", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_intercompany_receipt_draft")) return PR_DRAFT
+			if (method.includes("save_purchase_receipt"))
+				return { name: "PR-2026-00009" }
+			if (method.includes("get_purchase_receipt"))
+				return {
+					name: "PR-2026-00009",
+					status: "Draft",
+					docstatus: 0,
+					supplier: "SUP-1",
+					supplier_name: "Roti Ltd",
+					editable: true,
+					submit_actions: [],
+					items: [
+						{
+							item_code: "ITEM-1",
+							item_name: "Roti Tawar",
+							qty: 3,
+							uom: "Nos",
+						},
+					],
+				}
+			return {}
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		await openReceiveView(wrapper)
+
+		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
+		await qtyInputs[0].setValue(3)
+		await qtyInputs[1].setValue(0)
+
+		await wrapper.find('[data-testid="receive-save"]').trigger("click")
+		await flushPromises()
+
+		const saveCall = mocks.call.mock.calls.find(([m]) =>
+			m.includes("save_purchase_receipt"),
+		)
+		expect(saveCall[0]).toBe(
+			"pos_next.api.purchase_receipts.save_purchase_receipt",
+		)
+		expect(saveCall[1]).toEqual(expect.objectContaining({ submit: 0 }))
+		const data = JSON.parse(saveCall[1].data)
+		expect(data.supplier).toBe("SUP-1")
+		expect(data.posting_date).toBe("2026-09-19")
+		expect(data.items).toEqual([
+			{
+				item_code: "ITEM-1",
+				qty: 3,
+				uom: "Nos",
+				warehouse: "WH-1",
+				purchase_order: "PO-2026-00002",
+				purchase_order_item: "POI-1",
+				delivery_note_item: undefined,
+			},
+		])
+		expect("rate" in data.items[0]).toBe(false)
+		expect(mocks.toast.success).toHaveBeenCalledWith(
+			"Purchase Receipt PR-2026-00009 saved",
+		)
+		expect(wrapper.find('[data-testid="doc-header"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toBe("Submit")
+	})
+
 	it("routes internal POs to the Delivery Note draft and submits the DN links", async () => {
 		mocks.call.mockImplementation(async (method) => {
 			if (method.includes("get_purchase_orders"))
@@ -780,87 +1375,20 @@ describe("PurchaseOrderDialog", () => {
 			"pos_next.api.purchase_receipts.get_intercompany_receipt_draft",
 			{ po_name: "PO-2026-00004" },
 		)
-		expect(wrapper.text()).toContain("From Delivery Note: MAT-DN-2026-00001")
+		expect(wrapper.text()).toContain("MAT-DN-2026-00001")
 
 		mocks.call.mockImplementation(async (method) =>
 			method.includes("save_purchase_receipt") ? { name: "PR-2026-00009" } : {},
 		)
-		await button(wrapper, "Submit Receipt").trigger("click")
+		await wrapper.find('[data-testid="receive-save"]').trigger("click")
 		await flushPromises()
 
-		const saveCall = mocks.call.mock.calls.find(([method]) => method.includes("save_purchase_receipt"))
+		const saveCall = mocks.call.mock.calls.find(([method]) =>
+			method.includes("save_purchase_receipt"),
+		)
 		const data = JSON.parse(saveCall[1].data)
-		// the DN reference and row links ride the payload so the PR keeps the
-		// DN <-> PR cross links
 		expect(data.inter_company_reference).toBe("MAT-DN-2026-00001")
 		expect(data.items[0].delivery_note_item).toBe("DNROW-1")
-	})
-
-	it("Receive loads the draft and prefills qty with the pending qty", async () => {
-		mockPrFlow()
-		const wrapper = mountOpen()
-		await flushPromises()
-		await openReceiveView(wrapper)
-
-		expect(mocks.call).toHaveBeenCalledWith(
-			"pos_next.api.purchase_receipts.get_purchase_receipt_draft",
-			{ po_name: "PO-2026-00002" },
-		)
-		expect(wrapper.find('[data-test="receive-table"]').exists()).toBe(true)
-		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
-		expect(qtyInputs).toHaveLength(2)
-		expect(qtyInputs[0].element.value).toBe("6")
-		expect(qtyInputs[1].element.value).toBe("5")
-		expect(wrapper.find('[data-test="receive-posting-date"]').element.value).toBe(
-			"2026-09-19",
-		)
-	})
-
-	it("submits only rows with qty > 0 carrying the PO links, with the submit flag", async () => {
-		mockPrFlow()
-		const wrapper = mountOpen()
-		await flushPromises()
-		await openReceiveView(wrapper)
-
-		const qtyInputs = wrapper.findAll('[data-test="receive-qty"]')
-		await qtyInputs[0].setValue(3)
-		await qtyInputs[1].setValue(0) // not receiving this row now
-
-		mocks.call.mockImplementation(async (method) =>
-			method.includes("save_purchase_receipt") ? { name: "PR-2026-00009" } : {},
-		)
-		await button(wrapper, "Submit Receipt").trigger("click")
-		await flushPromises()
-
-		const saveCall = mocks.call.mock.calls.find(([m]) =>
-			m.includes("save_purchase_receipt"),
-		)
-		expect(saveCall[0]).toBe(
-			"pos_next.api.purchase_receipts.save_purchase_receipt",
-		)
-		expect(saveCall[1]).toEqual(expect.objectContaining({ submit: 1 }))
-		const data = JSON.parse(saveCall[1].data)
-		expect(data.supplier).toBe("SUP-1")
-		expect(data.posting_date).toBe("2026-09-19")
-		expect(data.items).toEqual([
-			{
-				item_code: "ITEM-1",
-				qty: 3,
-				rate: 100,
-				uom: "Nos",
-				warehouse: "WH-1",
-				purchase_order: "PO-2026-00002",
-				purchase_order_item: "POI-1",
-			},
-		])
-		expect(mocks.toast.success).toHaveBeenCalledWith(
-			"Purchase Receipt PR-2026-00009 submitted",
-		)
-		// back on the PO list, refreshed
-		expect(mocks.call).toHaveBeenCalledWith(
-			"pos_next.api.purchase_orders.get_purchase_orders",
-			expect.anything(),
-		)
 	})
 
 	it("surfaces the backend PR save error verbatim", async () => {
@@ -877,7 +1405,7 @@ describe("PurchaseOrderDialog", () => {
 				})
 			return {}
 		})
-		await button(wrapper, "Save Draft").trigger("click")
+		await wrapper.find('[data-testid="receive-save"]').trigger("click")
 		await flushPromises()
 
 		expect(mocks.toast.error).toHaveBeenCalledWith(
@@ -885,5 +1413,4 @@ describe("PurchaseOrderDialog", () => {
 		)
 		expect(mocks.toast.success).not.toHaveBeenCalled()
 	})
-
 })

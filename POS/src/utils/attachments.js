@@ -1,7 +1,7 @@
 import { call } from "@/utils/apiWrapper"
 
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
-export const ATTACHMENT_ACCEPT = "image/*,.pdf"
+export const ATTACHMENT_ACCEPT = "image/*,.pdf,.xlsx,.xls,.csv"
 
 export function formatBytes(bytes) {
 	const n = Number(bytes || 0)
