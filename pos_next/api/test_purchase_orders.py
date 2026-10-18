@@ -11,6 +11,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, getdate, nowdate
 
 from pos_next.api.purchase_orders import (
+	attach_purchase_files,
 	cancel_purchase_order,
 	get_po_defaults,
 	get_purchase_item_details,
@@ -84,6 +85,27 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		supplier_group = frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
 		if not supplier_group:
 			raise unittest.SkipTest("no leaf Supplier Group on this site")
+
+		cls.other_co = None
+		for candidate in frappe.get_all(
+			"Company",
+			filters={
+				"name": ("!=", cls.company),
+				"default_currency": frappe.db.get_value("Company", cls.company, "default_currency"),
+			},
+			pluck="name",
+			order_by="creation",
+		):
+			if not frappe.get_all(
+				"Supplier",
+				filters={"is_internal_supplier": 1, "represents_company": candidate},
+				pluck="name",
+			):
+				cls.other_co = candidate
+				break
+		if not cls.other_co:
+			cls.other_co = frappe.db.get_value("Company", {"name": ("!=", cls.company)}, "name")
+
 		cls.supplier_name = f"PO Proxy Supplier {cls._uniq()}"
 		cls.supplier = (
 			frappe.get_doc(
@@ -91,7 +113,22 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 					"doctype": "Supplier",
 					"supplier_name": cls.supplier_name,
 					"supplier_group": supplier_group,
+					"is_internal_supplier": 1,
+					"represents_company": cls.other_co,
+					"companies": [{"company": cls.company}],
 					**({"default_price_list": cls.price_list} if cls.price_list else {}),
+				}
+			)
+			.insert()
+			.name
+		)
+		cls.ext_supplier_name = f"PO Ext Supplier {cls._uniq()}"
+		cls.ext_supplier = (
+			frappe.get_doc(
+				{
+					"doctype": "Supplier",
+					"supplier_name": cls.ext_supplier_name,
+					"supplier_group": supplier_group,
 				}
 			)
 			.insert()
@@ -172,6 +209,18 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		cls.user = f"po.proxy.{cls._uniq()}@example.com"
 		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PO Proxy Tester"}).insert()
 
+		cls.cashier_user = f"po.cashier.{cls._uniq()}@example.com"
+		cashier = frappe.get_doc(
+			{"doctype": "User", "email": cls.cashier_user, "first_name": "PO Cashier Tester"}
+		).insert()
+		cashier.add_roles("Purchase User", "Stock User")
+
+		cls.manager_user = f"po.manager.{cls._uniq()}@example.com"
+		manager = frappe.get_doc(
+			{"doctype": "User", "email": cls.manager_user, "first_name": "PO Manager Tester"}
+		).insert()
+		manager.add_roles("Purchase User", "Stock User", "POSNext Manager")
+
 		cls.tax_template = None
 		tax_account = frappe.db.get_value(
 			"Account", {"company": cls.company, "account_type": "Tax", "is_group": 0, "disabled": 0}, "name"
@@ -237,7 +286,10 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 			("Custom Field", getattr(cls, "uom_field", None) if getattr(cls, "owns_uom_field", False) else None),
 			("UOM", getattr(cls, "uom_box", None)),
 			("Supplier", getattr(cls, "supplier", None)),
+			("Supplier", getattr(cls, "ext_supplier", None)),
 			("User", getattr(cls, "user", None)),
+			("User", getattr(cls, "cashier_user", None)),
+			("User", getattr(cls, "manager_user", None)),
 			("Fiscal Year", getattr(cls, "fiscal_year", None)),
 		]:
 			if name and frappe.db.exists(doctype, name):
@@ -404,7 +456,13 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		summary = get_purchase_order(name)
 		self.assertEqual(summary["name"], name)
 		self.assertEqual(summary["supplier"], self.supplier)
+		self.assertIn("per_received", summary)
+		self.assertEqual(flt(summary["per_received"]), 0)
+		self.assertIn("delivery_ready", summary)
+		self.assertFalse(summary["delivery_ready"])
 		self.assertEqual(len(summary["items"]), 1)
+		self.assertIn("received_qty", summary["items"][0])
+		self.assertEqual(flt(summary["items"][0]["received_qty"]), 0)
 
 	def test_list_and_search_find_purchase_orders(self):
 		name = self._save()["name"]
@@ -687,3 +745,280 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				cancel_purchase_order(name)
 		finally:
 			frappe.set_user(ADMIN)
+
+	def test_list_excludes_external_suppliers(self):
+		internal_po = self._save()["name"]
+		ext_po = frappe.get_doc(
+			{
+				"doctype": "Purchase Order",
+				"supplier": self.ext_supplier,
+				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"schedule_date": add_days(nowdate(), 1),
+				"set_warehouse": self.warehouse,
+				"items": [{"item_code": self.item, "qty": 1, "rate": 20, "warehouse": self.warehouse}],
+			}
+		)
+		ext_po.set_missing_values()
+		ext_po.insert()
+		self.pos.append(ext_po.name)
+
+		orders = get_purchase_orders()["orders"]
+		order_names = [o["name"] for o in orders]
+		self.assertIn(internal_po, order_names)
+		self.assertNotIn(ext_po.name, order_names)
+
+	def test_get_external_po_refused(self):
+		ext_po = frappe.get_doc(
+			{
+				"doctype": "Purchase Order",
+				"supplier": self.ext_supplier,
+				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"schedule_date": add_days(nowdate(), 1),
+				"set_warehouse": self.warehouse,
+				"items": [{"item_code": self.item, "qty": 1, "rate": 20, "warehouse": self.warehouse}],
+			}
+		)
+		ext_po.set_missing_values()
+		ext_po.insert()
+		self.pos.append(ext_po.name)
+
+		with self.assertRaises(ValidationError) as ctx:
+			get_purchase_order(ext_po.name)
+		self.assertIn("external supplier", str(ctx.exception))
+
+	def test_external_po_mutations_refused(self):
+		ext_po = frappe.get_doc(
+			{
+				"doctype": "Purchase Order",
+				"supplier": self.ext_supplier,
+				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"schedule_date": add_days(nowdate(), 1),
+				"set_warehouse": self.warehouse,
+				"items": [{"item_code": self.item, "qty": 1, "rate": 20, "warehouse": self.warehouse}],
+			}
+		)
+		ext_po.set_missing_values()
+		ext_po.insert()
+		self.pos.append(ext_po.name)
+
+		with self.assertRaises(ValidationError) as ctx:
+			submit_purchase_order(ext_po.name)
+		self.assertIn("external supplier", str(ctx.exception))
+
+		png_base = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+		with self.assertRaises(ValidationError) as ctx:
+			attach_purchase_files(
+				"Purchase Order",
+				ext_po.name,
+				json.dumps([{"file_name": "surat.png", "filedata": png_base}]),
+			)
+		self.assertIn("external supplier", str(ctx.exception))
+
+		ext_po.submit()
+		with self.assertRaises(ValidationError) as ctx:
+			cancel_purchase_order(ext_po.name)
+		self.assertIn("external supplier", str(ctx.exception))
+
+	def test_search_suppliers_internal_only(self):
+		suppliers = search_suppliers("")["suppliers"]
+		self.assertTrue(len(suppliers) > 0)
+		for s in suppliers:
+			self.assertEqual(frappe.db.get_value("Supplier", s["name"], "is_internal_supplier"), 1)
+		self.assertNotIn(self.ext_supplier, [s["name"] for s in suppliers])
+
+	def test_save_po_external_supplier_refused(self):
+		with self.assertRaises(ValidationError) as ctx:
+			save_purchase_order(self._data(supplier=self.ext_supplier))
+		self.assertIn("external", str(ctx.exception).lower())
+
+	def test_cashier_sees_no_prices(self):
+		po_name = self._save()["name"]
+		frappe.set_user(self.cashier_user)
+		try:
+			summary = get_purchase_order(po_name)
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, summary)
+			self.assertTrue(summary["items"])
+			for item in summary["items"]:
+				for k in (
+					"rate",
+					"amount",
+					"net_total",
+					"total_taxes_and_charges",
+					"grand_total",
+					"price_list_rate",
+					"price_list",
+					"taxes_and_charges",
+					"buying_price_list",
+				):
+					self.assertNotIn(k, item)
+
+			orders = get_purchase_orders()["orders"]
+			self.assertTrue(orders)
+			for order in orders:
+				for k in (
+					"rate",
+					"amount",
+					"net_total",
+					"total_taxes_and_charges",
+					"grand_total",
+					"price_list_rate",
+					"price_list",
+					"taxes_and_charges",
+					"buying_price_list",
+				):
+					self.assertNotIn(k, order)
+
+			details = get_purchase_item_details(
+				self.priced_item or self.item, supplier=self.supplier, warehouse=self.warehouse
+			)
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, details)
+
+			defaults = get_po_defaults(self.pos_profile)
+			self.assertNotIn("price_list", defaults)
+
+			supp_details = get_supplier_details(self.supplier)
+			self.assertNotIn("buying_price_list", supp_details)
+			self.assertNotIn("taxes_and_charges", supp_details)
+
+			saved = save_purchase_order(
+				{
+					"supplier": self.supplier,
+					"company": self.company,
+					"set_warehouse": self.warehouse,
+					"items": [{"item_code": self.item, "qty": 1}],
+				}
+			)
+			self.pos.append(saved["name"])
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, saved)
+			for item in saved["items"]:
+				for k in ("rate", "amount", "price_list_rate"):
+					self.assertNotIn(k, item)
+
+			submitted = submit_purchase_order(saved["name"])
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, submitted)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_manager_sees_prices(self):
+		po_name = self._save()["name"]
+		frappe.set_user(self.manager_user)
+		try:
+			summary = get_purchase_order(po_name)
+			self.assertIn("grand_total", summary)
+			self.assertTrue(summary["items"])
+			self.assertIn("rate", summary["items"][0])
+			self.assertEqual(flt(summary["items"][0]["rate"]), 25)
+
+			orders = get_purchase_orders()["orders"]
+			matched = next(o for o in orders if o["name"] == po_name)
+			self.assertIn("grand_total", matched)
+
+			if self.priced_item:
+				details = get_purchase_item_details(
+					self.priced_item, supplier=self.supplier, warehouse=self.warehouse
+				)
+				self.assertIn("price_list_rate", details)
+				self.assertEqual(flt(details["price_list_rate"]), 10)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_cashier_tampered_po_rate_ignored(self):
+		if not self.priced_item:
+			self.skipTest("no priced item fixture")
+		frappe.set_user(self.cashier_user)
+		try:
+			data = {
+				"supplier": self.supplier,
+				"company": self.company,
+				"set_warehouse": self.warehouse,
+				"items": [
+					{
+						"item_code": self.priced_item,
+						"qty": 1,
+						"rate": 1,
+						"warehouse": self.warehouse,
+					}
+				],
+			}
+			result = save_purchase_order(data)
+			self.pos.append(result["name"])
+		finally:
+			frappe.set_user(ADMIN)
+
+		saved_rate = frappe.db.get_value(
+			"Purchase Order Item",
+			{"parent": result["name"], "item_code": self.priced_item},
+			"rate",
+		)
+		self.assertEqual(flt(saved_rate), 10)
+
+	def test_cashier_tampered_tax_template_ignored(self):
+		frappe.set_user(self.cashier_user)
+		try:
+			data = {
+				"supplier": self.supplier,
+				"company": self.company,
+				"set_warehouse": self.warehouse,
+				"taxes_and_charges": self.tax_template or "Tampered Tax Template",
+				"items": [{"item_code": self.item, "qty": 1, "warehouse": self.warehouse}],
+			}
+			result = save_purchase_order(data)
+			self.pos.append(result["name"])
+		finally:
+			frappe.set_user(ADMIN)
+
+		saved_template = frappe.db.get_value(
+			"Purchase Order",
+			result["name"],
+			"taxes_and_charges",
+		)
+		self.assertNotEqual(saved_template, "Tampered Tax Template")
+		if self.tax_template:
+			self.assertNotEqual(saved_template, self.tax_template)

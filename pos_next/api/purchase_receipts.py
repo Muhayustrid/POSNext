@@ -5,11 +5,15 @@ import frappe
 from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 from erpnext.stock.doctype.delivery_note.delivery_note import make_inter_company_purchase_receipt
 from frappe import _
+from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name
 from frappe.utils import cint, flt, nowdate
 
 from pos_next.api.purchase_orders import (
+	_assert_internal,
 	_attachment_counts,
+	_can_see_prices,
 	_check_guest,
+	_hide_prices,
 	_parse,
 	_profile_value,
 	_resolve_company,
@@ -46,34 +50,36 @@ def _refuse_internal_suppliers(suppliers):
 
 def _draft_payload(pr, po, po_items):
 	"""Shape shared by both receive drafts (PO-sourced and DN-sourced)."""
-	return {
-		"supplier": pr.supplier,
-		"supplier_name": pr.supplier_name,
-		"posting_date": pr.posting_date or nowdate(),
-		"company": pr.company or po.company,
-		"currency": pr.currency or po.currency,
-		"set_warehouse": pr.set_warehouse or po.set_warehouse,
-		"items": [
-			{
-				"item_code": row.item_code,
-				"item_name": row.item_name,
-				"purchase_order": row.purchase_order,
-				"purchase_order_item": row.purchase_order_item,
-				"delivery_note_item": row.delivery_note_item,
-				"ordered_qty": flt(po_items[row.purchase_order_item].qty)
-				if row.purchase_order_item in po_items
-				else flt(row.qty),
-				"received_qty": flt(po_items[row.purchase_order_item].received_qty)
-				if row.purchase_order_item in po_items
-				else 0,
-				"pending_qty": flt(row.qty),
-				"uom": row.uom,
-				"rate": row.rate,
-				"warehouse": row.warehouse,
-			}
-			for row in pr.items
-		],
-	}
+	return _hide_prices(
+		{
+			"supplier": pr.supplier,
+			"supplier_name": pr.supplier_name,
+			"posting_date": pr.posting_date or nowdate(),
+			"company": pr.company or po.company,
+			"currency": pr.currency or po.currency,
+			"set_warehouse": pr.set_warehouse or po.set_warehouse,
+			"items": [
+				{
+					"item_code": row.item_code,
+					"item_name": row.item_name,
+					"purchase_order": row.purchase_order,
+					"purchase_order_item": row.purchase_order_item,
+					"delivery_note_item": row.delivery_note_item,
+					"ordered_qty": flt(po_items[row.purchase_order_item].qty)
+					if row.purchase_order_item in po_items
+					else flt(row.qty),
+					"received_qty": flt(po_items[row.purchase_order_item].received_qty)
+					if row.purchase_order_item in po_items
+					else 0,
+					"pending_qty": flt(row.qty),
+					"uom": row.uom,
+					"rate": row.rate,
+					"warehouse": row.warehouse,
+				}
+				for row in pr.items
+			],
+		}
+	)
 
 
 @frappe.whitelist()
@@ -145,42 +151,91 @@ def get_intercompany_receipt_draft(po_name):
 	frappe.throw(no_pending)
 
 
+def _pr_workflow():
+	"""Active Purchase Receipt workflow doc, or None when none is active."""
+	if not get_workflow_name("Purchase Receipt"):
+		return None
+	return get_workflow("Purchase Receipt")
+
+
+def _submit_actions(doc):
+	"""Actions the user may apply to submit, from the initial state only."""
+	wf = _pr_workflow()
+	if not wf or doc.is_new() or doc.get("workflow_state") != wf.states[0].state:
+		return []
+	return [transition["action"] for transition in get_transitions(doc)]
+
+
+def _submit_pr(doc, action=None):
+	wf = _pr_workflow()
+	if not wf:
+		doc.submit()
+		return
+	actions = _submit_actions(doc)
+	if not actions:
+		frappe.throw(_("You have no action available on {0}").format(doc.name), frappe.ValidationError)
+	if action:
+		if action not in actions:
+			frappe.throw(
+				_("{0} is not a valid action for {1}").format(action, doc.name), frappe.ValidationError
+			)
+	elif len(actions) == 1:
+		action = actions[0]
+	else:
+		frappe.throw(_("Choose an action: {0}").format(", ".join(actions)), frappe.ValidationError)
+	apply_workflow(doc, action)
+	doc.reload()
+
+
 def _pr_summary(doc):
 	"""Shape shared by every mutating/reading method."""
 	from pos_next.api.purchase_orders import _attachments_summary
 
 	attachments = _attachments_summary("Purchase Receipt", doc.name)
-	return {
-		"name": doc.name,
-		"docstatus": doc.docstatus,
-		"status": doc.status,
-		"supplier": doc.supplier,
-		"supplier_name": doc.supplier_name,
-		"posting_date": doc.posting_date,
-		"company": doc.company,
-		"set_warehouse": doc.set_warehouse,
-		"currency": doc.currency,
-		"net_total": doc.net_total,
-		"grand_total": doc.grand_total,
-		"per_billed": doc.per_billed,
-		"attachments": attachments,
-		"attachment_count": len(attachments),
-		"items": [
-			{
-				"name": row.name,
-				"item_code": row.item_code,
-				"item_name": row.item_name,
-				"qty": row.qty,
-				"uom": row.uom,
-				"rate": row.rate,
-				"amount": row.amount,
-				"warehouse": row.warehouse,
-				"purchase_order": row.purchase_order,
-				"purchase_order_item": row.purchase_order_item,
-			}
-			for row in doc.items
-		],
-	}
+	wf = _pr_workflow()
+	initial_state = wf.states[0].state if wf else None
+	editable = cint(doc.docstatus) == 0 and (wf is None or doc.get("workflow_state") == initial_state)
+	purchase_orders = sorted(
+		{row.purchase_order for row in doc.items if getattr(row, "purchase_order", None)}
+	)
+	return _hide_prices(
+		{
+			"name": doc.name,
+			"docstatus": doc.docstatus,
+			"status": doc.status,
+			"workflow_state": doc.get("workflow_state"),
+			"submit_actions": _submit_actions(doc),
+			"editable": editable,
+			"inter_company_reference": doc.get("inter_company_reference"),
+			"purchase_orders": purchase_orders,
+			"supplier": doc.supplier,
+			"supplier_name": doc.supplier_name,
+			"posting_date": doc.posting_date,
+			"company": doc.company,
+			"set_warehouse": doc.set_warehouse,
+			"currency": doc.currency,
+			"net_total": doc.net_total,
+			"grand_total": doc.grand_total,
+			"per_billed": doc.per_billed,
+			"attachments": attachments,
+			"attachment_count": len(attachments),
+			"items": [
+				{
+					"name": row.name,
+					"item_code": row.item_code,
+					"item_name": row.item_name,
+					"qty": row.qty,
+					"uom": row.uom,
+					"rate": row.rate,
+					"amount": row.amount,
+					"warehouse": row.warehouse,
+					"purchase_order": row.purchase_order,
+					"purchase_order_item": row.purchase_order_item,
+				}
+				for row in doc.items
+			],
+		}
+	)
 
 
 @frappe.whitelist()
@@ -201,6 +256,7 @@ def save_purchase_receipt(data, submit=0):
 	if name:
 		doc = frappe.get_doc("Purchase Receipt", name)
 		_check_permission("write", doc=doc)
+		_assert_internal(doc)
 		if doc.docstatus != 0:
 			frappe.throw(_("Only a Draft Purchase Receipt can be edited"))
 	else:
@@ -228,33 +284,64 @@ def save_purchase_receipt(data, submit=0):
 
 	doc.supplier = data.get("supplier")
 	doc.posting_date = data.get("posting_date") or nowdate()
-	doc.company = data.get("company") or _resolve_company()
+	company = data.get("company") or _resolve_company()
+	doc.company = company
 	if data.get("set_warehouse"):
 		doc.set_warehouse = data.get("set_warehouse")
-	if data.get("currency"):
-		doc.currency = data.get("currency")
+	currency = data.get("currency") or (
+		frappe.get_cached_value("Company", company, "default_currency") if company else None
+	)
+	if currency:
+		doc.currency = currency
 	if data.get("conversion_rate"):
 		doc.conversion_rate = flt(data.get("conversion_rate"))
 	if data.get("inter_company_reference"):
 		# keeps the DN <-> PR cross-links alive on the POS-saved draft
 		doc.inter_company_reference = data.get("inter_company_reference")
 
+	dn_item_ids = [row.get("delivery_note_item") for row in items if row.get("delivery_note_item")]
+	po_item_ids = [row.get("purchase_order_item") for row in items if row.get("purchase_order_item")]
+	dn_rates = {}
+	if dn_item_ids:
+		dn_rates = dict(
+			frappe.get_all(
+				"Delivery Note Item",
+				filters={"name": ("in", dn_item_ids)},
+				fields=["name", "rate"],
+				as_list=True,
+			)
+		)
+	po_rates = {}
+	if po_item_ids:
+		po_rates = dict(
+			frappe.get_all(
+				"Purchase Order Item",
+				filters={"name": ("in", po_item_ids)},
+				fields=["name", "rate"],
+				as_list=True,
+			)
+		)
+
 	doc.set("items", [])
 	for row in items:
 		_validate_row_uom(row.get("item_code"), row.get("uom"))
-		doc.append(
-			"items",
-			{
-				"item_code": row.get("item_code"),
-				"qty": flt(row.get("qty")),
-				"rate": row.get("rate"),
-				"uom": row.get("uom"),
-				"warehouse": row.get("warehouse") or data.get("set_warehouse"),
-				"purchase_order": row.get("purchase_order"),
-				"purchase_order_item": row.get("purchase_order_item"),
-				"delivery_note_item": row.get("delivery_note_item"),
-			},
-		)
+		rate = None
+		if row.get("delivery_note_item") and row.get("delivery_note_item") in dn_rates:
+			rate = dn_rates[row["delivery_note_item"]]
+		elif row.get("purchase_order_item") and row.get("purchase_order_item") in po_rates:
+			rate = po_rates[row["purchase_order_item"]]
+		item_dict = {
+			"item_code": row.get("item_code"),
+			"qty": flt(row.get("qty")),
+			"uom": row.get("uom"),
+			"warehouse": row.get("warehouse") or data.get("set_warehouse"),
+			"purchase_order": row.get("purchase_order"),
+			"purchase_order_item": row.get("purchase_order_item"),
+			"delivery_note_item": row.get("delivery_note_item"),
+		}
+		if rate is not None:
+			item_dict["rate"] = rate
+		doc.append("items", item_dict)
 
 	# expand item details (uom/conversion factor/rate/accounts) + currency
 	# before validate() — a missing supplier lets PR validate throw natively
@@ -264,14 +351,14 @@ def save_purchase_receipt(data, submit=0):
 	else:
 		doc.insert()
 	if cint(submit):
-		doc.submit()
+		_submit_pr(doc)
 	return _pr_summary(doc)
 
 
 @frappe.whitelist()
 def get_purchase_receipts(pos_profile=None, status=None, search_term=None, limit=50):
 	_check_guest()
-	filters = []
+	filters = [["is_internal_supplier", "=", 1]]
 	company = _profile_value(pos_profile, "company")
 	if company:
 		filters.append(["company", "=", company])
@@ -281,30 +368,36 @@ def get_purchase_receipts(pos_profile=None, status=None, search_term=None, limit
 	if search_term:
 		term = f"%{search_term.strip()}%"
 		or_filters = [["name", "like", term], ["supplier", "like", term], ["supplier_name", "like", term]]
+	fields = [
+		"name",
+		"supplier",
+		"supplier_name",
+		"posting_date",
+		"status",
+		"docstatus",
+		"grand_total",
+		"currency",
+		"per_billed",
+		"company",
+		"modified",
+	]
+	has_wf_field = frappe.get_meta("Purchase Receipt").has_field("workflow_state")
+	if has_wf_field:
+		fields.append("workflow_state")
 	receipts = frappe.get_list(
 		"Purchase Receipt",
 		filters=filters,
 		or_filters=or_filters,
-		fields=[
-			"name",
-			"supplier",
-			"supplier_name",
-			"posting_date",
-			"status",
-			"docstatus",
-			"grand_total",
-			"currency",
-			"per_billed",
-			"company",
-			"modified",
-		],
+		fields=fields,
 		order_by="modified desc",
 		limit_page_length=cint(limit) or 50,
 	)
 	counts = _attachment_counts("Purchase Receipt", [r["name"] for r in receipts])
 	for receipt in receipts:
 		receipt["attachment_count"] = counts.get(receipt["name"], 0)
-	return {"receipts": receipts}
+		if not has_wf_field:
+			receipt["workflow_state"] = None
+	return _hide_prices({"receipts": receipts})
 
 
 @frappe.whitelist()
@@ -312,6 +405,7 @@ def cancel_purchase_receipt(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("cancel", doc=doc)
+	_assert_internal(doc)
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted Purchase Receipt can be cancelled"))
 	doc.cancel()
@@ -323,4 +417,17 @@ def get_purchase_receipt(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("read", doc=doc)
+	_assert_internal(doc)
+	return _pr_summary(doc)
+
+
+@frappe.whitelist()
+def submit_purchase_receipt(name, action=None):
+	_check_guest()
+	doc = frappe.get_doc("Purchase Receipt", name)
+	_check_permission("submit", doc=doc)
+	if doc.docstatus != 0:
+		frappe.throw(_("Only a Draft Purchase Receipt can be submitted"))
+	_assert_internal(doc)
+	_submit_pr(doc, action=action)
 	return _pr_summary(doc)

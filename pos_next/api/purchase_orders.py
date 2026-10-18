@@ -25,6 +25,48 @@ def _check_permission(perm, doc=None):
 		frappe.throw(_("No {0} permission on Purchase Order").format(_(perm)), frappe.PermissionError)
 
 
+def _assert_internal(doc):
+	if not cint(doc.is_internal_supplier):
+		frappe.throw(
+			_("{0} {1} is from an external supplier. Open it in ERPNext.").format(doc.doctype, doc.name),
+			frappe.ValidationError,
+		)
+
+
+PRICE_FIELDS = (
+	"rate",
+	"amount",
+	"net_total",
+	"total_taxes_and_charges",
+	"grand_total",
+	"price_list_rate",
+	"price_list",
+	"taxes_and_charges",
+	"buying_price_list",
+)
+
+
+def _can_see_prices():
+	if frappe.session.user == "Administrator":
+		return True
+	user_roles = set(frappe.get_roles(frappe.session.user))
+	return bool(user_roles & {"POSNext Manager", "System Manager"})
+
+
+def _hide_prices(payload: dict) -> dict:
+	if not payload or _can_see_prices():
+		return payload
+	if isinstance(payload, dict):
+		for k in PRICE_FIELDS:
+			payload.pop(k, None)
+		for key in ("items", "orders", "receipts"):
+			for row in payload.get(key) or []:
+				if isinstance(row, dict):
+					for k in PRICE_FIELDS:
+						row.pop(k, None)
+	return payload
+
+
 def _parse(value):
 	"""Whitelisted list/dict args arrive as JSON strings."""
 	if not isinstance(value, str):
@@ -56,18 +98,20 @@ def get_po_defaults(pos_profile=None):
 	_check_guest()
 	_check_permission("read")
 	supplier = _po_setting(pos_profile, "po_default_supplier")
-	return {
-		"supplier": supplier,
-		"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name") if supplier else None,
-		"warehouse": _po_setting(pos_profile, "po_default_warehouse")
-		or _profile_value(pos_profile, "warehouse"),
-		# buying price list for POS Purchase Orders; empty = the supplier's own
-		# default applies (native set_missing_values)
-		"price_list": _po_setting(pos_profile, "po_default_price_list"),
-		# when on, the POS hides the Receive button until a pending Delivery
-		# Note exists for the order (intercompany flow)
-		"receive_requires_delivery_note": cint(_po_setting(pos_profile, "po_receive_requires_delivery_note")),
-	}
+	return _hide_prices(
+		{
+			"supplier": supplier,
+			"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name") if supplier else None,
+			"warehouse": _po_setting(pos_profile, "po_default_warehouse")
+			or _profile_value(pos_profile, "warehouse"),
+			# buying price list for POS Purchase Orders; empty = the supplier's own
+			# default applies (native set_missing_values)
+			"price_list": _po_setting(pos_profile, "po_default_price_list"),
+			# when on, the POS hides the Receive button until a pending Delivery
+			# Note exists for the order (intercompany flow)
+			"receive_requires_delivery_note": cint(_po_setting(pos_profile, "po_receive_requires_delivery_note")),
+		}
+	)
 
 
 def _resolve_company(pos_profile=None):
@@ -86,7 +130,7 @@ def search_suppliers(search_term=None, limit=20):
 	return {
 		"suppliers": frappe.get_list(
 			"Supplier",
-			filters={"disabled": 0},
+			filters={"disabled": 0, "is_internal_supplier": 1},
 			or_filters=[["name", "like", term], ["supplier_name", "like", term]],
 			fields=["name", "supplier_name", "supplier_group"],
 			order_by="supplier_name asc",
@@ -123,12 +167,14 @@ def get_supplier_details(supplier, pos_profile=None):
 		company=_resolve_company(pos_profile),
 		doctype="Purchase Order",
 	)
-	return {
-		"supplier_name": details.get("supplier_name"),
-		"currency": details.get("currency"),
-		"buying_price_list": details.get("buying_price_list"),
-		"taxes_and_charges": details.get("taxes_and_charges"),
-	}
+	return _hide_prices(
+		{
+			"supplier_name": details.get("supplier_name"),
+			"currency": details.get("currency"),
+			"buying_price_list": details.get("buying_price_list"),
+			"taxes_and_charges": details.get("taxes_and_charges"),
+		}
+	)
 
 
 def _default_purchase_uom(item_code, stock_uom):
@@ -195,19 +241,21 @@ def get_purchase_item_details(
 		fields=["uom", "conversion_factor"],
 		order_by="idx",
 	)
-	return {
-		"item_code": details.get("item_code"),
-		"item_name": details.get("item_name"),
-		"uom": details.get("uom"),
-		"stock_uom": details.get("stock_uom"),
-		# what a fresh row should default to when the cashier sent no pick
-		"default_uom": chosen_uom or stock_uom,
-		"uoms": [{"uom": d.uom, "conversion_factor": d.conversion_factor} for d in item_uoms],
-		"conversion_factor": details.get("conversion_factor"),
-		"price_list_rate": details.get("price_list_rate"),
-		"rate": details.get("rate"),
-		"warehouse": details.get("warehouse"),
-	}
+	return _hide_prices(
+		{
+			"item_code": details.get("item_code"),
+			"item_name": details.get("item_name"),
+			"uom": details.get("uom"),
+			"stock_uom": details.get("stock_uom"),
+			# what a fresh row should default to when the cashier sent no pick
+			"default_uom": chosen_uom or stock_uom,
+			"uoms": [{"uom": d.uom, "conversion_factor": d.conversion_factor} for d in item_uoms],
+			"conversion_factor": details.get("conversion_factor"),
+			"price_list_rate": details.get("price_list_rate"),
+			"rate": details.get("rate"),
+			"warehouse": details.get("warehouse"),
+		}
+	)
 
 
 ATTACHMENT_DOCTYPES = ("Purchase Order", "Purchase Receipt")
@@ -227,51 +275,100 @@ def _attachments_summary(doctype, name):
 	)
 
 
+def _linked_receipts(po_name):
+	"""PRs (docstatus < 2) linked to this PO via items, newest first."""
+	if not po_name or not frappe.db.exists("Purchase Order", po_name):
+		return []
+	pr_names = frappe.get_all(
+		"Purchase Receipt Item",
+		filters={"purchase_order": po_name, "docstatus": ("<", 2)},
+		pluck="parent",
+		distinct=True,
+	)
+	if not pr_names:
+		return []
+	fields = ["name", "posting_date", "status", "docstatus"]
+	has_wf = frappe.get_meta("Purchase Receipt").has_field("workflow_state")
+	if has_wf:
+		fields.append("workflow_state")
+	receipts = frappe.get_all(
+		"Purchase Receipt",
+		filters={"name": ("in", pr_names), "docstatus": ("<", 2)},
+		fields=fields,
+		order_by="posting_date desc, creation desc",
+	)
+	if not has_wf:
+		for r in receipts:
+			r["workflow_state"] = None
+	return receipts
+
+
+def _is_delivery_ready(so_name):
+	"""True if a submitted DN row against this SO is not fully received yet."""
+	if not so_name:
+		return False
+	for row in frappe.get_all(
+		"Delivery Note Item",
+		filters={"against_sales_order": so_name, "docstatus": 1},
+		fields=["qty", "returned_qty", "received_qty"],
+	):
+		if flt(row.received_qty) < flt(row.qty) + flt(row.returned_qty):
+			return True
+	return False
+
+
 def _po_summary(doc):
 	"""Shape shared by every mutating/reading method."""
 	attachments = _attachments_summary("Purchase Order", doc.name)
-	return {
-		"name": doc.name,
-		"docstatus": doc.docstatus,
-		"status": doc.status,
-		"supplier": doc.supplier,
-		"supplier_name": doc.supplier_name,
-		"transaction_date": doc.transaction_date,
-		"schedule_date": doc.schedule_date,
-		"company": doc.company,
-		"set_warehouse": doc.set_warehouse,
-		"currency": doc.currency,
-		"net_total": doc.net_total,
-		"total_taxes_and_charges": doc.total_taxes_and_charges,
-		"taxes_and_charges": doc.taxes_and_charges,
-		"grand_total": doc.grand_total,
-		# PO v16 has no remarks field — the payload remarks ride the native terms field
-		"remarks": doc.terms,
-		# fetched from the supplier master on save; internal POs are received via
-		# the selling company's Delivery Note, not the POS receive flow
-		"is_internal_supplier": cint(doc.is_internal_supplier),
-		# v16 never backfills the PO-side field — the live link is the submitted
-		# selling-company SO carrying this PO as its inter_company_order_reference
-		"inter_company_order_reference": frappe.db.get_value(
-			"Sales Order", {"inter_company_order_reference": doc.name, "docstatus": 1}, "name"
-		),
-		"attachments": attachments,
-		"attachment_count": len(attachments),
-		"items": [
-			{
-				"name": row.name,
-				"item_code": row.item_code,
-				"item_name": row.item_name,
-				"qty": row.qty,
-				"uom": row.uom,
-				"rate": row.rate,
-				"amount": row.amount,
-				"warehouse": row.warehouse,
-				"schedule_date": row.schedule_date,
-			}
-			for row in doc.items
-		],
-	}
+	so_name = frappe.db.get_value(
+		"Sales Order", {"inter_company_order_reference": doc.name, "docstatus": 1}, "name"
+	)
+	return _hide_prices(
+		{
+			"name": doc.name,
+			"docstatus": doc.docstatus,
+			"status": doc.status,
+			"per_received": flt(doc.per_received),
+			"delivery_ready": _is_delivery_ready(so_name),
+			"supplier": doc.supplier,
+			"supplier_name": doc.supplier_name,
+			"transaction_date": doc.transaction_date,
+			"schedule_date": doc.schedule_date,
+			"company": doc.company,
+			"set_warehouse": doc.set_warehouse,
+			"currency": doc.currency,
+			"net_total": doc.net_total,
+			"total_taxes_and_charges": doc.total_taxes_and_charges,
+			"taxes_and_charges": doc.taxes_and_charges,
+			"grand_total": doc.grand_total,
+			# PO v16 has no remarks field — the payload remarks ride the native terms field
+			"remarks": doc.terms,
+			# fetched from the supplier master on save; internal POs are received via
+			# the selling company's Delivery Note, not the POS receive flow
+			"is_internal_supplier": cint(doc.is_internal_supplier),
+			# v16 never backfills the PO-side field — the live link is the submitted
+			# selling-company SO carrying this PO as its inter_company_order_reference
+			"inter_company_order_reference": so_name,
+			"attachments": attachments,
+			"attachment_count": len(attachments),
+			"receipts": _linked_receipts(doc.name),
+			"items": [
+				{
+					"name": row.name,
+					"item_code": row.item_code,
+					"item_name": row.item_name,
+					"qty": row.qty,
+					"received_qty": flt(row.received_qty),
+					"uom": row.uom,
+					"rate": row.rate,
+					"amount": row.amount,
+					"warehouse": row.warehouse,
+					"schedule_date": row.schedule_date,
+				}
+				for row in doc.items
+			],
+		}
+	)
 
 
 def _validate_row_uom(item_code, uom):
@@ -301,8 +398,14 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	_check_guest()
 	data = _parse(data) or {}
 	# payload first, then the profile's POS Settings default supplier
-	if not data.get("supplier") and not _po_setting(pos_profile, "po_default_supplier"):
+	supplier = data.get("supplier") or _po_setting(pos_profile, "po_default_supplier")
+	if not supplier:
 		frappe.throw(_("Supplier is required"))
+	if not cint(frappe.db.get_value("Supplier", supplier, "is_internal_supplier")):
+		frappe.throw(
+			_("Supplier {0} is external. Use ERPNext for external purchases.").format(supplier),
+			frappe.ValidationError,
+		)
 	items = _parse(data.get("items")) or []
 	if not items:
 		frappe.throw(_("At least one item is required"))
@@ -311,6 +414,7 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	if name:
 		doc = frappe.get_doc("Purchase Order", name)
 		_check_permission("write", doc=doc)
+		_assert_internal(doc)
 		if doc.docstatus != 0:
 			frappe.throw(_("Only a Draft Purchase Order can be edited"))
 	else:
@@ -324,44 +428,47 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	)
 	schedule_date = data.get("schedule_date") or add_days(nowdate(), 1)
 
-	doc.supplier = data.get("supplier") or _po_setting(pos_profile, "po_default_supplier")
+	company = data.get("company") or _resolve_company(pos_profile)
+	doc.supplier = supplier
 	doc.transaction_date = data.get("transaction_date") or nowdate()
 	doc.schedule_date = schedule_date
-	doc.company = data.get("company") or _resolve_company(pos_profile)
+	doc.company = company
 	if set_warehouse:
 		doc.set_warehouse = set_warehouse
 	if data.get("currency"):
 		doc.currency = data.get("currency")
 	if data.get("conversion_rate"):
 		doc.conversion_rate = flt(data.get("conversion_rate"))
-	if "taxes_and_charges" in data:
+	doc.terms = data.get("remarks")
+	can_price = _can_see_prices()
+	if can_price and "taxes_and_charges" in data:
 		# full payload: present-but-empty explicitly clears the template, so the
 		# dialog's remove-tax action works — set_missing_values only expands rows
 		# for a truthy template, so a cleared template stays clear through save
 		doc.taxes_and_charges = data.get("taxes_and_charges") or None
 		if not doc.taxes_and_charges:
 			doc.set("taxes", [])
-	doc.terms = data.get("remarks")
 	# explicit price list wins over the supplier's own default; set before
 	# set_missing_values so the native fill respects it
-	buying_price_list = data.get("buying_price_list") or _po_setting(pos_profile, "po_default_price_list")
+	buying_price_list = (
+		data.get("buying_price_list") if can_price else None
+	) or _po_setting(pos_profile, "po_default_price_list")
 	if buying_price_list:
 		doc.buying_price_list = buying_price_list
 
 	doc.set("items", [])
 	for row in items:
 		_validate_row_uom(row.get("item_code"), row.get("uom"))
-		doc.append(
-			"items",
-			{
-				"item_code": row.get("item_code"),
-				"qty": flt(row.get("qty")),
-				"rate": row.get("rate"),
-				"uom": row.get("uom"),
-				"warehouse": row.get("warehouse") or set_warehouse,
-				"schedule_date": row.get("schedule_date") or schedule_date,
-			},
-		)
+		item_dict = {
+			"item_code": row.get("item_code"),
+			"qty": flt(row.get("qty")),
+			"uom": row.get("uom"),
+			"warehouse": row.get("warehouse") or set_warehouse,
+			"schedule_date": row.get("schedule_date") or schedule_date,
+		}
+		if can_price and "rate" in row and row.get("rate") is not None:
+			item_dict["rate"] = row.get("rate")
+		doc.append("items", item_dict)
 
 	# expand tax template + item details before validate() (validate's
 	# set_missing_values(for_validate=True) never expands taxes)
@@ -378,14 +485,16 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 @frappe.whitelist()
 def get_purchase_order(name):
 	_check_guest()
-	_check_permission("read", doc=name)
-	return _po_summary(frappe.get_doc("Purchase Order", name))
+	doc = frappe.get_doc("Purchase Order", name)
+	_check_permission("read", doc=doc)
+	_assert_internal(doc)
+	return _po_summary(doc)
 
 
 @frappe.whitelist()
 def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=50):
 	_check_guest()
-	filters = []
+	filters = [["is_internal_supplier", "=", 1]]
 	company = _profile_value(pos_profile, "company")
 	if company:
 		filters.append(["company", "=", company])
@@ -448,7 +557,7 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 	counts = _attachment_counts("Purchase Order", [o["name"] for o in orders])
 	for order in orders:
 		order["attachment_count"] = counts.get(order["name"], 0)
-	return {"orders": orders}
+	return _hide_prices({"orders": orders})
 
 
 def _attachment_counts(doctype, names):
@@ -472,6 +581,7 @@ def submit_purchase_order(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("submit", doc=doc)
+	_assert_internal(doc)
 	if doc.docstatus != 0:
 		frappe.throw(_("Only a Draft Purchase Order can be submitted"))
 	doc.submit()
@@ -483,6 +593,7 @@ def cancel_purchase_order(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("cancel", doc=doc)
+	_assert_internal(doc)
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted Purchase Order can be cancelled"))
 	# the live PO↔SO link lives on the selling-company SO side in v16 — a
@@ -514,7 +625,9 @@ def attach_purchase_files(doctype, name, files):
 	if doctype not in ATTACHMENT_DOCTYPES:
 		frappe.throw(_("Attachments are only supported on Purchase Order and Purchase Receipt"))
 	doc = frappe.get_doc(doctype, name)
-	_check_permission("write", doc=doc)
+	if not frappe.has_permission(doctype, "write", doc=doc):
+		frappe.throw(_("No {0} permission on {1}").format(_("write"), doctype), frappe.PermissionError)
+	_assert_internal(doc)
 	parsed = _parse(files) or []
 	if not parsed:
 		frappe.throw(_("At least one file is required"))

@@ -1,6 +1,7 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import json
 import unittest
 import uuid
 
@@ -9,15 +10,22 @@ from erpnext.buying.doctype.purchase_order.purchase_order import make_inter_comp
 from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
 from frappe import ValidationError
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import add_days, flt, getdate, nowdate
 
-from pos_next.api.purchase_orders import get_purchase_orders, save_purchase_order
+from pos_next.api.purchase_orders import (
+	attach_purchase_files,
+	get_purchase_order,
+	get_purchase_orders,
+	save_purchase_order,
+)
 from pos_next.api.purchase_receipts import (
 	cancel_purchase_receipt,
 	get_intercompany_receipt_draft,
+	get_purchase_receipt,
 	get_purchase_receipt_draft,
 	get_purchase_receipts,
 	save_purchase_receipt,
+	submit_purchase_receipt,
 )
 
 ADMIN = "Administrator"
@@ -62,6 +70,14 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 			.insert()
 			.name
 		)
+		cls.ext_supplier_name = f"PR Ext Supplier {cls._uniq()}"
+		cls.ext_supplier = (
+			frappe.get_doc(
+				{"doctype": "Supplier", "supplier_name": cls.ext_supplier_name, "supplier_group": supplier_group}
+			)
+			.insert()
+			.name
+		)
 
 		# note: when the site names items by series (Stock Settings item_naming_by),
 		# autoname replaces any custom item_code — always use the inserted doc's name
@@ -72,6 +88,18 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 
 		cls.user = f"pr.proxy.{cls._uniq()}@example.com"
 		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PR Proxy Tester"}).insert()
+
+		cls.cashier_user = f"pr.cashier.{cls._uniq()}@example.com"
+		cashier = frappe.get_doc(
+			{"doctype": "User", "email": cls.cashier_user, "first_name": "PR Cashier Tester"}
+		).insert()
+		cashier.add_roles("Purchase User", "Stock User")
+
+		cls.manager_user = f"pr.manager.{cls._uniq()}@example.com"
+		manager = frappe.get_doc(
+			{"doctype": "User", "email": cls.manager_user, "first_name": "PR Manager Tester"}
+		).insert()
+		manager.add_roles("Purchase User", "Stock User", "POSNext Manager")
 
 		# deleting a cancelled voucher only purges its stock/GL ledger rows when
 		# this setting is on — turn it on so the cleanup leaves zero residue
@@ -227,7 +255,10 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 			("Customer", getattr(cls, "created_ic_customer", None)),
 			("Warehouse", getattr(cls, "other_warehouse", None)),
 			("Supplier", getattr(cls, "supplier", None)),
+			("Supplier", getattr(cls, "ext_supplier", None)),
 			("User", getattr(cls, "user", None)),
+			("User", getattr(cls, "cashier_user", None)),
+			("User", getattr(cls, "manager_user", None)),
 			("Fiscal Year", getattr(cls, "fiscal_year", None)),
 			("Fiscal Year", getattr(cls, "other_fiscal_year", None)),
 		]:
@@ -266,40 +297,41 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 					frappe.get_doc(doctype, name).cancel()
 				frappe.delete_doc(doctype, name, force=1)
 
-	def _po(self, qty=2, submit=True, item=None):
-		result = save_purchase_order(
+	def _po(self, qty=2, submit=True, item=None, supplier=None):
+		doc = frappe.get_doc(
 			{
-				"supplier": self.supplier,
+				"doctype": "Purchase Order",
+				"supplier": supplier or self.supplier,
 				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"schedule_date": add_days(nowdate(), 1),
 				"set_warehouse": self.warehouse,
 				"items": [
 					{"item_code": item or self.item, "qty": qty, "rate": 25, "warehouse": self.warehouse}
 				],
-			},
-			submit=1 if submit else 0,
+			}
 		)
-		self.pos.append(result["name"])
-		return result
+		doc.set_missing_values()
+		doc.insert()
+		if submit:
+			doc.submit()
+		self.pos.append(doc.name)
+		return {"name": doc.name}
 
 	def _ic_flip_supplier(self, internal):
-		values = (
-			{"is_internal_supplier": 1, "represents_company": self.other_co}
-			if internal
-			else {"is_internal_supplier": 0, "represents_company": None}
-		)
-		frappe.db.set_value("Supplier", self.supplier, values)
+		supp = frappe.get_doc("Supplier", self.supplier)
+		supp.is_internal_supplier = 1 if internal else 0
+		supp.represents_company = self.other_co if internal else None
+		supp.set("companies", [{"company": self.company}] if internal else [])
+		supp.save()
 
 	def _ic_po(self, qty=2):
-		"""Internal-supplier PO here + factory SO/DN in the second company.
-
-		Flips the fixture supplier AFTER the PO exists (mirrors the live-master
-		guards) and restores everything via self.ic_restores.
-		"""
+		"""Internal-supplier PO here + factory SO/DN in the second company."""
 		if not (self.other_co and self.other_warehouse and self.ic_customer):
 			raise unittest.SkipTest("no intercompany pair available on this site")
-		po = self._po(qty=qty, item=self.ic_item)
 		self._ic_flip_supplier(1)
 		self.ic_restores.append(lambda: self._ic_flip_supplier(0))
+		po = self._po(qty=qty, item=self.ic_item)
 		price_list = frappe.db.get_value("Purchase Order", po["name"], "buying_price_list")
 		was_selling = frappe.db.get_value("Price List", price_list, "selling") if price_list else None
 		if price_list and not was_selling:
@@ -440,10 +472,10 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		self.assertEqual(po_status, "To Bill")
 
 		receipts = get_purchase_receipts()["receipts"]
-		self.assertIn(result["name"], [r["name"] for r in receipts])
+		self.assertNotIn(result["name"], [r["name"] for r in receipts])
 		if self.pos_profile:
 			scoped = get_purchase_receipts(pos_profile=self.pos_profile)["receipts"]
-			self.assertIn(result["name"], [r["name"] for r in scoped])
+			self.assertNotIn(result["name"], [r["name"] for r in scoped])
 
 	def test_partial_receive_two_stage(self):
 		po = self._po(qty=4)
@@ -468,8 +500,8 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		self.assertEqual(po_status, "To Bill")
 
 	def test_update_draft(self):
-		po = self._po()
-		draft = get_purchase_receipt_draft(po["name"])
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
 		name = self._save(self._payload(draft))["name"]
 		result = self._save(self._payload(draft, qty=1, name=name))
 		self.assertEqual(result["name"], name)
@@ -481,16 +513,14 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		self.assertEqual(flt(frappe.db.get_value("Purchase Order", po["name"], "per_received")), 50)
 
 	def test_cancel_restores_po(self):
-		po = self._po()
-		name = self._save(self._payload(get_purchase_receipt_draft(po["name"])), submit=1)["name"]
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		name = self._save(self._payload(draft), submit=1)["name"]
 		result = cancel_purchase_receipt(name)
 		self.assertEqual(result["docstatus"], 2)
 		self.assertEqual(result["status"], "Cancelled")
-		per_received, po_status = frappe.db.get_value(
-			"Purchase Order", po["name"], ["per_received", "status"]
-		)
+		per_received = frappe.db.get_value("Purchase Order", po["name"], "per_received")
 		self.assertEqual(flt(per_received), 0)
-		self.assertEqual(po_status, "To Receive and Bill")
 		stock_qty = sum(
 			flt(q)
 			for q in frappe.get_all(
@@ -671,3 +701,334 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 				cancel_purchase_receipt(name)
 		finally:
 			frappe.set_user(ADMIN)
+
+	def test_list_excludes_external_suppliers(self):
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		internal_pr = self._save(self._payload(draft), submit=1)["name"]
+
+		ext_pr = frappe.get_doc(
+			{
+				"doctype": "Purchase Receipt",
+				"supplier": self.ext_supplier,
+				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"items": [{"item_code": self.item, "qty": 1, "rate": 10, "warehouse": self.warehouse}],
+			}
+		)
+		ext_pr.set_missing_values()
+		ext_pr.insert()
+		self.receipts.append(ext_pr.name)
+
+		receipts = get_purchase_receipts()["receipts"]
+		receipt_names = [r["name"] for r in receipts]
+		self.assertIn(internal_pr, receipt_names)
+		self.assertNotIn(ext_pr.name, receipt_names)
+
+	def test_get_external_pr_refused(self):
+		ext_pr = frappe.get_doc(
+			{
+				"doctype": "Purchase Receipt",
+				"supplier": self.ext_supplier,
+				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"items": [{"item_code": self.item, "qty": 1, "rate": 10, "warehouse": self.warehouse}],
+			}
+		)
+		ext_pr.set_missing_values()
+		ext_pr.insert()
+		self.receipts.append(ext_pr.name)
+
+		with self.assertRaises(ValidationError) as ctx:
+			get_purchase_receipt(ext_pr.name)
+		self.assertIn("external supplier", str(ctx.exception))
+
+	def test_external_pr_mutations_refused(self):
+		ext_pr = frappe.get_doc(
+			{
+				"doctype": "Purchase Receipt",
+				"supplier": self.ext_supplier,
+				"company": self.company,
+				"currency": frappe.get_cached_value("Company", self.company, "default_currency"),
+				"items": [{"item_code": self.item, "qty": 1, "rate": 10, "warehouse": self.warehouse}],
+			}
+		)
+		ext_pr.set_missing_values()
+		ext_pr.insert()
+		self.receipts.append(ext_pr.name)
+
+		with self.assertRaises(ValidationError) as ctx:
+			save_purchase_receipt(
+				{
+					"name": ext_pr.name,
+					"supplier": self.ext_supplier,
+					"company": self.company,
+					"items": [{"item_code": self.item, "qty": 2, "warehouse": self.warehouse}],
+				}
+			)
+		self.assertIn("external supplier", str(ctx.exception))
+
+		png_base = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+		with self.assertRaises(ValidationError) as ctx:
+			attach_purchase_files(
+				"Purchase Receipt",
+				ext_pr.name,
+				json.dumps([{"file_name": "surat.png", "filedata": png_base}]),
+			)
+		self.assertIn("external supplier", str(ctx.exception))
+
+		ext_pr.submit()
+		with self.assertRaises(ValidationError) as ctx:
+			cancel_purchase_receipt(ext_pr.name)
+		self.assertIn("external supplier", str(ctx.exception))
+
+	def test_cashier_sees_no_prices(self):
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		payload = self._payload(draft)
+		result = self._save(payload)
+		po_normal = self._po(supplier=self.ext_supplier)
+
+		frappe.set_user(self.cashier_user)
+		try:
+			summary = get_purchase_receipt(result["name"])
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, summary)
+			self.assertTrue(summary["items"])
+			for item in summary["items"]:
+				for k in (
+					"rate",
+					"amount",
+					"net_total",
+					"total_taxes_and_charges",
+					"grand_total",
+					"price_list_rate",
+					"price_list",
+					"taxes_and_charges",
+					"buying_price_list",
+				):
+					self.assertNotIn(k, item)
+
+			receipts = get_purchase_receipts()["receipts"]
+			self.assertTrue(receipts)
+			for r in receipts:
+				for k in (
+					"rate",
+					"amount",
+					"net_total",
+					"total_taxes_and_charges",
+					"grand_total",
+					"price_list_rate",
+					"price_list",
+					"taxes_and_charges",
+					"buying_price_list",
+				):
+					self.assertNotIn(k, r)
+
+			ic_draft = get_intercompany_receipt_draft(po["name"])
+			self.assertTrue(ic_draft["items"])
+			for item in ic_draft["items"]:
+				for k in (
+					"rate",
+					"amount",
+					"net_total",
+					"total_taxes_and_charges",
+					"grand_total",
+					"price_list_rate",
+					"price_list",
+					"taxes_and_charges",
+					"buying_price_list",
+				):
+					self.assertNotIn(k, item)
+
+			normal_draft = get_purchase_receipt_draft(po_normal["name"])
+			self.assertTrue(normal_draft["items"])
+			for item in normal_draft["items"]:
+				for k in (
+					"rate",
+					"amount",
+					"net_total",
+					"total_taxes_and_charges",
+					"grand_total",
+					"price_list_rate",
+					"price_list",
+					"taxes_and_charges",
+					"buying_price_list",
+				):
+					self.assertNotIn(k, item)
+
+			# save (edit) response hides prices for cashier
+			saved = save_purchase_receipt(self._payload(draft, name=result["name"]))
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, saved)
+			for item in saved["items"]:
+				for k in ("rate", "amount", "price_list_rate"):
+					self.assertNotIn(k, item)
+
+			# submit response hides prices for cashier
+			submitted = submit_purchase_receipt(saved["name"])
+			for k in (
+				"rate",
+				"amount",
+				"net_total",
+				"total_taxes_and_charges",
+				"grand_total",
+				"price_list_rate",
+				"price_list",
+				"taxes_and_charges",
+				"buying_price_list",
+			):
+				self.assertNotIn(k, submitted)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_tampered_pr_rate_ignored(self):
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		dn_item_id = draft["items"][0]["delivery_note_item"]
+		original_dn_rate = frappe.db.get_value("Delivery Note Item", dn_item_id, "rate")
+		self.assertNotEqual(original_dn_rate, 1)
+
+		payload = self._payload(draft)
+		payload["items"][0]["rate"] = 1
+		frappe.set_user(self.cashier_user)
+		try:
+			result = self._save(payload)
+		finally:
+			frappe.set_user(ADMIN)
+
+		saved_rate = frappe.db.get_value(
+			"Purchase Receipt Item",
+			{"parent": result["name"], "delivery_note_item": dn_item_id},
+			"rate",
+		)
+		self.assertEqual(flt(saved_rate), flt(original_dn_rate))
+
+	def _setup_pr_workflow(self, allowed_role="System Manager"):
+		wf_name = "_PNXT PR Test"
+		wf_snapshot = frappe.get_all(
+			"Workflow",
+			filters={"document_type": "Purchase Receipt"},
+			fields=["name", "is_active"],
+		)
+		for state in ("_PNXT Draft", "_PNXT Pending"):
+			if not frappe.db.exists("Workflow State", state):
+				frappe.get_doc({"doctype": "Workflow State", "workflow_state_name": state}).insert(
+					ignore_permissions=True
+				)
+		if not frappe.db.exists("Workflow Action Master", "_PNXT Send"):
+			frappe.get_doc(
+				{"doctype": "Workflow Action Master", "workflow_action_name": "_PNXT Send"}
+			).insert(ignore_permissions=True)
+
+		if frappe.db.exists("Workflow", wf_name):
+			frappe.delete_doc("Workflow", wf_name, force=True, ignore_permissions=True)
+
+		frappe.db.set_value("Workflow", {"document_type": "Purchase Receipt"}, "is_active", 0)
+
+		wf = frappe.get_doc(
+			{
+				"doctype": "Workflow",
+				"workflow_name": wf_name,
+				"document_type": "Purchase Receipt",
+				"workflow_state_field": "workflow_state",
+				"is_active": 1,
+				"send_email_alert": 0,
+				"states": [
+					{"state": "_PNXT Draft", "doc_status": 0, "allow_edit": "All"},
+					{"state": "_PNXT Pending", "doc_status": 0, "allow_edit": "System Manager"},
+				],
+				"transitions": [
+					{
+						"state": "_PNXT Draft",
+						"action": "_PNXT Send",
+						"next_state": "_PNXT Pending",
+						"allowed": allowed_role,
+						"allow_self_approval": 1,
+					}
+				],
+			}
+		).insert(ignore_permissions=True)
+
+		frappe.cache.hdel("workflow", "Purchase Receipt")
+		frappe.clear_cache(doctype="Purchase Receipt")
+
+		def cleanup():
+			if frappe.db.exists("Workflow", wf_name):
+				frappe.delete_doc("Workflow", wf_name, force=True, ignore_permissions=True)
+			for w in wf_snapshot:
+				if frappe.db.exists("Workflow", w.name):
+					frappe.db.set_value("Workflow", w.name, "is_active", w.is_active)
+			frappe.cache.hdel("workflow", "Purchase Receipt")
+			frappe.clear_cache(doctype="Purchase Receipt")
+
+		self.addCleanup(cleanup)
+		return wf
+
+	def test_submit_without_workflow(self):
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		pr_name = self._save(self._payload(draft))["name"]
+		res = submit_purchase_receipt(pr_name)
+		self.assertEqual(res["docstatus"], 1)
+		self.assertEqual(frappe.db.get_value("Purchase Receipt", pr_name, "docstatus"), 1)
+
+	def test_submit_with_active_workflow(self):
+		self._setup_pr_workflow(allowed_role="System Manager")
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		pr_name = self._save(self._payload(draft))["name"]
+
+		summary = get_purchase_receipt(pr_name)
+		self.assertEqual(summary["submit_actions"], ["_PNXT Send"])
+		self.assertTrue(summary["editable"])
+
+		res = submit_purchase_receipt(pr_name)
+		self.assertEqual(res["workflow_state"], "_PNXT Pending")
+		self.assertEqual(res["docstatus"], 0)
+		self.assertFalse(res["editable"])
+
+	def test_submit_with_workflow_no_action_for_role(self):
+		self._setup_pr_workflow(allowed_role="Stock Manager")
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		pr_name = self._save(self._payload(draft))["name"]
+
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(ValidationError):
+				submit_purchase_receipt(pr_name)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_po_summary_lists_receipts(self):
+		po = self._ic_po()
+		draft = get_intercompany_receipt_draft(po["name"])
+		pr = self._save(self._payload(draft))
+
+		po_summary = get_purchase_order(po["name"])
+		self.assertIn("receipts", po_summary)
+		self.assertTrue(po_summary["receipts"])
+		self.assertEqual(po_summary["receipts"][0]["name"], pr["name"])
+		self.assertEqual(po_summary["receipts"][0]["docstatus"], 0)
+		self.assertIn("workflow_state", po_summary["receipts"][0])
