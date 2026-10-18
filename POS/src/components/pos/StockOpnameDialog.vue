@@ -8,7 +8,9 @@
 			<!-- LIST -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-3">
-					<h3 class="text-base font-semibold text-gray-900">{{ __("Stock Opname") }}</h3>
+					<p class="text-sm text-gray-500">
+						{{ opnames.length ? __("Total: {0}", [opnames.length]) : "" }}
+					</p>
 					<div class="flex items-center gap-2">
 						<RefreshButton :loading="loading" @click="loadList()" />
 						<Button v-if="openOpname" variant="solid" @click="openDoc(openOpname.name)">
@@ -212,55 +214,57 @@
 									{{ editor.name || __("New Count") }}
 								</p>
 							</div>
-							<div class="min-w-0">
+							<div v-if="editor.workflow_state" class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Status") }}</p>
-								<span v-if="editor.workflow_state" class="inline-flex items-center gap-1.5">
+								<span class="inline-flex items-center gap-1.5">
 									<span :class="['h-2 w-2 shrink-0 rounded-full', toneClass(editor)]"></span>
 									<span class="text-sm text-gray-700">{{ editor.workflow_state }}</span>
 								</span>
 							</div>
-							<div class="min-w-0">
+							<div v-if="editor.set_warehouse" class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Warehouse") }}</p>
 								<p class="truncate text-sm text-gray-900">{{ editor.set_warehouse }}</p>
 							</div>
-							<div class="col-span-2 min-w-0">
-								<p class="text-xs text-gray-500">{{ __("Posting Date") }}</p>
+							<div class="col-span-2 min-w-0 md:col-span-3">
+								<p class="mb-1 text-xs text-gray-500">{{ __("Posting Date") }}</p>
 								<template v-if="editable">
-									<label class="mb-1 flex items-center gap-1.5 text-xs text-gray-700">
-										<input
-											v-model="editor.set_posting_time"
-											type="checkbox"
-											data-testid="posting-toggle"
-										/>
-										{{ __("Edit Posting Date and Time") }}
-									</label>
-									<div class="flex flex-wrap gap-2">
+									<div class="flex flex-wrap items-center gap-2">
 										<input
 											v-model="editor.posting_date"
 											type="date"
 											data-testid="posting-date-input"
+											:aria-label="__('Posting Date')"
 											:disabled="!editor.set_posting_time"
-											class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-400"
+											class="h-8 rounded-md border border-gray-300 px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-500"
 										/>
 										<input
 											v-model="editor.posting_time"
 											type="time"
 											data-testid="posting-time-input"
+											:aria-label="__('Posting Time')"
 											:disabled="!editor.set_posting_time"
-											class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-400"
+											class="h-8 rounded-md border border-gray-300 px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-500"
 										/>
+										<label class="ms-1 flex items-center gap-1.5 text-sm text-gray-700">
+											<input
+												v-model="editor.set_posting_time"
+												type="checkbox"
+												data-testid="posting-toggle"
+											/>
+											{{ __("Edit Posting Date and Time") }}
+										</label>
 									</div>
 								</template>
 								<p v-else class="truncate text-sm text-gray-900">
 									{{ formatDate(editor.posting_date) }} · {{ formatTime(editor.posting_time) }}
 								</p>
 							</div>
-							<div class="min-w-0">
+							<div v-if="editor.name" class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Created By") }}</p>
 								<p class="truncate text-sm text-gray-900">{{ editor.owner_fullname }}</p>
 								<p class="truncate text-xs text-gray-400">{{ formatDateTime(editor.creation) }}</p>
 							</div>
-							<div class="min-w-0">
+							<div v-if="editor.name" class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Last Modified") }}</p>
 								<p class="truncate text-sm text-gray-900">{{ editor.modified_by_fullname }}</p>
 								<p class="truncate text-xs text-gray-400">{{ formatDateTime(editor.modified) }}</p>
@@ -270,12 +274,43 @@
 
 					<!-- Items -->
 					<section class="rounded-xl border border-gray-200 bg-white">
-						<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
+						<div class="flex flex-wrap items-center justify-between gap-2 px-4 pb-3 pt-4">
+							<h4 class="text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
+							<!-- Excel tools share the section header (N4) -->
+							<div v-if="editable" data-testid="grid-toolbar" class="flex flex-wrap items-center gap-2">
+								<select
+									id="so-item-group"
+									v-model="itemGroup"
+									:aria-label="__('Item Group')"
+									:title="__('Item Group')"
+									class="h-8 rounded-md border border-gray-300 bg-white py-0 pe-8 ps-2 text-sm text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+								>
+									<option value="">{{ __("All item groups") }}</option>
+									<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
+										{{ g.item_group }}
+									</option>
+								</select>
+								<Button variant="subtle" @click="downloadTemplate">
+									<template #prefix>
+										<FeatherIcon name="download" class="h-4 w-4" />
+									</template>
+									{{ __("Download Template") }}
+								</Button>
+								<label
+									class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded bg-gray-100 px-2 text-base text-gray-800 hover:bg-gray-200"
+									:class="{ 'pointer-events-none opacity-60': importing }"
+								>
+									<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
+									<FeatherIcon name="upload" class="h-4 w-4" />
+									{{ importing ? __("Uploading...") : __("Upload") }}
+								</label>
+							</div>
+						</div>
 
 						<!-- read-only -->
 						<template v-if="!editable">
 							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_7rem_7rem] md:gap-x-3"
 							>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("UOM") }}</span>
@@ -284,10 +319,13 @@
 							<div
 								v-for="(row, idx) in editor.items"
 								:key="idx"
-								class="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_6rem_5rem] md:gap-y-0 md:py-1.5"
+								class="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_7rem_7rem] md:gap-y-0 md:py-2"
 							>
 								<div class="col-span-2 min-w-0 md:col-span-1">
-									<p class="truncate text-gray-900">{{ row.item_name || row.item_code }}</p>
+									<p class="truncate font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
+									<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
+										{{ row.item_code }}
+									</p>
 									<p v-if="row.batch_no" class="truncate text-xs text-gray-400">
 										{{ __("Batch") }}: {{ row.batch_no }}
 									</p>
@@ -300,70 +338,43 @@
 								</div>
 								<div class="min-w-0">
 									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
-									<span class="truncate text-gray-500">{{ row.uom }}</span>
+									<span class="truncate text-gray-700">{{ row.uom }}</span>
 								</div>
 								<div class="min-w-0">
 									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
 									<span class="block text-end tabular-nums">{{ row.qty }}</span>
 								</div>
 							</div>
-							<p v-if="!editor.items.length" class="px-4 py-4 text-center text-sm text-gray-500">
+							<p v-if="!editor.items.length" class="px-4 py-6 text-center text-sm text-gray-400">
 								{{ __("No items") }}
 							</p>
 						</template>
 
 						<!-- editable -->
 						<template v-else>
-							<!-- Excel tools sit above the grid (N4) -->
 							<div
-								data-testid="grid-toolbar"
-								class="flex flex-wrap items-end justify-end gap-3 border-t border-gray-200 px-4 py-3"
-							>
-								<div>
-									<label for="so-item-group" class="mb-1 block text-xs font-medium text-gray-700">
-										{{ __("Item Group") }}
-									</label>
-									<select
-										id="so-item-group"
-										v-model="itemGroup"
-										class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-									>
-										<option value="">{{ __("All item groups") }}</option>
-										<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
-											{{ g.item_group }}
-										</option>
-									</select>
-								</div>
-								<Button variant="subtle" @click="downloadTemplate">
-									<template #prefix>
-										<FeatherIcon name="download" class="h-4 w-4" />
-									</template>
-									{{ __("Download Template") }}
-								</Button>
-								<label
-									class="cursor-pointer rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-								>
-									<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
-									{{ importing ? __("Uploading...") : __("Upload") }}
-								</label>
-							</div>
-
-							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_7rem_2rem] md:gap-x-3"
 							>
 								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("Batch") }}</span>
 								<span>{{ __("UOM") }}</span>
-								<span>{{ __("Qty") }}</span>
+								<span class="text-end">{{ __("Qty") }}</span>
 								<span></span>
 							</div>
+
+							<p
+								v-if="!editor.items.length"
+								class="border-b border-gray-100 px-4 py-6 text-center text-sm text-gray-400"
+							>
+								{{ __("No Data") }}
+							</p>
 
 							<div data-testid="grid-rows">
 								<div
 									v-for="(row, idx) in editor.items"
 									:key="row.key"
-									class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_8rem_6rem_6rem_2rem] md:gap-y-0 md:py-1.5"
+									class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_7rem_2rem] md:gap-y-0 md:py-1.5"
 								>
 									<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
 
@@ -468,7 +479,7 @@
 											inputmode="decimal"
 											data-testid="qty-input"
 											:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
-											class="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											class="w-full rounded-md border border-gray-300 px-2 py-1.5 text-end text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 										/>
 									</div>
 
@@ -516,7 +527,7 @@
 									</template>
 									{{ __("Add Row") }}
 								</Button>
-								<p v-if="!editor.items.length" class="text-xs text-gray-400">
+								<p v-if="!editor.items.length" class="text-sm text-gray-500">
 									{{ __("Search and add only the items you physically counted.") }}
 								</p>
 							</div>
@@ -550,7 +561,8 @@
 							@add="attachFiles"
 							@remove="removeAttachment"
 						/>
-						<PurchaseAttachments v-else :attached="editor.attachments" />
+						<PurchaseAttachments v-else-if="editor.attachments?.length" :attached="editor.attachments" />
+						<p v-else class="text-sm text-gray-400">{{ __("No attachments") }}</p>
 						<template v-if="editable">
 							<div class="mt-3 flex gap-2">
 								<input
@@ -564,7 +576,7 @@
 									:class="linkInput && !linkOk ? 'border-red-400' : 'border-gray-300'"
 									@keyup.enter="attachLink"
 								/>
-								<Button variant="subtle" :loading="attaching" :disabled="!linkOk" @click="attachLink">
+								<Button v-if="linkInput" variant="subtle" :loading="attaching" :disabled="!linkOk" @click="attachLink">
 									<template #prefix>
 										<FeatherIcon name="link" class="h-4 w-4" />
 									</template>

@@ -373,6 +373,18 @@ describe("StockOpnameDialog doc page", () => {
 		expect(entries[2].text()).toContain("Siti Manager")
 		expect(entries[2].text()).toContain("count again")
 	})
+
+	it("hides empty metadata on a new count and shows No Data in the empty grid", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Count").trigger("click")
+		await flushPromises()
+
+		const details = wrapper.find('[data-testid="opname-detail"]')
+		expect(details.text()).not.toContain("Created By")
+		expect(details.text()).not.toContain("Last Modified")
+		expect(details.text()).not.toContain("Status")
+		expect(wrapper.text()).toContain("No Data")
+	})
 })
 
 describe("StockOpnameDialog primary action", () => {
