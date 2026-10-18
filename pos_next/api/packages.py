@@ -248,6 +248,13 @@ def _eligible_package_names(pos_profile, on_date=None):
 	return [p.name for p in packages if _is_available(packages_by_name[p.name])]
 
 
+def _get_packages(pos_profile, on_date=None):
+	names = _eligible_package_names(pos_profile, on_date)
+	return [
+		_serialize_package(frappe.get_cached_doc("POS Package", name), pos_profile, on_date) for name in names
+	]
+
+
 @frappe.whitelist()
 def get_packages(pos_profile, on_date=None):
 	"""Return every package available on this profile, fully expanded.
@@ -256,11 +263,7 @@ def get_packages(pos_profile, on_date=None):
 	working offline.
 	"""
 	_assert_profile_access(pos_profile)
-
-	names = _eligible_package_names(pos_profile, on_date)
-	return [
-		_serialize_package(frappe.get_cached_doc("POS Package", name), pos_profile, on_date) for name in names
-	]
+	return _get_packages(pos_profile, on_date)
 
 
 def _index_choices(choices):

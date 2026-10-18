@@ -1,0 +1,248 @@
+{
+ "actions": [],
+ "autoname": "BDE-.YYYY.-.#####",
+ "creation": "2026-10-18 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "pos_opening_shift",
+  "pos_profile",
+  "shift_period",
+  "column_break_hdr",
+  "closing_date",
+  "closing_time",
+  "cancelled_closing_shift",
+  "new_closing_shift",
+  "section_break_shift_invoices",
+  "shift_invoices_html",
+  "section_break_invoices",
+  "invoices",
+  "section_break_items",
+  "items",
+  "section_break_payments",
+  "payments",
+  "section_break_closing",
+  "closing_payments",
+  "section_break_remarks",
+  "remarks",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pos_opening_shift",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "POS Opening Shift",
+   "options": "POS Opening Shift",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "pos_opening_shift.pos_profile",
+   "fieldname": "pos_profile",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "POS Profile",
+   "options": "POS Profile",
+   "read_only": 1
+  },
+  {
+   "fieldname": "shift_period",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Shift Period",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_hdr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "closing_date",
+   "fieldtype": "Date",
+   "label": "Closing Date",
+   "reqd": 1
+  },
+  {
+   "default": "Now",
+   "fieldname": "closing_time",
+   "fieldtype": "Time",
+   "label": "Closing Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cancelled_closing_shift",
+   "fieldtype": "Data",
+   "label": "Cancelled Closing Shift",
+   "read_only": 1
+  },
+  {
+   "fieldname": "new_closing_shift",
+   "fieldtype": "Link",
+   "label": "New Closing Shift",
+   "options": "POS Closing Shift",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_shift_invoices",
+   "fieldtype": "Section Break",
+   "label": "Shift Invoices"
+  },
+  {
+   "fieldname": "shift_invoices_html",
+   "fieldtype": "HTML",
+   "label": "Shift Invoices"
+  },
+  {
+   "fieldname": "section_break_invoices",
+   "fieldtype": "Section Break",
+   "label": "Invoices"
+  },
+  {
+   "fieldname": "invoices",
+   "fieldtype": "Table",
+   "label": "Invoices",
+   "options": "POS Backdate Entry Invoice",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_items",
+   "fieldtype": "Section Break",
+   "label": "Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "POS Backdate Entry Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_payments",
+   "fieldtype": "Section Break",
+   "label": "Payments"
+  },
+  {
+   "fieldname": "payments",
+   "fieldtype": "Table",
+   "label": "Payments",
+   "options": "POS Backdate Entry Payment"
+  },
+  {
+   "fieldname": "section_break_closing",
+   "fieldtype": "Section Break",
+   "label": "Closing"
+  },
+  {
+   "fieldname": "closing_payments",
+   "fieldtype": "Table",
+   "label": "Closing Payments",
+   "options": "POS Backdate Entry Closing Payment"
+  },
+  {
+   "fieldname": "section_break_remarks",
+   "fieldtype": "Section Break",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "POS Backdate Entry",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-10-18 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Backdate Entry",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "POSNext Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Administrator",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

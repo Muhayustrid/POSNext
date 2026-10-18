@@ -36,3 +36,4 @@ pos_next.patches.v2_20_0.scope_existing_coupons
 pos_next.patches.v2_21_0.repoint_app_desktop_icon
 pos_next.patches.v2_22_0.add_offline_price_mismatch_field
 pos_next.patches.v2_23_0.install_stock_opname_workflow
+pos_next.patches.v2_24_0.remove_backdate_entry_page

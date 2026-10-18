@@ -24,6 +24,8 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, cint, flt, getdate, now_datetime, nowdate
 
 from pos_next.api.backdate_invoices import (
+	_reopen,
+	_submit_backdated,
 	allow_change_posting_date,
 	get_access,
 	get_backdate_context,
@@ -39,6 +41,7 @@ from pos_next.api.invoices import (
 )
 from pos_next.api.shifts import get_closing_shift_data, submit_closing_shift
 from pos_next.invoice_type import get_pos_invoice_doctype
+from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
 from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
@@ -230,6 +233,29 @@ class TestSubmitBackdateInvoiceGates(unittest.TestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self._run({"posa_pos_opening_shift": "POSA-OS-0001", "posting_date": add_days(nowdate(), 1)})
 
+	def test_posting_time_before_shift_start_rejected(self):
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._run(
+				{
+					"posa_pos_opening_shift": "POSA-OS-0001",
+					"posting_date": "2020-01-01",
+					"posting_time": "07:59:59",
+				}
+			)
+		self.assertIn("shift period", str(ctx.exception))
+
+	def test_future_posting_datetime_rejected(self):
+		future_time = frappe.utils.add_to_date(now_datetime(), hours=2).strftime("%H:%M:%S")
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self._run(
+				{
+					"posa_pos_opening_shift": "POSA-OS-0001",
+					"posting_date": nowdate(),
+					"posting_time": future_time,
+				}
+			)
+		self.assertIn("shift period", str(ctx.exception))
+
 	def test_missing_posting_date_rejected(self):
 		with self.assertRaises(frappe.ValidationError):
 			self._run({"posa_pos_opening_shift": "POSA-OS-0001"})
@@ -313,7 +339,7 @@ class TestBackdateEntryFlow(FrappeTestCase):
 			pluck="name",
 			limit=1,
 		)
-		cls.customer = get_default_customer()
+		cls.customer = get_default_customer(cls.profile.company)
 		cls.mode = frappe.get_all(
 			"POS Payment Method",
 			{"parent": cls.profile.name, "parenttype": "POS Profile"},
@@ -710,6 +736,69 @@ class TestBackdateEntryFlow(FrappeTestCase):
 		self.assertEqual(cint(doc.is_return), 1)
 		self.assertEqual(str(doc.posting_date), add_days(nowdate(), -2))
 		self.assertEqual(doc.return_against, original["name"])
+
+	def test_submit_closing_with_explicit_period_end_date(self):
+		custom_end = f"{add_days(nowdate(), -2)} 18:30:00"
+		custom_posting = add_days(nowdate(), -2)
+		closing_name = _submit_closing(
+			self.shift.name,
+			counted={},
+			period_end_date=custom_end,
+			posting_date=custom_posting,
+		)
+		self.assertEqual(frappe.db.get_value("POS Opening Shift", self.shift.name, "status"), "Closed")
+		closing_doc = frappe.get_doc("POS Closing Shift", closing_name)
+		self.assertEqual(closing_doc.docstatus, 1)
+		self.assertEqual(str(closing_doc.period_end_date), custom_end)
+		self.assertEqual(str(closing_doc.posting_date), custom_posting)
+
+	def test_sales_manager_can_reopen_backdate_and_reclose(self):
+		# R1: Sales Manager role can reopen, submit backdated invoice, and re-close
+		first = submit_invoice(invoice=self._payload())
+		self.assertTrue(first.get("name"))
+
+		closing1 = get_closing_shift_data(self.shift.name)
+		submit_closing_shift(json.dumps(closing1))
+		self.assertEqual(frappe.db.get_value("POS Opening Shift", self.shift.name, "status"), "Closed")
+
+		sales_mgr = f"sales_mgr.{self._uniq()}@example.com"
+		frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": sales_mgr,
+				"first_name": "Sales Manager Tester",
+				"roles": [{"role": "Sales Manager"}, {"role": "Sales User"}],
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(lambda: frappe.delete_doc("User", sales_mgr, force=1, ignore_permissions=True))
+
+		frappe.set_user(sales_mgr)
+		try:
+			# 1. Sales Manager reopens the shift (closing cancel runs with ignore_permissions)
+			reopen_res = reopen_shift(self.shift.name)
+			self.assertEqual(reopen_res["status"], "Open")
+
+			# 2. Sales Manager submits backdated invoice
+			back = submit_backdate_invoice(
+				invoice=self._payload(posting_date=add_days(nowdate(), -1))
+			)
+			self.assertEqual(frappe.db.get_value(self.doctype, back["name"], "docstatus"), 1)
+
+			# 3. Without backdate marker, closing someone else's shift is blocked for Sales Manager
+			with self.assertRaises(frappe.PermissionError):
+				_submit_closing(self.shift.name, counted={})
+
+			# 4. With backdate marker, re-close passes the gate
+			frappe.flags.pos_next_backdate_entry = True
+			try:
+				closing2_name = _submit_closing(self.shift.name, counted={})
+			finally:
+				frappe.flags.pos_next_backdate_entry = None
+
+			self.assertEqual(frappe.db.get_value("POS Opening Shift", self.shift.name, "status"), "Closed")
+			self.assertEqual(frappe.db.get_value("POS Closing Shift", closing2_name, "docstatus"), 1)
+		finally:
+			frappe.set_user(ADMIN)
 
 
 if __name__ == "__main__":

@@ -405,10 +405,11 @@
   },
   {
    "color": "Grey",
-   "doc_view": "",
+   "doc_view": "List",
    "label": "Backdate Entry",
-   "link_to": "backdate-entry",
-   "type": "Page"
+   "link_to": "POS Backdate Entry",
+   "stats_filter": "[]",
+   "type": "DocType"
   },
   {
    "color": "Grey",

@@ -1,0 +1,144 @@
+{
+ "actions": [],
+ "creation": "2026-10-18 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "invoice_no",
+  "item_code",
+  "item_name",
+  "uom",
+  "conversion_factor",
+  "qty",
+  "rate",
+  "discount_percentage",
+  "amount",
+  "against_item_row",
+  "warehouse",
+  "remaining_qty",
+  "pos_package",
+  "pos_package_instance",
+  "pos_package_role",
+  "pos_package_snapshot"
+ ],
+ "fields": [
+  {
+   "fieldname": "invoice_no",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Invoice No",
+   "reqd": 1
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Item Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "UOM",
+   "options": "UOM"
+  },
+  {
+   "default": "1",
+   "fieldname": "conversion_factor",
+   "fieldtype": "Float",
+   "label": "Conversion Factor"
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Rate"
+  },
+  {
+   "fieldname": "discount_percentage",
+   "fieldtype": "Percent",
+   "label": "Discount %"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "against_item_row",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Against Item Row"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "remaining_qty",
+   "fieldtype": "Float",
+   "label": "Remaining Qty",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pos_package",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "POS Package",
+   "options": "POS Package"
+  },
+  {
+   "fieldname": "pos_package_instance",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "POS Package Instance"
+  },
+  {
+   "fieldname": "pos_package_role",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "POS Package Role",
+   "options": "\nPackage\nPackage Item"
+  },
+  {
+   "fieldname": "pos_package_snapshot",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "POS Package Snapshot"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-18 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Backdate Entry Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

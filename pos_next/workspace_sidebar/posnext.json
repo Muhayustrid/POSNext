@@ -167,8 +167,8 @@
    "indent": 0,
    "keep_closed": 0,
    "label": "Backdate Entry",
-   "link_to": "backdate-entry",
-   "link_type": "Page",
+   "link_to": "POS Backdate Entry",
+   "link_type": "DocType",
    "show_arrow": 0,
    "type": "Link"
   },

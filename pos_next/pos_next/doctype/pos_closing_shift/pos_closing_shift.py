@@ -493,7 +493,11 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 	shift_user = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "user")
 	if shift_user is None:
 		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
-	if shift_user != frappe.session.user and not is_management_user():
+	if (
+		shift_user != frappe.session.user
+		and not is_management_user()
+		and not getattr(frappe.flags, "pos_next_backdate_entry", None)
+	):
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
 	# whitelist gate: client input is interpolated into the SQL table name
@@ -742,6 +746,7 @@ def make_closing_shift_from_opening(opening_shift):
 	if (
 		frappe.db.get_value("POS Opening Shift", opening_shift_name, "user") != frappe.session.user
 		and not is_management_user()
+		and not getattr(frappe.flags, "pos_next_backdate_entry", None)
 	):
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
@@ -854,11 +859,7 @@ def make_closing_shift_from_opening(opening_shift):
 	return result
 
 
-@frappe.whitelist()
-def submit_closing_shift(closing_shift):
-	closing_shift = json.loads(closing_shift)
-
-	opening_shift_name = closing_shift.get("pos_opening_shift")
+def _submit_closing(opening_shift_name, counted=None, period_end_date=None, posting_date=None):
 	if not opening_shift_name:
 		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
 
@@ -875,8 +876,12 @@ def submit_closing_shift(closing_shift):
 	opening_shift = frappe.get_doc("POS Opening Shift", opening_shift_name)
 
 	# The payload is untrusted client JSON: only the shift owner (or a
-	# management user) may close a shift at all.
-	if opening_shift.user != frappe.session.user and not is_management_user():
+	# management user, or backdate entry) may close a shift at all.
+	if (
+		opening_shift.user != frappe.session.user
+		and not is_management_user()
+		and not getattr(frappe.flags, "pos_next_backdate_entry", None)
+	):
 		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
 
 	# COR-BE-15: printed drafts join the closing here, in the explicit close
@@ -891,15 +896,22 @@ def submit_closing_shift(closing_shift):
 	# be forged. The client only contributes the physically counted
 	# closing_amount per mode of payment (rows for unknown modes are dropped).
 	server_data = make_closing_shift_from_opening(json.dumps(opening_shift.as_dict(), default=str))
-	counted = {
-		row.get("mode_of_payment"): row.get("closing_amount")
-		for row in (closing_shift.get("payment_reconciliation") or [])
-		if row.get("mode_of_payment")
-	}
-	for row in server_data.get("payment_reconciliation") or []:
-		mode = row.get("mode_of_payment")
-		if mode in counted:
-			row["closing_amount"] = counted[mode]
+	if isinstance(counted, list):
+		counted = {
+			row.get("mode_of_payment"): row.get("closing_amount")
+			for row in counted
+			if isinstance(row, dict) and row.get("mode_of_payment")
+		}
+	if counted:
+		for row in server_data.get("payment_reconciliation") or []:
+			mode = row.get("mode_of_payment")
+			if mode in counted:
+				row["closing_amount"] = counted[mode]
+
+	if period_end_date:
+		server_data["period_end_date"] = period_end_date
+	if posting_date:
+		server_data["posting_date"] = posting_date
 
 	closing_shift_doc = frappe.get_doc(server_data)
 	# kept only AFTER the explicit ownership gate above — the cashier must
@@ -908,6 +920,23 @@ def submit_closing_shift(closing_shift):
 	closing_shift_doc.save()
 	closing_shift_doc.submit()
 	return closing_shift_doc.name
+
+
+@frappe.whitelist()
+def submit_closing_shift(closing_shift):
+	if isinstance(closing_shift, str):
+		closing_shift = json.loads(closing_shift)
+
+	opening_shift_name = closing_shift.get("pos_opening_shift")
+	if not opening_shift_name:
+		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
+
+	counted = {
+		row.get("mode_of_payment"): row.get("closing_amount")
+		for row in (closing_shift.get("payment_reconciliation") or [])
+		if row.get("mode_of_payment")
+	}
+	return _submit_closing(opening_shift_name, counted)
 
 
 def _count_pending_printed_drafts(pos_opening_shift):

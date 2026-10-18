@@ -3470,6 +3470,8 @@ def _return_access_denied(pos_profile):
 	in the intercompany deployment)."""
 	if frappe.session.user == "Administrator":
 		return False
+	if _backdate_entry_active(pos_profile):
+		return False
 	if pos_profile and frappe.db.exists(
 		"POS Profile User",
 		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},

@@ -1,0 +1,115 @@
+{
+ "actions": [],
+ "creation": "2026-10-18 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "invoice_no",
+  "entry_type",
+  "against_doctype",
+  "against_invoice",
+  "customer",
+  "posting_date",
+  "posting_time",
+  "confirmation_code",
+  "created_invoice",
+  "invoice_doctype",
+  "grand_total"
+ ],
+ "fields": [
+  {
+   "fieldname": "invoice_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Invoice No",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Sale",
+   "fieldname": "entry_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Entry Type",
+   "options": "Sale\nReturn\nCorrection",
+   "reqd": 1
+  },
+  {
+   "fieldname": "against_doctype",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Against DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "against_invoice",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Against Invoice"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Posting Date",
+   "reqd": 1
+  },
+  {
+   "default": "Now",
+   "fieldname": "posting_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Posting Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "confirmation_code",
+   "fieldtype": "Data",
+   "label": "Confirmation Code"
+  },
+  {
+   "fieldname": "created_invoice",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Created Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_doctype",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Invoice DocType",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "grand_total",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Grand Total",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-18 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Backdate Entry Invoice",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
