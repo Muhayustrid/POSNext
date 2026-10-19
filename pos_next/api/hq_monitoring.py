@@ -488,7 +488,7 @@ def set_outlet_target(
 		doc.save()
 		result["monthly"] = doc.name
 
-	if overall is not None or start:
+	if overall is not None or overall_from is not None:
 		if not frappe.has_permission("Company", "write", doc=company):
 			frappe.throw(
 				_("You need write permission on Company {0}").format(company),
@@ -498,6 +498,23 @@ def set_outlet_target(
 			# Blank target = keep the stored one, so the counted-from date can
 			# be (re)set on its own — same "blank keeps stored" rule as monthly.
 			overall = flt(frappe.db.get_value("Company", company, "pos_overall_sales_target"))
+
+		current = (
+			frappe.db.get_value(
+				"Company",
+				company,
+				["pos_overall_sales_target", "pos_overall_target_from"],
+				as_dict=True,
+			)
+			or {}
+		)
+		old_target = flt(current.get("pos_overall_sales_target"))
+		old_from = (
+			getdate(current.get("pos_overall_target_from"))
+			if current.get("pos_overall_target_from")
+			else None
+		)
+
 		frappe.db.set_value(
 			"Company",
 			company,
@@ -505,9 +522,98 @@ def set_outlet_target(
 		)
 		result["overall_updated"] = True
 
+		new_target = flt(overall)
+		new_from = getdate(start) if start else None
+
+		changed = []
+		if new_target != old_target:
+			changed.append(["pos_overall_sales_target", old_target, new_target])
+		if new_from != old_from:
+			changed.append([
+				"pos_overall_target_from",
+				str(old_from) if old_from else None,
+				str(new_from) if new_from else None,
+			])
+
+		if changed:
+			frappe.get_doc(
+				{
+					"doctype": "Version",
+					"ref_doctype": "Company",
+					"docname": company,
+					"data": frappe.as_json(
+						{"changed": changed, "added": [], "removed": [], "row_changed": []}
+					),
+				}
+			).insert(ignore_permissions=True)
+
 	if result["monthly"] is None and not result["overall_updated"]:
 		frappe.throw(_("Nothing to save — enter at least one target"))
 	return result
+
+
+@frappe.whitelist()
+def copy_outlet_targets(month_start=None):
+	"""Copy monthly targets from the previous month into month_start.
+
+	Copies target_sales for companies in the user's scope that have a target
+	in the previous month and do not have a record in month_start yet; never
+	overwrites existing records.
+
+	Returns {"copied": int, "skipped": int}.
+	"""
+	_check_hq_access()
+	month = _parse_date(month_start) or get_first_day(nowdate())
+	if month != get_first_day(month):
+		frappe.throw(_("Month Start must be the first day of the month"))
+
+	if not frappe.has_permission("POS Monthly Target", "create"):
+		frappe.throw(
+			_("You need create permission on POS Monthly Target"),
+			frappe.PermissionError,
+		)
+
+	companies = _resolve_scope(None, 0)["company_options"]
+	if not companies:
+		return {"copied": 0, "skipped": 0}
+
+	prev_month = add_months(month, -1)
+	prev_rows = frappe.get_all(
+		"POS Monthly Target",
+		filters={"company": ["in", companies], "month_start": prev_month},
+		fields=["company", "target_sales"],
+	)
+
+	existing_companies = set(
+		frappe.get_all(
+			"POS Monthly Target",
+			filters={"company": ["in", companies], "month_start": month},
+			pluck="company",
+		)
+	)
+
+	copied = 0
+	skipped = 0
+	for r in prev_rows:
+		if r.company in existing_companies:
+			skipped += 1
+			continue
+		if not frappe.has_permission("Company", "read", doc=r.company):
+			skipped += 1
+			continue
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Monthly Target",
+				"company": r.company,
+				"month_start": str(month),
+				"target_sales": r.target_sales,
+			}
+		)
+		doc.insert()
+		existing_companies.add(r.company)
+		copied += 1
+
+	return {"copied": copied, "skipped": skipped}
 
 
 @frappe.whitelist()

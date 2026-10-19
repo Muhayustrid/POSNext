@@ -16,13 +16,16 @@ Company B (currency CB, different from CA), profile B1:
   inv5  item_x qty 1 @ 100
 """
 
+import json
 from datetime import date, timedelta
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_months, flt, get_first_day, nowdate
 
 from pos_next.api.hq_monitoring import (
 	HQ_RECENT_LIMIT,
+	copy_outlet_targets,
 	get_outlet_targets,
 	get_sales_monitoring,
 	growth_pct,
@@ -1138,6 +1141,65 @@ class TestHQMonitoring(IntegrationTestCase):
 		# restore the class fixture for sibling tests (method changes persist)
 		frappe.db.delete("POS Monthly Target", {"company": self.company_a, "month_start": month})
 		self._make_target(self.company_a)
+
+	def _company_versions(self):
+		return frappe.get_all(
+			"Version",
+			filters={"ref_doctype": "Company", "docname": self.company_a},
+			fields=["name", "data"],
+			order_by="creation desc",
+		)
+
+	def test_set_outlet_target_writes_company_version(self):
+		frappe.set_user(ADMIN)
+		set_outlet_target(company=self.company_a, overall_target=0, overall_from="")
+		before = len(self._company_versions())
+		set_outlet_target(company=self.company_a, overall_target=750000, overall_from="2026-01-01")
+		versions = self._company_versions()
+		self.assertEqual(len(versions), before + 1)
+		changed = {c[0]: c for c in json.loads(versions[0].data)["changed"]}
+		self.assertEqual(set(changed), {"pos_overall_sales_target", "pos_overall_target_from"})
+		self.assertEqual(flt(changed["pos_overall_sales_target"][2]), 750000.0)
+		# no-op save writes no Version
+		set_outlet_target(company=self.company_a, overall_target=750000, overall_from="2026-01-01")
+		self.assertEqual(len(self._company_versions()), before + 1)
+		# clearing only the date: one Version, only that field
+		set_outlet_target(company=self.company_a, overall_target=750000, overall_from="")
+		versions = self._company_versions()
+		self.assertEqual(len(versions), before + 2)
+		self.assertEqual([c[0] for c in json.loads(versions[0].data)["changed"]], ["pos_overall_target_from"])
+		self.assertIsNone(frappe.db.get_value("Company", self.company_a, "pos_overall_target_from"))
+		set_outlet_target(company=self.company_a, overall_target=0, overall_from="")
+
+	def test_copy_outlet_targets(self):
+		frappe.set_user(ADMIN)
+		# far-future months: no real data lives there, cleanup touches only them
+		prev = add_months(get_first_day(nowdate()), 36)
+		month = add_months(prev, 1)
+		cleanup = lambda: frappe.db.delete("POS Monthly Target", {"month_start": ["in", [prev, month]]})  # noqa: E731
+		cleanup()
+		self.addCleanup(cleanup)
+		for co, amount in ((self.company_a, 123000), (self.company_b, 456000)):
+			frappe.get_doc(
+				{"doctype": "POS Monthly Target", "company": co, "month_start": prev, "target_sales": amount}
+			).insert(ignore_permissions=True)
+		# company_b already has a target for the destination month: never overwritten
+		frappe.get_doc(
+			{"doctype": "POS Monthly Target", "company": self.company_b, "month_start": month, "target_sales": 1}
+		).insert(ignore_permissions=True)
+
+		out = copy_outlet_targets(month_start=str(month))
+		self.assertEqual(out, {"copied": 1, "skipped": 1})
+		get = lambda co: flt(frappe.db.get_value("POS Monthly Target", {"company": co, "month_start": month}, "target_sales"))  # noqa: E731
+		self.assertEqual(get(self.company_a), 123000.0)
+		self.assertEqual(get(self.company_b), 1.0)
+		# second run copies nothing
+		self.assertEqual(copy_outlet_targets(month_start=str(month)), {"copied": 0, "skipped": 2})
+		with self.assertRaises(frappe.ValidationError):
+			copy_outlet_targets(month_start="2026-08-15")
+		frappe.set_user(self.user_no_role)  # fails the HQ role gate
+		with self.assertRaises(frappe.PermissionError):
+			copy_outlet_targets(month_start=str(month))
 
 	def test_set_outlet_target_validation_and_permission(self):
 		frappe.set_user(ADMIN)
