@@ -54,6 +54,7 @@ class OutletTargetsPage {
 		this.state = null;
 		this.start = 0;
 		this.page_length = 20;
+		this.datatable = null;
 		this._setup_actions();
 		this._setup_filters();
 		this.$root = $('<div class="ot-page">').appendTo(page.main);
@@ -62,10 +63,31 @@ class OutletTargetsPage {
 	}
 
 	_setup_actions() {
-		this.page.set_primary_action(__("Refresh"), () => this.refresh());
+		this.page.add_button(__("Refresh"), () => this.refresh());
 		this.page.add_menu_item(__("Export Excel"), () => this._export_excel());
 		this.page.add_menu_item(__("Import Excel"), () => this._import_dialog());
 		this.page.add_menu_item(__("Download Template"), () => this._export_excel(true));
+		this.page.add_menu_item(__("Copy Targets from Previous Month"), () => {
+			const monthLabel = moment(this._month_start()).format("MMMM YYYY");
+			frappe.confirm(
+				__("Copy last month's targets into {0} for outlets without a target?", [monthLabel]),
+				() => {
+					frappe.call({
+						method: "pos_next.api.hq_monitoring.copy_outlet_targets",
+						args: { month_start: this._month_start() },
+						freeze: true,
+						callback: (r) => {
+							const out = r.message || { copied: 0, skipped: 0 };
+							frappe.msgprint(__("Copied: {0} · Skipped: {1}", [out.copied || 0, out.skipped || 0]));
+							this.refresh();
+						},
+					});
+				}
+			);
+		});
+		this.page.add_menu_item(__("Target History"), () => {
+			frappe.set_route("List", "POS Monthly Target");
+		});
 	}
 
 	// Frappe page-field change handlers run before the control commits its
@@ -171,6 +193,10 @@ class OutletTargetsPage {
 	// The traceback's last line carries the exception message; the generic
 	// sentence covers transport errors where no server message arrived.
 	_render_error(r) {
+		if (this.datatable) {
+			this.datatable.destroy();
+			this.datatable = null;
+		}
 		let msg = __("Failed to load targets");
 		const exc = r && r.exc ? String(r.exc).trim().split("\n").filter(Boolean) : [];
 		if (exc.length) msg = exc[exc.length - 1];
@@ -180,86 +206,321 @@ class OutletTargetsPage {
 	}
 
 	// ------------------------------------------------------------------
-	// Rendering — one card, one row per outlet (= company)
+	// Rendering — native Frappe DataTable with inline autosave
 	// ------------------------------------------------------------------
 
 	_render() {
 		const rows = this.state.rows || [];
 		const total = this.state.total_count || 0;
 		if (!rows.length) {
+			if (this.datatable) {
+				this.datatable.destroy();
+				this.datatable = null;
+			}
 			this.$root.html(
 				`<div class="frappe-card"><p class="text-muted">${__("No data")}</p></div>`
 			);
 			return;
 		}
-		// Target columns are headed by the configured basis (e.g.
-		// "Target Laba Kotor (bulanan)"); the sales columns stay sales.
+
+		if (this.datatable) {
+			this.datatable.destroy();
+			this.datatable = null;
+		}
 		const mlabel = frappe.utils.escape_html(this._basis_label("monthly"));
 		this.$root.html([
-			`<div class="frappe-card"><div class="ot-table-scroll"><table class="ot-table">
-				<thead><tr>
-					<th>${__("Outlet (Company)")}</th>
-					<th class="ot-num">${__("Target")} ${mlabel} (${__("monthly")})</th>
-					<th class="ot-num">${mlabel} ${__("MTD")}</th>
-					<th class="ot-num">${__("Achievement")}</th>
-					<th class="ot-num">${__("Projection")}</th>
-					<th class="ot-num">${__("Balik Modal")}</th>
-					<th></th>
-				</tr></thead>
-				<tbody>${rows.map((r) => this._row(r)).join("")}</tbody>
-			</table></div></div>`,
+			`<div class="frappe-card"><div class="ot-datatable-wrapper"></div></div>`,
 			this._pager(total),
 			`<div class="ot-sub text-muted">${__("Month")}: ${frappe.utils.escape_html(this.state.month_start)}
 				· ${__("days elapsed")}: ${HQ_UTILS.fmtCount(this.state.days_elapsed ?? 0)}
 				· ${__("Generated")}: ${frappe.utils.escape_html(this.state.generated_at)}</div>`,
 		].join(""));
 		this._bind_pager();
+
+		const $wrapper = this.$root.find(".ot-datatable-wrapper");
+		const columns = this._get_columns(mlabel);
+		this.datatable = new frappe.DataTable($wrapper[0], {
+			columns: columns,
+			data: rows.map((r) => this._row_object(r)),
+			serialNoColumn: false,
+			checkboxColumn: false,
+			inlineFilters: false,
+			headerDropdown: [],
+			layout: "fluid",
+			cellHeight: 35,
+			language: frappe.boot.lang,
+			translations: frappe.utils.datatable.get_translations(),
+			direction: frappe.utils.is_rtl() ? "rtl" : "ltr",
+			getEditor: this._get_editor.bind(this),
+		});
 	}
 
-	_row(r) {
+	_get_columns(mlabel) {
+		const canWriteMonthly =
+			frappe.model.can_write("POS Monthly Target") ||
+			frappe.model.can_create("POS Monthly Target");
+		const canWriteCompany = frappe.model.can_write("Company");
+
+		return [
+			{
+				id: "company",
+				name: __("Outlet"),
+				editable: false,
+				sortable: false,
+				dropdown: false,
+				focusable: false,
+				format: (value) =>
+					`<a href="/desk/pos-monthly-target?company=${encodeURIComponent(value)}">${frappe.utils.escape_html(value)}</a>`,
+			},
+			{
+				id: "target_sales",
+				name: `${__("Target")} ${mlabel} (${__("monthly")})`,
+				align: "right",
+				editable: canWriteMonthly,
+				focusable: canWriteMonthly,
+				sortable: false,
+				dropdown: false,
+				docfield: {
+					fieldname: "target_sales",
+					fieldtype: "Currency",
+					label: `${__("Target")} ${mlabel} (${__("monthly")})`,
+				},
+				format: (value, row, column, data) => {
+					const ccy = (data && data.currency) || (row && row.currency) || "";
+					return value != null && value !== "" ? format_currency(value, ccy) : "";
+				},
+			},
+			{
+				id: "mtd_value",
+				name: `${mlabel} ${__("MTD")}`,
+				align: "right",
+				editable: false,
+				sortable: false,
+				dropdown: false,
+				focusable: false,
+				format: (value, row, column, data) => {
+					const ccy = (data && data.currency) || (row && row.currency) || "";
+					return value != null && value !== "" ? format_currency(value, ccy) : "";
+				},
+			},
+			{
+				id: "achievement",
+				name: __("Achievement"),
+				align: "right",
+				editable: false,
+				sortable: false,
+				dropdown: false,
+				focusable: false,
+				format: (value) => {
+					if (value == null || value === "") return "";
+					const num = Number(value);
+					if (isNaN(num)) return "";
+					const color = num < 50 ? "red" : num < 100 ? "orange" : "green";
+					return `<span class="indicator-pill ${color}">${HQ_UTILS.fmtPct(num, 1)}</span>`;
+				},
+			},
+			{
+				id: "projection",
+				name: __("Projection"),
+				align: "right",
+				editable: false,
+				sortable: false,
+				dropdown: false,
+				focusable: false,
+				format: (value, row, column, data) => {
+					const ccy = (data && data.currency) || (row && row.currency) || "";
+					return value != null && value !== "" ? format_currency(value, ccy) : "";
+				},
+			},
+			{
+				id: "overall_target",
+				name: __("Balik Modal Target"),
+				align: "right",
+				editable: canWriteCompany,
+				focusable: canWriteCompany,
+				sortable: false,
+				dropdown: false,
+				docfield: {
+					fieldname: "overall_target",
+					fieldtype: "Currency",
+					label: __("Balik Modal Target"),
+				},
+				format: (value, row, column, data) => {
+					const ccy = (data && data.currency) || (row && row.currency) || "";
+					return value != null && value !== "" ? format_currency(value, ccy) : "";
+				},
+			},
+			{
+				id: "overall_from",
+				name: __("Balik Modal From"),
+				editable: canWriteCompany,
+				focusable: canWriteCompany,
+				sortable: false,
+				dropdown: false,
+				docfield: {
+					fieldname: "overall_from",
+					fieldtype: "Date",
+					label: __("Balik Modal From"),
+				},
+				format: (value) => (value ? frappe.datetime.str_to_user(value) : ""),
+			},
+			{
+				id: "overall_pct",
+				name: __("Balik Modal %"),
+				align: "right",
+				editable: false,
+				sortable: false,
+				dropdown: false,
+				focusable: false,
+				format: (value) => {
+					if (value == null || value === "") return "";
+					const num = Number(value);
+					if (isNaN(num)) return "";
+					const color = num < 50 ? "red" : num < 100 ? "orange" : "green";
+					return `<span class="indicator-pill ${color}">${HQ_UTILS.fmtPct(num, 1)}</span>`;
+				},
+			},
+		];
+	}
+
+	_row_object(r) {
 		const m = r.monthly || {};
 		const o = r.overall;
-		const ccy = r.currency || "";
 		const missing = !!m.missing;
-		const unset = `<span class="text-muted ot-small">${__("not set yet")}</span>`;
-		// Neutral basis keys with the old net-sales keys as fallback; MTD TC
-		// stays a sales count on every basis.
-		const mtdValue = r.mtd_value ?? r.mtd_net_tax_incl;
-		const projected = r.projected_value ?? r.projected_sales;
-
-		const targetCell = missing
-			? unset
-			: `<span class="ot-money">${HQ_UTILS.fmtMoney(r.target_value ?? m.target_sales, ccy)}</span>`;
-		const mtdCell = `<span class="ot-money">${HQ_UTILS.fmtMoney(mtdValue ?? 0, ccy)}</span>
-			<div class="ot-sub">${HQ_UTILS.fmtCount(r.mtd_orders ?? 0)} ${__("TC")}</div>`;
-		const achCell = missing
-			? unset
-			: `${this._bar(r.achievement_sales_pct)} <b class="ot-pct">${HQ_UTILS.fmtPct(r.achievement_sales_pct, 1)}</b>`;
-		const projCell = missing || projected == null
-			? `<span class="text-muted">-</span>`
-			: `<span class="ot-money">${HQ_UTILS.fmtMoney(projected, ccy)}</span>`;
-		const overallCell = o && o.overall_target != null
-			? `${this._bar(o.achievement_pct, "ot-bar--thin")} <b class="ot-pct">${HQ_UTILS.fmtPct(o.achievement_pct, 1)}</b>
-				<div class="ot-sub">${__("cum.")} <span class="ot-money">${HQ_UTILS.fmtMoney(o.cumulative_value ?? o.cumulative_net_tax_incl, ccy)}</span>
-				/ <span class="ot-money">${HQ_UTILS.fmtMoney(o.overall_target, ccy)}</span>${o.from_date ? ` · ${frappe.utils.escape_html(o.from_date)} →` : ""}</div>`
-			: `<span class="text-muted">-</span>`;
-
-		return `<tr data-ot-row data-ot-company="${frappe.utils.escape_html(r.company)}">
-			<td class="ot-outlet">${frappe.utils.escape_html(r.company)}</td>
-			<td class="ot-num">${targetCell}</td>
-			<td class="ot-num">${mtdCell}</td>
-			<td class="ot-num">${achCell}</td>
-			<td class="ot-num">${projCell}</td>
-			<td class="ot-num">${overallCell}</td>
-			<td class="ot-num"><button class="btn btn-xs btn-default" data-ot-set="${frappe.utils.escape_html(r.company)}">${__("Set")}</button></td>
-		</tr>`;
+		return {
+			company: r.company,
+			target_sales: missing ? null : (m.target_sales ?? null),
+			mtd_value: r.mtd_value ?? r.mtd_net_tax_incl ?? 0,
+			achievement: missing ? null : (r.achievement_sales_pct ?? null),
+			projection: missing ? null : (r.projected_value ?? r.projected_sales ?? null),
+			overall_target: (o && o.overall_target != null) ? o.overall_target : null,
+			overall_from: (o && o.from_date) ? o.from_date : "",
+			overall_pct: (o && o.achievement_pct != null) ? o.achievement_pct : null,
+			currency: r.currency || "",
+		};
 	}
 
-	// Inline progress bar; pct is clamped for the fill, never for the label.
-	_bar(pct, cls) {
-		const value = pct === null || pct === undefined ? 0 : Math.max(0, Math.min(100, Number(pct)));
-		return `<span class="ot-bar${cls ? ` ${cls}` : ""}" role="img"
-			aria-label="${HQ_UTILS.fmtPct(pct === null || pct === undefined ? 0 : pct)}"><span class="ot-bar-fill" style="width:${value}%"></span></span>`;
+	_row_values(r) {
+		const obj = this._row_object(r);
+		return [
+			obj.company,
+			obj.target_sales,
+			obj.mtd_value,
+			obj.achievement,
+			obj.projection,
+			obj.overall_target,
+			obj.overall_from,
+			obj.overall_pct,
+		];
+	}
+
+	_get_editor(colIndex, rowIndex, value, parent) {
+		const col = this.datatable.getColumn(colIndex);
+		if (!col || !col.editable || !col.docfield) return false;
+
+		const rowData = (this.state && this.state.rows && this.state.rows[rowIndex]) || {};
+		const currency = rowData.currency || frappe.boot.sysdefaults.currency;
+
+		const df = Object.assign({}, col.docfield, {
+			options: col.docfield.fieldtype === "Currency" ? currency : col.docfield.options,
+		});
+
+		const control = frappe.ui.form.make_control({
+			df: df,
+			parent: parent,
+			render_input: true,
+		});
+		if (!control) return false;
+
+		control.set_value(value);
+		control.toggle_label(false);
+		control.toggle_description(false);
+		if (control.df) {
+			control.df.change = () => control.set_focus && control.set_focus();
+		}
+
+		return {
+			initValue: (val) => {
+				const res = control.set_value(val);
+				if (control.set_focus) {
+					control.set_focus();
+				}
+				return res;
+			},
+			setValue: (val) => {
+				control.set_value(val);
+				const current = (this.state && this.state.rows && this.state.rows[rowIndex]) || rowData;
+				const company = current.company || rowData.company;
+				const fieldname = col.docfield.fieldname;
+				const args = { company };
+
+				if (fieldname === "target_sales") {
+					args.month_start = this._month_start();
+					args.target_sales = val || 0;
+				} else if (fieldname === "overall_target") {
+					args.overall_target = val || 0;
+					args.overall_from = (current.overall && current.overall.from_date) || "";
+				} else if (fieldname === "overall_from") {
+					args.overall_target = (current.overall && current.overall.overall_target) || 0;
+					args.overall_from = val || "";
+				}
+
+				return new Promise((resolve, reject) => {
+					frappe.call({
+						method: "pos_next.api.hq_monitoring.set_outlet_target",
+						args: args,
+						callback: (r) => {
+							if (r && r.exc) {
+								reject(r.exc);
+							} else {
+								frappe.show_alert({ message: __("Saved"), indicator: "green" });
+								this._refresh_row(rowIndex, company);
+								resolve(val);
+							}
+						},
+						error: (err) => {
+							reject(err);
+						},
+					});
+				});
+			},
+			getValue: () => {
+				let val = control.get_value();
+				if (col.docfield && col.docfield.fieldtype === "Date") {
+					val = val || "";
+				} else if (val === "" || val === undefined) {
+					// blank Currency must equal the row's null so an unedited cell skips the save
+					val = null;
+				}
+				return Promise.resolve(val);
+			},
+		};
+	}
+
+	_refresh_row(rowIndex, company) {
+		frappe.call({
+			method: "pos_next.api.hq_monitoring.get_outlet_targets",
+			args: {
+				month_start: this._month_start(),
+				company: company,
+				start: 0,
+				page_length: 1,
+			},
+			callback: (r) => {
+				if (r.message && r.message.rows && r.message.rows.length) {
+					const row = r.message.rows[0];
+					if (this.state && this.state.rows) {
+						this.state.rows[rowIndex] = row;
+					}
+					if (this.datatable) {
+						if (this.datatable.datamanager && this.datatable.datamanager.data) {
+							this.datatable.datamanager.data[rowIndex] = this._row_object(row);
+						}
+						this.datatable.refreshRow(this._row_values(row), rowIndex);
+					}
+				}
+			},
+		});
 	}
 
 	// Frappe list-view-style pager: page-size buttons + Prev/Next + count.
@@ -285,8 +546,6 @@ class OutletTargetsPage {
 
 	_bind_pager() {
 		this.$root
-			.off("click", "[data-ot-set]")
-			.on("click", "[data-ot-set]", (e) => this._set_dialog($(e.currentTarget).data("ot-set")))
 			.off("click", "[data-ot-size]")
 			.on("click", "[data-ot-size]", (e) => {
 				this.page_length = Number($(e.currentTarget).data("ot-size"));
@@ -303,109 +562,6 @@ class OutletTargetsPage {
 				this.start = this.start + this.page_length;
 				this.refresh();
 			});
-	}
-
-	// ------------------------------------------------------------------
-	// Set Target dialog — monthly targets for the selected month plus the
-	// overall payback target on the Company master. Blank fields keep stored
-	// values; the server enforces permissions per store.
-	// ------------------------------------------------------------------
-
-	_set_dialog(company) {
-		const row = (this.state.rows || []).find((r) => r.company === company) || {};
-		const m = row.monthly || {};
-		const o = row.overall || {};
-		const month_start = this._month_start();
-		// Field labels follow the configured bases; only Net Sales keeps the
-		// "net incl. tax" qualifier (the profit bases carry their own meaning).
-		const mlabel = this._basis_label("monthly");
-		const olabel = this._basis_label("overall");
-		const netHint = this._basis("monthly") === "Net Sales" ? ` (${__("net incl. tax")})` : "";
-		const ccy = row.currency || "";
-		const mtdValue = row.mtd_value ?? row.mtd_net_tax_incl ?? 0;
-		const achievement =
-			row.achievement_sales_pct == null
-				? ""
-				: `${__("Achievement")}: ${HQ_UTILS.fmtPct(row.achievement_sales_pct, 1)} · ${__("MTD")}: ${HQ_UTILS.fmtMoney(mtdValue, ccy)}`;
-		const overallAch =
-			!o || o.overall_target == null
-				? ""
-				: `${__("cum.")} ${HQ_UTILS.fmtMoney(o.cumulative_value ?? o.cumulative_net_tax_incl, ccy)} / ${HQ_UTILS.fmtMoney(o.overall_target, ccy)} = ${HQ_UTILS.fmtPct(o.achievement_pct, 1)}`;
-		const d = new frappe.ui.Dialog({
-			title: `${__("Set Target")} · ${frappe.utils.escape_html(company)}`,
-			fields: [
-				{
-					fieldname: "monthly_section",
-					fieldtype: "Section Break",
-					label: `${__("Monthly Target")} (${frappe.utils.escape_html(mlabel)})`,
-				},
-				{
-					fieldname: "mtd_head",
-					fieldtype: "HTML",
-					options: `<div class="ot-dialog-head text-muted">${frappe.utils.escape_html(month_start)}${achievement ? ` · ${frappe.utils.escape_html(achievement)}` : ""}</div>`,
-				},
-				{
-					fieldname: "cb_monthly",
-					fieldtype: "Column Break",
-				},
-				{
-					fieldname: "target_sales",
-					label: `${__("Target")} ${mlabel}${netHint}`,
-					fieldtype: "Currency",
-					options: ccy,
-					default: m.target_sales ?? "",
-				},
-				{
-					fieldname: "overall_section",
-					fieldtype: "Section Break",
-					label: `${__("Overall / balik modal")} (${frappe.utils.escape_html(olabel)})`,
-				},
-				{
-					fieldname: "overall_head",
-					fieldtype: "HTML",
-					options: `<div class="ot-dialog-head text-muted">${frappe.utils.escape_html(overallAch || __("one-time target on the outlet"))}</div>`,
-				},
-				{
-					fieldname: "cb_overall",
-					fieldtype: "Column Break",
-				},
-				{
-					fieldname: "overall_target",
-					label: `${__("Overall Target")} (${olabel})`,
-					fieldtype: "Currency",
-					options: ccy,
-					default: o.overall_target ?? "",
-					description: `${__("0 clears the overall target")}.`,
-				},
-				{
-					fieldname: "overall_from",
-					label: __("Count cumulative from"),
-					fieldtype: "Date",
-					default: o.from_date || "",
-					description: `${__("Empty = all time")}.`,
-				},
-			],
-			primary_action_label: __("Save"),
-			primary_action: (values) => {
-				frappe.call({
-					method: "pos_next.api.hq_monitoring.set_outlet_target",
-					args: {
-						company,
-						month_start,
-						target_sales: values.target_sales ?? "",
-						overall_target: values.overall_target ?? "",
-						overall_from: values.overall_from || "",
-					},
-					freeze: true,
-					callback: () => {
-						d.hide();
-						frappe.show_alert({ message: __("Targets updated"), indicator: "green" });
-						this.refresh();
-					},
-				});
-			},
-		});
-		d.show();
 	}
 
 	// ------------------------------------------------------------------

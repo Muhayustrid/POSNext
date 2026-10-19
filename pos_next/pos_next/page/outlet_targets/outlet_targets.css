@@ -33,69 +33,8 @@
 	max-width: 260px;
 }
 
-.ot-table-scroll {
-	overflow-x: auto;
-	max-width: 100%;
-	-webkit-overflow-scrolling: touch;
-}
-
-/* The outlet column stays visible while the numbers scroll. */
-.ot-table td:first-child,
-.ot-table thead th:first-child {
-	position: sticky;
-	left: 0;
-	background: var(--card-bg, #fff);
-	z-index: 1;
-	text-align: left;
-}
-
-.ot-table {
-	width: 100%;
-	border-collapse: collapse;
-	font-variant-numeric: tabular-nums;
-}
-
-.ot-table th,
-.ot-table td {
-	padding: 8px 10px;
-	border-bottom: 1px solid var(--border-color, #f1f3f5);
-	text-align: left;
-	vertical-align: top;
-}
-
-.ot-table tbody tr {
-	transition: background 0.15s ease;
-}
-
-.ot-table tbody tr:hover td {
-	background: var(--control-bg, #f5f6f8);
-}
-
-/* Sticky cells must follow the row hover too, or they look torn off. */
-.ot-table tbody tr:hover td:first-child {
-	background: var(--control-bg, #f5f6f8);
-}
-
-.ot-table thead th {
-	font-size: 11px;
-	color: var(--text-muted);
-	text-transform: uppercase;
-	letter-spacing: 0.3px;
-	white-space: nowrap;
-}
-
-.ot-num {
-	text-align: right !important;
-	white-space: nowrap;
-}
-
-.ot-outlet {
-	font-weight: 600;
-	min-width: 180px;
-}
-
-.ot-money {
-	white-space: nowrap;
+.ot-datatable-wrapper {
+	min-height: 200px;
 }
 
 .ot-sub {
@@ -105,37 +44,18 @@
 	white-space: nowrap;
 }
 
-.ot-small {
-	font-size: 11px;
+.ot-import-errors {
+	max-height: 200px;
+	overflow-y: auto;
+	margin: 8px 0 0;
+	padding-left: 18px;
+	font-size: 12px;
+	color: var(--text-muted);
 }
 
-.ot-pct {
-	font-variant-numeric: tabular-nums;
-}
-
-/* Progress bar: the one accent on the page (--primary) lives in the fill. */
-.ot-bar {
-	display: inline-block;
-	vertical-align: middle;
-	width: 72px;
-	height: 6px;
-	border-radius: 999px;
-	background: var(--control-bg, #edf0f3);
-	overflow: hidden;
-	margin-right: 6px;
-}
-
-.ot-bar--thin {
-	height: 4px;
-	width: 60px;
-}
-
-.ot-bar-fill {
-	display: block;
-	height: 100%;
-	border-radius: inherit;
-	background: var(--primary, #2490ef);
-	transition: width 0.3s ease;
+.ot-error {
+	margin: 4px 0;
+	color: var(--text-muted);
 }
 
 /* Pager mirrors the Frappe list view: count left, page sizes, Prev/Next. */
@@ -156,25 +76,6 @@
 .ot-pager-nav {
 	display: inline-flex;
 	gap: 4px;
-}
-
-.ot-dialog-head {
-	font-size: 12px;
-	margin-bottom: 4px;
-}
-
-.ot-import-errors {
-	max-height: 200px;
-	overflow-y: auto;
-	margin: 8px 0 0;
-	padding-left: 18px;
-	font-size: 12px;
-	color: var(--text-muted);
-}
-
-.ot-error {
-	margin: 4px 0;
-	color: var(--text-muted);
 }
 
 /* Touch targets: comfortable on coarse pointers (44px per HIG). */
