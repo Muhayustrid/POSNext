@@ -98,32 +98,19 @@ class OutletTargetsPage {
 	}
 
 	_setup_filters() {
-		const start = frappe.datetime.month_start().split("-");
-		const year = Number(start[0]);
-		const monthOpts = [
-			"January", "February", "March", "April", "May", "June",
-			"July", "August", "September", "October", "November", "December",
-		].map((name, i) => ({ label: __(name), value: String(i + 1).padStart(2, "0") }));
-		const yearOpts = [];
-		for (let y = year - 1; y <= year + 1; y++) yearOpts.push({ label: String(y), value: String(y) });
+		// One native Date control whose picker opens on the month grid; any
+		// picked or typed date is normalised to the 1st (the month key).
 		this.month_field = this.page.add_field({
 			fieldname: "month",
 			label: __("Month"),
-			fieldtype: "Select",
-			options: monthOpts,
-			default: start[1],
+			fieldtype: "Date",
+			default: moment().startOf("month").format("YYYY-MM-DD"),
+			options: { view: "months", minView: "months" },
 			change: this._later(() => {
-				this.start = 0;
-				this.refresh();
-			}),
-		});
-		this.year_field = this.page.add_field({
-			fieldname: "year",
-			label: __("Year"),
-			fieldtype: "Select",
-			options: yearOpts,
-			default: String(year),
-			change: this._later(() => {
+				const value = this.month_field.get_value();
+				const first = moment(value || undefined).startOf("month").format("YYYY-MM-DD");
+				// set_value fires change again with the normalised date
+				if (value !== first) return this.month_field.set_value(first);
 				this.start = 0;
 				this.refresh();
 			}),
@@ -143,9 +130,8 @@ class OutletTargetsPage {
 		});
 	}
 
-	// The API receives exactly this key: year + "-" + month + "-01".
 	_month_start() {
-		return `${this.year_field.get_value()}-${this.month_field.get_value()}-01`;
+		return moment(this.month_field.get_value() || undefined).startOf("month").format("YYYY-MM-DD");
 	}
 
 	_search() {
