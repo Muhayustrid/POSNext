@@ -40,6 +40,7 @@
    "description": "Currency follows the company default currency",
    "fieldname": "target_sales",
    "fieldtype": "Currency",
+   "in_list_view": 1,
    "label": "Target Sales",
    "non_negative": 1,
    "options": "company:default_currency"
@@ -56,7 +57,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-08 00:00:00.000000",
+ "modified": "2026-10-19 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Monthly Target",
@@ -106,8 +107,10 @@
    "role": "POSNext Manager"
   }
  ],
- "sort_field": "modified",
+ "show_title_field_in_link": 1,
+ "sort_field": "month_start",
  "sort_order": "DESC",
  "states": [],
+ "title_field": "company",
  "track_changes": 1
 }
