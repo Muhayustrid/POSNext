@@ -1512,14 +1512,21 @@ def _collect_stock_errors(items):
 		if requested > available:
 			if d.get("item_code") in allowed_items:
 				continue
-			errors.append(
-				{
-					"item_code": d.get("item_code"),
-					"warehouse": d.get("warehouse"),
-					"requested_qty": requested,
-					"available_qty": available,
-				}
+			item_code = d.get("item_code")
+			item_name = d.get("item_name") or (
+				frappe.db.get_value("Item", item_code, "item_name", cache=True)
+				if item_code
+				else None
 			)
+			err = {
+				"item_code": item_code,
+				"warehouse": d.get("warehouse"),
+				"requested_qty": requested,
+				"available_qty": available,
+			}
+			if item_name:
+				err["item_name"] = item_name
+			errors.append(err)
 
 	return errors
 
@@ -2321,6 +2328,10 @@ def update_invoice(data):
 		if doctype != "Sales Order" and invoice_doc.get("pos_coupon_code"):
 			_apply_stamped_coupon_discount(invoice_doc)
 
+		# Outlet isolation: never persist items[].warehouse from the payload —
+		# the POS Profile warehouse wins on every row (see _enforce_profile_warehouse).
+		_enforce_profile_warehouse(invoice_doc, pos_profile_doc)
+
 		# Validate stock availability before saving draft
 		# is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
 		# so look it up from Item master
@@ -2337,10 +2348,6 @@ def update_invoice(data):
 					errors = _collect_stock_errors(stock_items)
 					if errors:
 						frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
-
-		# Outlet isolation: never persist items[].warehouse from the payload —
-		# the POS Profile warehouse wins on every row (see _enforce_profile_warehouse).
-		_enforce_profile_warehouse(invoice_doc, pos_profile_doc)
 
 		# Save as draft — permission flags were decided at the top (own draft
 		# bypass only); docstatus stays server-owned.

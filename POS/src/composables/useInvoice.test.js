@@ -4,22 +4,43 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { nextTick } from "vue"
 
-const { invoicePayloads } = vi.hoisted(() => ({ invoicePayloads: [] }))
+const { invoicePayloads, stockValidationMock, shiftStoreState } = vi.hoisted(() => ({
+	invoicePayloads: [],
+	stockValidationMock: { calls: [], result: [] },
+	shiftStoreState: { profileCompany: null, profileWarehouse: "Outlet Warehouse - RR" },
+}))
 
 vi.mock("frappe-ui", () => ({
-	createResource: vi.fn(() => ({
-		loading: false,
-		data: null,
-		error: null,
-		reload: vi.fn(),
-		// updateInvoiceResource.submit({ data: invoiceData }) — record every
-		// doctype-bearing payload. submitInvoiceResource.submit rides the same
-		// factory but its data carries no doctype, so it never lands here.
-		submit: vi.fn(async (arg) => {
-			if (arg?.data?.doctype) invoicePayloads.push(arg.data)
-			return { data: { name: "POS-INV-0001" } }
-		}),
-	})),
+	createResource: vi.fn((opts) => {
+		if (opts?.url === "pos_next.api.invoices.validate_cart_items") {
+			return {
+				loading: false,
+				data: null,
+				error: null,
+				reload: vi.fn(),
+				submit: vi.fn(async (arg) => {
+					stockValidationMock.calls.push(arg)
+					if (typeof stockValidationMock.impl === "function") {
+						return stockValidationMock.impl(arg)
+					}
+					return stockValidationMock.result
+				}),
+			}
+		}
+		return {
+			loading: false,
+			data: null,
+			error: null,
+			reload: vi.fn(),
+			// updateInvoiceResource.submit({ data: invoiceData }) — record every
+			// doctype-bearing payload. submitInvoiceResource.submit rides the same
+			// factory but its data carries no doctype, so it never lands here.
+			submit: vi.fn(async (arg) => {
+				if (arg?.data?.doctype) invoicePayloads.push(arg.data)
+				return { data: { name: "POS-INV-0001" } }
+			}),
+		}
+	}),
 }))
 vi.mock("@/utils/offline", () => ({
 	isOffline: () => false,
@@ -35,7 +56,7 @@ vi.mock("@/stores/posSettings", () => ({
 	usePOSSettingsStore: () => ({ queueEnabled: false }),
 }))
 vi.mock("@/stores/posShift", () => ({
-	usePOSShiftStore: () => ({ profileCompany: null }),
+	usePOSShiftStore: () => shiftStoreState,
 }))
 vi.mock("@/utils/queue/queueNumber", () => ({
 	acquireQueueNumber: vi.fn(),
@@ -359,5 +380,74 @@ describe("coupon follows the cart (server formula)", () => {
 
 		// 20% of the remaining 10000 — not the 20000 frozen at apply time.
 		expect(invoice.additionalDiscount.value).toBe(2000)
+	})
+})
+
+describe("submitInvoice stock pre-check", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		invoicePayloads.length = 0
+		stockValidationMock.calls.length = 0
+		stockValidationMock.result = []
+		stockValidationMock.impl = null
+		shiftStoreState.profileWarehouse = "Outlet Warehouse - RR"
+	})
+
+	function setupInvoiceForStockCheck() {
+		const invoice = useInvoice()
+		invoice.posProfile.value = "POS Profile 1"
+		invoice.invoiceItems.value = [
+			{
+				item_code: "PJO2605",
+				item_name: "Roti Coklat",
+				quantity: 3,
+				rate: 10000,
+				price_list_rate: 10000,
+				amount: 30000,
+				warehouse: "Old Warehouse",
+			},
+		]
+		invoice.payments.value = [
+			{
+				mode_of_payment: "Cash",
+				amount: 30000,
+			},
+		]
+		invoice.rebuildIncrementalCache()
+		return invoice
+	}
+
+	it("calls stock pre-check with profile warehouse and aborts before creating draft when stock is short", async () => {
+		const invoice = setupInvoiceForStockCheck()
+		stockValidationMock.result = [
+			{
+				item_code: "PJO2605",
+				item_name: "Roti Coklat",
+				warehouse: "Outlet Warehouse - RR",
+				requested_qty: 3,
+				available_qty: 1,
+			},
+		]
+
+		await expect(invoice.submitInvoice()).rejects.toThrow()
+
+		// validate_cart_items MUST be called with pre-check items and profile warehouse
+		expect(stockValidationMock.calls).toHaveLength(1)
+		expect(stockValidationMock.calls[0].pos_profile).toBe("POS Profile 1")
+		expect(stockValidationMock.calls[0].items[0].item_code).toBe("PJO2605")
+		expect(stockValidationMock.calls[0].items[0].warehouse).toBe("Outlet Warehouse - RR")
+
+		// NO draft invoice was created on the server
+		expect(invoicePayloads).toHaveLength(0)
+	})
+
+	it("proceeds to draft creation when stock is sufficient", async () => {
+		const invoice = setupInvoiceForStockCheck()
+		stockValidationMock.result = []
+
+		await invoice.submitInvoice()
+
+		expect(stockValidationMock.calls).toHaveLength(1)
+		expect(invoicePayloads).toHaveLength(1)
 	})
 })

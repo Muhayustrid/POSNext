@@ -1166,13 +1166,44 @@ export function useInvoice() {
 			isSubmitting.value = true;
 
 			try {
-				// Step 1: Create invoice draft
+				// Pre-submission stock validation: check against profile warehouse
 				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 				const rawItems = toRaw(invoiceItems.value);
 				const rawPayments = toRaw(payments.value);
 				const rawSalesTeam = toRaw(salesTeam.value);
 				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
 					buildCustomerCreditPayload(rawPayments);
+
+				const formattedItems = formatItemsForSubmission(rawItems);
+
+				const precheckWarehouse = shiftStore.profileWarehouse;
+				const precheckItems = formattedItems.map((item) => ({
+					...item,
+					warehouse: precheckWarehouse || item.warehouse,
+				}));
+
+				const stockResult = await validateCartItemsResource.submit({
+					items: precheckItems,
+					pos_profile: posProfile.value,
+				});
+
+				const stockErrors = Array.isArray(stockResult)
+					? stockResult
+					: Array.isArray(stockResult?.message)
+						? stockResult.message
+						: Array.isArray(stockResult?.data)
+							? stockResult.data
+							: [];
+
+				if (stockErrors.length > 0) {
+					const payload = JSON.stringify({ errors: stockErrors });
+					const stockError = new Error(payload);
+					stockError.exc_type = "ValidationError";
+					stockError.messages = [payload];
+					throw stockError;
+				}
+
+				// Step 1: Create invoice draft
 
 				// Daily per-outlet queue number, allocated before the draft save so
 				// it rides the invoice everywhere (server print, history, sync).
@@ -1199,7 +1230,7 @@ export function useInvoice() {
 					posa_pos_opening_shift: posOpeningShift.value,
 					customer: customer.value?.name || customer.value,
 					buyer_name: buyerName.value.trim(),
-					items: formatItemsForSubmission(rawItems),
+					items: formattedItems,
 					payments: invoicePayments,
 					...buildDiscountFields(),
 					discount_confirmation_code: restrictionStore.code || "",

@@ -20,6 +20,52 @@
  */
 
 /**
+ * Extract structured stock error items from error payload
+ */
+function extractStructuredStockErrors(error, message) {
+	if (Array.isArray(error?.errors)) return error.errors;
+
+	const candidates = [
+		message,
+		error?.message,
+		Array.isArray(error?.messages) ? error.messages[0] : null,
+	];
+
+	for (const cand of candidates) {
+		if (typeof cand === "string" && cand.includes('"errors"')) {
+			try {
+				const parsed = JSON.parse(cand);
+				if (Array.isArray(parsed?.errors)) {
+					return parsed.errors;
+				}
+			} catch (_) {}
+		} else if (cand && typeof cand === "object" && Array.isArray(cand.errors)) {
+			return cand.errors;
+		}
+	}
+
+	if (error?._server_messages) {
+		try {
+			const raw = error._server_messages;
+			const serverMessages = typeof raw === "string" ? JSON.parse(raw) : raw;
+			const list = Array.isArray(serverMessages) ? serverMessages : [serverMessages];
+			for (const item of list) {
+				const obj = typeof item === "string" ? JSON.parse(item) : item;
+				const msg = obj?.message || obj;
+				if (typeof msg === "string" && msg.includes('"errors"')) {
+					const parsed = JSON.parse(msg);
+					if (Array.isArray(parsed?.errors)) return parsed.errors;
+				} else if (msg && typeof msg === "object" && Array.isArray(msg.errors)) {
+					return msg.errors;
+				}
+			}
+		} catch (_) {}
+	}
+
+	return null;
+}
+
+/**
  * Clean HTML and extra whitespace from error messages
  */
 function cleanErrorMessage(rawMessage) {
@@ -113,8 +159,31 @@ export function parseError(error) {
 	const normalizedMessage = (context.message || "").toLowerCase();
 	const excType = (error.exc_type || "").toLowerCase();
 
-	// Insufficient Stock
-	if (
+	// Insufficient Stock (structured errors payload or exception)
+	const structuredStockErrors = extractStructuredStockErrors(error, context.message);
+	if (structuredStockErrors && structuredStockErrors.length > 0) {
+		context.type = "warning";
+		context.title = __("Insufficient Stock");
+		context.retryable = true;
+		context.message = structuredStockErrors
+			.map((err) => {
+				const itemLabel = err.item_name || err.item_code;
+				if (err.warehouse) {
+					return __("{0}: requested {1}, available {2} in {3}", [
+						itemLabel,
+						err.requested_qty,
+						err.available_qty,
+						err.warehouse,
+					]);
+				}
+				return __("{0}: requested {1}, available {2}", [
+					itemLabel,
+					err.requested_qty,
+					err.available_qty,
+				]);
+			})
+			.join("\n");
+	} else if (
 		excType === "negativestockerror" ||
 		normalizedMessage.includes("needed in") ||
 		normalizedMessage.includes("insufficient stock") ||
