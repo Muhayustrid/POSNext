@@ -181,6 +181,14 @@ class TestStockOpnameOverride(FrappeTestCase):
 		doc.save()
 		self.assertEqual({r.item_code for r in doc.items}, {equal, changed})
 
+	def test_draft_skip_still_resets_difference_amount(self):
+		# ERPNext >=16.52 validate_data does `difference_amount +=` for rows
+		# without a valuation rate; the draft skip must leave it a number.
+		doc = frappe.new_doc(DOCTYPE)
+		doc.difference_amount = None
+		doc.remove_items_with_no_change()
+		self.assertEqual(doc.difference_amount, 0.0)
+
 	def test_submit_with_all_rows_equal_raises_clear_message(self):
 		item = _make_test_item()
 		_seed_stock(item, self.warehouse, 5)

@@ -32,6 +32,8 @@ class CustomStockReconciliation(StockReconciliation):
 	def remove_items_with_no_change(self):
 		# Drafts keep every counted row (blind count); filter only on submit.
 		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
+			# super() resets this; ERPNext validate_data later does `difference_amount +=`
+			self.difference_amount = 0.0
 			return
 		try:
 			super().remove_items_with_no_change()
