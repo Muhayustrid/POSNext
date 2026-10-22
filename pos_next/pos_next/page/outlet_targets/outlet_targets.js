@@ -232,7 +232,8 @@ class OutletTargetsPage {
 			checkboxColumn: false,
 			inlineFilters: false,
 			headerDropdown: [],
-			layout: "fluid",
+			// "fluid" forces overflow-x hidden and squeezes columns; "fixed" allows horizontal scroll
+			layout: "fixed",
 			cellHeight: 35,
 			language: frappe.boot.lang,
 			translations: frappe.utils.datatable.get_translations(),
@@ -251,6 +252,8 @@ class OutletTargetsPage {
 			{
 				id: "company",
 				name: __("Outlet"),
+				width: 260,
+				sticky: true,
 				editable: false,
 				sortable: false,
 				dropdown: false,
