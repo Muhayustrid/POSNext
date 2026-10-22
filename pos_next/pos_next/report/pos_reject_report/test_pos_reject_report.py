@@ -2,8 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
-from frappe.utils import flt, today
+from frappe.utils import flt
 
 from pos_next.api.test_reject_request import RejectRequestTest, _as_user
 
@@ -18,17 +17,15 @@ class TestPOSRejectReport(RejectRequestTest):
 		self.crew2 = self._user(["POSNext Cashier"], prefix="rrp-u2")
 		self.approver = self._user(["POSNext Reject Approver"], prefix="rrp-appr")
 
-	def _decided(self, decision, liabilities=None):
+	def _decided(self, borne_by, liabilities=None):
 		doc = self._submitted(1)
-		if decision == "Approved":
-			self._decide(doc, "Approved")
-		else:
-			self._decide(doc.reload(), decision, "crew liable", liabilities)
-		return doc
-
-	def _decide(self, doc, decision, notes=None, liabilities=None):
 		with _as_user(self.approver):
-			return reject_request_apply(doc, decision, notes, liabilities)
+			from frappe.model.workflow import apply_workflow
+
+			from pos_next.services import reject_request
+
+			reject_request.set_liability(doc, borne_by, liabilities)
+			return apply_workflow(doc, "Approve")
 
 	def _liability_rows(self, filters=None):
 		filters = {"from_date": "2020-01-01", "to_date": "2050-01-01", "view": "Per Liability", **(filters or {})}
@@ -36,11 +33,11 @@ class TestPOSRejectReport(RejectRequestTest):
 		return columns, data
 
 	def test_liability_rows_sum_to_totals(self):
-		approved = self._decided("Approved")
+		approved = self._decided("Company")
 		total = flt(frappe.db.get_value("POS Reject Request", approved.name, "total_amount"))
-		liab = self._decided("Rejected", [{"user": self.crew1, "amount": total * 0.6}, {"user": self.crew2, "amount": total * 0.4}])
-		filters = {"purpose": "Unsold", "decision": ""}
-		columns, data = self._liability_rows(filters)
+		self._decided("Crew", [{"user": self.crew1, "amount": total * 0.6}, {"user": self.crew2, "amount": total * 0.4}])
+		filters = {"purpose": "Unsold", "borne_by": ""}
+		_columns, data = self._liability_rows(filters)
 		bearers = {r.bearer: r.amount for r in data}
 		self.assertEqual(flt(bearers.get("Company")), total)
 		self.assertEqual(flt(bearers.get(self.crew1)), total * 0.6)
@@ -54,10 +51,15 @@ class TestPOSRejectReport(RejectRequestTest):
 		self.assertEqual(next(s["value"] for s in summary if s["label"] == "Requests"), 2)
 
 	def test_user_filter_per_liability(self):
-		total = 50.0
 		doc = self._submitted(5)  # rate 10 → total 50
-		self._decide(doc.reload(), "Rejected", "split", [{"user": self.crew1, "amount": 20}, {"user": self.crew2, "amount": 30}])
-		columns, data = self._liability_rows({"user": self.crew2})
+		with _as_user(self.approver):
+			from frappe.model.workflow import apply_workflow
+
+			from pos_next.services import reject_request
+
+			reject_request.set_liability(doc, "Crew", [{"user": self.crew1, "amount": 20}, {"user": self.crew2, "amount": 30}])
+			apply_workflow(doc, "Approve")
+		_columns, data = self._liability_rows({"user": self.crew2})
 		self.assertEqual(len(data), 1)
 		self.assertEqual(data[0].bearer, self.crew2)
 		self.assertEqual(flt(data[0].amount), 30)
@@ -65,14 +67,32 @@ class TestPOSRejectReport(RejectRequestTest):
 	def test_per_request_liable_crew_column(self):
 		doc = self._submitted(2)
 		total = flt(doc.total_amount)
-		self._decide(doc.reload(), "Rejected", "split", [{"user": self.crew1, "amount": total / 2}, {"user": self.crew2, "amount": total / 2}])
+		with _as_user(self.approver):
+			from frappe.model.workflow import apply_workflow
+
+			from pos_next.services import reject_request
+
+			reject_request.set_liability(doc, "Crew", [{"user": self.crew1, "amount": total / 2}, {"user": self.crew2, "amount": total / 2}])
+			apply_workflow(doc, "Approve")
 		filters = {"view": "Per Request", "from_date": "2020-01-01", "to_date": "2050-01-01"}
-		data = self.execute(filters)[1]
+		cols, data = self.execute(filters)[:2]
 		row = next(r for r in data if r.name == doc.name)
 		self.assertEqual(row.liable_crew, f"{self.crew1}, {self.crew2}")
+		self.assertEqual(row.workflow_state, "Awaiting Destruction")
+		self.assertEqual(row.borne_by, "Crew")
+		col_fields = [c["fieldname"] for c in cols]
+		self.assertIn("workflow_state", col_fields)
+		self.assertIn("borne_by", col_fields)
+		self.assertNotIn("status", col_fields)
+		self.assertNotIn("decision", col_fields)
 
-
-def reject_request_apply(doc, decision, notes=None, liabilities=None):
-	from pos_next.services import reject_request
-
-	return reject_request.apply_decision(doc, decision, notes, liabilities, system=False)
+	def test_only_approved_workflow_states_in_report(self):
+		draft = self._doc(1)
+		pending = self._submitted(1)
+		approved = self._decided("Company")
+		filters = {"from_date": "2020-01-01", "to_date": "2050-01-01", "view": "Per Request"}
+		data = self.execute(filters)[1]
+		names = {r.name for r in data}
+		self.assertNotIn(draft.name, names)
+		self.assertNotIn(pending.name, names)
+		self.assertIn(approved.name, names)

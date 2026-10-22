@@ -17,6 +17,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, flt, today
 
+from pos_next.reject_request_setup import STATE_DRAFT
 from pos_next.services.reject_request import approver_users, ensure_production_loss_request, notify
 
 # Canonical English, never translated: the dedupe marker.
@@ -64,7 +65,7 @@ def _notify_overdue():
 		"POS Reject Request",
 		filters={
 			"is_system_generated": 1,
-			"docstatus": 0,
+			"workflow_state": STATE_DRAFT,
 			"deadline_date": ["<", today()],
 		},
 		pluck="name",

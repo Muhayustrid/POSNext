@@ -3343,3 +3343,144 @@ Diminta {1} {2}, tetapi hanya {3} {4} tersedia di ""{5}"".",""
 "You need create permission on POS Monthly Target","Anda perlu izin buat pada Target Bulanan POS",""
 "{0}: requested {1}, available {2} in {3}","{0}: diminta {1}, tersedia {2} di {3}",""
 "{0}: requested {1}, available {2}","{0}: diminta {1}, tersedia {2}",""
+"Pending Approval","Menunggu Persetujuan",""
+"Awaiting Destruction","Menunggu Pemusnahan",""
+"Destruction Submitted","Pemusnahan Dikirim",""
+"Returned by Head Office","Dikembalikan oleh Kantor Pusat",""
+"Ready for Destruction","Siap Dimusnahkan",""
+"Download Berita Acara, perform destruction, and upload video/photos proof.","Unduh Berita Acara, lakukan pemusnahan, dan unggah bukti video/foto.",""
+"Download Berita Acara","Unduh Berita Acara",""
+"Destruction Proof","Bukti Pemusnahan",""
+"Upload photos or provide a video link showing stock destruction, then click Send Proof.","Unggah foto atau sertakan tautan video pemusnahan stok, lalu klik Kirim Bukti.",""
+"Destruction Video Link","Tautan Video Pemusnahan",""
+"Add Destruction Photos","Tambah Foto Pemusnahan",""
+"Destruction Photos","Foto Pemusnahan",""
+"Approval Code","Kode Persetujuan",""
+"Approved by {0} on {1}","Disetujui oleh {0} pada {1}",""
+"Borne by Company","Ditanggung Perusahaan",""
+"Borne by Crew","Ditanggung Kru",""
+"Head Office approved this loss to be borne by company.","Kantor Pusat menyetujui kerugian ini ditanggung oleh perusahaan.",""
+"Head Office assigned this loss to crew liabilities.","Kantor Pusat menetapkan kerugian ini ke tanggung jawab kru.",""
+"Withdraw","Tarik Kembali",""
+"Withdraw this reject request back to Draft?","Tarik kembali permintaan reject ini ke Draf?",""
+"Reject request withdrawn to Draft","Permintaan reject ditarik kembali ke Draf",""
+"Failed to withdraw reject request","Gagal menarik kembali permintaan reject",""
+"Send Proof","Kirim Bukti",""
+"Destruction proof sent for review","Bukti pemusnahan dikirim untuk ditinjau",""
+"Failed to send destruction proof","Gagal mengirim bukti pemusnahan",""
+"Duplicate item with same production date","Item duplikat dengan tanggal produksi yang sama",""
+"Production Date","Tanggal Produksi",""
+"Click Add Row to add items for reject.","Klik Tambah Baris untuk menambahkan item reject.",""
+"Reason (optional)","Alasan (opsional)",""
+"Stock Entry","Entri Stok",""
+"Berita Acara","Berita Acara",""
+"Borne By","Ditanggung Oleh",""
+"Liabilities are required when borne by Crew","Tanggung jawab kru wajib diisi saat ditanggung oleh Kru",""
+"Row #{0}","Baris #{0}",""
+"Click to change item","Klik untuk mengubah item",""
+"Remove Item","Hapus Item",""
+A system-generated Production Loss request cannot be repurposed,Permintaan Production Loss yang dibuat sistem tidak dapat diubah tujuannya
+A system-generated request holds exactly the production item of its Work Order,Permintaan yang dibuat sistem hanya memuat item produksi dari Perintah Kerja terkait
+A valid reject purpose is required,Tujuan reject yang valid diperlukan
+Action {0} is not allowed,Tindakan {0} tidak diizinkan
+Add Evidence Photos,Tambah Foto Bukti
+Approve,Setujui
+At most {0} evidence photos are allowed,Maksimal {0} foto bukti yang diizinkan
+Attach 1 to {0} evidence photos,Lampirkan 1 hingga {0} foto bukti
+Attachments must be evidence or destruction,Lampiran harus berupa bukti atau pemusnahan
+Before you submit,Sebelum mengirimkan
+Borne By must be Company or Crew,Ditanggung Oleh harus berupa Perusahaan atau Kru
+Borne By must be set before approving,Ditanggung Oleh harus diatur sebelum menyetujui
+Company-borne requests cannot have crew liabilities,Permintaan yang ditanggung perusahaan tidak boleh memiliki kewajiban kru
+Create one with New Request,Buat permintaan baru dengan Permintaan Baru
+Deadline,Batas Waktu
+Describe what happened to the lost quantity before submitting,Jelaskan apa yang terjadi pada kuantitas yang hilang sebelum mengirimkan
+Destruction photos can only be attached in Awaiting Destruction,Foto pemusnahan hanya dapat dilampirkan saat Menunggu Pemusnahan
+Destruction proof (video link or at least one photo) is required,Bukti pemusnahan (tautan video atau minimal satu foto) wajib disertakan
+Destruction proof returned for {0},Bukti pemusnahan dikembalikan untuk {0}
+Destruction proof submitted for {0},Bukti pemusnahan dikirimkan untuk {0}
+Each item must be an object with item_code and qty,Setiap item harus berupa objek dengan kode item dan jumlah
+Error attaching files: {0},Gagal melampirkan berkas: {0}
+Error fetching reject purposes: {0},Gagal mengambil tujuan reject: {0}
+Error fetching reject request: {0},Gagal mengambil permintaan reject: {0}
+Error fetching reject requests: {0},Gagal mengambil daftar permintaan reject: {0}
+Error recording return reason: {0},Gagal mencatat alasan pengembalian: {0}
+Error saving reject request: {0},Gagal menyimpan permintaan reject: {0}
+Error setting reject liability: {0},Gagal mengatur kewajiban reject: {0}
+Evidence Photos,Foto Bukti
+Evidence Photos (1-5),Foto Bukti (1-5)
+Evidence photos can only be attached to a Draft,Foto bukti hanya dapat dilampirkan pada Draft
+Incident Date,Tanggal Kejadian
+Incident date cannot be changed once submitted,Tanggal kejadian tidak dapat diubah setelah dikirim
+Incident date cannot be in the future,Tanggal kejadian tidak boleh di masa depan
+Invalid workflow state: {0},Status workflow tidak valid: {0}
+Invalid workflow transition from {0} to {1},Transisi workflow tidak valid dari {0} ke {1}
+"Item {0} has only {1} in {2}, cannot reject {3}","Item {0} hanya memiliki stok {1} di {2}, tidak dapat mereject {3}"
+Item {0}: Production date {1} cannot be after incident date {2},Item {0}: Tanggal produksi {1} tidak boleh setelah tanggal kejadian {2}
+Items cannot be changed once submitted,Item tidak dapat diubah setelah dikirim
+Late,Terlambat
+Late request in Strict mode must be borne by Crew,Permintaan terlambat dalam mode Ketat harus ditanggung oleh Kru
+Liabilities,Kewajiban
+Liability amount must be greater than zero,Jumlah kewajiban harus lebih dari nol
+Liability amounts must add up to {0},Total kewajiban harus sama dengan {0}
+Liability can only be set in Pending Approval,Kewajiban hanya dapat diatur saat Menunggu Persetujuan
+Liability user {0} appears more than once,Pengguna kewajiban {0} muncul lebih dari satu kali
+Liability user {0} must be an enabled user,Pengguna kewajiban {0} harus pengguna yang aktif
+New Reject Request,Permintaan Reject Baru
+New Request,Permintaan Baru
+New reject request must start in Draft state,Permintaan reject baru harus dimulai dalam status Draft
+New reject request {0},Permintaan reject baru {0}
+No reject requests,Tidak ada permintaan reject
+Only a Draft reject request can be edited,Hanya permintaan reject status Draft yang dapat diedit
+Only cashier or manager can perform this action,Hanya kasir atau manajer yang dapat melakukan tindakan ini
+"Only cashier, manager or approver can return/withdraw this request","Hanya kasir, manajer, atau penyetujui yang dapat mengembalikan/menarik permintaan ini"
+Only the system can create a system-generated Production Loss request,Hanya sistem yang dapat membuat permintaan Production Loss
+Only {0} can perform this action,Hanya {0} yang dapat melakukan tindakan ini
+Only {0} can record return reason,Hanya {0} yang dapat mencatat alasan pengembalian
+Only {0} can set liability,Hanya {0} yang dapat mengatur kewajiban
+Optional,Opsional
+Over Limit,Melebihi Batas
+POS Profile cannot be changed once submitted,Profil POS tidak dapat diubah setelah dikirim
+Production Loss requests can only be created by the system from a Work Order,Permintaan Production Loss hanya dapat dibuat oleh sistem dari Perintah Kerja
+Purpose cannot be changed once submitted,Tujuan tidak dapat diubah setelah dikirim
+Purpose {0} can only be used by the system,Tujuan {0} hanya dapat digunakan oleh sistem
+Purpose {0} is disabled,Tujuan {0} dinonaktifkan
+Reason & Evidence,Alasan & Bukti
+Reason cannot be changed once submitted,Alasan tidak dapat diubah setelah dikirim
+Reject Requests,Permintaan Reject
+Reject request submitted,Permintaan reject berhasil dikirim
+Reject request {0} approved,Permintaan reject {0} disetujui
+Reject request {0} completed,Permintaan reject {0} selesai
+Reject request {0} returned to Draft,Permintaan reject {0} dikembalikan ke Draft
+Report unsold or damaged stock for Head Office review,Laporkan stok tidak terjual atau rusak untuk ditinjau oleh Kantor Pusat
+Request,Permintaan
+Request Information,Informasi Permintaan
+Return reason can only be recorded in Pending Approval or Destruction Submitted,Alasan pengembalian hanya dapat dicatat saat Menunggu Persetujuan atau Bukti Pemusnahan Dikirim
+Return reason is required,Alasan pengembalian wajib diisi
+Returned: {0},Dikembalikan: {0}
+Row {0}: quantity must be greater than zero,Baris {0}: kuantitas harus lebih dari nol
+The lost quantity is fixed at {0} by the Work Order and cannot be changed,Jumlah yang hilang ditetapkan sebesar {0} oleh Perintah Kerja dan tidak dapat diubah
+The original transfer entry has no target warehouse,Entri transfer asal tidak memiliki gudang tujuan
+This request is system-generated and stays that way,Permintaan ini dibuat oleh sistem dan tidak dapat diubah
+Try a different status,Coba status yang berbeda
+UOM {0} not configured for item {1},Satuan {0} tidak terkonfigurasi untuk item {1}
+Video Link,Tautan Video
+Video link can only be changed in Awaiting Destruction,Tautan video hanya dapat diubah saat Menunggu Pemusnahan
+Video link can only be edited in Awaiting Destruction,Tautan video hanya dapat diedit saat Menunggu Pemusnahan
+Video link can only be set in Awaiting Destruction,Tautan video hanya dapat diatur saat Menunggu Pemusnahan
+Video link must start with http:// or https://,Tautan video harus dimulai dengan http:// atau https://
+Work Order {0} does not exist,Perintah Kerja {0} tidak ditemukan
+"You cannot approve, return or cancel your own reject request","Anda tidak dapat menyetujui, mengembalikan, atau membatalkan permintaan reject milik sendiri"
+You cannot set liability on your own request,Anda tidak dapat mengatur kewajiban pada permintaan milik sendiri
+borne_by cannot be modified directly,borne_by tidak dapat diubah langsung
+company cannot be modified directly,company tidak dapat diubah langsung
+deadline_date cannot be modified directly,deadline_date tidak dapat diubah langsung
+is_late cannot be modified directly,is_late tidak dapat diubah langsung
+items must be a list,items harus berupa daftar
+letter_head cannot be modified directly,letter_head tidak dapat diubah langsung
+liabilities cannot be modified directly,liabilities tidak dapat diubah langsung
+over_limit cannot be modified directly,over_limit tidak dapat diubah langsung
+return_reason cannot be modified directly,return_reason tidak dapat diubah langsung
+total_amount cannot be modified directly,total_amount tidak dapat diubah langsung
+work_order cannot be modified directly,work_order tidak dapat diubah langsung
+{0} cannot be modified directly,{0} tidak dapat diubah langsung

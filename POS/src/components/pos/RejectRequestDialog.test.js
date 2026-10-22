@@ -14,7 +14,6 @@ vi.mock("frappe-ui", async () => {
 		name: "DialogStub",
 		props: ["modelValue", "options"],
 		setup(_, { slots }) {
-			// the real Dialog renders the footer actions slot too
 			return () => [slots["body-content"]?.(), slots.actions?.()]
 		},
 	})
@@ -29,6 +28,9 @@ vi.mock("frappe-ui", async () => {
 	const FeatherIcon = defineComponent({
 		name: "FeatherIconStub",
 		props: ["name"],
+		setup() {
+			return () => h("span", { class: "feather-icon" })
+		},
 	})
 	return {
 		Dialog,
@@ -80,49 +82,57 @@ const LIST_URL = "pos_next.api.reject_request.get_reject_requests"
 const DETAIL_URL = "pos_next.api.reject_request.get_reject_request"
 const SAVE_URL = "pos_next.api.reject_request.save_reject_request"
 const ATTACH_URL = "pos_next.api.reject_request.attach_reject_files"
-const CANCEL_URL = "pos_next.api.reject_request.cancel_reject_request"
-const CLOSE_URL = "pos_next.api.reject_request.close_reject_request"
+const APPLY_ACTION_URL = "pos_next.api.reject_request.apply_reject_action"
+const SAVE_VIDEO_URL = "pos_next.api.reject_request.save_reject_video"
 const PURPOSES_URL = "pos_next.api.reject_request.get_reject_purposes"
 const ITEMS_URL = "pos_next.api.items.get_items"
 
 const ROW = (name, extra = {}) => ({
 	name,
 	purpose: "Unsold",
-	status: "Pending",
+	workflow_state: "Pending Approval",
 	incident_date: "2026-01-05",
 	deadline_date: "2026-01-08",
 	total_amount: 5000,
 	is_late: false,
 	over_limit: false,
-	decision: null,
+	approval_code: null,
+	borne_by: null,
 	work_order: null,
 	evidence_count: 1,
 	destruction_count: 0,
 	...extra,
 })
 
-const ROWS = { requests: [ROW("PRJ-2601-0001", { is_late: true })], has_more: false }
+const ROWS = {
+	requests: [ROW("PRJ-2601-0001", { is_late: true })],
+	has_more: false,
+}
 
 const UNSOLD_DETAIL = {
 	name: "PRJ-2601-0002",
 	purpose: "Unsold",
-	status: "Draft",
+	workflow_state: "Draft",
 	docstatus: 0,
 	pos_profile: "POS-1",
 	company: "Co",
 	incident_date: "2026-01-05",
 	deadline_date: "2026-01-08",
 	reason: "",
+	return_reason: null,
+	approval_code: null,
+	borne_by: null,
+	letter_head: "Standard Letter Head",
 	video_link: null,
 	work_order: null,
 	is_system_generated: 0,
 	is_late: false,
 	total_amount: 0,
+	actions: ["Submit"],
 	items: [],
 	evidence: [],
 	destruction: [],
-	decision: null,
-	decision_notes: null,
+	liabilities: [],
 }
 
 const PL_DRAFT_DETAIL = {
@@ -142,59 +152,68 @@ const PL_DRAFT_DETAIL = {
 	],
 }
 
-const APPROVED_DETAIL = {
+const PENDING_DETAIL = {
 	...UNSOLD_DETAIL,
-	name: "PRJ-2601-0004",
-	status: "Approved",
-	docstatus: 1,
+	name: "PRJ-2601-0001",
+	workflow_state: "Pending Approval",
+	docstatus: 0,
 	reason: "rusak",
-	video_link: "https://youtu.be/x",
-	decision: null,
-	decision_notes: null,
+	actions: ["Withdraw"],
 	items: [
-		{ item_code: "ICED-LATTE", item_name: "Iced Latte", qty: 2, uom: "Nos" },
+		{
+			item_code: "ICED-LATTE",
+			item_name: "Iced Latte",
+			qty: 2,
+			uom: "Nos",
+			production_date: "2026-01-04",
+			reject_reason: "basi",
+		},
 	],
 	evidence: [{ name: "File-1", file_name: "a.jpg", file_url: "/f/1" }],
-	destruction: [],
-	liabilities: [],
 }
 
-const REJECTED_DETAIL = {
+const AWAITING_DETAIL = {
 	...UNSOLD_DETAIL,
-	name: "PRJ-2601-0005",
-	status: "Rejected",
+	name: "PRJ-2601-0004",
+	workflow_state: "Awaiting Destruction",
 	docstatus: 1,
 	reason: "rusak",
-	video_link: "https://youtu.be/x",
-	decision: "Rejected",
-	decision_notes: "kru yang menanggung",
+	approval_code: "ABC12345",
+	borne_by: "Company",
+	decided_by: "approver@example.com",
+	decided_on: "2026-01-06",
+	actions: ["Send Proof"],
 	items: [
 		{ item_code: "ICED-LATTE", item_name: "Iced Latte", qty: 2, uom: "Nos" },
 	],
 	evidence: [{ name: "File-1", file_name: "a.jpg", file_url: "/f/1" }],
 	destruction: [],
+}
+
+const RETURNED_DRAFT_DETAIL = {
+	...UNSOLD_DETAIL,
+	name: "PRJ-2601-0007",
+	workflow_state: "Draft",
+	reason: "rusak",
+	return_reason: "Foto bukti kurang jelas",
+	items: [
+		{ item_code: "ICED-LATTE", item_name: "Iced Latte", qty: 2, uom: "Nos" },
+	],
+	evidence: [{ name: "File-1", file_name: "a.jpg", file_url: "/f/1" }],
+}
+
+const COMPLETED_CREW_DETAIL = {
+	...AWAITING_DETAIL,
+	name: "PRJ-2601-0005",
+	workflow_state: "Completed",
+	actions: [],
+	borne_by: "Crew",
+	video_link: "https://youtu.be/proof",
+	destruction: [{ name: "File-2", file_name: "dest.jpg", file_url: "/f/2" }],
 	liabilities: [
 		{ user: "kru1@example.com", amount: 3000 },
 		{ user: "kru2@example.com", amount: 2000 },
 	],
-}
-
-const APPROVED_DECIDED = {
-	...APPROVED_DETAIL,
-	decision: "Write Off",
-	decision_notes: "stock habis",
-}
-
-const PENDING_DETAIL = {
-	...UNSOLD_DETAIL,
-	name: "PRJ-2601-0001",
-	status: "Pending",
-	docstatus: 1,
-	reason: "rusak",
-	items: [
-		{ item_code: "ICED-LATTE", item_name: "Iced Latte", qty: 2, uom: "Nos" },
-	],
-	evidence: [{ name: "File-1", file_name: "a.jpg", file_url: "/f/1" }],
 }
 
 function mockCall(url, impl) {
@@ -223,9 +242,10 @@ function findButton(wrapper, text) {
 	return wrapper.findAll("button").find((b) => b.text().includes(text))
 }
 
-/** Type a search term and let the 350 ms trailing debounce fire. */
-async function searchItem(wrapper, term) {
-	await wrapper.find('input[placeholder="Search item..."]').setValue(term)
+/** Type a search term in the row input and let the 350 ms trailing debounce fire. */
+async function searchRowItem(wrapper, term) {
+	const input = wrapper.find('[data-testid="row-item-input"]')
+	await input.setValue(term)
 	await new Promise((r) => setTimeout(r, 400))
 	await flushPromises()
 }
@@ -247,14 +267,14 @@ describe("RejectRequestDialog", () => {
 		window.confirm = vi.fn(() => true)
 		mockCall(LIST_URL, () => Promise.resolve(ROWS))
 		mockCall(DETAIL_URL, () => Promise.resolve(UNSOLD_DETAIL))
-		mockCall(PURPOSES_URL, () =>
-			Promise.resolve(["Unsold", "Damaged"]),
-		)
+		mockCall(PURPOSES_URL, () => Promise.resolve(["Unsold", "Damaged"]))
 		mockCall(ITEMS_URL, () =>
 			Promise.resolve([
-				{ item_code: "ICED-LATTE", item_name: "Iced Latte" },
+				{ item_code: "ICED-LATTE", item_name: "Iced Latte", stock_uom: "Nos" },
 			]),
 		)
+		mockCall(APPLY_ACTION_URL, () => Promise.resolve(UNSOLD_DETAIL))
+		mockCall(SAVE_VIDEO_URL, () => Promise.resolve({ name: "PRJ-2601-0004" }))
 	})
 
 	it("submit disabled until reason and 1 photo present", async () => {
@@ -262,29 +282,139 @@ describe("RejectRequestDialog", () => {
 		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
 
-		let submit = findButton(wrapper, "Submit")
+		const submit = findButton(wrapper, "Submit")
 		expect(submit.attributes("disabled")).toBeDefined()
 
 		// reason alone is not enough
-		await wrapper.find("textarea").setValue("expired stock")
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
 		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
 
-		// add an item and one photo -> enabled
-		await searchItem(wrapper, "latte")
+		// add row and pick item
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
 		await findButton(wrapper, "Iced Latte").trigger("click")
 		await flushPromises()
+
+		// still disabled without photo
+		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
+
+		// add photo -> enabled
 		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
-		expect(
-			findButton(wrapper, "Submit").attributes("disabled"),
-		).toBeUndefined()
+		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeUndefined()
+	})
+
+	it("add row appends a blank row and picking an item fills it", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		// initially no rows or blank row
+		const addBtn = wrapper.find('[data-testid="add-row"]')
+		expect(addBtn.exists()).toBe(true)
+
+		await addBtn.trigger("click")
+		await flushPromises()
+
+		const rowInput = wrapper.find('[data-testid="row-item-input"]')
+		expect(rowInput.exists()).toBe(true)
+
+		await searchRowItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("Iced Latte")
+	})
+
+	it("empty trailing rows are not sent on save", async () => {
+		const saveCall = mockCall(SAVE_URL, (params) =>
+			Promise.resolve({
+				name: JSON.parse(params.data).name || "PRJ-2601-0002",
+				workflow_state: "Pending Approval",
+				docstatus: 0,
+			}),
+		)
+		mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 1, destruction_count: 0 }),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+
+		// Add first row and pick item
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		// Add second row and leave it empty
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
+		await findButton(wrapper, "Submit").trigger("click")
+		await flushPromises()
+
+		expect(saveCall).toHaveBeenCalled()
+		const firstSavePayload = JSON.parse(saveCall.mock.calls[0][0].data)
+		expect(firstSavePayload.items).toHaveLength(1)
+		expect(firstSavePayload.items[0].item_code).toBe("ICED-LATTE")
+	})
+
+	it("submit sends production_date and reject_reason per row", async () => {
+		const saveCall = mockCall(SAVE_URL, (params) =>
+			Promise.resolve({
+				name: JSON.parse(params.data).name || "PRJ-2601-0002",
+				workflow_state: "Pending Approval",
+				docstatus: 0,
+			}),
+		)
+		mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 1, destruction_count: 0 }),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		// fill production date and reason in the row
+		await wrapper.find('[data-testid="prod-date-input"]').setValue("2026-01-04")
+		await wrapper
+			.find('[data-testid="item-reason-input"]')
+			.setValue("Stale taste")
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
+
+		await findButton(wrapper, "Submit").trigger("click")
+		await flushPromises()
+
+		expect(saveCall).toHaveBeenCalled()
+		const payload = JSON.parse(saveCall.mock.calls[0][0].data)
+		expect(payload.items[0]).toEqual(
+			expect.objectContaining({
+				item_code: "ICED-LATTE",
+				production_date: "2026-01-04",
+				reject_reason: "Stale taste",
+			}),
+		)
 	})
 
 	it("submit sends save_reject_request with submit=1 after attach; second save carries the draft name", async () => {
 		const saveCall = mockCall(SAVE_URL, (params) =>
 			Promise.resolve({
 				name: JSON.parse(params.data).name || "PRJ-2601-0002",
-				status: "Pending",
-				docstatus: 1,
+				workflow_state: "Pending Approval",
+				docstatus: 0,
 			}),
 		)
 		const attachCall = mockCall(ATTACH_URL, (_params) =>
@@ -295,8 +425,10 @@ describe("RejectRequestDialog", () => {
 		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
 
-		await wrapper.find("textarea").setValue("expired stock")
-		await searchItem(wrapper, "latte")
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
 		await findButton(wrapper, "Iced Latte").trigger("click")
 		await flushPromises()
 		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
@@ -330,8 +462,8 @@ describe("RejectRequestDialog", () => {
 			}
 			return Promise.resolve({
 				name: JSON.parse(params.data).name || "PRJ-DRAFT-1",
-				status: "Pending",
-				docstatus: 1,
+				workflow_state: "Pending Approval",
+				docstatus: 0,
 			})
 		})
 		const attachCall = mockCall(ATTACH_URL, (_params) =>
@@ -341,8 +473,10 @@ describe("RejectRequestDialog", () => {
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
-		await wrapper.find("textarea").setValue("expired stock")
-		await searchItem(wrapper, "latte")
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
 		await findButton(wrapper, "Iced Latte").trigger("click")
 		await flushPromises()
 		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
@@ -361,49 +495,12 @@ describe("RejectRequestDialog", () => {
 		const inserts = saveCall.mock.calls.filter(
 			([p]) => !JSON.parse(p.data).name,
 		)
-		expect(inserts).toHaveLength(1) // exactly one insert overall
-		expect(attachCall).toHaveBeenCalledTimes(1) // no re-upload on retry
+		expect(inserts).toHaveLength(1)
+		expect(attachCall).toHaveBeenCalledTimes(1)
 		const submitSaves = saveCall.mock.calls.filter(([p]) => p.submit)
-		expect(submitSaves).toHaveLength(2) // both attempts submitted
+		expect(submitSaves).toHaveLength(2)
 		expect(JSON.parse(submitSaves[1][0].data).name).toBe("PRJ-DRAFT-1")
 		expect(submitSaves[1][0].submit).toBe(1)
-	})
-
-	it("a failed close keeps the button enabled and retry does not re-attach", async () => {
-		mockCall(LIST_URL, () =>
-			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
-		)
-		mockCall(DETAIL_URL, () => Promise.resolve(APPROVED_DETAIL))
-		let closeFails = true
-		const closeCall = mockCall(CLOSE_URL, () => {
-			if (closeFails) {
-				closeFails = false
-				return Promise.reject(new Error("boom on close"))
-			}
-			return Promise.resolve({ status: "Closed" })
-		})
-		const attachCall = mockCall(ATTACH_URL, () =>
-			Promise.resolve({ evidence_count: 1, destruction_count: 1 }),
-		)
-
-		const wrapper = await mountOpenDialog()
-		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
-		await flushPromises()
-		await pickFiles(wrapper, '[data-test="attach-input"]', ["d.png"])
-
-		const closeBtn = findButton(wrapper, "Close")
-		await closeBtn.trigger("click")
-		await flushPromises()
-
-		// failed close must NOT disable the button
-		expect(findButton(wrapper, "Close").attributes("disabled")).toBeUndefined()
-
-		// retry: close again, no re-attach
-		await findButton(wrapper, "Close").trigger("click")
-		await flushPromises()
-
-		expect(closeCall).toHaveBeenCalledTimes(2)
-		expect(attachCall).toHaveBeenCalledTimes(1) // no re-upload on retry
 	})
 
 	it("production loss draft shows qty read-only", async () => {
@@ -417,19 +514,57 @@ describe("RejectRequestDialog", () => {
 
 		expect(wrapper.text()).toContain("Production Loss")
 		expect(wrapper.text()).toContain("Iced Latte")
-		// qty is plain text, never an editable number input
 		expect(wrapper.findAll('input[type="number"]')).toHaveLength(0)
-		// the qty cell itself carries the locked value
 		const qtyCells = wrapper.findAll('[data-testid="item-qty"]')
 		expect(qtyCells).toHaveLength(1)
 		expect(qtyCells[0].text().trim()).toBe("3")
-		// reason is editable for the crew
-		const reason = wrapper.find("textarea")
+		const reason = wrapper.find("textarea#rr-reason, textarea")
 		expect(reason.exists()).toBe(true)
 	})
 
-	it("close button only for Approved and requires destruction photo", async () => {
-		// Pending detail: Cancel, no Close
+	it("renders return reason banner on returned draft", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0007")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(RETURNED_DRAFT_DETAIL))
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0007").trigger("click")
+		await flushPromises()
+
+		const banner = wrapper.find('[data-testid="return-reason-banner"]')
+		expect(banner.exists()).toBe(true)
+		expect(banner.text()).toContain("Returned by Head Office")
+		expect(banner.text()).toContain("Foto bukti kurang jelas")
+	})
+
+	it("Withdraw calls apply_reject_action", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0001")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(PENDING_DETAIL))
+		const actionCall = mockCall(APPLY_ACTION_URL, () =>
+			Promise.resolve({ ...PENDING_DETAIL, workflow_state: "Draft" }),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0001").trigger("click")
+		await flushPromises()
+
+		const withdrawBtn = wrapper.find('[data-testid="withdraw-button"]')
+		expect(withdrawBtn.exists()).toBe(true)
+		await withdrawBtn.trigger("click")
+		await flushPromises()
+
+		expect(window.confirm).toHaveBeenCalled()
+		expect(actionCall).toHaveBeenCalledWith({
+			name: "PRJ-2601-0001",
+			action: "Withdraw",
+		})
+	})
+
+	it("shows Send Proof only in Awaiting Destruction and disables it without proof", async () => {
+		// Pending detail: no Send Proof button
 		mockCall(LIST_URL, () =>
 			Promise.resolve({ requests: [ROW("PRJ-2601-0001")], has_more: false }),
 		)
@@ -437,108 +572,118 @@ describe("RejectRequestDialog", () => {
 		let wrapper = await mountOpenDialog()
 		await findButton(wrapper, "PRJ-2601-0001").trigger("click")
 		await flushPromises()
-		expect(findButton(wrapper, "Close")).toBeUndefined()
-		expect(findButton(wrapper, "Cancel")).toBeDefined()
+		expect(wrapper.find('[data-testid="send-proof"]').exists()).toBe(false)
 
-		// Approved detail: Close disabled until a destruction photo exists
+		// Awaiting Destruction detail: Send Proof exists and disabled without proof
 		mockCall(LIST_URL, () =>
 			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
 		)
-		mockCall(DETAIL_URL, () => Promise.resolve(APPROVED_DETAIL))
+		mockCall(DETAIL_URL, () => Promise.resolve(AWAITING_DETAIL))
 		wrapper = await mountOpenDialog()
 		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
 		await flushPromises()
-		let close = findButton(wrapper, "Close")
-		expect(close).toBeDefined()
-		expect(close.attributes("disabled")).toBeDefined()
 
-		await pickFiles(wrapper, '[data-test="attach-input"]', ["d.png"])
+		const sendProofBtn = wrapper.find('[data-testid="send-proof"]')
+		expect(sendProofBtn.exists()).toBe(true)
+		expect(sendProofBtn.attributes("disabled")).toBeDefined()
+
+		// Add photo -> enabled
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["proof.png"])
 		expect(
-			findButton(wrapper, "Close").attributes("disabled"),
+			wrapper.find('[data-testid="send-proof"]').attributes("disabled"),
 		).toBeUndefined()
 	})
 
-	it("close sequence attaches destruction photos then closes", async () => {
+	it("Berita Acara link targets download_pdf with format and letterhead", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
 		)
-		mockCall(DETAIL_URL, () => Promise.resolve(APPROVED_DETAIL))
-		const order = []
-		const attachCall = mockCall(ATTACH_URL, (params) => {
-			order.push("attach")
-			return Promise.resolve({
-				evidence_count: 1,
-				destruction_count: JSON.parse(params.files).length,
-			})
-		})
-		const closeCall = mockCall(CLOSE_URL, () => {
-			order.push("close")
-			return Promise.resolve({ status: "Closed" })
-		})
+		mockCall(DETAIL_URL, () => Promise.resolve(AWAITING_DETAIL))
 
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
 		await flushPromises()
-		await pickFiles(wrapper, '[data-test="attach-input"]', ["d.png"])
 
-		await findButton(wrapper, "Close").trigger("click")
+		const link = wrapper.find('[data-testid="download-berita-acara"]')
+		expect(link.exists()).toBe(true)
+		const href = link.attributes("href")
+		expect(href).toContain("download_pdf")
+		expect(href).toContain("doctype=POS%20Reject%20Request")
+		expect(href).toContain("name=PRJ-2601-0004")
+		expect(href).toContain("format=Berita%20Acara%20Reject")
+		expect(href).toContain("letterhead=Standard%20Letter%20Head")
+		expect(link.attributes("target")).toBe("_blank")
+	})
+
+	it("Send Proof sequence attaches destruction photos, saves video, and applies workflow action", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(AWAITING_DETAIL))
+		const attachCall = mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 1, destruction_count: 1 }),
+		)
+		const videoCall = mockCall(SAVE_VIDEO_URL, () =>
+			Promise.resolve({
+				name: "PRJ-2601-0004",
+				video_link: "https://youtu.be/proof",
+			}),
+		)
+		const actionCall = mockCall(APPLY_ACTION_URL, () =>
+			Promise.resolve({
+				...AWAITING_DETAIL,
+				workflow_state: "Destruction Submitted",
+			}),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
 		await flushPromises()
 
-		expect(window.confirm).toHaveBeenCalled()
-		expect(order).toEqual(["attach", "close"])
+		// enter video link and attach destruction photo
+		await wrapper
+			.find('[data-testid="video-link"]')
+			.setValue("https://youtu.be/proof")
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["destruct.png"])
+
+		await wrapper.find('[data-testid="send-proof"]').trigger("click")
+		await flushPromises()
+
 		expect(attachCall).toHaveBeenCalledWith(
 			expect.objectContaining({ name: "PRJ-2601-0004", kind: "destruction" }),
 		)
-		expect(closeCall).toHaveBeenCalledWith({ name: "PRJ-2601-0004" })
+		expect(videoCall).toHaveBeenCalledWith({
+			name: "PRJ-2601-0004",
+			video_link: "https://youtu.be/proof",
+		})
+		expect(actionCall).toHaveBeenCalledWith({
+			name: "PRJ-2601-0004",
+			action: "Send Proof",
+		})
 	})
 
-	it("cancel is confirmed and only offered on Pending", async () => {
+	it("step indicator highlights the current workflow state", async () => {
 		mockCall(LIST_URL, () =>
-			Promise.resolve({ requests: [ROW("PRJ-2601-0001")], has_more: false }),
+			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
 		)
-		mockCall(DETAIL_URL, () => Promise.resolve(PENDING_DETAIL))
-		const cancelCall = mockCall(CANCEL_URL, () =>
-			Promise.resolve({ status: "Cancelled" }),
-		)
+		mockCall(DETAIL_URL, () => Promise.resolve(AWAITING_DETAIL))
+
 		const wrapper = await mountOpenDialog()
-		await findButton(wrapper, "PRJ-2601-0001").trigger("click")
+		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
 		await flushPromises()
 
-		await findButton(wrapper, "Cancel").trigger("click")
-		await flushPromises()
-		expect(window.confirm).toHaveBeenCalled()
-		expect(cancelCall).toHaveBeenCalledWith({ name: "PRJ-2601-0001" })
+		const stepIndicator = wrapper.find('[data-testid="step-indicator"]')
+		expect(stepIndicator.exists()).toBe(true)
+		const activeStep = stepIndicator.find('[data-step="Awaiting Destruction"]')
+		expect(activeStep.exists()).toBe(true)
+		expect(activeStep.attributes("data-current")).toBe("true")
 	})
 
-	it("draft detail has no Cancel button (backend cancels only Pending)", async () => {
-		mockCall(LIST_URL, () =>
-			Promise.resolve({ requests: [ROW("PRJ-2601-0002")], has_more: false }),
-		)
-		const wrapper = await mountOpenDialog()
-		await findButton(wrapper, "PRJ-2601-0002").trigger("click")
-		await flushPromises()
-		expect(findButton(wrapper, "Submit")).toBeDefined()
-		expect(findButton(wrapper, "Cancel")).toBeUndefined()
-	})
-
-	it("invalid video link keeps submit disabled", async () => {
+	it("draft form has no video link field (proof comes after approval)", async () => {
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
-		await wrapper.find("textarea").setValue("expired stock")
-		await searchItem(wrapper, "latte")
-		await findButton(wrapper, "Iced Latte").trigger("click")
-		await flushPromises()
-		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
-		expect(
-			findButton(wrapper, "Submit").attributes("disabled"),
-		).toBeUndefined()
-
-		await wrapper.find('[data-testid="video-link"]').setValue("ftp://nope")
-		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
-		expect(wrapper.text()).toContain(
-			"Video link must start with http:// or https://",
-		)
+		expect(wrapper.find('[data-testid="video-link"]').exists()).toBe(false)
 	})
 
 	it("keeps only the first 5 evidence photos when more are picked", async () => {
@@ -547,90 +692,94 @@ describe("RejectRequestDialog", () => {
 		await flushPromises()
 
 		await pickFiles(wrapper, '[data-test="attach-input"]', [
-			"1.png", "2.png", "3.png", "4.png", "5.png", "6.png", "7.png",
+			"1.png",
+			"2.png",
+			"3.png",
+			"4.png",
+			"5.png",
+			"6.png",
+			"7.png",
 		])
 		expect(wrapper.findAll('[data-test="attachment-list"] li')).toHaveLength(5)
-		// the cap truncation must be surfaced
 		expect(toasts.log).toContain("At most 5 evidence photos are allowed")
 	})
 
 	it("searches items with a trailing debounce and ignores stale responses", async () => {
 		let resolveA
-		mockCall(ITEMS_URL, () => new Promise((r) => resolveA = r))
+		mockCall(
+			ITEMS_URL,
+			() =>
+				new Promise((r) => {
+					resolveA = r
+				}),
+		)
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
 
-		await wrapper.find('input[placeholder="Search item..."]').setValue("lat")
-		await wrapper.find('input[placeholder="Search item..."]').setValue("latt")
-		await wrapper.find('input[placeholder="Search item..."]').setValue("latte")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
 
-		// no request fired per keystroke
+		const input = wrapper.find('[data-testid="row-item-input"]')
+		await input.setValue("lat")
+		await input.setValue("latt")
+		await input.setValue("latte")
+
 		let calls = handlers.calls[ITEMS_URL].mock.calls.length
 		expect(calls).toBe(0)
 
-		await searchItem(wrapper, "latte2")
+		await searchRowItem(wrapper, "latte2")
 		calls = handlers.calls[ITEMS_URL].mock.calls.length
-		expect(calls).toBe(1) // single trailing request
+		expect(calls).toBe(1)
 
-		// resolve the FIRST (now stale) request
 		resolveA([{ item_code: "STALE", item_name: "Stale" }])
 		await flushPromises()
 
-		// a NEW request starts (never resolved yet)
 		let resolveB
-		mockCall(ITEMS_URL, () => new Promise((r) => resolveB = r))
-		await searchItem(wrapper, "milk")
+		mockCall(
+			ITEMS_URL,
+			() =>
+				new Promise((r) => {
+					resolveB = r
+				}),
+		)
+		await searchRowItem(wrapper, "milk")
 
-		// the OLD request (latte2) resolves LAST — it must not repopulate
 		resolveA([{ item_code: "STALE-2", item_name: "Stale 2" }])
 		await flushPromises()
 		expect(findButton(wrapper, "Stale 2")).toBeUndefined()
 
-		// the new request resolves and DOES show its results
 		resolveB([{ item_code: "MILK", item_name: "Milk" }])
 		await flushPromises()
 		await findButton(wrapper, "Milk").trigger("click")
 		await flushPromises()
 
-		// after addItem the results are cleared and no late response repopulates
 		resolveA([{ item_code: "STALE-3", item_name: "Stale 3" }])
 		resolveB([{ item_code: "MILK-2", item_name: "Milk 2" }])
 		await flushPromises()
-		expect(wrapper.find('input[placeholder="Search item..."]').element.value).toBe("")
 		expect(findButton(wrapper, "Stale 3")).toBeUndefined()
 		expect(findButton(wrapper, "Milk 2")).toBeUndefined()
 	})
 
 	it("status filter change reloads with the new filter even while loading", async () => {
 		let resolveList
-		mockCall(LIST_URL, () => new Promise((r) => resolveList = r))
+		mockCall(
+			LIST_URL,
+			() =>
+				new Promise((r) => {
+					resolveList = r
+				}),
+		)
 		const wrapper = await mountOpenDialog()
 		expect(wrapper.text()).toContain("Loading")
 
-		// filter click while the first load is in flight
-		await findButton(wrapper, "Pending").trigger("click")
+		await findButton(wrapper, "Pending Approval").trigger("click")
 		resolveList({ requests: [], has_more: false })
 		await flushPromises()
 
 		const calls = handlers.calls[LIST_URL].mock.calls
 		expect(calls).toHaveLength(2)
-		expect(calls[1][0].status).toBe("Pending")
-	})
-
-	it("shows decision and notes on a decided request", async () => {
-		mockCall(LIST_URL, () =>
-			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
-		)
-		mockCall(DETAIL_URL, () => Promise.resolve(APPROVED_DECIDED))
-		const wrapper = await mountOpenDialog()
-		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
-		await flushPromises()
-
-		expect(wrapper.text()).toContain("Write Off")
-		expect(wrapper.text()).toContain("stock habis")
-		expect(wrapper.text()).toContain("rusak")
-		expect(wrapper.text()).toContain("https://youtu.be/x")
+		expect(calls[1][0].status).toBe("Pending Approval")
 	})
 
 	it("purpose select lists API purposes and defaults to the first", async () => {
@@ -642,12 +791,13 @@ describe("RejectRequestDialog", () => {
 		expect(select.exists()).toBe(true)
 		const options = select.findAll("option")
 		expect(options.map((o) => o.element.value)).toEqual(["Unsold", "Damaged"])
-		// default = first item of the list
 		expect(select.element.value).toBe("Unsold")
 
 		await select.setValue("Damaged")
-		await wrapper.find("textarea").setValue("expired stock")
-		await searchItem(wrapper, "latte")
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
 		await findButton(wrapper, "Iced Latte").trigger("click")
 		await flushPromises()
 		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
@@ -655,8 +805,8 @@ describe("RejectRequestDialog", () => {
 		mockCall(SAVE_URL, (params) =>
 			Promise.resolve({
 				name: JSON.parse(params.data).name || "PRJ-2601-0002",
-				status: "Pending",
-				docstatus: 1,
+				workflow_state: "Pending Approval",
+				docstatus: 0,
 			}),
 		)
 		mockCall(ATTACH_URL, () =>
@@ -665,9 +815,7 @@ describe("RejectRequestDialog", () => {
 		await findButton(wrapper, "Submit").trigger("click")
 		await flushPromises()
 
-		const firstSave = JSON.parse(
-			handlers.calls[SAVE_URL].mock.calls[0][0].data,
-		)
+		const firstSave = JSON.parse(handlers.calls[SAVE_URL].mock.calls[0][0].data)
 		expect(firstSave.purpose).toBe("Damaged")
 	})
 
@@ -676,35 +824,35 @@ describe("RejectRequestDialog", () => {
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
-		await wrapper.find("textarea").setValue("expired stock")
-		await searchItem(wrapper, "latte")
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
 		await findButton(wrapper, "Iced Latte").trigger("click")
 		await flushPromises()
 		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
 		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
 	})
 
-	it("Rejected detail shows each liability user and amount, Approved shows none", async () => {
+	it("Completed crew-borne detail shows liabilities, company-borne shows none", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve({
 				requests: [ROW("PRJ-2601-0005")],
 				has_more: false,
 			}),
 		)
-		mockCall(DETAIL_URL, () => Promise.resolve(REJECTED_DETAIL))
+		mockCall(DETAIL_URL, () => Promise.resolve(COMPLETED_CREW_DETAIL))
 		let wrapper = await mountOpenDialog()
 		await findButton(wrapper, "PRJ-2601-0005").trigger("click")
 		await flushPromises()
 
 		expect(wrapper.text()).toContain("kru1@example.com")
 		expect(wrapper.text()).toContain("kru2@example.com")
-		// amounts are currency-formatted (id-ID grouping)
 		expect(wrapper.text()).toContain("3.000")
 		expect(wrapper.text()).toContain("2.000")
-		// subtitle for the crew-borne decision
-		expect(wrapper.text()).toContain("Borne by crew")
+		expect(wrapper.text()).toContain("Borne by Crew")
 
-		// Approved detail: no liability block, subtitle "Borne by company"
+		// Company-borne
 		mockCall(LIST_URL, () =>
 			Promise.resolve({
 				requests: [ROW("PRJ-2601-0004")],
@@ -712,68 +860,74 @@ describe("RejectRequestDialog", () => {
 			}),
 		)
 		mockCall(DETAIL_URL, () =>
-			Promise.resolve({ ...APPROVED_DETAIL, decision: "Approved" }),
+			Promise.resolve({
+				...COMPLETED_CREW_DETAIL,
+				borne_by: "Company",
+				liabilities: [],
+			}),
 		)
 		wrapper = await mountOpenDialog()
 		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
 		await flushPromises()
 
-		expect(wrapper.text()).toContain("Borne by company")
+		expect(wrapper.text()).toContain("Borne by Company")
 		expect(wrapper.text()).not.toContain("kru1@example.com")
 	})
 
-	it("draft video link shows an anchor only for a valid http(s) URL", async () => {
+	it("draft detail has no video link field", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve({ requests: [ROW("PRJ-2601-0002")], has_more: false }),
 		)
 		const wrapper = await mountOpenDialog()
 		await findButton(wrapper, "PRJ-2601-0002").trigger("click")
 		await flushPromises()
-
-		const input = wrapper.find('[data-testid="video-link"]')
-		// invalid first — no anchor
-		await input.setValue("javascript:alert(1)")
-		expect(wrapper.find('a[target="_blank"]').exists()).toBe(false)
-
-		await input.setValue("https://youtu.be/x")
-		const anchor = wrapper.find('a[target="_blank"]')
-		expect(anchor.exists()).toBe(true)
-		expect(anchor.attributes("href")).toBe("https://youtu.be/x")
-		expect(anchor.attributes("rel")).toBe("noopener")
+		expect(wrapper.find('[data-testid="video-link"]').exists()).toBe(false)
 	})
 
-	it("close step enabled for Rejected status", async () => {
-		mockCall(LIST_URL, () =>
-			Promise.resolve({
-				requests: [ROW("PRJ-2601-0005", { status: "Rejected" })],
-				has_more: false,
-			}),
-		)
-		mockCall(DETAIL_URL, () => Promise.resolve(REJECTED_DETAIL))
-		const closeCall = mockCall(CLOSE_URL, () =>
-			Promise.resolve({ status: "Closed" }),
-		)
-		mockCall(ATTACH_URL, () =>
-			Promise.resolve({ evidence_count: 0, destruction_count: 1 }),
-		)
+	it("duplicate item with same production date shows error and blocks submit, different date is allowed", async () => {
 		const wrapper = await mountOpenDialog()
-		await findButton(wrapper, "PRJ-2601-0005").trigger("click")
+		await findButton(wrapper, "New Request").trigger("click")
 		await flushPromises()
 
-		let close = findButton(wrapper, "Close")
-		expect(close).toBeDefined()
-		expect(close.attributes("disabled")).toBeDefined()
+		await wrapper.find("textarea#rr-reason").setValue("expired stock")
+		await pickFiles(wrapper, '[data-test="attach-input"]', ["a.png"])
 
-		await pickFiles(wrapper, '[data-test="attach-input"]', ["d.png"])
-		await findButton(wrapper, "Close").trigger("click")
+		// Row 1: ICED-LATTE
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
 		await flushPromises()
-		expect(closeCall).toHaveBeenCalledWith({ name: "PRJ-2601-0005" })
+		await searchRowItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		// Row 2: ICED-LATTE with same (empty) production date
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		const inputs = wrapper.findAll('[data-testid="row-item-input"]')
+		await inputs[inputs.length - 1].setValue("latte")
+		await new Promise((r) => setTimeout(r, 400))
+		await flushPromises()
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		// Should show duplicate error and disable submit
+		expect(wrapper.text()).toContain("Duplicate item with same production date")
+		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeDefined()
+
+		// Change production date on row 2 to something different
+		const prodDateInputs = wrapper.findAll('[data-testid="prod-date-input"]')
+		await prodDateInputs[0].setValue("2026-01-03")
+		await prodDateInputs[1].setValue("2026-01-04")
+		await flushPromises()
+
+		// Error should disappear and submit should be enabled
+		expect(wrapper.text()).not.toContain(
+			"Duplicate item with same production date",
+		)
+		expect(findButton(wrapper, "Submit").attributes("disabled")).toBeUndefined()
 	})
 
 	it("initialRequest prop opens that request's detail", async () => {
-		mockCall(LIST_URL, () =>
-			Promise.resolve({ requests: [], has_more: false }),
-		)
+		mockCall(LIST_URL, () => Promise.resolve({ requests: [], has_more: false }))
 		mockCall(DETAIL_URL, () => Promise.resolve(PENDING_DETAIL))
 		const wrapper = mount(RejectRequestDialog, {
 			props: {
@@ -791,5 +945,274 @@ describe("RejectRequestDialog", () => {
 			name: "PRJ-2601-0001",
 		})
 		expect(wrapper.text()).toContain("PRJ-2601-0001")
+	})
+
+	it("send proof button requires 'Send Proof' in detail.actions", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0004")], has_more: false }),
+		)
+		// Awaiting Destruction but without "Send Proof" in actions
+		mockCall(DETAIL_URL, () =>
+			Promise.resolve({ ...AWAITING_DETAIL, actions: [] }),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0004").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="send-proof"]').exists()).toBe(false)
+	})
+
+	it("read-only video link anchor is not rendered when video_link is invalid javascript URL", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0001")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () =>
+			Promise.resolve({
+				...PENDING_DETAIL,
+				video_link: "javascript:alert('xss')",
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0001").trigger("click")
+		await flushPromises()
+
+		const anchor = wrapper.find('a[href^="javascript:"]')
+		expect(anchor.exists()).toBe(false)
+	})
+
+	it("detail items loop renders multiple rows of same item_code with different production dates", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0001")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () =>
+			Promise.resolve({
+				...PENDING_DETAIL,
+				items: [
+					{
+						name: "row-1",
+						item_code: "ICED-LATTE",
+						item_name: "Iced Latte",
+						qty: 2,
+						production_date: "2026-01-01",
+						amount: 2000,
+					},
+					{
+						name: "row-2",
+						item_code: "ICED-LATTE",
+						item_name: "Iced Latte",
+						qty: 3,
+						production_date: "2026-01-02",
+						amount: 3000,
+					},
+				],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0001").trigger("click")
+		await flushPromises()
+
+		const qtySpans = wrapper.findAll('[data-testid="item-qty"]')
+		expect(qtySpans).toHaveLength(2)
+		expect(qtySpans[0].text()).toBe("2")
+		expect(qtySpans[1].text()).toBe("3")
+	})
+
+	it("pressing enter on reason input of the last row appends a new blank row", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-testid="remove-row"]')).toHaveLength(1)
+
+		const reasonInput = wrapper.find('[data-testid="item-reason-input"]')
+		await reasonInput.setValue("Basi")
+		await reasonInput.trigger("keydown.enter")
+		await flushPromises()
+
+		// A second row was added
+		expect(wrapper.findAll('[data-testid="remove-row"]')).toHaveLength(2)
+	})
+
+	it("row checkbox allows selecting and deleting rows with Delete button", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		// Add two rows
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(2)
+		expect(wrapper.find('[data-testid="delete-selected-rows"]').exists()).toBe(
+			false,
+		)
+
+		// Select first row
+		const checkboxes = wrapper.findAll('[data-testid="row-checkbox"]')
+		await checkboxes[0].setValue(true)
+		await flushPromises()
+
+		const deleteBtn = wrapper.find('[data-testid="delete-selected-rows"]')
+		expect(deleteBtn.exists()).toBe(true)
+		expect(deleteBtn.text()).toContain("Delete")
+		expect(deleteBtn.text()).toContain("1")
+
+		// Click delete
+		await deleteBtn.trigger("click")
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(1)
+		expect(wrapper.find('[data-testid="delete-selected-rows"]').exists()).toBe(
+			false,
+		)
+	})
+
+	it("select-all checkbox selects all rows and bulk deletes them", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+
+		const selectAll = wrapper.find('[data-testid="select-all-rows"]')
+		expect(selectAll.exists()).toBe(true)
+		await selectAll.setValue(true)
+		await flushPromises()
+
+		const deleteBtn = wrapper.find('[data-testid="delete-selected-rows"]')
+		expect(deleteBtn.exists()).toBe(true)
+		expect(deleteBtn.text()).toContain("2")
+
+		await deleteBtn.trigger("click")
+		await flushPromises()
+
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(0)
+		expect(wrapper.text()).toContain("No Data")
+	})
+
+	it("clicking a picked item switches it back to search input for editing", async () => {
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Request").trigger("click")
+		await flushPromises()
+
+		await wrapper.find('[data-testid="add-row"]').trigger("click")
+		await flushPromises()
+		await searchRowItem(wrapper, "latte")
+		await findButton(wrapper, "Iced Latte").trigger("click")
+		await flushPromises()
+
+		// Item input is replaced by the picked item display
+		expect(wrapper.find('[data-testid="row-item-input"]').exists()).toBe(false)
+		const itemBox = wrapper.find('[title="Click to change item"]')
+		expect(itemBox.exists()).toBe(true)
+		expect(itemBox.text()).toContain("Iced Latte")
+
+		// Click to edit
+		await itemBox.trigger("click")
+		await flushPromises()
+
+		// Input returns with search prefilled to previous item_code
+		const input = wrapper.find('[data-testid="row-item-input"]')
+		expect(input.exists()).toBe(true)
+		expect(input.element.value).toBe("ICED-LATTE")
+	})
+	it("draft opened in detail allows editing items, purpose, incident_date and sends them", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0007")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(RETURNED_DRAFT_DETAIL))
+		const saveCall = mockCall(SAVE_URL, (params) =>
+			Promise.resolve({
+				name: "PRJ-2601-0007",
+				workflow_state: "Pending Approval",
+				docstatus: 0,
+			}),
+		)
+		mockCall(ATTACH_URL, () =>
+			Promise.resolve({ evidence_count: 1, destruction_count: 0 }),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0007").trigger("click")
+		await flushPromises()
+
+		// Check editable purpose & incident date
+		const purposeSelect = wrapper.find('[data-testid="detail-purpose-select"]')
+		expect(purposeSelect.exists()).toBe(true)
+		await purposeSelect.setValue("Damaged")
+
+		const incidentInput = wrapper.find(
+			'[data-testid="detail-incident-date-input"]',
+		)
+		expect(incidentInput.exists()).toBe(true)
+		await incidentInput.setValue("2026-01-06")
+
+		// Check items table is editable (add row exists)
+		const addRowBtn = wrapper.find('[data-testid="add-row"]')
+		expect(addRowBtn.exists()).toBe(true)
+
+		// Modify first row qty
+		const qtyInput = wrapper.find('[data-testid="qty-input"]')
+		expect(qtyInput.exists()).toBe(true)
+		await qtyInput.setValue(5)
+
+		// Submit detail
+		const submitBtn = findButton(wrapper, "Submit")
+		expect(submitBtn.exists()).toBe(true)
+		expect(submitBtn.attributes("disabled")).toBeUndefined()
+
+		await submitBtn.trigger("click")
+		await flushPromises()
+
+		expect(saveCall).toHaveBeenCalled()
+		const payload = JSON.parse(saveCall.mock.calls[0][0].data)
+		expect(payload.name).toBe("PRJ-2601-0007")
+		expect(payload.purpose).toBe("Damaged")
+		expect(payload.incident_date).toBe("2026-01-06")
+		expect(payload.items[0]).toEqual(
+			expect.objectContaining({
+				item_code: "ICED-LATTE",
+				qty: 5,
+				uom: "Nos",
+			}),
+		)
+	})
+
+	it("Berita Acara button is shown in detail when approval_code is set in Completed state", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0005")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(COMPLETED_CREW_DETAIL))
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0005").trigger("click")
+		await flushPromises()
+
+		const downloadBtn = wrapper.find('[data-testid="download-berita-acara"]')
+		expect(downloadBtn.exists()).toBe(true)
+		expect(downloadBtn.attributes("href")).toContain("Berita%20Acara%20Reject")
+	})
+
+	it("detail items table displays UOM column for read-only view", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({ requests: [ROW("PRJ-2601-0001")], has_more: false }),
+		)
+		mockCall(DETAIL_URL, () => Promise.resolve(PENDING_DETAIL))
+
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "PRJ-2601-0001").trigger("click")
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("UOM")
+		expect(wrapper.text()).toContain("Nos")
 	})
 })

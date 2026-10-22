@@ -10,11 +10,17 @@ class POSRejectRequest(Document):
 	def validate(self):
 		reject_request.validate_request(self)
 
-	def on_submit(self):
-		reject_request.on_submit_request(self)
+	def before_update_after_submit(self):
+		reject_request.validate_request(self)
 
-	def before_cancel(self):
-		reject_request.before_cancel_request(self)
+	def on_update(self):
+		reject_request.on_state_change(self)
+
+	def on_submit(self):
+		reject_request.on_state_change(self)
+
+	def on_update_after_submit(self):
+		reject_request.on_state_change(self)
 
 	def on_cancel(self):
 		reject_request.on_cancel_request(self)

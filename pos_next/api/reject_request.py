@@ -3,22 +3,27 @@
 
 """Thin whitelisted POS Reject Request endpoints: outlet access gate + input
 parsing (design D-phase 5). All lifecycle logic lives in
-pos_next.services.reject_request; the Head Office decide endpoint has no
-profile gate — role and owner checks are in apply_decision."""
+pos_next.services.reject_request; the Head Office endpoints have no profile gate
+— role and owner checks live in the service."""
 
 import json
 from collections import Counter
 
 import frappe
 from frappe import ValidationError, _
-from frappe.utils import cint, flt
+from frappe.utils import cint, flt, getdate
 
 from pos_next.api.packages import _assert_profile_access
+from pos_next.reject_request_setup import (
+	APPROVER_ROLE,
+	STATE_AWAITING,
+	STATE_DRAFT,
+)
 from pos_next.services import reject_request
 
 LIST_FIELDS = (
-	"name", "purpose", "status", "incident_date", "deadline_date", "total_amount",
-	"is_late", "over_limit", "decision", "work_order",
+	"name", "purpose", "workflow_state", "incident_date", "deadline_date", "total_amount",
+	"is_late", "over_limit", "approval_code", "borne_by", "work_order",
 )
 MAX_EVIDENCE = reject_request.MAX_EVIDENCE
 ATTACHMENT_KINDS = ("evidence", "destruction")
@@ -38,6 +43,15 @@ def _parse(value, default):
 def _doc(name):
 	doc = frappe.get_doc("POS Reject Request", name)
 	return doc
+
+
+def _assert_reject_access(pos_profile):
+	"""Outlet access check; approvers have company-wide access."""
+	if frappe.session.user == "Administrator":
+		return
+	if APPROVER_ROLE in frappe.get_roles():
+		return
+	_assert_profile_access(pos_profile)
 
 
 def _attached(kind, name):
@@ -74,7 +88,7 @@ def get_reject_requests(pos_profile, status=None, limit=30, offset=0):
 	try:
 		filters = [["pos_profile", "=", pos_profile]]
 		if status:
-			filters.append(["status", "=", status])
+			filters.append(["workflow_state", "=", status])
 		limit = min(max(cint(limit), 1), 100)
 		offset = max(cint(offset), 0)
 		rows = frappe.get_list(
@@ -119,14 +133,30 @@ def _file_counts(names):
 
 @frappe.whitelist()
 def get_reject_request(name):
-	"""Full row: doc + items + evidence/destruction attachment summaries."""
+	"""Full row: doc + items + evidence/destruction attachment summaries + actions."""
 	doc = _doc(name)
-	_assert_profile_access(doc.pos_profile)
+	_assert_reject_access(doc.pos_profile)
 	try:
 		payload = doc.as_dict()
 		payload["items"] = [row.as_dict() for row in doc.items]
 		payload["evidence"] = _attached("evidence", name)
 		payload["destruction"] = _attached("destruction", name)
+
+		from frappe.model.workflow import get_transitions, has_approval_access
+
+		try:
+			transitions = get_transitions(doc)
+			user = frappe.session.user
+			payload["actions"] = list(
+				dict.fromkeys(
+					t.get("action")
+					for t in transitions
+					if has_approval_access(user, doc, t)
+				)
+			)
+		except Exception:
+			payload["actions"] = []
+
 		return payload
 	except (ValidationError, frappe.PermissionError):
 		raise
@@ -135,7 +165,7 @@ def get_reject_request(name):
 		frappe.throw(_("Error fetching reject request: {0}").format(str(e)))
 
 
-def _item_rows(value):
+def _item_rows(value, incident_date=None):
 	"""Validated item payload rows; refuses non-dict entries cleanly."""
 	rows = _parse(value, [])
 	if not isinstance(rows, list):
@@ -144,7 +174,24 @@ def _item_rows(value):
 	for row in rows:
 		if not isinstance(row, dict):
 			frappe.throw(_("Each item must be an object with item_code and qty"), ValidationError)
-		out.append({"item_code": row.get("item_code"), "qty": flt(row.get("qty"))})
+		item_code = row.get("item_code")
+		qty = flt(row.get("qty"))
+		prod_date = row.get("production_date")
+		if prod_date and incident_date:
+			if getdate(prod_date) > getdate(incident_date):
+				frappe.throw(
+					_("Item {0}: Production date {1} cannot be after incident date {2}").format(
+						item_code, prod_date, incident_date
+					),
+					ValidationError,
+				)
+		out.append({
+			"item_code": item_code,
+			"qty": qty,
+			"uom": row.get("uom") or None,
+			"production_date": prod_date or None,
+			"reject_reason": row.get("reject_reason") or None,
+		})
 	return out
 
 
@@ -163,8 +210,8 @@ def save_reject_request(data, submit=0):
 	"""Insert or update a crew draft (docstatus 0), optionally submit it.
 
 	New rows require a non-system, enabled purpose; existing rows may only
-	change purpose / reason / video_link / incident_date / items (never
-	system-only fields: is_system_generated, work_order, owner, status).
+	change purpose / reason / incident_date / items (never video_link or
+	system-only fields: is_system_generated, work_order, owner, workflow_state, borne_by).
 	"""
 	data = _parse(data, {}) or {}
 	name = data.get("name")
@@ -172,18 +219,17 @@ def save_reject_request(data, submit=0):
 		if name:
 			doc = _doc(name)
 			_assert_profile_access(doc.pos_profile)
-			if doc.docstatus != 0:
-				frappe.throw(_("Only a Draft reject request can be edited"))
+			if doc.docstatus != 0 or (doc.workflow_state and doc.workflow_state != STATE_DRAFT):
+				frappe.throw(_("Only a Draft reject request can be edited"), ValidationError)
 			if "purpose" in data and not doc.is_system_generated:
 				_validate_crew_purpose(data.get("purpose"))
 				doc.purpose = data.get("purpose")
 			doc.reason = data.get("reason", doc.reason)
-			doc.video_link = data.get("video_link", doc.video_link)
 			if "incident_date" in data and not doc.is_system_generated:
 				doc.incident_date = data.get("incident_date")
 			if "items" in data and not doc.is_system_generated:
 				doc.set("items", [])
-				for row in _item_rows(data.get("items")):
+				for row in _item_rows(data.get("items"), incident_date=doc.incident_date):
 					doc.append("items", row)
 		else:
 			pos_profile = data.get("pos_profile")
@@ -194,15 +240,19 @@ def save_reject_request(data, submit=0):
 			doc.pos_profile = pos_profile
 			doc.incident_date = data.get("incident_date")
 			doc.reason = data.get("reason")
-			doc.video_link = data.get("video_link")
-			for row in _item_rows(data.get("items")):
+			for row in _item_rows(data.get("items"), incident_date=doc.incident_date):
 				doc.append("items", row)
+
 		if name:
 			doc.save()
 		else:
 			doc.insert()
+
 		if cint(submit):
-			doc.submit()
+			from frappe.model.workflow import apply_workflow
+
+			doc = apply_workflow(doc, "Submit")
+
 		return _summary(doc)
 	except (ValidationError, frappe.PermissionError):
 		raise
@@ -214,17 +264,72 @@ def save_reject_request(data, submit=0):
 def _summary(doc):
 	return {
 		"name": doc.name,
-		"status": frappe.db.get_value("POS Reject Request", doc.name, "status"),
+		"workflow_state": doc.workflow_state or frappe.db.get_value("POS Reject Request", doc.name, "workflow_state"),
 		"docstatus": doc.docstatus,
 		"total_amount": doc.total_amount,
 	}
 
 
 @frappe.whitelist()
+def apply_reject_action(name, action):
+	"""Apply a crew workflow action (Withdraw or Send Proof)."""
+	if action not in ("Withdraw", "Send Proof"):
+		frappe.throw(_("Action {0} is not allowed").format(action), ValidationError)
+	doc = _doc(name)
+	_assert_profile_access(doc.pos_profile)
+	from frappe.model.workflow import apply_workflow
+
+	apply_workflow(doc, action)
+	return get_reject_request(name)
+
+
+@frappe.whitelist()
+def save_reject_video(name, video_link):
+	"""Save destruction video link while in Awaiting Destruction."""
+	doc = _doc(name)
+	_assert_profile_access(doc.pos_profile)
+	if doc.workflow_state != STATE_AWAITING:
+		frappe.throw(_("Video link can only be edited in Awaiting Destruction"), ValidationError)
+	link = (video_link or "").strip()
+	if not link.lower().startswith(("http://", "https://")):
+		frappe.throw(_("Video link must start with http:// or https://"), ValidationError)
+	doc.video_link = link
+	doc.save()
+	return {"name": doc.name, "video_link": doc.video_link}
+
+
+@frappe.whitelist()
+def set_reject_liability(name, borne_by, liabilities=None):
+	"""Head Office prompt wrapper: set borne_by and optional crew liabilities."""
+	doc = _doc(name)
+	try:
+		return reject_request.set_liability(doc, borne_by, _parse(liabilities, None))
+	except (ValidationError, frappe.PermissionError):
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Set Reject Liability Error")
+		frappe.throw(_("Error setting reject liability: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def record_return_reason(name, reason):
+	"""Head Office prompt wrapper: record return reason before returning to crew."""
+	doc = _doc(name)
+	try:
+		reject_request.record_return_reason(doc, reason)
+		return {"name": name, "return_reason": doc.return_reason}
+	except (ValidationError, frappe.PermissionError):
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Record Return Reason Error")
+		frappe.throw(_("Error recording return reason: {0}").format(str(e)))
+
+
+@frappe.whitelist()
 def attach_reject_files(name, kind, files):
 	"""Attach private Files to the request as `kind` (evidence / destruction).
 
-	Evidence only while Draft (max 5 total), destruction only once Approved.
+	Evidence only while Draft (max 5 total), destruction only in Awaiting Destruction.
 	Outlet roles lack write-after-submit docperms, so the inserts run with
 	ignore_permissions — the profile gate above is the access decision.
 	"""
@@ -240,12 +345,13 @@ def attach_reject_files(name, kind, files):
 			if not (f.get("file_name") or "").strip() or not (f.get("filedata") or "").strip():
 				frappe.throw(_("File name and data are required"))
 		if kind == "evidence":
-			if doc.docstatus != 0:
+			if doc.workflow_state and doc.workflow_state != STATE_DRAFT:
 				frappe.throw(_("Evidence photos can only be attached to a Draft"))
 			if _count_files(name, "evidence") + len(parsed) > MAX_EVIDENCE:
 				frappe.throw(_("At most {0} evidence photos are allowed").format(MAX_EVIDENCE))
-		elif doc.status not in reject_request.DECISIONS:
-			frappe.throw(_("Destruction photos can only be attached after a decision"))
+		elif kind == "destruction":
+			if doc.workflow_state != STATE_AWAITING:
+				frappe.throw(_("Destruction photos can only be attached in Awaiting Destruction"))
 
 		for f in parsed:
 			frappe.get_doc(
@@ -266,52 +372,6 @@ def attach_reject_files(name, kind, files):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Attach Reject Files Error")
 		frappe.throw(_("Error attaching files: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def cancel_reject_request(name):
-	"""Cancel a Pending request (service guards the status, stock returns)."""
-	doc = _doc(name)
-	_assert_profile_access(doc.pos_profile)
-	try:
-		doc.flags.ignore_permissions = True
-		doc.cancel()
-		return _summary(doc)
-	except (ValidationError, frappe.PermissionError):
-		raise
-	except Exception as e:
-		frappe.log_error(frappe.get_traceback(), "Cancel Reject Request Error")
-		frappe.throw(_("Error cancelling reject request: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def close_reject_request(name):
-	"""Close an Approved request after destruction proof (service guards)."""
-	doc = _doc(name)
-	_assert_profile_access(doc.pos_profile)
-	try:
-		return reject_request.close_request(doc)
-	except (ValidationError, frappe.PermissionError):
-		raise
-	except Exception as e:
-		frappe.log_error(frappe.get_traceback(), "Close Reject Request Error")
-		frappe.throw(_("Error closing reject request: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def decide_reject_request(name, decision, notes=None, liabilities=None):
-	"""Head Office verdict — no profile gate; role/owner checks live in the
-	service (apply_decision), the outlet never sees this form. `liabilities`
-	is a JSON list of {user, amount} rows."""
-	try:
-		return reject_request.apply_decision(
-			_doc(name), decision, notes, _parse(liabilities, None)
-		)
-	except (ValidationError, frappe.PermissionError):
-		raise
-	except Exception as e:
-		frappe.log_error(frappe.get_traceback(), "Decide Reject Request Error")
-		frappe.throw(_("Error deciding reject request: {0}").format(str(e)))
 
 
 @frappe.whitelist()

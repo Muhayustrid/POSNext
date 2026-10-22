@@ -4,102 +4,169 @@
 frappe.ui.form.on("POS Reject Request", {
 	refresh(frm) {
 		pos_next_reject.indicators(frm);
-		pos_next_reject.decide_buttons(frm);
+		if (frm.doc.docstatus === 1) {
+			frm.add_custom_button(__("Berita Acara"), () => {
+				const url = `/printview?doctype=POS%20Reject%20Request&name=${encodeURIComponent(frm.doc.name)}&format=Berita%20Acara%20Reject`;
+				window.open(url, "_blank");
+			});
+		}
+	},
+
+	before_workflow_action(frm) {
+		const action = frm.selected_workflow_action;
+		if (action === "Approve" && frm.doc.workflow_state === "Pending Approval") {
+			frappe.dom.unfreeze();
+			return pos_next_reject.prompt_approve(frm).then((res) => {
+				frappe.dom.freeze();
+				return frappe
+					.xcall("pos_next.api.reject_request.set_reject_liability", {
+						name: frm.doc.name,
+						borne_by: res.borne_by,
+						liabilities: res.liabilities,
+					})
+					.catch((err) => {
+						frappe.dom.unfreeze();
+						throw err;
+					});
+			});
+		}
+
+		if (action === "Return") {
+			frappe.dom.unfreeze();
+			return pos_next_reject.prompt_return_reason(action).then((reason) => {
+				frappe.dom.freeze();
+				return frappe
+					.xcall("pos_next.api.reject_request.record_return_reason", {
+						name: frm.doc.name,
+						reason: reason,
+					})
+					.catch((err) => {
+						frappe.dom.unfreeze();
+						throw err;
+					});
+			});
+		}
 	},
 });
 
 frappe.provide("pos_next_reject");
 
-pos_next_reject.decide_buttons = function (frm) {
-	if (frm.doc.status !== "Pending" || !frappe.user.has_role("POSNext Reject Approver")) {
-		return;
-	}
-	if (frappe.session.user === frm.doc.owner) {
-		// segregation of duties: the owner cannot judge their own request
-		return;
-	}
-	const group = __("Decide");
-	frm.add_custom_button(__("Approved"), () => pos_next_reject.approved_dialog(frm), group);
-	frm.add_custom_button(__("Rejected"), () => pos_next_reject.rejected_dialog(frm), group);
-};
-
-pos_next_reject.decide = function (frm, decision, notes, liabilities) {
-	frappe
-		.call({
-			method: "pos_next.api.reject_request.decide_reject_request",
-			args: { name: frm.doc.name, decision, notes, liabilities },
-		})
-		.then(() => frm.reload_doc());
-};
-
-pos_next_reject.approved_dialog = function (frm) {
-	frappe.prompt(
-		[
-			{
-				fieldname: "notes",
-				fieldtype: "Small Text",
-				label: __("Notes"),
-				description: __("Optional explanation for the crew"),
-			},
-		],
-		(values) => pos_next_reject.decide(frm, "Approved", values.notes),
-		__("Approve"),
-		__("Approve")
-	);
-};
-
-pos_next_reject.rejected_dialog = function (frm) {
-	let manually_edited = false;
-	const dialog = new frappe.ui.Dialog({
-		title: __("Decide: {0}", [__("Rejected")]),
-		fields: [
-			{
-				fieldname: "notes",
-				fieldtype: "Small Text",
-				label: __("Notes"),
-				reqd: 1,
-				description: __("Notes are required for {0}", [__("Rejected")]),
-			},
-			{
-				fieldname: "liabilities",
-				fieldtype: "Table",
-				label: __("Liabilities"),
-				// inline fields: the form's per-doc docfield copy breaks options-based grid meta
-				fields: [
-					{ fieldname: "user", fieldtype: "Link", options: "User", label: __("User"), reqd: 1, in_list_view: 1 },
-					{ fieldname: "amount", fieldtype: "Currency", label: __("Amount"), reqd: 1, in_list_view: 1 },
-				],
-				reqd: 1,
-				data: [{ user: frm.doc.owner, amount: frm.doc.total_amount }],
-				get_data() {
-					return dialog.get_value("liabilities");
-				},
-				// grid's own Add Row; programmatic changes never fire this
-				on_add_row() {
-					if (!manually_edited) pos_next_reject.redistribute(dialog, frm);
-				},
-			},
-			{
-				fieldname: "total_html",
-				fieldtype: "HTML",
-				options: "",
-			},
-		],
-		primary_action_label: __("Decide"),
-		primary_action(values) {
-			pos_next_reject.decide(frm, "Rejected", values.notes, values.liabilities);
-			dialog.hide();
-		},
+pos_next_reject.prompt_return_reason = function (action) {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const settle = (fn, value) => {
+			if (settled) return;
+			settled = true;
+			fn(value);
+		};
+		const d = frappe.prompt(
+			[{ fieldname: "reason", fieldtype: "Small Text", label: __("Reason"), reqd: 1 }],
+			() => {},
+			action,
+			action
+		);
+		d.set_primary_action(action, () => {
+			const values = d.get_values();
+			if (!values) return;
+			settle(resolve, values.reason);
+			d.hide();
+		});
+		d.on_hide = () => settle(reject);
 	});
+};
 
-	// user keystrokes bubble a change event; programmatic grid edits do not
-	dialog.$body.on("change", 'input[data-fieldname="amount"]', () => {
-		manually_edited = true;
-		pos_next_reject.show_total(dialog, frm);
+pos_next_reject.prompt_approve = function (frm) {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		let manually_edited = false;
+		const settle = (fn, value) => {
+			if (settled) return;
+			settled = true;
+			fn(value);
+		};
+
+		const default_borne_by = frm.doc.borne_by || "Company";
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Approve"),
+			fields: [
+				{
+					fieldname: "borne_by",
+					fieldtype: "Select",
+					label: __("Borne By"),
+					options: "\nCompany\nCrew",
+					default: default_borne_by,
+					reqd: 1,
+					onchange() {
+						const val = dialog.get_value("borne_by");
+						const is_crew = val === "Crew";
+						dialog.set_df_property("liabilities", "hidden", !is_crew);
+						dialog.set_df_property("total_html", "hidden", !is_crew);
+						if (is_crew) {
+							if (dialog.fields_dict.liabilities && dialog.fields_dict.liabilities.grid) {
+								dialog.fields_dict.liabilities.grid.refresh();
+							}
+							pos_next_reject.show_total(dialog, frm);
+						}
+					},
+				},
+				{
+					fieldname: "liabilities",
+					fieldtype: "Table",
+					label: __("Liabilities"),
+					hidden: default_borne_by !== "Crew",
+					fields: [
+						{ fieldname: "user", fieldtype: "Link", options: "User", label: __("User"), reqd: 1, in_list_view: 1 },
+						{ fieldname: "amount", fieldtype: "Currency", label: __("Amount"), reqd: 1, in_list_view: 1 },
+					],
+					data: [{ user: frm.doc.owner, amount: frm.doc.total_amount }],
+					get_data() {
+						return dialog.get_value("liabilities");
+					},
+					on_add_row() {
+						if (!manually_edited) pos_next_reject.redistribute(dialog, frm);
+					},
+				},
+				{
+					fieldname: "total_html",
+					fieldtype: "HTML",
+					hidden: default_borne_by !== "Crew",
+				},
+			],
+			primary_action_label: __("Approve"),
+			primary_action(values) {
+				const borne_by = values.borne_by;
+				let liabilities = null;
+				if (borne_by === "Crew") {
+					liabilities = dialog.get_value("liabilities") || [];
+					if (!liabilities.length) {
+						frappe.msgprint(__("Liabilities are required when borne by Crew"));
+						return;
+					}
+					const sum = liabilities.reduce((s, r) => s + (flt(r.amount) || 0), 0);
+					const precision = frm.doc.precision ? frm.doc.precision("total_amount") || 2 : 2;
+					if (Math.abs(sum - flt(frm.doc.total_amount)) > 0.5 * Math.pow(10, -precision)) {
+						const fmt = (v) => format_currency(v, erpnext.get_currency(frm.doc.company));
+						frappe.msgprint(__("Liability amounts must add up to {0}", [fmt(frm.doc.total_amount)]));
+						return;
+					}
+				}
+				settle(resolve, { borne_by, liabilities });
+				dialog.hide();
+			},
+		});
+
+		dialog.$body.on("change", 'input[data-fieldname="amount"]', () => {
+			manually_edited = true;
+			pos_next_reject.show_total(dialog, frm);
+		});
+
+		dialog.on_hide = () => settle(reject);
+		dialog.show();
+		if (default_borne_by === "Crew") {
+			pos_next_reject.show_total(dialog, frm);
+		}
 	});
-
-	dialog.show();
-	pos_next_reject.show_total(dialog, frm);
 };
 
 pos_next_reject.show_total = function (dialog, frm) {

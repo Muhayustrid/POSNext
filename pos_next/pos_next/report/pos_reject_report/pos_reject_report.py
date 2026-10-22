@@ -5,7 +5,7 @@
 
 Per Request: one row per decided request with the liable crew comma-joined.
 Per Liability: one row per POS Reject Liability row, plus one "Company" row
-per Approved request (the company bears it). Two queries max: the request
+per Company-borne request (the company bears it). Two queries max: the request
 window, then the liability rows of those requests."""
 
 import frappe
@@ -29,19 +29,24 @@ def execute(filters=None):
 
 
 def get_requests(filters):
-	conds = ["docstatus = 1", "ifnull(decision, '') != ''"]
+	conds = ["workflow_state in ('Awaiting Destruction', 'Destruction Submitted', 'Completed')"]
 	params = {
 		"from_date": getdate(filters.from_date or nowdate()),
 		"to_date": getdate(filters.to_date or nowdate()),
 	}
 	conds.append("incident_date between %(from_date)s and %(to_date)s")
-	for key in ("pos_profile", "purpose", "decision"):
+	if filters.get("decision") and not filters.get("borne_by"):
+		if filters.decision == "Approved":
+			filters.borne_by = "Company"
+		elif filters.decision == "Rejected":
+			filters.borne_by = "Crew"
+	for key in ("pos_profile", "purpose", "borne_by"):
 		if filters.get(key):
 			conds.append(f"{key} = %({key})s")
 			params[key] = filters[key]
 	rows = frappe.db.sql(
 		f"""
-		select name, incident_date, pos_profile, purpose, status, decision,
+		select name, incident_date, pos_profile, purpose, workflow_state, borne_by,
 			total_amount, owner, decided_by, closed_on
 		from `tabPOS Reject Request`
 		where {" and ".join(conds)}
@@ -70,7 +75,7 @@ def liability_rows(requests, liabilities):
 		by_parent.setdefault(l.parent, []).append(l)
 	rows = []
 	for r in requests:
-		if r.decision == "Approved":
+		if r.borne_by == "Company":
 			rows.append(_row(r, "Company", r.total_amount))
 		for l in by_parent.get(r.name, []):
 			rows.append(_row(r, l.user, l.amount))
@@ -83,7 +88,8 @@ def _row(r, bearer, amount):
 		incident_date=r.incident_date,
 		pos_profile=r.pos_profile,
 		purpose=r.purpose,
-		decision=r.decision,
+		workflow_state=r.workflow_state,
+		borne_by=r.borne_by,
 		bearer=bearer,
 		amount=flt(amount),
 	)
@@ -110,7 +116,7 @@ def get_columns(per_liability):
 			{"fieldname": "incident_date", "label": _("Incident Date"), "fieldtype": "Date", "width": 100},
 			{"fieldname": "pos_profile", "label": _("Outlet"), "fieldtype": "Link", "options": "POS Profile", "width": 160},
 			{"fieldname": "purpose", "label": _("Purpose"), "fieldtype": "Link", "options": "POS Reject Purpose", "width": 130},
-			{"fieldname": "decision", "label": _("Decision"), "fieldtype": "Data", "width": 90},
+			{"fieldname": "borne_by", "label": _("Borne By"), "fieldtype": "Data", "width": 100},
 			{"fieldname": "bearer", "label": _("Bearer"), "fieldtype": "Data", "width": 200},
 			{"fieldname": "amount", "label": _("Amount"), "fieldtype": "Currency", "width": 130},
 		]
@@ -119,8 +125,8 @@ def get_columns(per_liability):
 		{"fieldname": "incident_date", "label": _("Incident Date"), "fieldtype": "Date", "width": 100},
 		{"fieldname": "pos_profile", "label": _("Outlet"), "fieldtype": "Link", "options": "POS Profile", "width": 160},
 		{"fieldname": "purpose", "label": _("Purpose"), "fieldtype": "Link", "options": "POS Reject Purpose", "width": 130},
-		{"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 90},
-		{"fieldname": "decision", "label": _("Decision"), "fieldtype": "Data", "width": 90},
+		{"fieldname": "workflow_state", "label": _("Status"), "fieldtype": "Data", "width": 140},
+		{"fieldname": "borne_by", "label": _("Borne By"), "fieldtype": "Data", "width": 100},
 		{"fieldname": "total_amount", "label": _("Total Amount"), "fieldtype": "Currency", "width": 130},
 		{"fieldname": "liable_crew", "label": _("Liable Crew"), "fieldtype": "Data", "width": 200},
 		{"fieldname": "decided_by", "label": _("Decided By"), "fieldtype": "Link", "options": "User", "width": 180},

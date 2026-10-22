@@ -5,7 +5,7 @@
 		:options="{ title: dialogTitle, size: '4xl' }"
 	>
 		<template #body-content>
-			<!-- LIST -->
+			<!-- 1. LIST VIEW -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-3">
 					<p class="text-sm text-gray-500">
@@ -40,10 +40,10 @@
 					</button>
 				</div>
 
-				<div class="rounded-xl border border-gray-200 bg-white">
-					<!-- desktop column header; rows below share the same grid -->
+				<div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+					<!-- desktop column header -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_7rem_8rem_7rem] md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_7rem_8rem_7rem] md:gap-x-3"
 					>
 						<span>{{ __("Request") }}</span>
 						<span>{{ __("Purpose") }}</span>
@@ -79,12 +79,12 @@
 								<span
 									v-if="r.is_late"
 									class="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200"
-									>{{ __("Late") }}</span
 								>
+									{{ __("Late") }}
+								</span>
 							</span>
-							<!-- status sits top-right on cards, in its own column on desktop -->
 							<span class="justify-self-end md:order-last md:justify-self-start">
-								<span :class="statusPill(r.status)">{{ __(r.status) }}</span>
+								<span :class="statusPill(r.workflow_state)">{{ __(r.workflow_state) }}</span>
 							</span>
 							<span class="truncate text-sm text-gray-700">{{ __(r.purpose) }}</span>
 							<span class="text-xs text-gray-500 md:text-sm md:text-gray-700">
@@ -103,7 +103,7 @@
 				</div>
 			</div>
 
-			<!-- NEW REQUEST (crew purposes) -->
+			<!-- 2. NEW REQUEST FORM -->
 			<div v-else-if="view === 'new'" class="mx-auto flex w-full max-w-6xl flex-col gap-4">
 				<div class="flex items-center gap-2">
 					<button
@@ -119,118 +119,315 @@
 					<h3 class="truncate text-base font-semibold text-gray-900">{{ __("New Reject Request") }}</h3>
 				</div>
 
+				<!-- Step Indicator -->
+				<div data-testid="step-indicator" class="overflow-x-auto rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
+					<div class="flex items-center justify-between min-w-[480px]">
+						<template v-for="(step, idx) in WORKFLOW_STEPS" :key="step">
+							<div
+								class="flex items-center gap-2 shrink-0"
+								:data-step="step"
+								:data-current="idx === 0 ? 'true' : undefined"
+								:class="{
+									'font-semibold text-blue-600': idx === 0,
+									'text-gray-400': idx > 0,
+								}"
+							>
+								<span
+									class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
+									:class="{
+										'bg-blue-600 text-white': idx === 0,
+										'bg-gray-100 text-gray-500': idx > 0,
+									}"
+								>
+									{{ idx + 1 }}
+								</span>
+								<span class="text-xs sm:text-sm whitespace-nowrap">{{ __(step) }}</span>
+							</div>
+							<div
+								v-if="idx < WORKFLOW_STEPS.length - 1"
+								class="mx-2 h-0.5 flex-1 min-w-[1rem] bg-gray-200"
+							></div>
+						</template>
+					</div>
+				</div>
+
+				<!-- Request Information -->
 				<section class="rounded-xl border border-gray-200 bg-white p-4">
 					<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Request Information") }}</h4>
-					<div class="grid gap-3 sm:grid-cols-2">
+					<div class="grid gap-3.5 md:grid-cols-2">
 						<div>
-							<label for="rr-purpose" class="mb-1 block text-xs font-medium text-gray-700">
+							<label for="rr-purpose" class="mb-1 block text-xs font-medium text-gray-600">
 								{{ __("Purpose") }} <span class="text-red-500">*</span>
 							</label>
 							<select
 								id="rr-purpose"
 								v-model="form.purpose"
 								data-testid="purpose-select"
-								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+								class="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
 							>
 								<option v-for="p in purposes" :key="p" :value="p">{{ __(p) }}</option>
 							</select>
 						</div>
 						<div>
-							<label for="rr-incident-date" class="mb-1 block text-xs font-medium text-gray-700">
+							<label for="rr-incident-date" class="mb-1 block text-xs font-medium text-gray-600">
 								{{ __("Incident Date") }} <span class="text-red-500">*</span>
 							</label>
 							<input
 								id="rr-incident-date"
 								v-model="form.incident_date"
 								type="date"
-								class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+								class="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
 							/>
 						</div>
+						<div v-if="posProfile" class="col-span-1 md:col-span-2">
+							<span class="mb-1 block text-xs font-medium text-gray-600">{{ __("Outlet") }}</span>
+							<div class="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+								{{ posProfile }}
+							</div>
+						</div>
 					</div>
-					<p v-if="posProfile" class="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
-						{{ __("Outlet") }}: <b class="font-medium text-gray-700">{{ posProfile }}</b>
-					</p>
 				</section>
 
-				<!-- items: ERPNext-style grid, the search row sits below the table -->
-				<section class="rounded-xl border border-gray-200 bg-white">
-					<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">
-						{{ __("Items") }} <span class="text-red-500">*</span>
-					</h4>
-					<div
-						class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_7rem_2rem] md:gap-3"
-					>
-						<span>#</span>
-						<span>{{ __("Item") }}</span>
-						<span>{{ __("Qty") }}</span>
-						<span></span>
+				<!-- Items child table (ERPNext / Frappe grid feel) -->
+				<section class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+					<div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+						<h4 class="text-sm font-semibold text-gray-900">
+							{{ __("Items") }} <span class="text-red-500">*</span>
+						</h4>
 					</div>
-					<div
-						v-for="(row, idx) in form.items"
-						:key="row.item_code"
-						class="grid grid-cols-[minmax(0,1fr)_6rem_2rem] items-center gap-2 border-b border-gray-100 px-4 py-2 hover:bg-gray-50 md:grid-cols-[2rem_minmax(0,1fr)_7rem_2rem] md:gap-3 md:py-1.5"
-					>
-						<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
-						<div class="min-w-0">
-							<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name }}</p>
-							<p v-if="row.item_name !== row.item_code" class="truncate text-xs text-gray-400">
-								{{ row.item_code }}
-							</p>
-						</div>
-						<input
-							v-model.number="row.qty"
-							type="number"
-							min="0"
-							step="any"
-							inputmode="decimal"
-							:aria-label="`${row.item_name} — ${__('Qty')}`"
-							class="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-							:class="row.qty > 0 ? 'border-gray-300' : 'border-red-400 bg-red-50'"
-						/>
-						<button
-							type="button"
-							class="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
-							:aria-label="__('Remove item')"
-							:title="__('Remove item')"
-							@click="form.items.splice(idx, 1)"
-						>
-							<FeatherIcon name="x" class="h-4 w-4" />
-						</button>
-					</div>
-					<div class="relative px-4 py-3">
-						<div class="relative">
-						<FeatherIcon
-							name="search"
-							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-						/>
-						<input
-							v-model="itemSearch"
-							type="text"
-							:placeholder="__('Search item...')"
-							:aria-label="__('Add item')"
-							class="w-full rounded-lg border border-dashed border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-							@input="searchItems"
-						/>
-						</div>
-						<div
-							v-if="itemResults.length"
-							class="absolute inset-x-4 top-[3.25rem] z-10 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-						>
-							<button
-								v-for="i in itemResults"
-								:key="i.item_code"
-								type="button"
-								class="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none"
-								@click="addItem(i)"
+
+					<div class="md:overflow-x-auto">
+						<div class="md:min-w-[620px]">
+							<!-- Desktop & Tablet Table Header -->
+							<div
+								class="hidden border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_1.75rem_minmax(0,1.5fr)_5.5rem_4.5rem_8rem_minmax(0,1fr)_2.25rem] md:items-center md:gap-x-2"
 							>
-								<span class="truncate text-gray-900">{{ i.item_name || i.item_code }}</span>
-								<span v-if="i.item_name && i.item_name !== i.item_code" class="shrink-0 text-xs text-gray-400">
-									{{ i.item_code }}
-								</span>
-							</button>
+								<div class="flex items-center justify-center">
+									<input
+										type="checkbox"
+										data-testid="select-all-rows"
+										:checked="isAllSelected"
+										:indeterminate="isPartiallySelected"
+										:aria-label="__('Select All')"
+										class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+										@change="toggleSelectAll($event.target.checked)"
+									/>
+								</div>
+								<span class="text-center">{{ __("No.") }}</span>
+								<span>{{ __("Item") }}</span>
+								<span>{{ __("UOM") }}</span>
+								<span class="text-end">{{ __("Qty") }}</span>
+								<span>{{ __("Production Date") }}</span>
+								<span>{{ __("Reason") }}</span>
+								<span></span>
+							</div>
+
+							<p
+								v-if="!form.items.length"
+								class="border-b border-gray-200 bg-gray-50/30 px-4 py-8 text-center text-sm text-gray-400"
+							>
+								{{ __("No Data") }}
+							</p>
+
+							<!-- Item Rows (Desktop & Tablet grid / Mobile stacked cards) -->
+							<div data-testid="grid-rows" class="p-2 md:p-0">
+								<div
+									v-for="(row, idx) in form.items"
+									:key="row.key"
+									class="rounded-lg border border-gray-200 bg-white p-3.5 shadow-xs space-y-2.5 mb-3 last:mb-0 md:mb-0 md:space-y-0 md:border-0 md:border-b md:border-gray-100 md:p-0 md:rounded-none md:grid md:grid-cols-[2rem_1.75rem_minmax(0,1.5fr)_5.5rem_4.5rem_8rem_minmax(0,1fr)_2.25rem] md:items-center md:gap-x-2 md:px-3 md:py-1.5 md:hover:bg-gray-50/50"
+								>
+									<!-- Checkbox + Row # (Mobile card header / Desktop & Tablet cols 1 & 2) -->
+									<div class="flex items-center justify-between pb-2 border-b border-gray-100 md:border-b-0 md:pb-0 md:contents">
+										<div class="flex items-center gap-2 md:justify-center">
+											<input
+												type="checkbox"
+												v-model="row.selected"
+												data-testid="row-checkbox"
+												:aria-label="`Select row ${idx + 1}`"
+												class="h-5 w-5 md:h-4 md:w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+											/>
+											<span class="text-xs font-semibold text-gray-700 md:hidden">{{ __("Row #{0}", [idx + 1]) }}</span>
+										</div>
+										<span class="hidden text-xs tabular-nums text-center text-gray-400 md:block">{{ idx + 1 }}</span>
+									</div>
+
+									<!-- Item column -->
+									<div class="relative min-w-0">
+										<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Item") }}</span>
+										<template v-if="row.item_code">
+											<div
+												class="group flex min-h-[40px] md:min-h-0 items-center justify-between rounded border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 md:py-1 hover:border-gray-300 hover:bg-gray-100/70 cursor-pointer transition-colors"
+												:title="__('Click to change item')"
+												@click="editRowItem(row, idx)"
+											>
+												<div class="min-w-0 pr-1">
+													<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
+													<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
+														{{ row.item_code }}
+													</p>
+												</div>
+												<FeatherIcon
+													name="edit-2"
+													class="h-3.5 w-3.5 shrink-0 text-gray-400 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+												/>
+											</div>
+										</template>
+										<template v-else>
+											<input
+												v-model="row.search"
+												type="text"
+												data-testid="row-item-input"
+												:data-cell="`${idx}-item`"
+												:placeholder="__('Search item...')"
+												:aria-label="__('Item')"
+												class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-dashed border-gray-300 bg-gray-50/50 px-2.5 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+												@input="searchRow(row)"
+												@keyup.enter="onItemEnter(row, idx)"
+												@keyup.escape="closeResults(row)"
+												@blur="blurRow(row)"
+											/>
+											<div
+												v-if="row.results.length"
+												class="absolute inset-x-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+											>
+												<button
+													v-for="i in row.results"
+													:key="i.item_code"
+													type="button"
+													data-testid="row-item-result"
+													class="flex min-h-[40px] w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none"
+													@click="pickItem(row, i); focusCell(idx, 'uom')"
+												>
+													<span class="truncate font-medium text-gray-900">{{ i.item_name || i.item_code }}</span>
+													<span v-if="i.item_name && i.item_name !== i.item_code" class="shrink-0 text-xs text-gray-400">
+														{{ i.item_code }}
+													</span>
+												</button>
+											</div>
+										</template>
+										<p v-if="rowDuplicateError(row)" class="mt-0.5 text-xs text-red-600">
+											{{ rowDuplicateError(row) }}
+										</p>
+									</div>
+
+									<!-- Mobile 2-column group for UOM + Qty -->
+									<div class="grid grid-cols-2 gap-2 md:contents">
+										<!-- UOM -->
+										<div class="min-w-0">
+											<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("UOM") }}</span>
+											<select
+												v-if="row.item_code"
+												v-model="row.uom"
+												data-testid="uom-select"
+												:data-cell="`${idx}-uom`"
+												:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
+												class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+												@keydown.enter.prevent="focusCell(idx, 'qty')"
+											>
+												<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
+											</select>
+											<span v-else class="text-xs text-gray-400 md:block">—</span>
+										</div>
+
+										<!-- Qty -->
+										<div class="min-w-0">
+											<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Qty") }}</span>
+											<input
+												v-if="row.item_code"
+												v-model.number="row.qty"
+												type="number"
+												min="0"
+												step="any"
+												inputmode="decimal"
+												data-testid="qty-input"
+												:data-cell="`${idx}-qty`"
+												:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
+												class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border px-2 py-1 text-end text-sm tabular-nums focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+												:class="row.qty > 0 ? 'border-gray-300 bg-gray-50' : 'border-red-400 bg-red-50'"
+												@keydown.enter.prevent="focusCell(idx, 'prod-date')"
+											/>
+											<span v-else class="text-xs text-gray-400 md:block md:text-end">—</span>
+										</div>
+									</div>
+
+									<!-- Production Date -->
+									<div class="min-w-0">
+										<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Production Date") }}</span>
+										<input
+											v-if="row.item_code"
+											v-model="row.production_date"
+											type="date"
+											:max="form.incident_date"
+											data-testid="prod-date-input"
+											:data-cell="`${idx}-prod-date`"
+											:aria-label="`${row.item_name || row.item_code} — ${__('Production Date')}`"
+											class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs sm:text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+											@keydown.enter.prevent="focusCell(idx, 'reason')"
+										/>
+										<span v-else class="text-xs text-gray-400 md:block">—</span>
+									</div>
+
+									<!-- Reason -->
+									<div class="min-w-0">
+										<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Reason") }}</span>
+										<input
+											v-if="row.item_code"
+											v-model="row.reject_reason"
+											type="text"
+											data-testid="item-reason-input"
+											:data-cell="`${idx}-reason`"
+											:placeholder="__('Reason (optional)')"
+											:aria-label="`${row.item_name || row.item_code} — ${__('Reason')}`"
+											class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs sm:text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+											@keydown.enter.prevent="onReasonEnter(idx)"
+										/>
+										<span v-else class="text-xs text-gray-400 md:block">—</span>
+									</div>
+
+									<!-- Remove button (full width tap target on mobile, compact icon on desktop/tablet) -->
+									<div class="flex md:justify-center">
+										<button
+											type="button"
+											data-testid="remove-row"
+											class="flex h-10 w-full min-h-[40px] items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 text-xs font-medium text-red-600 hover:bg-red-50 hover:border-red-200 md:h-8 md:w-8 md:min-h-0 md:border-0 md:bg-transparent md:text-gray-400 md:hover:bg-red-50 md:hover:text-red-600"
+											:aria-label="__('Remove item')"
+											:title="__('Remove item')"
+											@click="form.items.splice(idx, 1)"
+										>
+											<FeatherIcon name="trash-2" class="h-4 w-4" />
+											<span class="md:hidden">{{ __("Remove Item") }}</span>
+										</button>
+									</div>
+								</div>
+							</div>
 						</div>
-						<p v-if="!form.items.length" class="mt-2 text-xs text-gray-400">
-							{{ __("Search and pick the rejected items. Picking the same item twice keeps one row.") }}
+					</div>
+
+					<!-- Add Row & Delete Selected footer -->
+					<div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
+						<div class="flex items-center gap-2">
+							<Button variant="subtle" size="sm" data-testid="add-row" @click="addRow">
+								<template #prefix>
+									<FeatherIcon name="plus" class="h-4 w-4" />
+								</template>
+								{{ __("Add Row") }}
+							</Button>
+							<Button
+								v-if="selectedCount > 0"
+								variant="subtle"
+								theme="red"
+								size="sm"
+								data-testid="delete-selected-rows"
+								@click="deleteSelectedRows"
+							>
+								<template #prefix>
+									<FeatherIcon name="trash-2" class="h-4 w-4" />
+								</template>
+								{{ __("Delete") }} ({{ selectedCount }})
+							</Button>
+						</div>
+						<p v-if="!form.items.length" class="text-xs text-gray-500">
+							{{ __("Click Add Row to add items for reject.") }}
 						</p>
 					</div>
 				</section>
@@ -245,23 +442,8 @@
 							id="rr-reason"
 							v-model="form.reason"
 							rows="3"
-							class="mb-3 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							class="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 						/>
-						<label for="rr-video" class="mb-1 block text-xs font-medium text-gray-700">
-							{{ __("Video Link") }}
-						</label>
-						<input
-							id="rr-video"
-							v-model="form.video_link"
-							type="text"
-							inputmode="url"
-							data-testid="video-link"
-							class="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-							:class="form.video_link && !videoLinkOk ? 'border-red-400' : 'border-gray-300'"
-						/>
-						<p v-if="form.video_link && !videoLinkOk" class="mt-1 text-xs text-red-600">
-							{{ __("Video link must start with http:// or https://") }}
-						</p>
 						<div class="mt-3">
 							<PurchaseAttachments
 								editable
@@ -273,7 +455,7 @@
 						</div>
 					</section>
 
-					<!-- what Submit still waits for, so a disabled button is never a mystery -->
+					<!-- Checklist summary -->
 					<section class="order-1 rounded-xl border border-gray-200 bg-gray-50 p-4 md:order-2 md:self-start" data-testid="new-summary">
 						<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Before you submit") }}</h4>
 						<ul class="space-y-2 text-sm">
@@ -293,12 +475,13 @@
 				</div>
 			</div>
 
-			<!-- DETAIL -->
+			<!-- 3. DETAIL VIEW -->
 			<div v-else class="mx-auto flex w-full max-w-6xl flex-col gap-4">
 				<div v-if="loadingDetail" class="py-10 text-center text-sm text-gray-500">
 					{{ __("Loading...") }}
 				</div>
 				<template v-else-if="detail">
+					<!-- Header -->
 					<div class="flex flex-wrap items-center gap-2">
 						<button
 							type="button"
@@ -310,43 +493,430 @@
 							<FeatherIcon name="arrow-left" class="h-4 w-4" />
 						</button>
 						<h3 class="truncate text-base font-semibold text-gray-900">{{ detail.name }}</h3>
-						<span :class="statusPill(detail.status)">{{ __(detail.status) }}</span>
+						<span :class="statusPill(detail.workflow_state)">{{ __(detail.workflow_state) }}</span>
 						<span
 							v-if="detail.is_late"
 							class="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200"
-							>{{ __("Late") }}</span
 						>
+							{{ __("Late") }}
+						</span>
 					</div>
 
+					<!-- Step Indicator -->
+					<div data-testid="step-indicator" class="overflow-x-auto rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
+						<div class="flex items-center justify-between min-w-[500px]">
+							<template v-for="(step, idx) in WORKFLOW_STEPS" :key="step">
+								<div
+									class="flex items-center gap-2 shrink-0"
+									:data-step="step"
+									:data-current="detail.workflow_state === step ? 'true' : undefined"
+									:class="{
+										'font-semibold text-blue-600': detail.workflow_state === step,
+										'font-medium text-gray-900': isStepPassed(step),
+										'text-gray-400': !isStepPassed(step) && detail.workflow_state !== step,
+									}"
+								>
+									<span
+										class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
+										:class="{
+											'bg-blue-600 text-white': detail.workflow_state === step,
+											'bg-green-100 text-green-700': isStepPassed(step),
+											'bg-gray-100 text-gray-500': !isStepPassed(step) && detail.workflow_state !== step,
+										}"
+									>
+										<FeatherIcon v-if="isStepPassed(step)" name="check" class="h-3.5 w-3.5" />
+										<span v-else>{{ idx + 1 }}</span>
+									</span>
+									<span class="text-xs sm:text-sm whitespace-nowrap">{{ __(step) }}</span>
+								</div>
+								<div
+									v-if="idx < WORKFLOW_STEPS.length - 1"
+									class="mx-2 h-0.5 flex-1 min-w-[1rem] bg-gray-200"
+									:class="{
+										'bg-green-500': isStepPassed(WORKFLOW_STEPS[idx + 1]) || detail.workflow_state === WORKFLOW_STEPS[idx + 1],
+									}"
+								></div>
+							</template>
+						</div>
+					</div>
+
+					<!-- Return Reason Banner (Draft returned by HO) -->
+					<div
+						v-if="detail.workflow_state === 'Draft' && detail.return_reason"
+						data-testid="return-reason-banner"
+						class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+					>
+						<div class="flex items-start gap-2">
+							<FeatherIcon name="alert-triangle" class="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+							<div>
+								<h4 class="font-semibold text-amber-900">{{ __("Returned by Head Office") }}</h4>
+								<p class="mt-1 text-amber-800">{{ detail.return_reason }}</p>
+							</div>
+						</div>
+					</div>
+
+					<!-- Awaiting Destruction Notice + Berita Acara -->
+					<div
+						v-if="detail.workflow_state === 'Awaiting Destruction'"
+						class="rounded-xl border border-blue-200 bg-blue-50 p-4"
+					>
+						<div class="flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<h4 class="font-semibold text-blue-900">{{ __("Ready for Destruction") }}</h4>
+								<p class="mt-0.5 text-xs text-blue-700">
+									{{ __("Download Berita Acara, perform destruction, and upload video/photos proof.") }}
+								</p>
+							</div>
+							<a
+								:href="beritaAcaraUrl"
+								target="_blank"
+								rel="noopener"
+								data-testid="download-berita-acara"
+								class="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm hover:bg-blue-50"
+							>
+								<FeatherIcon name="download" class="h-4 w-4" />
+								{{ __("Download Berita Acara") }}
+							</a>
+						</div>
+					</div>
+
+					<!-- Main content grid -->
 					<div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
 						<div class="flex min-w-0 flex-col gap-4">
-							<section class="rounded-xl border border-gray-200 bg-white">
+							<!-- Draft: editable Request Information (purpose & incident date) -->
+							<section v-if="detail.workflow_state === 'Draft' && !detail.is_system_generated" class="rounded-xl border border-gray-200 bg-white p-4">
+								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Request Information") }}</h4>
+								<div class="grid gap-3.5 md:grid-cols-2">
+									<div>
+										<label for="rr-detail-purpose" class="mb-1 block text-xs font-medium text-gray-600">
+											{{ __("Purpose") }} <span class="text-red-500">*</span>
+										</label>
+										<select
+											id="rr-detail-purpose"
+											v-model="detail.purpose"
+											data-testid="detail-purpose-select"
+											class="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+										>
+											<option v-for="p in purposes" :key="p" :value="p">{{ __(p) }}</option>
+										</select>
+									</div>
+									<div>
+										<label for="rr-detail-incident-date" class="mb-1 block text-xs font-medium text-gray-600">
+											{{ __("Incident Date") }} <span class="text-red-500">*</span>
+										</label>
+										<input
+											id="rr-detail-incident-date"
+											v-model="detail.incident_date"
+											type="date"
+											data-testid="detail-incident-date-input"
+											class="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+										/>
+									</div>
+									<div v-if="detail.pos_profile || posProfile" class="col-span-1 md:col-span-2">
+										<span class="mb-1 block text-xs font-medium text-gray-600">{{ __("Outlet") }}</span>
+										<div class="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+											{{ detail.pos_profile || posProfile }}
+										</div>
+									</div>
+								</div>
+							</section>
+
+							<!-- Draft: editable Items child table -->
+							<section v-if="detail.workflow_state === 'Draft' && !detail.is_system_generated" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+								<div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+									<h4 class="text-sm font-semibold text-gray-900">
+										{{ __("Items") }} <span class="text-red-500">*</span>
+									</h4>
+								</div>
+
+								<div class="md:overflow-x-auto">
+									<div class="md:min-w-[620px]">
+										<!-- Desktop & Tablet Table Header -->
+										<div
+											class="hidden border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_1.75rem_minmax(0,1.5fr)_5.5rem_4.5rem_8rem_minmax(0,1fr)_2.25rem] md:items-center md:gap-x-2"
+										>
+											<div class="flex items-center justify-center">
+												<input
+													type="checkbox"
+													data-testid="select-all-rows"
+													:checked="isAllSelected"
+													:indeterminate="isPartiallySelected"
+													:aria-label="__('Select All')"
+													class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+													@change="toggleSelectAll($event.target.checked)"
+												/>
+											</div>
+											<span class="text-center">{{ __("No.") }}</span>
+											<span>{{ __("Item") }}</span>
+											<span>{{ __("UOM") }}</span>
+											<span class="text-end">{{ __("Qty") }}</span>
+											<span>{{ __("Production Date") }}</span>
+											<span>{{ __("Reason") }}</span>
+											<span></span>
+										</div>
+
+										<p
+											v-if="!form.items.length"
+											class="border-b border-gray-200 bg-gray-50/30 px-4 py-8 text-center text-sm text-gray-400"
+										>
+											{{ __("No Data") }}
+										</p>
+
+										<!-- Item Rows (Desktop & Tablet grid / Mobile stacked cards) -->
+										<div data-testid="grid-rows" class="p-2 md:p-0">
+											<div
+												v-for="(row, idx) in form.items"
+												:key="row.key"
+												class="rounded-lg border border-gray-200 bg-white p-3.5 shadow-xs space-y-2.5 mb-3 last:mb-0 md:mb-0 md:space-y-0 md:border-0 md:border-b md:border-gray-100 md:p-0 md:rounded-none md:grid md:grid-cols-[2rem_1.75rem_minmax(0,1.5fr)_5.5rem_4.5rem_8rem_minmax(0,1fr)_2.25rem] md:items-center md:gap-x-2 md:px-3 md:py-1.5 md:hover:bg-gray-50/50"
+											>
+												<!-- Checkbox + Row # (Mobile card header / Desktop & Tablet cols 1 & 2) -->
+												<div class="flex items-center justify-between pb-2 border-b border-gray-100 md:border-b-0 md:pb-0 md:contents">
+													<div class="flex items-center gap-2 md:justify-center">
+														<input
+															type="checkbox"
+															v-model="row.selected"
+															data-testid="row-checkbox"
+															:aria-label="`Select row ${idx + 1}`"
+															class="h-5 w-5 md:h-4 md:w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+														/>
+														<span class="text-xs font-semibold text-gray-700 md:hidden">{{ __("Row #{0}", [idx + 1]) }}</span>
+													</div>
+													<span class="hidden text-xs tabular-nums text-center text-gray-400 md:block">{{ idx + 1 }}</span>
+												</div>
+
+												<!-- Item column -->
+												<div class="relative min-w-0">
+													<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Item") }}</span>
+													<template v-if="row.item_code">
+														<div
+															class="group flex min-h-[40px] md:min-h-0 items-center justify-between rounded border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 md:py-1 hover:border-gray-300 hover:bg-gray-100/70 cursor-pointer transition-colors"
+															:title="__('Click to change item')"
+															@click="editRowItem(row, idx)"
+														>
+															<div class="min-w-0 pr-1">
+																<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
+																<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
+																	{{ row.item_code }}
+																</p>
+															</div>
+															<FeatherIcon
+																name="edit-2"
+																class="h-3.5 w-3.5 shrink-0 text-gray-400 opacity-60 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+															/>
+														</div>
+													</template>
+													<template v-else>
+														<input
+															v-model="row.search"
+															type="text"
+															data-testid="row-item-input"
+															:data-cell="`${idx}-item`"
+															:placeholder="__('Search item...')"
+															:aria-label="__('Item')"
+															class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-dashed border-gray-300 bg-gray-50/50 px-2.5 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+															@input="searchRow(row)"
+															@keyup.enter="onItemEnter(row, idx)"
+															@keyup.escape="closeResults(row)"
+															@blur="blurRow(row)"
+														/>
+														<div
+															v-if="row.results.length"
+															class="absolute inset-x-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+														>
+															<button
+																v-for="i in row.results"
+																:key="i.item_code"
+																type="button"
+																data-testid="row-item-result"
+																class="flex min-h-[40px] w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none"
+																@click="pickItem(row, i); focusCell(idx, 'uom')"
+															>
+																<span class="truncate font-medium text-gray-900">{{ i.item_name || i.item_code }}</span>
+																<span v-if="i.item_name && i.item_name !== i.item_code" class="shrink-0 text-xs text-gray-400">
+																	{{ i.item_code }}
+																</span>
+															</button>
+														</div>
+													</template>
+													<p v-if="rowDuplicateError(row)" class="mt-0.5 text-xs text-red-600">
+														{{ rowDuplicateError(row) }}
+													</p>
+												</div>
+
+												<!-- Mobile 2-column group for UOM + Qty -->
+												<div class="grid grid-cols-2 gap-2 md:contents">
+													<!-- UOM -->
+													<div class="min-w-0">
+														<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("UOM") }}</span>
+														<select
+															v-if="row.item_code"
+															v-model="row.uom"
+															data-testid="uom-select"
+															:data-cell="`${idx}-uom`"
+															:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
+															class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+															@keydown.enter.prevent="focusCell(idx, 'qty')"
+														>
+															<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
+														</select>
+														<span v-else class="text-xs text-gray-400 md:block">—</span>
+													</div>
+
+													<!-- Qty -->
+													<div class="min-w-0">
+														<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Qty") }}</span>
+														<input
+															v-if="row.item_code"
+															v-model.number="row.qty"
+															type="number"
+															min="0"
+															step="any"
+															inputmode="decimal"
+															data-testid="qty-input"
+															:data-cell="`${idx}-qty`"
+															:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
+															class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border px-2 py-1 text-end text-sm tabular-nums focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+															:class="row.qty > 0 ? 'border-gray-300 bg-gray-50' : 'border-red-400 bg-red-50'"
+															@keydown.enter.prevent="focusCell(idx, 'prod-date')"
+														/>
+														<span v-else class="text-xs text-gray-400 md:block md:text-end">—</span>
+													</div>
+												</div>
+
+												<!-- Production Date -->
+												<div class="min-w-0">
+													<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Production Date") }}</span>
+													<input
+														v-if="row.item_code"
+														v-model="row.production_date"
+														type="date"
+														:max="detail.incident_date || form.incident_date"
+														data-testid="prod-date-input"
+														:data-cell="`${idx}-prod-date`"
+														:aria-label="`${row.item_name || row.item_code} — ${__('Production Date')}`"
+														class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs sm:text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+														@keydown.enter.prevent="focusCell(idx, 'reason')"
+													/>
+													<span v-else class="text-xs text-gray-400 md:block">—</span>
+												</div>
+
+												<!-- Reason -->
+												<div class="min-w-0">
+													<span class="mb-1 block text-xs font-medium text-gray-500 md:hidden">{{ __("Reason") }}</span>
+													<input
+														v-if="row.item_code"
+														v-model="row.reject_reason"
+														type="text"
+														data-testid="item-reason-input"
+														:data-cell="`${idx}-reason`"
+														:placeholder="__('Reason (optional)')"
+														:aria-label="`${row.item_name || row.item_code} — ${__('Reason')}`"
+														class="h-10 min-h-[40px] md:h-8 md:min-h-0 w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs sm:text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30"
+														@keydown.enter.prevent="onReasonEnter(idx)"
+													/>
+													<span v-else class="text-xs text-gray-400 md:block">—</span>
+												</div>
+
+												<!-- Remove button -->
+												<div class="flex md:justify-center">
+													<button
+														type="button"
+														data-testid="remove-row"
+														class="flex h-10 w-full min-h-[40px] items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 text-xs font-medium text-red-600 hover:bg-red-50 hover:border-red-200 md:h-8 md:w-8 md:min-h-0 md:border-0 md:bg-transparent md:text-gray-400 md:hover:bg-red-50 md:hover:text-red-600"
+														:aria-label="__('Remove item')"
+														:title="__('Remove item')"
+														@click="form.items.splice(idx, 1)"
+													>
+														<FeatherIcon name="trash-2" class="h-4 w-4" />
+														<span class="md:hidden">{{ __("Remove Item") }}</span>
+													</button>
+												</div>
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<!-- Add Row & Delete Selected footer -->
+								<div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
+									<div class="flex items-center gap-2">
+										<Button variant="subtle" size="sm" data-testid="add-row" @click="addRow">
+											<template #prefix>
+												<FeatherIcon name="plus" class="h-4 w-4" />
+											</template>
+											{{ __("Add Row") }}
+										</Button>
+										<Button
+											v-if="selectedCount > 0"
+											variant="subtle"
+											theme="red"
+											size="sm"
+											data-testid="delete-selected-rows"
+											@click="deleteSelectedRows"
+										>
+											<template #prefix>
+												<FeatherIcon name="trash-2" class="h-4 w-4" />
+											</template>
+											{{ __("Delete") }} ({{ selectedCount }})
+										</Button>
+									</div>
+									<p v-if="!form.items.length" class="text-xs text-gray-500">
+										{{ __("Click Add Row to add items for reject.") }}
+									</p>
+								</div>
+							</section>
+
+							<!-- Non-Draft or system-generated: read-only Items Table -->
+							<section v-else class="overflow-hidden rounded-xl border border-gray-200 bg-white">
 								<h4 class="px-4 pb-2 pt-4 text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
 								<div
-									class="grid grid-cols-[minmax(0,1fr)_4rem_7rem] gap-3 border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500"
+									class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.5fr)_4.5rem_4rem_6.5rem_minmax(0,1fr)_6rem] md:gap-3"
 								>
 									<span>{{ __("Item") }}</span>
+									<span>{{ __("UOM") }}</span>
 									<span class="text-end">{{ __("Qty") }}</span>
+									<span>{{ __("Production Date") }}</span>
+									<span>{{ __("Reason") }}</span>
 									<span class="text-end">{{ __("Amount") }}</span>
 								</div>
 								<div
-									v-for="row in detail.items"
-									:key="row.item_code"
-									class="grid grid-cols-[minmax(0,1fr)_4rem_7rem] items-center gap-3 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0"
+									v-for="(row, idx) in detail.items"
+									:key="row.name || idx"
+									class="border-b border-gray-100 p-3 last:border-b-0 md:grid md:grid-cols-[minmax(0,1.5fr)_4.5rem_4rem_6.5rem_minmax(0,1fr)_6rem] md:items-center md:gap-3 md:px-4 md:py-2 md:text-sm"
 								>
-									<span class="truncate text-gray-900">{{ row.item_name || row.item_code }}</span>
-									<span class="text-end tabular-nums" data-testid="item-qty">{{ row.qty }}</span>
-									<span class="text-end tabular-nums text-gray-700">{{ formatCurrency(row.amount) }}</span>
+									<div class="min-w-0">
+										<p class="truncate font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
+										<p v-if="row.item_name && row.item_name !== row.item_code" class="truncate text-xs text-gray-400">
+											{{ row.item_code }}
+										</p>
+									</div>
+									<div class="mt-1 flex items-center justify-between text-xs text-gray-600 md:mt-0 md:text-sm">
+										<span class="text-gray-500 md:hidden">{{ __("UOM") }}:</span>
+										<span>{{ row.uom || row.stock_uom || "—" }}</span>
+									</div>
+									<div class="mt-1 flex items-center justify-between md:mt-0 md:justify-end">
+										<span class="text-xs text-gray-500 md:hidden">{{ __("Qty") }}:</span>
+										<span class="tabular-nums font-medium text-gray-900" data-testid="item-qty">{{ row.qty }}</span>
+									</div>
+									<div class="mt-1 flex items-center justify-between text-xs text-gray-600 md:mt-0 md:text-sm">
+										<span class="text-gray-500 md:hidden">{{ __("Production Date") }}:</span>
+										<span>{{ row.production_date ? formatDate(row.production_date) : "—" }}</span>
+									</div>
+									<div class="mt-1 text-xs text-gray-600 md:mt-0 md:text-sm">
+										<span class="text-gray-500 md:hidden">{{ __("Reason") }}: </span>
+										<span class="italic text-gray-700">{{ row.reject_reason || "—" }}</span>
+									</div>
+									<div class="mt-1 flex items-center justify-between md:mt-0 md:justify-end">
+										<span class="text-xs text-gray-500 md:hidden">{{ __("Amount") }}:</span>
+										<span class="tabular-nums text-gray-700">{{ formatCurrency(row.amount) }}</span>
+									</div>
 								</div>
 								<p v-if="!detail.items?.length" class="px-4 py-4 text-center text-sm text-gray-500">
 									{{ __("No items") }}
 								</p>
 							</section>
 
-							<!-- Draft: crew-editable reason + video link + photos. Items are never
-							     editable here — qty on a system Production Loss is locked
-							     server-side, and a new Unsold request picks items in the New form. -->
-							<section v-if="detail.docstatus === 0" class="rounded-xl border border-gray-200 bg-white p-4">
+							<!-- Draft: crew-editable reason + video link + photos -->
+							<section v-if="detail.workflow_state === 'Draft'" class="rounded-xl border border-gray-200 bg-white p-4">
 								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Reason & Evidence") }}</h4>
 								<label for="rr-detail-reason" class="mb-1 block text-xs font-medium text-gray-700">
 									{{ __("Reason") }} <span class="text-red-500">*</span>
@@ -355,31 +925,8 @@
 									id="rr-detail-reason"
 									v-model="detail.reason"
 									rows="3"
-									class="mb-3 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									class="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 								/>
-								<label for="rr-detail-video" class="mb-1 block text-xs font-medium text-gray-700">
-									{{ __("Video Link") }}
-								</label>
-								<input
-									id="rr-detail-video"
-									v-model="detail.video_link"
-									type="text"
-									inputmode="url"
-									data-testid="video-link"
-									class="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-									:class="detail.video_link && !videoLinkOk ? 'border-red-400' : 'border-gray-300'"
-								/>
-								<a
-									v-if="detail.video_link && videoLinkOk"
-									:href="detail.video_link"
-									target="_blank"
-									rel="noopener"
-									class="mt-1 block break-all text-xs text-blue-600 hover:underline"
-									>{{ detail.video_link }}</a
-								>
-								<p v-if="detail.video_link && !videoLinkOk" class="mt-1 text-xs text-red-600">
-									{{ __("Video link must start with http:// or https://") }}
-								</p>
 								<div class="mt-3 flex flex-col gap-2">
 									<PurchaseAttachments :attached="detail.evidence" :label="__('Evidence Photos (1-5)')" />
 									<PurchaseAttachments
@@ -392,7 +939,7 @@
 								</div>
 							</section>
 
-							<!-- submitted: read-only reason, video link and evidence -->
+							<!-- Non-Draft: read-only reason, video link, and evidence photos -->
 							<section v-else class="rounded-xl border border-gray-200 bg-white p-4">
 								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Reason & Evidence") }}</h4>
 								<dl class="space-y-2 text-sm">
@@ -400,7 +947,7 @@
 										<dt class="text-xs text-gray-500">{{ __("Reason") }}</dt>
 										<dd class="whitespace-pre-line text-gray-900">{{ detail.reason || "—" }}</dd>
 									</div>
-									<div v-if="detail.video_link">
+									<div v-if="detail.video_link && videoLinkOk">
 										<dt class="text-xs text-gray-500">{{ __("Video Link") }}</dt>
 										<dd>
 											<a
@@ -408,8 +955,9 @@
 												target="_blank"
 												rel="noopener"
 												class="break-all text-blue-600 hover:underline"
-												>{{ detail.video_link }}</a
 											>
+												{{ detail.video_link }}
+											</a>
 										</dd>
 									</div>
 								</dl>
@@ -418,15 +966,33 @@
 								</div>
 							</section>
 
-							<!-- Approved/Rejected: upload destruction proof, then close -->
+							<!-- Awaiting Destruction: Video link input + destruction photos upload -->
 							<section
-								v-if="detail.status === 'Approved' || detail.status === 'Rejected'"
+								v-if="detail.workflow_state === 'Awaiting Destruction'"
 								class="rounded-xl border border-gray-200 bg-white p-4"
 							>
-								<h4 class="mb-1 text-sm font-semibold text-gray-900">{{ __("Destruction Photos") }}</h4>
+								<h4 class="mb-1 text-sm font-semibold text-gray-900">{{ __("Destruction Proof") }}</h4>
 								<p class="mb-3 text-xs text-gray-500">
-									{{ __("Upload proof the stock was destroyed, then close the request.") }}
+									{{ __("Upload photos or provide a video link showing stock destruction, then click Send Proof.") }}
 								</p>
+
+								<label for="rr-awaiting-video" class="mb-1 block text-xs font-medium text-gray-700">
+									{{ __("Destruction Video Link") }}
+								</label>
+								<input
+									id="rr-awaiting-video"
+									v-model="detail.video_link"
+									type="text"
+									inputmode="url"
+									data-testid="video-link"
+									class="mb-3 w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									:class="detail.video_link && !videoLinkOk ? 'border-red-400' : 'border-gray-300'"
+									placeholder="https://..."
+								/>
+								<p v-if="detail.video_link && !videoLinkOk" class="mb-3 mt-1 text-xs text-red-600">
+									{{ __("Video link must start with http:// or https://") }}
+								</p>
+
 								<div class="flex flex-col gap-2">
 									<PurchaseAttachments :attached="detail.destruction" :label="__('Destruction Photos')" />
 									<PurchaseAttachments
@@ -438,9 +1004,59 @@
 									/>
 								</div>
 							</section>
+
+							<!-- Destruction Submitted / Completed: read-only destruction proof -->
+							<section
+								v-else-if="detail.workflow_state === 'Destruction Submitted' || detail.workflow_state === 'Completed'"
+								class="rounded-xl border border-gray-200 bg-white p-4"
+							>
+								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Destruction Proof") }}</h4>
+								<dl v-if="detail.video_link && videoLinkOk" class="mb-3 space-y-1 text-sm">
+									<dt class="text-xs text-gray-500">{{ __("Destruction Video Link") }}</dt>
+									<dd>
+										<a
+											:href="detail.video_link"
+											target="_blank"
+											rel="noopener"
+											class="break-all text-blue-600 hover:underline"
+										>
+											{{ detail.video_link }}
+										</a>
+									</dd>
+								</dl>
+								<PurchaseAttachments :attached="detail.destruction" :label="__('Destruction Photos')" />
+							</section>
 						</div>
 
+						<!-- Right column: summary + liability -->
 						<div class="flex flex-col gap-4">
+							<!-- Approval Code Card (shown whenever approval_code exists) -->
+							<section v-if="detail.approval_code" class="rounded-xl border border-gray-200 bg-white p-4">
+								<div class="flex items-start justify-between gap-3">
+									<div>
+										<p class="text-xs font-medium text-gray-500 uppercase tracking-wider">{{ __("Approval Code") }}</p>
+										<p class="mt-1 font-mono text-xl font-bold tracking-widest text-gray-900" data-testid="approval-code">
+											{{ detail.approval_code }}
+										</p>
+										<p v-if="detail.decided_by" class="mt-1 text-xs text-gray-500">
+											{{ __("Approved by {0} on {1}", [detail.decided_by, formatDate(detail.decided_on)]) }}
+										</p>
+									</div>
+									<a
+										v-if="detail.workflow_state !== 'Awaiting Destruction'"
+										:href="beritaAcaraUrl"
+										target="_blank"
+										rel="noopener"
+										data-testid="download-berita-acara"
+										class="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 shadow-xs hover:bg-blue-100 shrink-0"
+									>
+										<FeatherIcon name="download" class="h-3.5 w-3.5" />
+										{{ __("Download Berita Acara") }}
+									</a>
+								</div>
+							</section>
+
+							<!-- Summary -->
 							<section class="rounded-xl border border-gray-200 bg-gray-50 p-4">
 								<h4 class="mb-3 text-sm font-semibold text-gray-900">{{ __("Summary") }}</h4>
 								<dl class="space-y-2 text-sm">
@@ -458,7 +1074,11 @@
 									</div>
 									<div class="flex justify-between gap-3">
 										<dt class="text-gray-500">{{ __("Evidence Photos") }}</dt>
-										<dd class="font-medium tabular-nums text-gray-900">{{ detail.evidence.length }}</dd>
+										<dd class="font-medium tabular-nums text-gray-900">{{ detail.evidence?.length || 0 }}</dd>
+									</div>
+									<div v-if="detail.issue_entry" class="flex justify-between gap-3">
+										<dt class="text-gray-500">{{ __("Stock Entry") }}</dt>
+										<dd class="font-medium text-gray-900">{{ detail.issue_entry }}</dd>
 									</div>
 									<div class="flex justify-between gap-3 border-t border-gray-200 pt-2">
 										<dt class="text-gray-500">{{ __("Total Amount") }}</dt>
@@ -467,28 +1087,25 @@
 								</dl>
 							</section>
 
-							<!-- Head Office verdict: who bears the loss -->
+							<!-- Liability info -->
 							<section
-								v-if="detail.decision"
+								v-if="detail.borne_by"
 								class="rounded-xl border p-4"
-								:class="detail.decision === 'Rejected' ? 'border-red-200 bg-red-50/40' : 'border-green-200 bg-green-50/40'"
+								:class="detail.borne_by === 'Crew' ? 'border-amber-200 bg-amber-50/40' : 'border-green-200 bg-green-50/40'"
 							>
-								<h4 class="text-sm font-semibold text-gray-900">{{ __("Decision") }}: {{ __(detail.decision) }}</h4>
+								<h4 class="text-sm font-semibold text-gray-900">
+									{{ detail.borne_by === "Company" ? __("Borne by Company") : __("Borne by Crew") }}
+								</h4>
 								<p class="mt-0.5 text-xs text-gray-600">
 									{{
-										detail.decision === "Approved"
-											? __("Borne by company")
-											: detail.decision === "Rejected"
-												? __("Borne by crew")
-												: ""
+										detail.borne_by === "Company"
+											? __("Head Office approved this loss to be borne by company.")
+											: __("Head Office assigned this loss to crew liabilities.")
 									}}
 								</p>
-								<p v-if="detail.decision_notes" class="mt-3 whitespace-pre-line text-sm text-gray-900">
-									{{ detail.decision_notes }}
-								</p>
 								<ul
-									v-if="detail.decision === 'Rejected' && detail.liabilities?.length"
-									class="mt-3 divide-y divide-red-100 border-t border-red-100 text-sm"
+									v-if="detail.borne_by === 'Crew' && detail.liabilities?.length"
+									class="mt-3 divide-y divide-amber-100 border-t border-amber-100 text-sm"
 								>
 									<li v-for="l in detail.liabilities" :key="l.user" class="flex justify-between gap-3 py-1.5">
 										<span class="min-w-0 truncate text-gray-700">{{ l.user }}</span>
@@ -502,6 +1119,7 @@
 			</div>
 		</template>
 
+		<!-- Action buttons footer -->
 		<template #actions>
 			<div v-if="view === 'new'" class="mx-auto flex w-full max-w-6xl justify-between gap-2">
 				<Button variant="subtle" :disabled="submitting" @click="view = 'list'">{{ __("Back") }}</Button>
@@ -511,8 +1129,10 @@
 			</div>
 			<div v-else-if="view === 'detail' && detail && !loadingDetail" class="mx-auto flex w-full max-w-6xl justify-between gap-2">
 				<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
+
+				<!-- Draft: can submit/resubmit -->
 				<Button
-					v-if="detail.docstatus === 0"
+					v-if="detail.workflow_state === 'Draft'"
 					variant="solid"
 					:loading="submitting"
 					:disabled="!canSubmitDetail"
@@ -520,24 +1140,29 @@
 				>
 					{{ __("Submit") }}
 				</Button>
-				<!-- Pending: the crew can still withdraw the request -->
+
+				<!-- Pending Approval: Withdraw button -->
 				<Button
-					v-else-if="detail.status === 'Pending'"
+					v-else-if="detail.workflow_state === 'Pending Approval' && detail.actions?.includes('Withdraw')"
 					variant="subtle"
 					theme="red"
+					data-testid="withdraw-button"
 					:loading="acting"
-					@click="doCancel"
+					@click="doWithdraw"
 				>
-					{{ __("Cancel") }}
+					{{ __("Withdraw") }}
 				</Button>
+
+				<!-- Awaiting Destruction: Send Proof button -->
 				<Button
-					v-else-if="detail.status === 'Approved' || detail.status === 'Rejected'"
+					v-else-if="detail.workflow_state === 'Awaiting Destruction' && detail.actions?.includes('Send Proof')"
 					variant="solid"
+					data-testid="send-proof"
 					:loading="acting"
-					:disabled="!destructionCount"
-					@click="doClose"
+					:disabled="!canSendProof"
+					@click="doSendProof"
 				>
-					{{ __("Close") }}
+					{{ __("Send Proof") }}
 				</Button>
 			</div>
 		</template>
@@ -567,20 +1192,17 @@ const { showSuccess, showError } = useToast()
 const { formatCurrency, formatDate } = useFormatters()
 
 const show = ref(props.modelValue)
-watch(
-	() => props.modelValue,
-	(v) => {
-		show.value = v
-		if (v) {
-			view.value = "list"
-			loadList()
-		}
-	},
-)
-watch(show, (v) => emit("update:modelValue", v))
 
 const MAX_EVIDENCE = 5
 const PAGE = 30
+
+const WORKFLOW_STEPS = [
+	"Draft",
+	"Pending Approval",
+	"Awaiting Destruction",
+	"Destruction Submitted",
+	"Completed",
+]
 
 // view: "list" | "new" | "detail"
 const view = ref("list")
@@ -593,10 +1215,10 @@ const loadingDetail = ref(false)
 const statusTabs = [
 	{ value: "", label: __("All") },
 	{ value: "Draft", label: __("Draft") },
-	{ value: "Pending", label: __("Pending") },
-	{ value: "Approved", label: __("Approved") },
-	{ value: "Rejected", label: __("Rejected") },
-	{ value: "Closed", label: __("Closed") },
+	{ value: "Pending Approval", label: __("Pending Approval") },
+	{ value: "Awaiting Destruction", label: __("Awaiting Destruction") },
+	{ value: "Destruction Submitted", label: __("Destruction Submitted") },
+	{ value: "Completed", label: __("Completed") },
 	{ value: "Cancelled", label: __("Cancelled") },
 ]
 
@@ -607,14 +1229,8 @@ const detail = ref(null)
 const newEvidence = ref([])
 const newDestruction = ref([])
 
-const itemSearch = ref("")
-const itemResults = ref([])
-
-// name of the draft created by a first submit attempt — kept across retries
-// so a failed submit updates the same draft instead of inserting a duplicate
+// draft tracking
 const draftName = ref(null)
-// files already uploaded in this session — retries after a failed final
-// save/close must not be blocked by gates that only count pending files
 const uploadedEvidence = ref(0)
 const uploadedDestruction = ref(0)
 
@@ -622,20 +1238,16 @@ const form = ref({
 	incident_date: "",
 	purpose: "",
 	reason: "",
-	video_link: "",
 	items: [],
 	files: [],
 })
 
-// enabled non-system purposes for the crew dropdown; a Production Loss
-// draft keeps its purpose read-only since it is not in this list
 const purposes = ref([])
 
 async function loadPurposes() {
 	try {
 		purposes.value =
 			(await call("pos_next.api.reject_request.get_reject_purposes")) || []
-		// the New form may already be open while purposes were loading
 		if (!form.value.purpose && purposes.value.length)
 			form.value.purpose = purposes.value[0]
 	} catch (err) {
@@ -645,10 +1257,10 @@ async function loadPurposes() {
 
 const STATUS_TONES = {
 	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	Pending: "bg-blue-50 text-blue-700 ring-blue-200",
-	Approved: "bg-green-50 text-green-700 ring-green-200",
-	Rejected: "bg-red-50 text-red-700 ring-red-200",
-	Closed: "bg-gray-100 text-gray-600 ring-gray-200",
+	"Pending Approval": "bg-blue-50 text-blue-700 ring-blue-200",
+	"Awaiting Destruction": "bg-amber-50 text-amber-700 ring-amber-200",
+	"Destruction Submitted": "bg-purple-50 text-purple-700 ring-purple-200",
+	Completed: "bg-green-50 text-green-700 ring-green-200",
 	Cancelled: "bg-gray-50 text-gray-500 ring-gray-200",
 }
 
@@ -663,8 +1275,27 @@ const dialogTitle = computed(() =>
 	view.value === "new" ? __("New Reject Request") : __("Reject Requests"),
 )
 
+function isStepPassed(step) {
+	if (
+		!detail.value?.workflow_state ||
+		detail.value.workflow_state === "Cancelled"
+	)
+		return false
+	const currentIdx = WORKFLOW_STEPS.indexOf(detail.value.workflow_state)
+	const stepIdx = WORKFLOW_STEPS.indexOf(step)
+	return currentIdx > -1 && stepIdx < currentIdx
+}
+
+const beritaAcaraUrl = computed(() => {
+	if (!detail.value?.name) return "#"
+	const name = encodeURIComponent(detail.value.name)
+	const format = encodeURIComponent("Berita Acara Reject")
+	const letterhead = encodeURIComponent(detail.value.letter_head || "")
+	return `/api/method/frappe.utils.print_format.download_pdf?doctype=POS%20Reject%20Request&name=${name}&format=${format}&letterhead=${letterhead}`
+})
+
 const videoLinkOk = computed(() => {
-	const link = (view.value === "detail" ? detail.value?.video_link : form.value.video_link) || ""
+	const link = detail.value?.video_link || ""
 	if (!link) return true
 	try {
 		return ["http:", "https:"].includes(new URL(link).protocol)
@@ -680,43 +1311,106 @@ const destructionCount = computed(
 		uploadedDestruction.value,
 )
 
-const canSubmit = computed(
-	() =>
+const hasProof = computed(() => {
+	const hasValidVideo = !!detail.value?.video_link?.trim() && videoLinkOk.value
+	return hasValidVideo || destructionCount.value >= 1
+})
+
+const canSendProof = computed(() => {
+	return (
+		detail.value?.workflow_state === "Awaiting Destruction" &&
+		hasProof.value &&
+		videoLinkOk.value
+	)
+})
+
+function rowDuplicateError(row) {
+	if (!row.item_code) return ""
+	const duplicates = form.value.items.filter(
+		(r) =>
+			r !== row &&
+			r.item_code === row.item_code &&
+			(r.production_date || "") === (row.production_date || ""),
+	)
+	if (duplicates.length > 0) {
+		return __("Duplicate item with same production date")
+	}
+	return ""
+}
+
+const canSubmit = computed(() => {
+	const filledItems = form.value.items.filter((i) => !!i.item_code)
+	const hasDuplicate = form.value.items.some(
+		(r) => r.item_code && !!rowDuplicateError(r),
+	)
+	const validDates = filledItems.every(
+		(r) =>
+			!r.production_date ||
+			!form.value.incident_date ||
+			r.production_date <= form.value.incident_date,
+	)
+	return (
 		!!props.posProfile &&
 		!!form.value.purpose &&
 		!!form.value.reason.trim() &&
-		form.value.items.length > 0 &&
-		form.value.items.every((i) => i.qty > 0) &&
+		filledItems.length > 0 &&
+		filledItems.every((i) => i.qty > 0) &&
+		!hasDuplicate &&
+		validDates &&
 		form.value.files.length + uploadedEvidence.value >= 1 &&
-		form.value.files.length + uploadedEvidence.value <= MAX_EVIDENCE &&
-		videoLinkOk.value,
-)
+		form.value.files.length + uploadedEvidence.value <= MAX_EVIDENCE
+	)
+})
 
-// mirrors canSubmit item by item so the summary card explains a disabled Submit
 const newChecklist = computed(() => {
 	const photos = form.value.files.length + uploadedEvidence.value
-	const items = form.value.items
+	const items = form.value.items.filter((i) => !!i.item_code)
 	return [
-		{ label: __("Items"), value: items.length, ok: items.length > 0 && items.every((i) => i.qty > 0) },
+		{
+			label: __("Items"),
+			value: items.length,
+			ok:
+				items.length > 0 &&
+				items.every((i) => i.qty > 0) &&
+				!form.value.items.some((r) => r.item_code && !!rowDuplicateError(r)),
+		},
 		{ label: __("Reason"), value: "", ok: !!form.value.reason.trim() },
-		{ label: __("Evidence Photos"), value: `${photos}/${MAX_EVIDENCE}`, ok: photos >= 1 && photos <= MAX_EVIDENCE },
-		{ label: __("Video Link"), value: form.value.video_link ? "" : __("Optional"), ok: !!form.value.video_link && videoLinkOk.value },
+		{
+			label: __("Evidence Photos"),
+			value: `${photos}/${MAX_EVIDENCE}`,
+			ok: photos >= 1 && photos <= MAX_EVIDENCE,
+		},
 	]
 })
 
-const canSubmitDetail = computed(
-	() =>
-		!!detail.value?.reason?.trim() &&
-		(detail.value?.evidence?.length || 0) +
-			newEvidence.value.length +
-			uploadedEvidence.value >=
-			1 &&
-		(detail.value?.evidence?.length || 0) +
-			newEvidence.value.length +
-			uploadedEvidence.value <=
-			MAX_EVIDENCE &&
-		videoLinkOk.value,
-)
+const canSubmitDetail = computed(() => {
+	if (!detail.value) return false
+	const hasReason = !!detail.value.reason?.trim()
+	const photos =
+		(detail.value.evidence?.length || 0) +
+		newEvidence.value.length +
+		uploadedEvidence.value
+	const hasPhotos = photos >= 1 && photos <= MAX_EVIDENCE
+	if (!hasReason || !hasPhotos) return false
+	if (!detail.value.is_system_generated) {
+		if (!detail.value.purpose) return false
+		const items = form.value.items.filter((i) => !!i.item_code)
+		if (!items.length) return false
+		if (!items.every((i) => i.qty > 0)) return false
+		if (form.value.items.some((r) => r.item_code && !!rowDuplicateError(r)))
+			return false
+		if (
+			!items.every(
+				(r) =>
+					!r.production_date ||
+					!detail.value.incident_date ||
+					r.production_date <= detail.value.incident_date,
+			)
+		)
+			return false
+	}
+	return true
+})
 
 // ---------------------------------------------------------------------------
 // List
@@ -724,7 +1418,7 @@ const canSubmitDetail = computed(
 
 async function loadList(reset = true) {
 	if (!props.posProfile) return
-	if (!reset && loading.value) return // Load More waits for the page in flight
+	if (!reset && loading.value) return
 	const offset = reset ? 0 : requests.value.length
 	loading.value = true
 	try {
@@ -745,8 +1439,6 @@ async function loadList(reset = true) {
 	}
 }
 
-// A filter click during a load must not be swallowed — reset loads always
-// re-run with the latest filter.
 function setStatusFilter(value) {
 	if (statusFilter.value === value) return
 	statusFilter.value = value
@@ -757,8 +1449,99 @@ function setStatusFilter(value) {
 // New request
 // ---------------------------------------------------------------------------
 
-// local date string for <input type="date"> — toISOString would shift a day
-// for any timezone east of UTC
+let rowSeq = 0
+function blankRow(fields = {}) {
+	return {
+		key: ++rowSeq,
+		selected: false,
+		item_code: "",
+		item_name: "",
+		stock_uom: "Nos",
+		uom: "Nos",
+		uoms: [],
+		qty: 1,
+		production_date: "",
+		reject_reason: "",
+		search: "",
+		results: [],
+		...fields,
+	}
+}
+
+const isAllSelected = computed(() => {
+	const items = form.value.items
+	return items.length > 0 && items.every((r) => r.selected)
+})
+
+const isPartiallySelected = computed(() => {
+	const items = form.value.items
+	const sel = items.filter((r) => r.selected).length
+	return sel > 0 && sel < items.length
+})
+
+const selectedCount = computed(() => {
+	return form.value.items.filter((r) => r.selected).length
+})
+
+function toggleSelectAll(checked) {
+	for (const row of form.value.items) {
+		row.selected = checked
+	}
+}
+
+function deleteSelectedRows() {
+	form.value.items = form.value.items.filter((r) => !r.selected)
+}
+
+function focusCell(idx, cellName) {
+	requestAnimationFrame(() => {
+		const el = document.querySelector(`[data-cell="${idx}-${cellName}"]`)
+		if (el) {
+			el.focus()
+			if (typeof el.select === "function") el.select()
+		}
+	})
+}
+
+function editRowItem(row, idx) {
+	row.search = row.item_code
+	row.item_code = ""
+	row.results = []
+	focusCell(idx, "item")
+}
+
+async function onItemEnter(row, idx) {
+	if (row.results?.length > 0) {
+		pickItem(row, row.results[0])
+		focusCell(idx, "uom")
+		return
+	}
+	await addExactMatch(row)
+	if (row.item_code) {
+		focusCell(idx, "uom")
+	}
+}
+
+function addRow() {
+	const nextIdx = form.value.items.length
+	form.value.items.push(blankRow())
+	focusCell(nextIdx, "item")
+}
+
+function onReasonEnter(idx) {
+	if (idx === form.value.items.length - 1) {
+		addRow()
+	} else {
+		focusCell(idx + 1, "item")
+	}
+}
+
+function uomOptionsOf(row) {
+	return [
+		...new Set([row.stock_uom, row.uom, ...(row.uoms || [])].filter(Boolean)),
+	]
+}
+
 function localDate() {
 	const d = new Date()
 	const m = String(d.getMonth() + 1).padStart(2, "0")
@@ -769,15 +1552,11 @@ function localDate() {
 function openNew() {
 	form.value = {
 		incident_date: localDate(),
-		// default = first purpose of the list; empty until loadPurposes lands
 		purpose: purposes.value[0] || "",
 		reason: "",
-		video_link: "",
 		items: [],
 		files: [],
 	}
-	itemSearch.value = ""
-	itemResults.value = []
 	draftName.value = null
 	uploadedEvidence.value = 0
 	if (!purposes.value.length) loadPurposes()
@@ -786,22 +1565,21 @@ function openNew() {
 
 let searchTimer = null
 let searchSeq = 0
-// trailing-only debounce: one request per settled term; stale responses and
-// in-flight searches after a selection are discarded via the sequence guard
-function searchItems() {
+
+function searchRow(row) {
 	clearTimeout(searchTimer)
-	const term = itemSearch.value.trim()
+	for (const r of form.value.items) if (r !== row) r.results = []
+	row.results = []
+	const term = row.search.trim()
 	if (!term) {
-		// invalidate in-flight searches when the field is cleared
 		searchSeq++
-		itemResults.value = []
 		return
 	}
-	searchTimer = setTimeout(() => doSearchItems(term), 350)
+	searchTimer = setTimeout(() => doSearchRow(row, term), 350)
 }
 
-async function doSearchItems(term) {
-	const seq = ++searchSeq // starting a request invalidates older ones
+async function doSearchRow(row, term) {
+	const seq = ++searchSeq
 	try {
 		const rows = await call("pos_next.api.items.get_items", {
 			pos_profile: props.posProfile,
@@ -809,21 +1587,49 @@ async function doSearchItems(term) {
 			start: 0,
 			limit: 10,
 		})
-		if (seq === searchSeq) itemResults.value = rows || []
+		if (seq !== searchSeq) return null
+		row.results = rows || []
+		return row.results
 	} catch (err) {
 		if (seq === searchSeq) showError(errMsg(err, "Failed to search items"))
+		return null
 	}
 }
 
-function addItem(item) {
-	if (!form.value.items.some((r) => r.item_code === item.item_code)) {
-		form.value.items.push({ item_code: item.item_code, item_name: item.item_name || item.item_code, qty: 1 })
-	}
-	// invalidate any in-flight search so a late response can't repopulate
-	searchSeq++
+function closeResults(row) {
 	clearTimeout(searchTimer)
-	itemSearch.value = ""
-	itemResults.value = []
+	row.results = []
+}
+
+function blurRow(row) {
+	setTimeout(() => {
+		row.results = []
+	}, 200)
+}
+
+async function addExactMatch(row) {
+	const term = row.search.trim()
+	if (!term) return
+	let exact = row.results.find((i) => i.item_code === term)
+	if (!exact) {
+		clearTimeout(searchTimer)
+		const rows = await doSearchRow(row, term)
+		exact = rows?.find((i) => i.item_code === term)
+	}
+	if (exact) pickItem(row, exact)
+}
+
+function pickItem(row, item) {
+	clearTimeout(searchTimer)
+	searchSeq++
+	row.search = ""
+	row.results = []
+	row.item_code = item.item_code
+	row.item_name = item.item_name || item.item_code
+	row.stock_uom = item.stock_uom || item.uom || "Nos"
+	row.uom = item.uom || item.stock_uom || "Nos"
+	row.uoms = item.uoms ? item.uoms.map((u) => u.uom || u) : [row.uom]
+	if (!row.qty) row.qty = 1
 }
 
 function addEvidence(list, files) {
@@ -849,7 +1655,10 @@ function addDestruction(files) {
 
 async function toPayloads(files) {
 	return Promise.all(
-		files.map(async (f) => ({ file_name: f.name, filedata: await fileToBase64(f) })),
+		files.map(async (f) => ({
+			file_name: f.name,
+			filedata: await fileToBase64(f),
+		})),
 	)
 }
 
@@ -863,19 +1672,15 @@ async function attachFiles(name, kind, files) {
 	return files.length
 }
 
-/**
- * Draft save → attach evidence → submit save. On any failure the draft name
- * is kept, so a retry updates the same draft instead of inserting another.
- * Pending files are cleared right after a successful attach so retries
- * never re-upload them. `getPending()` returns the pending files and clears
- * them when called with true.
- */
 async function submitRequest(buildData, draftNameRef, getPending) {
 	if (!draftNameRef.value) {
-		const draft = await call("pos_next.api.reject_request.save_reject_request", {
-			data: JSON.stringify(buildData()),
-			submit: 0,
-		})
+		const draft = await call(
+			"pos_next.api.reject_request.save_reject_request",
+			{
+				data: JSON.stringify(buildData()),
+				submit: 0,
+			},
+		)
 		draftNameRef.value = draft.name
 	}
 	const name = draftNameRef.value
@@ -887,6 +1692,7 @@ async function submitRequest(buildData, draftNameRef, getPending) {
 		submit: 1,
 	})
 }
+
 async function submitNew() {
 	if (!canSubmit.value || submitting.value) return
 	submitting.value = true
@@ -896,18 +1702,21 @@ async function submitNew() {
 			incident_date: form.value.incident_date,
 			purpose: form.value.purpose,
 			reason: form.value.reason.trim(),
-			video_link: form.value.video_link.trim() || null,
-			items: form.value.items.map((i) => ({ item_code: i.item_code, qty: i.qty })),
+			items: form.value.items
+				.filter((i) => !!i.item_code)
+				.map((i) => ({
+					item_code: i.item_code,
+					qty: i.qty,
+					uom: i.uom,
+					production_date: i.production_date || null,
+					reject_reason: (i.reject_reason || "").trim() || null,
+				})),
 		})
-		await submitRequest(
-			buildData,
-			draftName,
-			(clear) => {
-				const files = form.value.files
-				if (clear) form.value.files = []
-				return files
-			},
-		)
+		await submitRequest(buildData, draftName, (clear) => {
+			const files = form.value.files
+			if (clear) form.value.files = []
+			return files
+		})
 		showSuccess(__("Reject request submitted"))
 		view.value = "list"
 		loadList()
@@ -930,10 +1739,31 @@ async function openDetail(name) {
 	uploadedDestruction.value = 0
 	newEvidence.value = []
 	newDestruction.value = []
-	itemSearch.value = ""
-	itemResults.value = []
 	try {
-		detail.value = await call("pos_next.api.reject_request.get_reject_request", { name })
+		detail.value = await call(
+			"pos_next.api.reject_request.get_reject_request",
+			{ name },
+		)
+		if (
+			detail.value?.workflow_state === "Draft" &&
+			!detail.value.is_system_generated
+		) {
+			form.value.purpose = detail.value.purpose
+			form.value.incident_date = detail.value.incident_date
+			form.value.items = (detail.value.items || []).map((r) =>
+				blankRow({
+					item_code: r.item_code,
+					item_name: r.item_name || r.item_code,
+					stock_uom: r.stock_uom || r.uom || "Nos",
+					uom: r.uom || r.stock_uom || "Nos",
+					uoms: r.uoms || [r.uom || "Nos"],
+					qty: r.qty,
+					production_date: r.production_date || "",
+					reject_reason: r.reject_reason || "",
+				}),
+			)
+			if (!purposes.value.length) loadPurposes()
+		}
 	} catch (err) {
 		detail.value = null
 		showError(errMsg(err, "Failed to load reject request"))
@@ -945,6 +1775,7 @@ async function openDetail(name) {
 
 function backToList() {
 	detail.value = null
+	form.value.items = []
 	view.value = "list"
 	loadList()
 }
@@ -953,21 +1784,32 @@ async function submitDetail() {
 	if (!canSubmitDetail.value || submitting.value || !detail.value) return
 	submitting.value = true
 	try {
-		const buildData = () => ({
-			name: detail.value.name,
-			reason: detail.value.reason.trim(),
-			video_link: detail.value.video_link || null,
+		const buildData = () => {
+			const data = {
+				name: detail.value.name,
+				reason: detail.value.reason.trim(),
+			}
+			if (!detail.value.is_system_generated) {
+				data.purpose = detail.value.purpose
+				data.incident_date = detail.value.incident_date
+				data.items = form.value.items
+					.filter((i) => !!i.item_code)
+					.map((i) => ({
+						item_code: i.item_code,
+						qty: i.qty,
+						uom: i.uom,
+						production_date: i.production_date || null,
+						reject_reason: (i.reject_reason || "").trim() || null,
+					}))
+			}
+			return data
+		}
+		draftName.value = detail.value.name
+		await submitRequest(buildData, draftName, (clear) => {
+			const files = newEvidence.value
+			if (clear) newEvidence.value = []
+			return files
 		})
-		// the draft already exists — reuse its name, never insert again
-		await submitRequest(
-			buildData,
-			draftName,
-			(clear) => {
-				const files = newEvidence.value
-				if (clear) newEvidence.value = []
-				return files
-			},
-		)
 		showSuccess(__("Reject request submitted"))
 		backToList()
 	} catch (err) {
@@ -977,68 +1819,80 @@ async function submitDetail() {
 	}
 }
 
-async function doCancel() {
+async function doWithdraw() {
 	if (acting.value || !detail.value) return
-	if (!window.confirm(__("Cancel this reject request?"))) return
+	if (!window.confirm(__("Withdraw this reject request back to Draft?"))) return
 	acting.value = true
 	try {
-		await call("pos_next.api.reject_request.cancel_reject_request", {
-			name: detail.value.name,
-		})
-		showSuccess(__("Reject request cancelled"))
-		backToList()
-	} catch (err) {
-		showError(errMsg(err, "Failed to cancel reject request"))
-	} finally {
-		acting.value = false
-	}
-}
-
-async function doClose() {
-	if (acting.value || !detail.value) return
-	if (!window.confirm(__("Close this reject request after destruction?"))) return
-	acting.value = true
-	try {
-		uploadedDestruction.value += await attachFiles(
-			detail.value.name,
-			"destruction",
-			newDestruction.value,
+		detail.value = await call(
+			"pos_next.api.reject_request.apply_reject_action",
+			{
+				name: detail.value.name,
+				action: "Withdraw",
+			},
 		)
-		// clear before closing: a failed close retry must not re-upload
-		newDestruction.value = []
-		await call("pos_next.api.reject_request.close_reject_request", {
-			name: detail.value.name,
-		})
-		showSuccess(__("Reject request closed"))
-		backToList()
+		showSuccess(__("Reject request withdrawn to Draft"))
 	} catch (err) {
-		showError(errMsg(err, "Failed to close reject request"))
+		showError(errMsg(err, "Failed to withdraw reject request"))
 	} finally {
 		acting.value = false
 	}
 }
 
-function errMsg(err, fallback) {
-	const text =
-		err?.messages?.join("\n") ||
-		(typeof err === "string" ? err : err?.message) ||
-		""
-	return text || __(fallback)
+async function doSendProof() {
+	if (acting.value || !canSendProof.value || !detail.value) return
+	acting.value = true
+	try {
+		if (newDestruction.value.length) {
+			uploadedDestruction.value += await attachFiles(
+				detail.value.name,
+				"destruction",
+				newDestruction.value,
+			)
+			newDestruction.value = []
+		}
+		if (detail.value.video_link?.trim()) {
+			await call("pos_next.api.reject_request.save_reject_video", {
+				name: detail.value.name,
+				video_link: detail.value.video_link.trim(),
+			})
+		}
+		detail.value = await call(
+			"pos_next.api.reject_request.apply_reject_action",
+			{
+				name: detail.value.name,
+				action: "Send Proof",
+			},
+		)
+		showSuccess(__("Destruction proof sent for review"))
+	} catch (err) {
+		showError(errMsg(err, "Failed to send destruction proof"))
+	} finally {
+		acting.value = false
+	}
 }
 
-if (props.modelValue) {
-	view.value = "list"
-	loadList()
-}
-
-// Task 6 deep link: when the dialog opens with a request name, jump
-// straight into its detail view. Declared last so `view` exists before
-// the immediate callback can touch it.
 watch(
-	[() => props.initialRequest, show],
-	([name, open]) => {
-		if (name && open) openDetail(name)
+	() => props.modelValue,
+	(v) => {
+		show.value = v
+		if (v) {
+			if (props.initialRequest) {
+				openDetail(props.initialRequest)
+			} else {
+				view.value = "list"
+				loadList()
+			}
+		}
 	},
 	{ immediate: true },
 )
+watch(show, (v) => emit("update:modelValue", v))
+
+function errMsg(err, fallback) {
+	if (typeof err === "string") return err
+	if (err?.messages?.length) return err.messages[0]
+	if (err?.message) return err.message
+	return fallback
+}
 </script>

@@ -27,10 +27,10 @@ frappe.query_reports["POS Reject Report"] = {
 			options: "POS Reject Purpose",
 		},
 		{
-			fieldname: "decision",
-			label: __("Decision"),
+			fieldname: "borne_by",
+			label: __("Borne By"),
 			fieldtype: "Select",
-			options: ["", "Approved", "Rejected"],
+			options: ["", "Company", "Crew"],
 		},
 		{
 			fieldname: "user",
