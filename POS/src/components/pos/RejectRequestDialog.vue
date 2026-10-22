@@ -117,6 +117,15 @@
 						<FeatherIcon name="arrow-left" class="h-4 w-4" />
 					</button>
 					<h3 class="truncate text-base font-semibold text-gray-900">{{ __("New Reject Request") }}</h3>
+					<Button
+						class="ms-auto"
+						variant="solid"
+						:loading="submitting"
+						:disabled="!canSubmit"
+						@click="submitNew"
+					>
+						{{ __("Submit") }}
+					</Button>
 				</div>
 
 				<!-- Step Indicator -->
@@ -500,6 +509,42 @@
 						>
 							{{ __("Late") }}
 						</span>
+						<div class="ms-auto flex items-center gap-2">
+							<!-- Draft: can submit/resubmit -->
+							<Button
+								v-if="detail.workflow_state === 'Draft'"
+								variant="solid"
+								:loading="submitting"
+								:disabled="!canSubmitDetail"
+								@click="submitDetail"
+							>
+								{{ __("Submit") }}
+							</Button>
+
+							<!-- Pending Approval: Withdraw button -->
+							<Button
+								v-else-if="detail.workflow_state === 'Pending Approval' && detail.actions?.includes('Withdraw')"
+								variant="subtle"
+								theme="red"
+								data-testid="withdraw-button"
+								:loading="acting"
+								@click="doWithdraw"
+							>
+								{{ __("Withdraw") }}
+							</Button>
+
+							<!-- Awaiting Destruction: Send Proof button -->
+							<Button
+								v-else-if="detail.workflow_state === 'Awaiting Destruction' && detail.actions?.includes('Send Proof')"
+								variant="solid"
+								data-testid="send-proof"
+								:loading="acting"
+								:disabled="!canSendProof"
+								@click="doSendProof"
+							>
+								{{ __("Send Proof") }}
+							</Button>
+						</div>
 					</div>
 
 					<!-- Step Indicator -->
@@ -1116,54 +1161,6 @@
 						</div>
 					</div>
 				</template>
-			</div>
-		</template>
-
-		<!-- Action buttons footer -->
-		<template #actions>
-			<div v-if="view === 'new'" class="mx-auto flex w-full max-w-6xl justify-between gap-2">
-				<Button variant="subtle" :disabled="submitting" @click="view = 'list'">{{ __("Back") }}</Button>
-				<Button variant="solid" :loading="submitting" :disabled="!canSubmit" @click="submitNew">
-					{{ __("Submit") }}
-				</Button>
-			</div>
-			<div v-else-if="view === 'detail' && detail && !loadingDetail" class="mx-auto flex w-full max-w-6xl justify-between gap-2">
-				<Button variant="subtle" @click="backToList">{{ __("Back") }}</Button>
-
-				<!-- Draft: can submit/resubmit -->
-				<Button
-					v-if="detail.workflow_state === 'Draft'"
-					variant="solid"
-					:loading="submitting"
-					:disabled="!canSubmitDetail"
-					@click="submitDetail"
-				>
-					{{ __("Submit") }}
-				</Button>
-
-				<!-- Pending Approval: Withdraw button -->
-				<Button
-					v-else-if="detail.workflow_state === 'Pending Approval' && detail.actions?.includes('Withdraw')"
-					variant="subtle"
-					theme="red"
-					data-testid="withdraw-button"
-					:loading="acting"
-					@click="doWithdraw"
-				>
-					{{ __("Withdraw") }}
-				</Button>
-
-				<!-- Awaiting Destruction: Send Proof button -->
-				<Button
-					v-else-if="detail.workflow_state === 'Awaiting Destruction' && detail.actions?.includes('Send Proof')"
-					variant="solid"
-					data-testid="send-proof"
-					:loading="acting"
-					:disabled="!canSendProof"
-					@click="doSendProof"
-				>
-					{{ __("Send Proof") }}
-				</Button>
 			</div>
 		</template>
 	</DialogHost>
