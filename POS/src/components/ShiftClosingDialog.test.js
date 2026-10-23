@@ -51,7 +51,6 @@ vi.mock("../composables/useToast", () => ({ useToast: () => toastSpies }))
 
 const storeRefs = vi.hoisted(() => ({
 	hideExpectedAmount: false,
-	autoBalanceClosing: false,
 }))
 
 vi.mock("../stores/posSettings", async () => {
@@ -60,7 +59,6 @@ vi.mock("../stores/posSettings", async () => {
 	return {
 		usePOSSettingsStore: defineStore("posSettings", () => ({
 			hideExpectedAmount: computed(() => storeRefs.hideExpectedAmount),
-			autoBalanceClosing: computed(() => storeRefs.autoBalanceClosing),
 			reloadSettings,
 		})),
 	}
@@ -310,59 +308,10 @@ describe("ShiftClosingDialog EOD print feedback", () => {
 	})
 })
 
-describe("ShiftClosingDialog counted-amount prefill", () => {
-	beforeEach(() => {
-		vi.clearAllMocks()
-		reloadSettings.mockResolvedValue(undefined)
-		printEODReport.mockResolvedValue({ method: "silent", success: true })
-	})
-
-	it("prefills each row from the expected total, still editable with live grouping", async () => {
-		getClosingShiftData.submit.mockResolvedValue({
-			pos_profile: POS_PROFILE,
-			payment_reconciliation: [
-				{ mode_of_payment: "Cash", expected_amount: 71000 },
-				{ mode_of_payment: "QRIS", expected_amount: 25000 },
-			],
-			pos_transactions: [],
-		})
-		const wrapper = await mountOpenDialog()
-		const rows = wrapper.vm.closingData.payment_reconciliation
-		expect(rows.map((r) => r.closing_text)).toEqual(["71.000", "25.000"])
-		expect(rows.map((r) => r.closing_amount)).toEqual([71000, 25000])
-		expect(rows.map((r) => r.difference)).toEqual([0, 0])
-		// the cashier can submit right away — prefill counts as filled
-		expect(wrapper.vm.canSubmit).toBe(true)
-
-		// an edit recalculates live through the same mask as the opening dialog
-		wrapper.vm.onClosingInput(rows[0], "20000")
-		expect(rows[0].closing_text).toBe("20.000")
-		expect(rows[0].closing_amount).toBe(20000)
-		expect(rows[0].difference).toBe(-51000)
-		expect(wrapper.vm.canSubmit).toBe(true)
-	})
-
-	it("prefills a negative expected with its sign", async () => {
-		getClosingShiftData.submit.mockResolvedValue({
-			pos_profile: POS_PROFILE,
-			payment_reconciliation: [
-				{ mode_of_payment: "Cash", expected_amount: -19750 },
-			],
-			pos_transactions: [],
-		})
-		const wrapper = await mountOpenDialog()
-		const row = wrapper.vm.closingData.payment_reconciliation[0]
-		expect(row.closing_text).toBe("-19.750")
-		expect(row.closing_amount).toBe(-19750)
-		expect(row.difference).toBe(0)
-	})
-})
-
-describe("ShiftClosingDialog auto-balance closing", () => {
+describe("ShiftClosingDialog closing always expected", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		storeRefs.hideExpectedAmount = false
-		storeRefs.autoBalanceClosing = true
 		reloadSettings.mockResolvedValue(undefined)
 		submitClosingShift.submit.mockResolvedValue({ name: CLOSING_SHIFT_NAME })
 		getClosingShiftData.submit.mockResolvedValue({
@@ -376,7 +325,7 @@ describe("ShiftClosingDialog auto-balance closing", () => {
 		printEODReport.mockResolvedValue({ method: "silent", success: true, printed: true })
 	})
 
-	it("with autoBalanceClosing on, no closing amount input is rendered and submit sends closing_amount == expected", async () => {
+	it("renders no amount inputs and submit sends rows without closing_amount", async () => {
 		const rendered = mount(ShiftClosingDialog, {
 			props: { modelValue: false, openingShift: "POS-OPEN-0001" },
 			global: {
@@ -398,16 +347,14 @@ describe("ShiftClosingDialog auto-balance closing", () => {
 		expect(rendered.findAll("input")).toHaveLength(0)
 		expect(rendered.html()).not.toContain("Enter actual amount for")
 
-		// Submit should send closing_amount == expected
+		// Submit should send rows without closing_amount
 		await rendered.vm.submitClosing()
 		await flushPromises()
 
 		expect(submitClosingShift.submit).toHaveBeenCalledTimes(1)
 		const sentClosing = submitClosingShift.submit.mock.calls[0][0].closing_shift
 		const sentRows = sentClosing.payment_reconciliation
-		expect(sentRows.map((r) => r.closing_amount)).toEqual([150000, 50000])
-		expect(sentRows.map((r) => r.expected_amount)).toEqual([150000, 50000])
-		expect(sentRows.map((r) => r.difference)).toEqual([0, 0])
+		expect(sentRows.map((r) => r.closing_amount)).toEqual([undefined, undefined])
 	})
 })
 
@@ -417,7 +364,6 @@ describe("ShiftClosingDialog autoClose mode", () => {
 		syncStoreRefs.pendingInvoicesCount = 0
 		cartStoreRefs.isSubmitting = false
 		storeRefs.hideExpectedAmount = true
-		storeRefs.autoBalanceClosing = false
 		reloadSettings.mockResolvedValue(undefined)
 		submitClosingShift.submit.mockResolvedValue({ name: CLOSING_SHIFT_NAME })
 		getClosingShiftData.submit.mockResolvedValue({
@@ -431,7 +377,7 @@ describe("ShiftClosingDialog autoClose mode", () => {
 		printEODReport.mockResolvedValue({ method: "silent", success: true, printed: true })
 	})
 
-	it("with autoClose prop on, auto-fills counted amounts, auto-submits, calls printEODReport, and emits shift-closed", async () => {
+	it("with autoClose prop on, auto-submits, calls printEODReport, and emits shift-closed", async () => {
 		const rendered = mount(ShiftClosingDialog, {
 			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
 			global: {
@@ -451,7 +397,7 @@ describe("ShiftClosingDialog autoClose mode", () => {
 		expect(submitClosingShift.submit).toHaveBeenCalledTimes(1)
 		const sentClosing = submitClosingShift.submit.mock.calls[0][0].closing_shift
 		const sentRows = sentClosing.payment_reconciliation
-		expect(sentRows.map((r) => r.closing_amount)).toEqual([150000, 50000])
+		expect(sentRows.map((r) => r.closing_amount)).toEqual([undefined, undefined])
 		expect(printEODReport).toHaveBeenCalledWith(CLOSING_SHIFT_NAME, POS_PROFILE)
 		expect(rendered.emitted("shift-closed")).toBeTruthy()
 	})

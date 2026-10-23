@@ -9,7 +9,6 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
-from pos_next.api.settings_resolver import get_effective_pos_setting
 from pos_next.invoice_type import SALES_INVOICE, get_pos_invoice_doctype
 from pos_next.services.cash_mode import get_cash_mode_of_payment as _resolve_cash_mode
 from pos_next.utils.authz import is_management_user
@@ -906,7 +905,7 @@ def _submit_closing(
 		# be forged. The client only contributes the physically counted
 		# closing_amount per mode of payment (rows for unknown modes are dropped).
 		server_data = make_closing_shift_from_opening(json.dumps(opening_shift.as_dict(), default=str))
-		if auto_balance or get_effective_pos_setting(opening_shift.pos_profile, "auto_balance_closing"):
+		if auto_balance:
 			for row in server_data.get("payment_reconciliation") or []:
 				row["closing_amount"] = row.get("expected_amount")
 		else:
@@ -950,12 +949,7 @@ def submit_closing_shift(closing_shift):
 	if not opening_shift_name:
 		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
 
-	counted = {
-		row.get("mode_of_payment"): row.get("closing_amount")
-		for row in (closing_shift.get("payment_reconciliation") or [])
-		if row.get("mode_of_payment")
-	}
-	return _submit_closing(opening_shift_name, counted)
+	return _submit_closing(opening_shift_name, auto_balance=True)
 
 
 def _count_pending_printed_drafts(pos_opening_shift):

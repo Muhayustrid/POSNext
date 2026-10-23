@@ -187,7 +187,6 @@ describe("small-screen responsive contracts", () => {
 			return {
 				usePOSSettingsStore: () => ({
 					hideExpectedAmount: ref(false),
-					autoBalanceClosing: ref(false),
 					reloadSettings,
 				}),
 			}

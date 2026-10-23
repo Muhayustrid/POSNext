@@ -6,9 +6,8 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 from pos_next.api.settings_resolver import get_effective_pos_settings
-from pos_next.utils.authz import is_management_user
 from pos_next.invoice_type import get_pos_invoice_doctype
-
+from pos_next.utils.authz import is_management_user
 
 # The POS "Sales Management" tab: money rules a cashier must not loosen for
 # themselves. Only management may change them through update_pos_settings.
@@ -21,7 +20,6 @@ SALES_MANAGEMENT_FIELDS = (
 	"allow_user_to_edit_rate",
 	"allow_write_off_change",
 	"auto_apply_offers",
-	"auto_balance_closing",
 	"disable_rounded_total",
 	"max_discount_allowed",
 	"print_mode",

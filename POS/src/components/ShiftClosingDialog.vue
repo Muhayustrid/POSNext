@@ -479,92 +479,15 @@
 										{{ reconciliationMessage }}
 									</p>
 								</div>
-								<div
-									v-if="shouldShowSummary && getTotalDifference !== 0"
-									class="text-start sm:text-end"
-								>
-									<div class="text-xs mb-1 text-gray-500 uppercase">
-										{{ __("Total Variance") }}
-									</div>
-									<div
-										:class="[
-											'text-lg md:text-xl font-bold',
-											getTotalDifference > 0
-												? 'text-blue-600'
-												: 'text-red-600',
-										]"
-									>
-										{{ getTotalDifference > 0 ? "+" : ""
-										}}{{ formatCurrency(Math.abs(getTotalDifference)) }}
-									</div>
-								</div>
 							</div>
 						</div>
 
 						<div class="p-3 md:p-6">
-							<!-- ENTRY MODE: Simple blind input list (when hideExpectedAmount is enabled and not showing report) -->
-							<div v-if="isInEntryMode" class="flex flex-col gap-3 md:gap-4">
+							<div class="flex flex-col gap-4 md:gap-5">
 								<div
 									v-for="(payment, idx) in closingData.payment_reconciliation"
 									:key="idx"
-									class="border border-gray-200 rounded-lg p-3 md:p-4 bg-white hover:border-gray-300 transition-colors"
-								>
-									<div class="flex items-center justify-between gap-3">
-										<!-- Payment Method Name with Icon -->
-										<div class="flex items-center gap-2 md:gap-3 flex-1">
-											<div
-												:class="[
-													'rounded-lg p-1.5 md:p-2 flex-shrink-0',
-													getPaymentIcon(payment.mode_of_payment).color,
-												]"
-											>
-												<span class="text-base md:text-xl">{{
-													getPaymentIcon(payment.mode_of_payment).icon
-												}}</span>
-											</div>
-											<label
-												:for="`payment-${idx}`"
-												class="text-start text-sm md:text-base font-semibold text-gray-900 cursor-pointer"
-											>
-												{{ payment.mode_of_payment }}
-											</label>
-										</div>
-
-										<!-- Counted Amount, live thousand grouping -->
-										<div v-if="!autoBalanceClosing" class="w-40 md:w-48">
-											<input
-												:id="`payment-${idx}`"
-												class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-center text-base md:text-lg font-semibold text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
-												:value="payment.closing_text"
-												inputmode="decimal"
-												autocomplete="off"
-												placeholder="0"
-												:disabled="submitResource.loading"
-												:aria-label="
-													__('Enter actual amount for {0}', [
-														payment.mode_of_payment,
-													])
-												"
-												@input="onClosingInput(payment, $event.target.value)"
-											/>
-										</div>
-									</div>
-								</div>
-							</div>
-
-							<!-- REVIEW MODE: Full payment method cards (when not in entry mode) -->
-							<div v-else class="flex flex-col gap-4 md:gap-5">
-								<div
-									v-for="(payment, idx) in closingData.payment_reconciliation"
-									:key="idx"
-									:class="[
-										'border rounded-lg p-3 md:p-5 transition-all',
-										payment.difference === 0
-											? 'border-green-200 bg-green-50'
-											: payment.difference > 0
-											? 'border-blue-200 bg-blue-50'
-											: 'border-red-200 bg-red-50',
-									]"
+									class="border border-gray-200 rounded-lg p-3 md:p-5 bg-white"
 								>
 									<div
 										class="flex items-start justify-between mb-3 md:mb-4 gap-2"
@@ -603,50 +526,11 @@
 												/>
 											</div>
 										</div>
-
-										<!-- Status Badge -->
-										<div
-											v-if="
-												payment.closing_amount !== null &&
-												payment.closing_amount !== undefined
-											"
-											class="flex-shrink-0"
-										>
-											<span
-												v-if="payment.difference === 0"
-												class="inline-flex items-center px-2 md:px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
-											>
-												{{ __("✓ Balanced") }}
-											</span>
-											<span
-												v-else-if="payment.difference > 0"
-												class="inline-flex items-center px-2 md:px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-											>
-												{{
-													__("Over {0}", [
-														formatCurrency(payment.difference),
-													])
-												}}
-											</span>
-											<span
-												v-else
-												class="inline-flex items-center px-2 md:px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800"
-											>
-												{{
-													__("Short {0}", [
-														formatCurrency(
-															Math.abs(payment.difference)
-														),
-													])
-												}}
-											</span>
-										</div>
 									</div>
 
 									<!-- Amount Entry Grid -->
 									<div
-										class="grid grid-cols-1 gap-2 md:gap-3"
-										:class="autoBalanceClosing ? 'sm:grid-cols-2' : 'sm:grid-cols-3'"
+										class="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3"
 									>
 										<!-- Opening Amount -->
 										<div
@@ -692,103 +576,6 @@
 												<span v-else>{{ __("No sales") }}</span>
 											</div>
 										</div>
-
-										<!-- Actual/Closing Amount -->
-										<div
-											v-if="!autoBalanceClosing"
-											class="text-start bg-white rounded-lg p-2 md:p-3 border border-gray-300"
-										>
-											<label
-												class="block text-xs font-medium text-gray-700 uppercase mb-0.5 md:mb-1"
-											>
-												{{ __("Actual Amount *") }}
-											</label>
-											<input
-												class="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-base md:text-lg text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
-												:value="payment.closing_text"
-												inputmode="decimal"
-												autocomplete="off"
-												placeholder="0"
-												:disabled="
-													showSuccessReport || submitResource.loading
-												"
-												:aria-label="
-													__(
-														'Enter actual amount for {0}',
-														[payment.mode_of_payment],
-													)
-												"
-												@input="onClosingInput(payment, $event.target.value)"
-											/>
-											<div
-												class="text-xs text-gray-500 mt-0.5 md:mt-1 hidden sm:block"
-											>
-												{{
-													showSuccessReport
-														? __("Final Amount")
-														: __("Count & enter")
-												}}
-											</div>
-										</div>
-									</div>
-
-									<!-- Difference Alert -->
-									<div
-										v-if="
-											payment.closing_amount !== null &&
-											payment.closing_amount !== undefined &&
-											payment.difference !== 0
-										"
-										class="text-start mt-2 md:mt-3 p-2 md:p-3 rounded-lg"
-										:class="[
-											payment.difference > 0
-												? 'bg-blue-50 border border-blue-200'
-												: 'bg-red-50 border border-red-200',
-										]"
-									>
-										<div class="flex items-center justify-between gap-2">
-											<div class="flex-1">
-												<p
-													:class="[
-														'text-xs md:text-sm font-medium',
-														payment.difference > 0
-															? 'text-blue-900'
-															: 'text-red-900',
-													]"
-												>
-													{{
-														payment.difference > 0
-															? __("Cash Over")
-															: __("Cash Short")
-													}}
-												</p>
-												<p
-													:class="[
-														'text-xs',
-														payment.difference > 0
-															? 'text-blue-700'
-															: 'text-red-700',
-													]"
-												>
-													{{
-														payment.difference > 0
-															? __("You have more than expected.")
-															: __("You have less than expected.")
-													}}
-												</p>
-											</div>
-											<div
-												:class="[
-													'text-base md:text-xl font-bold',
-													payment.difference > 0
-														? 'text-blue-700'
-														: 'text-red-700',
-												]"
-											>
-												{{ payment.difference > 0 ? "+" : ""
-												}}{{ formatCurrency(payment.difference) }}
-											</div>
-										</div>
 									</div>
 								</div>
 							</div>
@@ -799,46 +586,13 @@
 							v-if="shouldShowSummary"
 							class="text-start bg-gray-50 px-3 py-3 md:px-6 md:py-4 border-t border-gray-200"
 						>
-							<div class="grid grid-cols-3 gap-2 md:gap-4">
-								<div>
-									<p class="text-xs md:text-sm text-gray-600">
-										{{ __("Total Expected") }}
-									</p>
-									<p class="text-base md:text-xl font-semibold text-gray-900">
-										{{ formatCurrency(getTotalExpected) }}
-									</p>
-								</div>
-								<div>
-									<p class="text-xs md:text-sm text-gray-600">
-										{{ __("Total Actual") }}
-									</p>
-									<p class="text-base md:text-xl font-semibold text-gray-900">
-										{{ formatCurrency(getTotalActual) }}
-									</p>
-								</div>
-								<div>
-									<p class="text-xs md:text-sm text-gray-600">
-										{{ __("Net Variance") }}
-									</p>
-									<p
-										:class="[
-											'text-base md:text-xl font-bold',
-											getTotalDifference === 0
-												? 'text-green-600'
-												: getTotalDifference > 0
-												? 'text-blue-600'
-												: 'text-red-600',
-										]"
-									>
-										{{
-											getTotalDifference === 0
-												? "✓ "
-												: getTotalDifference > 0
-												? "+"
-												: ""
-										}}{{ formatCurrency(Math.abs(getTotalDifference)) }}
-									</p>
-								</div>
+							<div>
+								<p class="text-xs md:text-sm text-gray-600">
+									{{ __("Total Expected") }}
+								</p>
+								<p class="text-base md:text-xl font-semibold text-gray-900">
+									{{ formatCurrency(getTotalExpected) }}
+								</p>
 							</div>
 						</div>
 					</div>
@@ -996,12 +750,12 @@
 					<div
 						class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 order-1 sm:order-2"
 					>
-						<!-- Validation Warning (only in entry mode) -->
+						<!-- Validation Warning -->
 						<div
 							v-if="!canSubmit && closingData && !showSuccessReport"
 							class="text-xs md:text-sm text-yellow-600 font-medium text-center sm:text-end"
 						>
-							{{ syncStore.hasPendingInvoices ? syncBlockMessage : __("Please enter all closing amounts") }}
+							{{ syncStore.hasPendingInvoices ? syncBlockMessage : __("Cannot close shift while a submission is in progress.") }}
 						</div>
 
 						<!-- Success message (shown in report view) -->
@@ -1032,7 +786,6 @@
 
 <script setup>
 import { Button, Dialog, FeatherIcon } from "frappe-ui"
-import { formatAmountInput, parseAmountInput } from "../utils/amountInput"
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { storeToRefs } from "pinia"
 import { useShift, shiftState } from "../composables/useShift"
@@ -1073,7 +826,7 @@ const { formatCurrency, formatQuantity, formatDateTime, formatTime } =
 	useFormatters()
 const { showInfo, showSuccess, showWarning, showError } = useToast()
 const posSettingsStore = usePOSSettingsStore()
-const { hideExpectedAmount, autoBalanceClosing } = storeToRefs(posSettingsStore)
+const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 
 const shiftStore = usePOSShiftStore()
 const syncStore = usePOSSyncStore()
@@ -1166,28 +919,9 @@ async function loadClosingData() {
 
 		// Make payment_reconciliation reactive
 		if (data.payment_reconciliation) {
-			// Auto-fill each row's counted amount from the expected total so
-			// the cashier only edits the rows that really differ — but blind
-			// entry mode must NOT leak the expected value, so it stays empty.
-			const autoFill =
-				props.autoClose || Boolean(autoBalanceClosing?.value) || !hideExpectedAmount?.value
 			data.payment_reconciliation = data.payment_reconciliation.map(
-				(payment) => {
-					const expected = Number.parseFloat(payment.expected_amount) || 0
-					return reactive({
-						...payment,
-						closing_amount: autoFill ? expected : (payment.closing_amount ?? 0),
-						closing_text: autoFill ? formatAmountInput(expected) : "",
-						difference: 0,
-						_touched: true,
-					})
-				},
+				(payment) => reactive({ ...payment }),
 			)
-
-			// Calculate initial differences
-			data.payment_reconciliation.forEach((payment) => {
-				calculateDifference(payment)
-			})
 		}
 
 		closingData.value = data
@@ -1220,22 +954,6 @@ async function loadClosingData() {
 	}
 }
 
-function calculateDifference(payment) {
-	const closing = Number.parseFloat(payment.closing_amount) || 0
-	const expected = Number.parseFloat(payment.expected_amount) || 0
-	payment.difference = closing - expected
-}
-
-// Live-masked counted amount: closing_text holds the grouped display
-// ("71.000"), closing_amount the parsed number that drives difference,
-// canSubmit and the submit payload.
-function onClosingInput(payment, rawValue) {
-	payment.closing_text = formatAmountInput(rawValue)
-	payment.closing_amount = parseAmountInput(payment.closing_text)
-	payment._touched = true
-	calculateDifference(payment)
-}
-
 const canSubmit = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation)
 		return false
@@ -1243,14 +961,7 @@ const canSubmit = computed(() => {
 	// Never close over unsynced invoices or an in-flight submission
 	if (syncStore.hasPendingInvoices || cartStore.isSubmitting) return false
 
-	// Check if all closing amounts have been manually entered
-	return closingData.value.payment_reconciliation.every(
-		(payment) =>
-			payment._touched &&
-			payment.closing_amount !== null &&
-			payment.closing_amount !== undefined &&
-			payment.closing_amount !== "",
-	)
+	return true
 })
 
 async function submitClosing() {
@@ -1259,16 +970,16 @@ async function submitClosing() {
 	try {
 		errorMessage.value = "" // Clear any previous errors
 
-		// Ensure all differences are calculated
-		if (closingData.value.payment_reconciliation) {
-			closingData.value.payment_reconciliation.forEach((payment) => {
-				calculateDifference(payment)
-			})
+		// Submit to server without counted amounts
+		const payload = {
+			...closingData.value,
+			payment_reconciliation: (closingData.value.payment_reconciliation || []).map(
+				({ closing_amount, closing_text, difference, _touched, ...rest }) => rest,
+			),
 		}
 
-		// Submit to server
 		const result = await submitResource.submit({
-			closing_shift: closingData.value,
+			closing_shift: payload,
 		})
 		const closingShiftName = result?.name ?? submitResource.data?.name
 		if (closingShiftName) {
@@ -1295,18 +1006,9 @@ async function submitClosing() {
 			}
 		}
 
-		// If hideExpectedAmount is enabled, show success report before closing
-		if (!props.autoClose && !autoBalanceClosing?.value && hideExpectedAmount?.value) {
-			showSuccessReport.value = true
-			// Auto-expand invoice details in success report
-			if (invoiceCount.value > 0 && invoiceCount.value <= 10) {
-				showInvoiceDetails.value = true
-			}
-		} else {
-			// Normal mode: close immediately
-			emit("shift-closed")
-			closeDialog()
-		}
+		// Normal mode: close immediately
+		emit("shift-closed")
+		closeDialog()
 	} catch (error) {
 		console.error("Error submitting closing shift:", error)
 		errorMessage.value =
@@ -1380,36 +1082,15 @@ function closeDialog() {
 
 // UI State Computed Properties
 const shouldShowSummary = computed(
-	() =>
-		Boolean(autoBalanceClosing?.value) ||
-		!hideExpectedAmount?.value ||
-		showSuccessReport.value,
+	() => true,
 )
 
 // Final state after "Close Shift" succeeded but the EOD print failed: the
 // shift IS closed, so show a compact panel instead of the reconciliation form.
 const isPrintFailureState = computed(() => Boolean(eodPrintFailed.value))
 
-const isInEntryMode = computed(
-	() =>
-		!autoBalanceClosing?.value &&
-		hideExpectedAmount?.value &&
-		!showSuccessReport.value,
-)
-
 const reconciliationMessage = computed(() => {
-	if (props.autoClose || autoBalanceClosing?.value) {
-		return __("Closing amounts are automatically balanced with expected amounts")
-	}
-	if (isInEntryMode.value) {
-		return __("Enter the actual counted amounts for each payment method")
-	}
-	if (showSuccessReport.value && hideExpectedAmount.value) {
-		return __(
-			"Shift closed successfully - Review the final reconciliation below",
-		)
-	}
-	return __("Count your cash and enter actual amounts below")
+	return __("Closing amounts are automatically balanced with expected amounts")
 })
 
 // Computed properties for real-time recalculation
@@ -1450,18 +1131,6 @@ const getTotalExpected = computed(() => {
 		(sum, payment) => sum + Number.parseFloat(payment.expected_amount || 0),
 		0,
 	)
-})
-
-const getTotalActual = computed(() => {
-	if (!closingData.value || !closingData.value.payment_reconciliation) return 0
-	return closingData.value.payment_reconciliation.reduce(
-		(sum, payment) => sum + Number.parseFloat(payment.closing_amount || 0),
-		0,
-	)
-})
-
-const getTotalDifference = computed(() => {
-	return getTotalActual.value - getTotalExpected.value
 })
 
 function getSalesForPayment(payment) {

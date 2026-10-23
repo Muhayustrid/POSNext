@@ -67,7 +67,6 @@
   "display_discount_amount",
   "show_customer_balance",
   "hide_expected_amount",
-  "auto_balance_closing",
   "section_break_misc",
   "use_limit_search",
   "column_break_misc",
@@ -538,13 +537,6 @@
    "fieldname": "hide_expected_amount",
    "fieldtype": "Check",
    "label": "Hide Expected Amount"
-  },
-  {
-   "default": "0",
-   "description": "Closing amount is set to the expected amount; cashier enters no counted amounts",
-   "fieldname": "auto_balance_closing",
-   "fieldtype": "Check",
-   "label": "Auto-balance Closing"
   },
   {
    "fieldname": "section_break_misc",
