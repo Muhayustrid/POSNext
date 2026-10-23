@@ -179,6 +179,7 @@ class TestInvoiceAuthorizationSecurity(FrappeTestCase):
 		_safe(lambda: frappe.db.delete("POS Settings", {"pos_profile": profile}))
 		_safe(lambda: frappe.delete_doc("POS Profile", profile, force=1, ignore_permissions=True))
 		_safe(lambda: frappe.db.delete("Warehouse", {"company": company}))
+		_safe(lambda: frappe.db.delete("Expense Claim Account", {"company": company}))
 		_safe(lambda: frappe.delete_doc("Company", company, force=1, ignore_permissions=True))
 		frappe.db.commit()
 		super().tearDownClass()

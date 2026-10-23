@@ -268,6 +268,8 @@ class TestSubmitStockNoOrphanDraft(unittest.TestCase):
 			mock.patch("frappe.db.exists", side_effect=fake_db_exists),
 			mock.patch("frappe.get_all", side_effect=fake_get_all),
 			mock.patch("pos_next.api.invoices._check_profile_access", return_value=None),
+			mock.patch("pos_next.api.invoices.get_pos_invoice_doctype", return_value="Sales Invoice"),
+			mock.patch("pos_next.api.invoices._backdate_entry_active", return_value=False),
 			mock.patch("pos_next.api.invoices.get_effective_pos_settings", return_value={}),
 			mock.patch("pos_next.api.invoices._validate_item_rates", return_value=set()),
 			mock.patch("pos_next.api.invoices._should_block", return_value=True),

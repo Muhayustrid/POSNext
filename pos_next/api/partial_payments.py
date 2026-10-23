@@ -529,17 +529,9 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
 	    frappe.ValidationError: If validation fails
 	    frappe.PermissionError: If user lacks access
 	"""
-	# Input validation
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	from pos_next.api.invoices import company_profiles
 
-	# Validate POS Profile exists
-	if not frappe.db.exists("POS Profile", pos_profile):
-		frappe.throw(_("POS Profile {0} does not exist").format(pos_profile))
-
-	# Check permissions
-	if not _has_pos_profile_access(pos_profile):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	profiles = company_profiles(pos_profile)
 
 	# Validate and sanitize limit
 	limit = cint(limit)
@@ -548,34 +540,40 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
 	elif limit > MAX_INVOICE_LIMIT:
 		limit = MAX_INVOICE_LIMIT
 
-	# Get partially paid invoices using ORM
-	# Filter logic: outstanding > 0 AND paid > 0 (mathematical definition of partial payment)
-	invoices = frappe.get_all(
-		"Sales Invoice",
-		filters={
-			"pos_profile": pos_profile,
-			"docstatus": 1,
-			"is_pos": 1,
-			"outstanding_amount": [">", 0],
-			"paid_amount": [">", 0],
-			"is_return": 0,
-		},
-		fields=[
-			"name",
-			"customer",
-			"customer_name",
-			"posting_date",
-			"posting_time",
-			"grand_total",
-			"paid_amount",
-			"outstanding_amount",
-			"status",
-			"creation",
-			"currency",
-		],
-		order_by="posting_date desc, posting_time desc",
-		limit=limit,
+	si = frappe.qb.DocType("Sales Invoice")
+	pos = frappe.qb.DocType("POS Opening Shift")
+	query = (
+		frappe.qb.from_(si)
+		.left_join(pos)
+		.on(pos.name == si.posa_pos_opening_shift)
+		.select(
+			si.name,
+			si.customer,
+			si.customer_name,
+			si.posting_date,
+			si.posting_time,
+			si.grand_total,
+			si.paid_amount,
+			si.outstanding_amount,
+			si.status,
+			si.creation,
+			si.currency,
+			si.pos_profile,
+			pos.shift_slot,
+		)
+		.where(
+			(si.pos_profile.isin(profiles))
+			& (si.docstatus == 1)
+			& (si.is_pos == 1)
+			& (si.outstanding_amount > 0)
+			& (si.paid_amount > 0)
+			& (si.is_return == 0)
+		)
+		.orderby(si.posting_date, order=frappe.qb.desc)
+		.orderby(si.posting_time, order=frappe.qb.desc)
+		.limit(limit)
 	)
+	invoices = query.run(as_dict=True)
 
 	# Enrich with payment history
 	# Note: This makes additional queries. For summary-only views, use get_partial_payment_summary() instead.
@@ -606,16 +604,9 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
 	    frappe.ValidationError: If validation fails
 	    frappe.PermissionError: If user lacks access
 	"""
-	# Input validation
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	from pos_next.api.invoices import company_profiles
 
-	# Validate POS Profile exists
-	if not frappe.db.exists("POS Profile", pos_profile):
-		frappe.throw(_("POS Profile {0} does not exist").format(pos_profile))
-
-	if not _has_pos_profile_access(pos_profile):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	profiles = company_profiles(pos_profile)
 
 	# Validate and sanitize limit
 	limit = cint(limit)
@@ -625,33 +616,41 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
 		limit = MAX_INVOICE_LIMIT
 
 	# Get all unpaid invoices (any invoice with outstanding > 0)
-	invoices = frappe.get_all(
-		"Sales Invoice",
-		filters={
-			"pos_profile": pos_profile,
-			"docstatus": 1,
-			"is_pos": 1,
-			"outstanding_amount": [">", 0],
-			"is_return": 0,
-		},
-		fields=[
-			"name",
-			"customer",
-			"customer_name",
-			"buyer_name",
-			"posting_date",
-			"posting_time",
-			"grand_total",
-			"paid_amount",
-			"outstanding_amount",
-			"status",
-			"creation",
-			"currency",
-			"pos_queue_number",
-		],
-		order_by="posting_date desc, posting_time desc",
-		limit=limit,
+	si = frappe.qb.DocType("Sales Invoice")
+	pos = frappe.qb.DocType("POS Opening Shift")
+	query = (
+		frappe.qb.from_(si)
+		.left_join(pos)
+		.on(pos.name == si.posa_pos_opening_shift)
+		.select(
+			si.name,
+			si.customer,
+			si.customer_name,
+			si.buyer_name,
+			si.posting_date,
+			si.posting_time,
+			si.grand_total,
+			si.paid_amount,
+			si.outstanding_amount,
+			si.status,
+			si.creation,
+			si.currency,
+			si.pos_queue_number,
+			si.pos_profile,
+			pos.shift_slot,
+		)
+		.where(
+			(si.pos_profile.isin(profiles))
+			& (si.docstatus == 1)
+			& (si.is_pos == 1)
+			& (si.outstanding_amount > 0)
+			& (si.is_return == 0)
+		)
+		.orderby(si.posting_date, order=frappe.qb.desc)
+		.orderby(si.posting_time, order=frappe.qb.desc)
+		.limit(limit)
 	)
+	invoices = query.run(as_dict=True)
 
 	# Enrich with payment history
 	for invoice in invoices:
@@ -881,16 +880,9 @@ def get_partial_payment_summary(pos_profile: str) -> Dict:
 	    frappe.ValidationError: If validation fails
 	    frappe.PermissionError: If user lacks access
 	"""
-	# Input validation
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	from pos_next.api.invoices import company_profiles
 
-	# Validate POS Profile exists
-	if not frappe.db.exists("POS Profile", pos_profile):
-		frappe.throw(_("POS Profile {0} does not exist").format(pos_profile))
-
-	if not _has_pos_profile_access(pos_profile):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	profiles = company_profiles(pos_profile)
 
 	# Use direct SQL aggregation - single query instead of N queries
 	# This is critical for performance with large datasets
@@ -902,14 +894,14 @@ def get_partial_payment_summary(pos_profile: str) -> Dict:
             COALESCE(SUM(paid_amount), 0) as total_paid,
             COALESCE(SUM(grand_total), 0) as total_grand_total
         FROM `tabSales Invoice`
-        WHERE pos_profile = %(pos_profile)s
+        WHERE pos_profile IN %(profiles)s
             AND docstatus = 1
             AND is_pos = 1
             AND outstanding_amount > 0
             AND paid_amount > 0
             AND is_return = 0
         """,
-		{"pos_profile": pos_profile},
+		{"profiles": tuple(profiles)},
 		as_dict=True,
 	)[0]
 
@@ -944,16 +936,9 @@ def get_unpaid_summary(pos_profile: str) -> Dict:
 	    frappe.ValidationError: If validation fails
 	    frappe.PermissionError: If user lacks access
 	"""
-	# Input validation
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	from pos_next.api.invoices import company_profiles
 
-	# Validate POS Profile exists
-	if not frappe.db.exists("POS Profile", pos_profile):
-		frappe.throw(_("POS Profile {0} does not exist").format(pos_profile))
-
-	if not _has_pos_profile_access(pos_profile):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	profiles = company_profiles(pos_profile)
 
 	# Use direct SQL aggregation - critical for performance
 	summary = frappe.db.sql(
@@ -964,13 +949,13 @@ def get_unpaid_summary(pos_profile: str) -> Dict:
             COALESCE(SUM(paid_amount), 0) as total_paid,
             COALESCE(SUM(grand_total), 0) as total_grand_total
         FROM `tabSales Invoice`
-        WHERE pos_profile = %(pos_profile)s
+        WHERE pos_profile IN %(profiles)s
             AND docstatus = 1
             AND is_pos = 1
             AND outstanding_amount > 0
             AND is_return = 0
         """,
-		{"pos_profile": pos_profile},
+		{"profiles": tuple(profiles)},
 		as_dict=True,
 	)[0]
 

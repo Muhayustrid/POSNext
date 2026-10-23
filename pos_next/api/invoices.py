@@ -3184,6 +3184,35 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
+def company_profiles(pos_profile: str) -> list[str]:
+	"""Returns every POS Profile (enabled or disabled) with the same company as pos_profile.
+
+	Checks membership-or-management on pos_profile (raises frappe.PermissionError).
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	has_access = frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "user": frappe.session.user},
+	)
+	if not has_access and not is_management_user():
+		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
+
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if not company:
+		return [pos_profile]
+
+	profiles = frappe.get_all(
+		"POS Profile",
+		filters={"company": company},
+		pluck="name",
+		order_by="name asc",
+	)
+	return profiles or [pos_profile]
+
+
+@frappe.whitelist()
 def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
 	"""
 	Get paginated, server-side filtered list of invoices for a POS Profile.
@@ -3215,13 +3244,10 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	union = sales_invoice_union(
 		"""name, customer, customer_name, buyer_name, posting_date, posting_time,
 		grand_total, paid_amount, change_amount, outstanding_amount, status, docstatus, is_return,
-		return_against, pos_queue_number, pos_profile, is_pos, owner, '{dt}' AS doctype"""
+		return_against, pos_queue_number, pos_profile, posa_pos_opening_shift, is_pos, owner, '{dt}' AS doctype"""
 	)
 
-	# Permission check
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-	if not has_access and not is_management_user():
-		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
+	profiles = company_profiles(pos_profile)
 
 	# Clamp page size securely: minimum 1, maximum 100
 	limit = max(1, min(cint(limit) or 20, 100))
@@ -3229,33 +3255,33 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 
 	# Build WHERE conditions and params
 	conditions = [
-		"pos_profile = %(pos_profile)s",
-		"is_pos = 1",
+		"si.pos_profile IN %(profiles)s",
+		"si.is_pos = 1",
 	]
-	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
+	params = {"profiles": tuple(profiles), "limit": limit, "offset": offset}
 
 	if docstatus is not None:
 		if isinstance(docstatus, (list, tuple)):
 			docstatus_list = [cint(d) for d in docstatus]
-			conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
+			conditions.append(f"si.docstatus IN ({','.join(map(str, docstatus_list))})")
 		else:
-			conditions.append("docstatus = %(docstatus)s")
+			conditions.append("si.docstatus = %(docstatus)s")
 			params["docstatus"] = cint(docstatus)
 	else:
-		conditions.append("docstatus < 2")
+		conditions.append("si.docstatus < 2")
 
 	if search:
 		conditions.append(
-			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s OR buyer_name LIKE %(search)s)"
+			"(si.name LIKE %(search)s OR si.customer_name LIKE %(search)s OR si.customer LIKE %(search)s OR si.buyer_name LIKE %(search)s)"
 		)
 		params["search"] = f"%{cstr(search)}%"
 
 	if from_date:
-		conditions.append("posting_date >= %(from_date)s")
+		conditions.append("si.posting_date >= %(from_date)s")
 		params["from_date"] = from_date
 
 	if to_date:
-		conditions.append("posting_date <= %(to_date)s")
+		conditions.append("si.posting_date <= %(to_date)s")
 		params["to_date"] = to_date
 
 	where_clause = " AND ".join(conditions)
@@ -3265,30 +3291,34 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	invoices = frappe.db.sql(
 		f"""
 		SELECT
-			name,
-			customer,
-			customer_name,
-			buyer_name,
-			posting_date,
-			posting_time,
-			grand_total,
-			paid_amount,
-			change_amount,
-			outstanding_amount,
-			status,
-			docstatus,
-			is_return,
-			return_against,
-			pos_queue_number,
-			owner,
-			doctype
+			si.name,
+			si.customer,
+			si.customer_name,
+			si.buyer_name,
+			si.posting_date,
+			si.posting_time,
+			si.grand_total,
+			si.paid_amount,
+			si.change_amount,
+			si.outstanding_amount,
+			si.status,
+			si.docstatus,
+			si.is_return,
+			si.return_against,
+			si.pos_queue_number,
+			si.pos_profile,
+			pos.shift_slot,
+			si.owner,
+			si.doctype
 		FROM
 			{union}
+		LEFT JOIN
+			`tabPOS Opening Shift` pos ON pos.name = si.posa_pos_opening_shift
 		WHERE
 			{where_clause}
 		ORDER BY
-			posting_date DESC,
-			posting_time DESC
+			si.posting_date DESC,
+			si.posting_time DESC
 		LIMIT %(limit)s
 		OFFSET %(offset)s
 	""",
@@ -3478,21 +3508,32 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 
 def _return_access_denied(pos_profile):
 	"""SEC-05 membership test for single-invoice return reads (Administrator
-	exempt). Strict on purpose — a site-wide read grant (role "All" read=1)
-	must not open the POS return flow to every user. Cross-profile returns
-	need membership in the invoice's profile (outlet = POS Profile = 1 company
-	in the intercompany deployment)."""
+	exempt). Returns of any invoice of the same company as the caller's open
+	shift are allowed (D10)."""
 	if frappe.session.user == "Administrator":
 		return False
 	if _backdate_entry_active(pos_profile):
 		return False
-	if pos_profile and frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "parenttype": "POS Profile", "user": frappe.session.user},
-	):
-		company = _open_shift_company()
-		return bool(company) and frappe.db.get_value("POS Profile", pos_profile, "company") != company
-	return True
+	if not pos_profile:
+		return True
+	invoice_company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if not invoice_company:
+		return True
+	company = _open_shift_company()
+	if company:
+		return invoice_company != company
+	# Fallback when no open shift: caller must have profile access in the same company
+	user_profiles = frappe.get_all(
+		"POS Profile User", filters={"user": frappe.session.user}, pluck="parent"
+	)
+	if not user_profiles and not is_management_user():
+		return True
+	if is_management_user():
+		return False
+	user_companies = frappe.get_all(
+		"POS Profile", filters={"name": ["in", user_profiles]}, pluck="company"
+	)
+	return invoice_company not in user_companies
 
 
 def _open_shift_company():
@@ -3503,6 +3544,15 @@ def _open_shift_company():
 		"POS Opening Shift",
 		{"user": frappe.session.user, "docstatus": 1, "status": "Open", "pos_closing_shift": ["is", "not set"]},
 		"company",
+	)
+
+
+def _open_shift_profile():
+	"""POS Profile of the caller's open shift, or None."""
+	return frappe.db.get_value(
+		"POS Opening Shift",
+		{"user": frappe.session.user, "docstatus": 1, "status": "Open", "pos_closing_shift": ["is", "not set"]},
+		"pos_profile",
 	)
 
 
@@ -3517,24 +3567,20 @@ def _check_return_read_access(pos_profile):
 
 
 def _return_scope_for(pos_profile=None):
-	"""SEC-05 scoping for return listings/searches (cheap: one indexed
-	child-table query, no JOINs). Profile members get their profile list;
-	Administrator is scoped to the explicitly requested profile so the return
-	dialog stays outlet-pure for every role. No profile requested (admin
-	callers without context) → None (unrestricted); no membership at all →
-	PermissionError."""
-	if frappe.session.user == "Administrator":
-		return [pos_profile] if pos_profile else None
-	profiles = frappe.get_all("POS Profile User", filters={"user": frappe.session.user}, pluck="parent")
-	if not profiles:
-		frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
-	company = _open_shift_company()
-	if company:
-		# [] (no same-company profile) matches nothing via isin — fail closed
-		profiles = frappe.get_all(
-			"POS Profile", filters={"name": ["in", profiles], "company": company}, pluck="name"
-		) or [""]
-	return profiles
+	"""SEC-05 scoping for return listings/searches.
+	Returns company_profiles for the requested pos_profile or caller's open shift profile.
+	Administrator with no profile context gets None (unrestricted)."""
+	target_profile = pos_profile or _open_shift_profile()
+	if not target_profile:
+		if frappe.session.user == "Administrator":
+			return None
+		user_profiles = frappe.get_all(
+			"POS Profile User", filters={"user": frappe.session.user}, pluck="parent"
+		)
+		if not user_profiles:
+			frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
+		target_profile = user_profiles[0]
+	return company_profiles(target_profile)
 
 
 def _return_search_scope():
@@ -3635,13 +3681,16 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 		)
 
 	si = frappe.qb.DocType(doctype)
+	pos = frappe.qb.DocType("POS Opening Shift")
 
 	# Over-fetch to compensate for fully-returned invoices removed in step 2
 	fetch_limit = cint(limit) * 2
 
-	# Step 1: fetch candidates (lightweight, no JOINs)
+	# Step 1: fetch candidates
 	query = (
 		frappe.qb.from_(si)
+		.left_join(pos)
+		.on(pos.name == si.posa_pos_opening_shift)
 		.select(
 			si.name,
 			si.customer,
@@ -3650,6 +3699,8 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 			si.posting_date,
 			si.grand_total,
 			si.status,
+			si.pos_profile,
+			pos.shift_slot,
 		)
 		.where((si.docstatus == 1) & (si.is_return == 0) & (si.is_pos == 1))
 		.orderby(si.posting_date, order=frappe.qb.desc)
@@ -3701,10 +3752,13 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	scope = _return_scope_for(pos_profile)
 
 	si = frappe.qb.DocType(doctype)
+	pos = frappe.qb.DocType("POS Opening Shift")
 
-	# Step 1: find matching invoices (lightweight, no JOINs)
+	# Step 1: find matching invoices
 	query = (
 		frappe.qb.from_(si)
+		.left_join(pos)
+		.on(pos.name == si.posa_pos_opening_shift)
 		.select(
 			si.name,
 			si.customer,
@@ -3713,6 +3767,8 @@ def search_invoice_by_number(search_term, pos_profile=None):
 			si.posting_date,
 			si.grand_total,
 			si.status,
+			si.pos_profile,
+			pos.shift_slot,
 		)
 		.where(
 			(si.docstatus == 1) & (si.is_return == 0) & (si.is_pos == 1) & (si.name.like(f"%{search_term}%"))
@@ -4361,11 +4417,23 @@ def search_invoices_for_return(
 
 	# Build main invoice query
 	si = frappe.qb.DocType(doctype)
+	pos = frappe.qb.DocType("POS Opening Shift")
 
 	# Start building the query
 	query = (
 		frappe.qb.from_(si)
-		.select(si.name, si.customer, si.customer_name, si.posting_date, si.grand_total, si.status)
+		.left_join(pos)
+		.on(pos.name == si.posa_pos_opening_shift)
+		.select(
+			si.name,
+			si.customer,
+			si.customer_name,
+			si.posting_date,
+			si.grand_total,
+			si.status,
+			si.pos_profile,
+			pos.shift_slot,
+		)
 		.where((si.docstatus == 1) & (si.is_return == 0))
 		.orderby(si.posting_date, order=frappe.qb.desc)
 		.orderby(si.name, order=frappe.qb.desc)
