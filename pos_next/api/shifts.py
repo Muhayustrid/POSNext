@@ -23,6 +23,7 @@ from pos_next.services.sales_recap import (
 	shift_recent,
 	shift_scope,
 )
+from pos_next.shift_schedule import get_profile_slots, open_slots_now
 from pos_next.utils.authz import is_management_user
 
 
@@ -82,6 +83,21 @@ def get_opening_dialog_data():
 	else:
 		data["payments_method"] = []
 
+	# Slots per POS Profile with open_now flag
+	now = now_datetime()
+	slots = {}
+	for p in pos_profiles_list:
+		all_slots = get_profile_slots(p)
+		open_now_names = {s["shift_name"] for s in open_slots_now(p, now_dt=now)}
+		slots[p] = [
+			{
+				**s,
+				"open_now": s["shift_name"] in open_now_names,
+			}
+			for s in all_slots
+		]
+	data["slots"] = slots
+
 	return data
 
 
@@ -134,7 +150,7 @@ def check_opening_shift(user=None):
 
 
 @frappe.whitelist()
-def create_opening_shift(pos_profile, company, balance_details):
+def create_opening_shift(pos_profile, company, balance_details, shift_slot=None):
 	"""Create a new POS Opening Shift"""
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
 
@@ -173,6 +189,7 @@ def create_opening_shift(pos_profile, company, balance_details):
 			"posting_time": nowtime(),
 			"user": frappe.session.user,
 			"pos_profile": pos_profile,
+			"shift_slot": shift_slot,
 			"company": company,
 			"status": "Open",
 		}

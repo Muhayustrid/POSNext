@@ -15,6 +15,7 @@
   "section_break_5",
   "company",
   "pos_profile",
+  "shift_slot",
   "pos_closing_shift",
   "column_break_7",
   "user",
@@ -94,6 +95,12 @@
    "label": "POS Profile",
    "options": "POS Profile",
    "reqd": 1
+  },
+  {
+   "fieldname": "shift_slot",
+   "fieldtype": "Data",
+   "label": "Shift Slot",
+   "read_only": 1
   },
   {
    "fieldname": "column_break_7",

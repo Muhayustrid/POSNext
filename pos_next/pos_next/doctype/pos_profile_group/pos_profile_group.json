@@ -10,6 +10,7 @@
   "company",
   "column_break_name",
   "section_break_schedule",
+  "shifts",
   "pos_schedule_enabled",
   "column_break_schedule",
   "pos_schedule_start",
@@ -44,6 +45,13 @@
    "fieldname": "section_break_schedule",
    "fieldtype": "Section Break",
    "label": "Shift Schedule"
+  },
+  {
+   "description": "Shift time slots for member profiles. When configured, opening a shift resolves the active slot from this table instead of the single schedule below.",
+   "fieldname": "shifts",
+   "fieldtype": "Table",
+   "label": "Shift Slots",
+   "options": "POS Shift Slot"
   },
   {
    "description": "Saving the group pushes these shift hours to every member POS Profile (site timezone).",

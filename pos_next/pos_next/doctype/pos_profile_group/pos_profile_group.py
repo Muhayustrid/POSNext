@@ -4,8 +4,9 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import cint
 
-from pos_next.shift_schedule import GATE_TITLE, SCHEDULE_FIELDS, validate_schedule_values
+from pos_next.shift_schedule import GATE_TITLE, SCHEDULE_FIELDS, _as_time_delta, validate_schedule_values
 
 
 class POSProfileGroup(Document):
@@ -20,11 +21,47 @@ class POSProfileGroup(Document):
 	"""
 
 	def validate(self):
-		validate_schedule_values(self, label=_("Shift Group {0}").format(self.group_name))
+		if self.shifts:
+			self.validate_slots()
+		else:
+			validate_schedule_values(self, label=_("Shift Group {0}").format(self.group_name))
 		self.validate_members()
 
 	def on_update(self):
 		self.sync_members()
+
+	def validate_slots(self):
+		seen = set()
+		for row in self.shifts or []:
+			name = (row.shift_name or "").strip()
+			if not name:
+				frappe.throw(_("Shift Name is required for all slots"), title=GATE_TITLE)
+			if name.lower() in seen:
+				frappe.throw(
+					_("Shift slot {0} is listed more than once in Shift Group {1}").format(
+						name, self.group_name
+					),
+					title=GATE_TITLE,
+				)
+			seen.add(name.lower())
+
+			start = _as_time_delta(row.start_time)
+			end = _as_time_delta(row.end_time)
+			if start is None or end is None:
+				frappe.throw(
+					_("Shift slot {0}: start time and end time must be valid times.").format(name),
+					title=GATE_TITLE,
+				)
+			if start == end:
+				frappe.throw(
+					_("Shift slot {0}: start time and end time cannot be equal.").format(name),
+					title=GATE_TITLE,
+				)
+			if cint(row.warning_minutes) < 0:
+				frappe.throw(
+					_("Shift slot {0}: Schedule Warning Minutes must be zero or greater.").format(name),
+					title=GATE_TITLE,
+				)
 
 	def validate_members(self):
 		seen = set()
@@ -92,12 +129,13 @@ class POSProfileGroup(Document):
 			stored = frappe.db.get_value(
 				"POS Profile", name, ("pos_profile_group", *SCHEDULE_FIELDS), as_dict=True
 			)
-			if stored.pos_profile_group == self.name and all(
-				stored[field] == values[field] for field in SCHEDULE_FIELDS
+			if stored.pos_profile_group == self.name and (
+				bool(self.shifts) or all(stored[field] == values[field] for field in SCHEDULE_FIELDS)
 			):
 				continue
 			profile = frappe.get_doc("POS Profile", name)
-			profile.update(values)
+			if not self.shifts:
+				profile.update(values)
 			profile.pos_profile_group = self.name
 			# full save so profile validation and on_update events still run;
 			# a permission failure here aborts the group save (clear error)

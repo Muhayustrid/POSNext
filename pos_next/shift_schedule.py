@@ -119,6 +119,57 @@ def resolve_window(now_dt, start_time, end_time):
 	return None
 
 
+def _profile_group(pos_profile):
+	row = frappe.db.get_value("POS Profile", pos_profile, ("pos_profile_group",), as_dict=True)
+	return row and row.pos_profile_group
+
+
+def get_profile_slots(pos_profile):
+	"""Return shift slots configured on the POS Profile's Shift Group, or []."""
+	return _group_slots(_profile_group(pos_profile) if pos_profile else None)
+
+
+def _group_slots(group):
+	if not group:
+		return []
+	slots = frappe.db.sql(
+		"""
+		SELECT shift_name, start_time, end_time, warning_minutes, enforce_closing
+		FROM `tabPOS Shift Slot`
+		WHERE parent = %s AND parenttype = 'POS Profile Group'
+		ORDER BY idx ASC
+		""",
+		group,
+		as_dict=True,
+	)
+	return [
+		{
+			"shift_name": s["shift_name"],
+			"start_time": _format_time_str(s["start_time"]),
+			"end_time": _format_time_str(s["end_time"]),
+			"warning_minutes": cint(s.get("warning_minutes", 0)),
+			"enforce_closing": cint(s.get("enforce_closing", 1)),
+		}
+		for s in slots
+	]
+
+
+def _open_slots(slots, now):
+	"""Slots whose window contains `now`, latest window start first."""
+	open_slots = []
+	for slot in slots:
+		window = resolve_window(now, slot["start_time"], slot["end_time"])
+		if window is not None:
+			open_slots.append((window[0], slot))
+	open_slots.sort(key=lambda item: item[0], reverse=True)
+	return [slot for _, slot in open_slots]
+
+
+def open_slots_now(pos_profile, now_dt=None):
+	"""Return slots whose window contains `now_dt`, ordered by window start descending."""
+	return _open_slots(get_profile_slots(pos_profile), now_dt or now_datetime())
+
+
 def apply_schedule_snapshot(opening):
 	"""Snapshot the effective schedule onto a POS Opening Shift.
 
@@ -127,6 +178,45 @@ def apply_schedule_snapshot(opening):
 	submitted after hours is rejected, same as a fresh open). Schedule field
 	edits made by the client between insert and submit are overwritten here.
 	"""
+	group = _profile_group(opening.pos_profile)
+	slots = _group_slots(group)
+	if slots:
+		now = now_datetime()
+		open_slots = _open_slots(slots, now)
+		label = group or opening.pos_profile
+
+		if not open_slots:
+			frappe.throw(
+				_("{0} is outside every shift of {1}. A shift cannot be opened now.").format(
+					now.strftime("%H:%M"),
+					label,
+				),
+				title=GATE_TITLE,
+			)
+
+		requested_slot = getattr(opening, "shift_slot", None)
+		if requested_slot:
+			matched = [s for s in open_slots if s["shift_name"] == requested_slot]
+			if not matched:
+				frappe.throw(
+					_("Shift slot {0} is not available now for {1}").format(requested_slot, label),
+					title=GATE_TITLE,
+				)
+			chosen = matched[0]
+		else:
+			chosen = open_slots[0]
+
+		window = resolve_window(now, chosen["start_time"], chosen["end_time"])
+		opening.shift_slot = chosen["shift_name"]
+		opening.pos_schedule_enabled = 1
+		opening.pos_schedule_start = chosen["start_time"]
+		opening.pos_schedule_end = chosen["end_time"]
+		opening.pos_schedule_warning_minutes = chosen["warning_minutes"]
+		opening.pos_schedule_enforce_closing = chosen["enforce_closing"]
+		opening.pos_schedule_deadline = window[1] if window else None
+		return
+
+	opening.shift_slot = None
 	schedule = get_effective_schedule(opening.pos_profile)
 
 	for field in SCHEDULE_FIELDS:
@@ -163,10 +253,10 @@ def freeze_schedule_snapshot(opening):
 		return
 
 	stored = frappe.db.get_value(
-		"POS Opening Shift", opening.name, (*SCHEDULE_FIELDS, "pos_schedule_deadline"), as_dict=True
+		"POS Opening Shift", opening.name, (*SCHEDULE_FIELDS, "pos_schedule_deadline", "shift_slot"), as_dict=True
 	)
-	for field in (*SCHEDULE_FIELDS, "pos_schedule_deadline"):
-		setattr(opening, field, stored[field])
+	for field in (*SCHEDULE_FIELDS, "pos_schedule_deadline", "shift_slot"):
+		setattr(opening, field, stored.get(field))
 
 
 def get_shift_gate(opening_shift):
@@ -427,3 +517,15 @@ def _as_time_delta(value):
 			return None
 		return datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
 	return None
+
+
+def _format_time_str(value):
+	td = _as_time_delta(value)
+	if td is None:
+		return str(value or "")
+	total_secs = int(td.total_seconds())
+	h = total_secs // 3600
+	m = (total_secs % 3600) // 60
+	s = total_secs % 60
+	return f"{h:02d}:{m:02d}:{s:02d}"
+
