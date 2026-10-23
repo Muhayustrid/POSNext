@@ -11,6 +11,7 @@ frappe.ui.form.on("Stock Reconciliation", {
 		)
 			return;
 		frm.add_custom_button(__("Show System Qty"), () => show_system_qty(frm));
+		if (!frm.is_new()) fill_live_differences(frm);
 	},
 
 	before_workflow_action(frm) {
@@ -82,6 +83,45 @@ function prompt_reject_reason(action) {
 		// cancel: the freeze was already lifted before the prompt opened
 		d.on_hide = () => settle(reject);
 	});
+}
+
+const LIVE_COLUMNS = [
+	"current_qty",
+	"quantity_difference",
+	"current_valuation_rate",
+	"amount_difference",
+];
+
+// HQ draft: fill the native grid with live system qty/rate/differences for
+// display only. The rows are not marked dirty and the server blanks these
+// fields on save, so the outlet never sees them.
+function fill_live_differences(frm) {
+	frappe
+		.xcall("pos_next.api.stock_opname.get_system_qty", { name: frm.doc.name })
+		.then((res) => {
+			if (!res) return;
+			const by_idx = Object.fromEntries(res.items.map((r) => [r.idx, r]));
+			(frm.doc.items || []).forEach((row) => {
+				const live = by_idx[row.idx];
+				if (!live) return;
+				row.current_qty = live.system_qty;
+				row.quantity_difference = live.difference_qty;
+				row.current_valuation_rate = live.valuation_rate;
+				row.amount_difference = live.amount_difference;
+				// warehouse_app per-UOM columns, same formulas as its own form script
+				if ("custom_qty_before" in row) {
+					const factor = flt(row.custom_conversion_factor) || 1;
+					row.custom_qty_before = flt(live.system_qty) / factor;
+					row.custom_qty_difference_per_uom =
+						flt(row.custom_qty_after) - row.custom_qty_before;
+				}
+			});
+			frm.doc.difference_amount = res.items.reduce((s, r) => s + flt(r.amount_difference), 0);
+			frm.refresh_field("difference_amount");
+			const grid = frm.fields_dict.items.grid;
+			LIVE_COLUMNS.forEach((f) => grid.update_docfield_property(f, "in_list_view", 1));
+			grid.reset_grid();
+		});
 }
 
 // Read-only table of live system qty vs the counted qty (HQ approval aid).

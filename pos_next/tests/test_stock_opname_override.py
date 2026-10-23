@@ -189,6 +189,18 @@ class TestStockOpnameOverride(FrappeTestCase):
 		doc.remove_items_with_no_change()
 		self.assertEqual(doc.difference_amount, 0.0)
 
+	def test_draft_blanks_misleading_differences(self):
+		# Draft rows have no current qty, so ERPNext's difference = counted - 0.
+		item = _make_test_item()
+		_seed_stock(item, self.warehouse, 5)
+		doc = self._make_sr(self.warehouse, [(item, 3)])
+		doc.insert(ignore_permissions=True)
+		row = doc.items[0]
+		self.assertEqual(
+			(row.current_qty, row.quantity_difference, row.amount_difference, doc.difference_amount),
+			(0, 0, 0, 0),
+		)
+
 	def test_submit_with_all_rows_equal_raises_clear_message(self):
 		item = _make_test_item()
 		_seed_stock(item, self.warehouse, 5)

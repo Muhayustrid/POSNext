@@ -66,6 +66,18 @@ class CustomStockReconciliation(StockReconciliation):
 				row.custom_qty_before = 0
 				row.custom_qty_difference_per_uom = 0
 		super().validate()
+		# Draft rows have no live current qty yet, so ERPNext's differences read
+		# as "counted vs zero"; blank them (HQ Desk shows live values instead).
+		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
+			for row in self.items:
+				# HQ's Desk fills current_* on screen; never persist them from a save
+				if not row.current_serial_and_batch_bundle:
+					row.current_qty = 0
+					row.current_valuation_rate = 0
+				row.current_amount = 0
+				row.quantity_difference = 0
+				row.amount_difference = 0
+			self.difference_amount = 0
 
 	def submit(self):
 		# The background worker reloads from DB, losing the in-memory
