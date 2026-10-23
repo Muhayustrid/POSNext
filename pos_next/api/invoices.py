@@ -1668,7 +1668,14 @@ def validate_cart_items(items, pos_profile=None):
 	if not _should_block(pos_profile):
 		return []
 
-	errors = _collect_stock_errors(items)
+	# Non-stock rows (Product Bundle parents) have no Bin; same filter as update_invoice.
+	item_codes = list({d.get("item_code") for d in items if d.get("item_code")})
+	stock_item_set = set(
+		frappe.get_all("Item", filters={"name": ["in", item_codes], "is_stock_item": 1}, pluck="name")
+		if item_codes
+		else []
+	)
+	errors = _collect_stock_errors([d for d in items if d.get("item_code") in stock_item_set])
 	if not errors:
 		return []
 

@@ -294,3 +294,32 @@ class TestSubmitStockNoOrphanDraft(unittest.TestCase):
 		# Crucial: invoice draft must NOT have been saved!
 		self.assertIsNotNone(mock_inv)
 		mock_inv.save.assert_not_called()
+
+
+class TestValidateCartItemsSkipsNonStock(unittest.TestCase):
+	"""Product Bundle parents are non-stock (no Bin): the cart pre-check must skip
+	them like update_invoice does, or every bundle sale reads "available 0"."""
+
+	def test_bundle_parent_is_not_reported_as_short(self):
+		from pos_next.api.invoices import validate_cart_items
+
+		items = [
+			{"item_code": "BUNDLE-A", "warehouse": "Stores - Test", "qty": 1, "stock_qty": 1},
+			{"item_code": "STOCK-B", "warehouse": "Stores - Test", "qty": 3, "stock_qty": 3},
+		]
+
+		def fake_get_all(doctype, *args, **kwargs):
+			filters = kwargs.get("filters", {})
+			if doctype == "Item" and isinstance(filters, dict) and filters.get("is_stock_item"):
+				return ["STOCK-B"]
+			return []
+
+		with (
+			mock.patch("pos_next.api.invoices._should_block", return_value=True),
+			mock.patch("pos_next.api.invoices._get_available_stock", return_value=0),
+			mock.patch("frappe.get_all", side_effect=fake_get_all),
+			mock.patch("frappe.db.get_value", return_value=None),
+		):
+			errors = validate_cart_items(json.dumps(items))
+
+		self.assertEqual([e["item_code"] for e in errors], ["STOCK-B"])
