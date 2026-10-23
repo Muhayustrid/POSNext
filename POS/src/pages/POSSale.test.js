@@ -97,6 +97,23 @@ vi.mock("@/utils/printInvoice", async (importOriginal) => ({
 	printWithSilentFallback: printMock.printWithSilentFallback,
 }))
 
+const printEodMock = vi.hoisted(() => ({
+	printEODReport: vi.fn(async () => ({ method: "silent", success: true, printed: true })),
+}))
+vi.mock("@/utils/printEod", () => ({
+	printEODReport: printEodMock.printEODReport,
+}))
+
+const toastMock = vi.hoisted(() => ({
+	showSuccess: vi.fn(),
+	showError: vi.fn(),
+	showWarning: vi.fn(),
+	showInfo: vi.fn(),
+}))
+vi.mock("@/composables/useToast", () => ({
+	useToast: () => toastMock,
+}))
+
 vi.mock("@/utils/apiWrapper", () => ({
 	call: vi.fn(async () => ({})),
 }))
@@ -266,9 +283,15 @@ const ShiftOpeningDialogStub = defineComponent({
 
 const ShiftClosingDialogStub = defineComponent({
 	name: "ShiftClosingDialog",
-	props: { modelValue: { type: Boolean, default: false } },
-	emits: ["shift-closed"],
-	template: `<button data-test="shift-closed" @click="$emit('shift-closed')"></button>`,
+	props: {
+		modelValue: { type: Boolean, default: false },
+		autoClose: { type: Boolean, default: false },
+	},
+	emits: ["shift-closed", "auto-close-failed"],
+	template: `<div>
+		<button data-test="shift-closed" @click="$emit('shift-closed')"></button>
+		<button data-test="auto-close-failed" @click="$emit('auto-close-failed', new Error('Auto close failed'))"></button>
+	</div>`,
 })
 
 const DraftInvoicesDialogStub = defineComponent({
@@ -931,5 +954,95 @@ describe("return invoice auto-print", () => {
 		await new Promise((r) => setTimeout(r, 50))
 
 		expect(printMock.printWithSilentFallback).not.toHaveBeenCalled()
+	})
+})
+
+describe("shift schedule auto-closing and reprint (Task B)", () => {
+	it("defers auto-close and shows single warning when cart has items, then auto-closes when cart clears", async () => {
+		await mountPOS({ ShiftClosingDialog: ShiftClosingDialogStub })
+		offlineStore.isOffline = false
+		const shiftStore = usePOSShiftStore(wrapper.vm.$pinia)
+		toastMock.showWarning.mockClear()
+
+		// Cart starts with 1 item from mountPOS
+		expect(cartStore.invoiceItems).toHaveLength(1)
+
+		// Schedule expires with enforce=true
+		shiftStore.scheduleStatus = { enabled: true, enforce: true, expired: true }
+		await flushPromises()
+
+		// Deferred: dialog not shown, warning toast shown
+		expect(uiStore.showCloseShiftDialog).toBe(false)
+		expect(toastMock.showWarning).toHaveBeenCalledTimes(1)
+
+		// Clearing cart triggers auto-close
+		cartStore.invoiceItems = []
+		await flushPromises()
+
+		expect(uiStore.showCloseShiftDialog).toBe(true)
+		const closingDialog = wrapper.findComponent(ShiftClosingDialogStub)
+		expect(closingDialog.props("autoClose")).toBe(true)
+	})
+
+	it("falls back to manual dialog on auto-close failure and does not re-trigger", async () => {
+		toastMock.showError.mockClear()
+		await mountPOS({ ShiftClosingDialog: ShiftClosingDialogStub })
+		offlineStore.isOffline = false
+		const shiftStore = usePOSShiftStore(wrapper.vm.$pinia)
+		cartStore.invoiceItems = []
+
+		// Schedule expires
+		shiftStore.scheduleStatus = { enabled: true, enforce: true, expired: true }
+		await flushPromises()
+
+		expect(uiStore.showCloseShiftDialog).toBe(true)
+		const closingDialog = wrapper.findComponent(ShiftClosingDialogStub)
+		expect(closingDialog.props("autoClose")).toBe(true)
+
+		// Emit failure
+		await closingDialog.find('[data-test="auto-close-failed"]').trigger("click")
+		await flushPromises()
+
+		// Fallback to manual: autoClose is false, dialog remains open
+		expect(closingDialog.props("autoClose")).toBe(false)
+		expect(uiStore.showCloseShiftDialog).toBe(true)
+		expect(toastMock.showError).toHaveBeenCalledTimes(1)
+	})
+
+	it("reprints auto-closed shift on POS load when user has no open shift", async () => {
+		const { call } = await import("@/utils/apiWrapper")
+		call.mockImplementation(async (method) => {
+			if (method === "pos_next.api.shifts.get_recent_auto_closed_shift") {
+				return "POS-CLOSING-AUTO-1"
+			}
+			return {}
+		})
+		printEodMock.printEODReport.mockClear()
+		toastMock.showInfo.mockClear()
+		localStorage.removeItem("pos_auto_closed_printed_POS-CLOSING-AUTO-1")
+
+		// Reset shiftState so currentShift is null
+		shiftState.value = { pos_opening_shift: null, pos_profile: null }
+
+		// Mount with no open shift
+		const pinia = createPinia()
+		setActivePinia(pinia)
+		const shiftStore = usePOSShiftStore()
+		shiftStore.checkShift = vi.fn(async () => false)
+		const localOfflineStore = usePOSSyncStore()
+		localOfflineStore.isOffline = false
+
+		const localWrapper = mount(POSSale, {
+			global: {
+				plugins: [pinia],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: ALL_DIALOG_STUBS,
+			},
+		})
+		await flushPromises()
+
+		expect(printEodMock.printEODReport).toHaveBeenCalledWith("POS-CLOSING-AUTO-1")
+		expect(localStorage.getItem("pos_auto_closed_printed_POS-CLOSING-AUTO-1")).toBe("1")
+		expect(toastMock.showInfo).toHaveBeenCalledTimes(1)
 	})
 })

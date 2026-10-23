@@ -293,6 +293,7 @@ export const usePOSEventsStore = defineStore("posEvents", () => {
 			"display_item_code",
 			"show_customer_balance",
 			"hide_expected_amount",
+			"auto_balance_closing",
 			"display_discount_percentage",
 			"display_discount_amount",
 		];

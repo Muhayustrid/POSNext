@@ -43,6 +43,8 @@ POS_SETTINGS_FIELDS = [
 	"session_lock_timeout",
 	"show_variants_as_items",
 	"enable_pos_queue",
+	"hide_expected_amount",
+	"auto_balance_closing",
 ]
 
 # Default POS Settings values
@@ -77,4 +79,6 @@ DEFAULT_POS_SETTINGS = {
 	"session_lock_timeout": 5,
 	"show_variants_as_items": 0,
 	"enable_pos_queue": 0,
+	"hide_expected_amount": 0,
+	"auto_balance_closing": 0,
 }

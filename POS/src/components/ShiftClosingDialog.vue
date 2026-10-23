@@ -531,7 +531,7 @@
 										</div>
 
 										<!-- Counted Amount, live thousand grouping -->
-										<div class="w-40 md:w-48">
+										<div v-if="!autoBalanceClosing" class="w-40 md:w-48">
 											<input
 												:id="`payment-${idx}`"
 												class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-center text-base md:text-lg font-semibold text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
@@ -644,7 +644,10 @@
 									</div>
 
 									<!-- Amount Entry Grid -->
-									<div class="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-3">
+									<div
+										class="grid grid-cols-1 gap-2 md:gap-3"
+										:class="autoBalanceClosing ? 'sm:grid-cols-2' : 'sm:grid-cols-3'"
+									>
 										<!-- Opening Amount -->
 										<div
 											class="text-start bg-white rounded-lg p-2 md:p-3 border border-gray-200"
@@ -692,6 +695,7 @@
 
 										<!-- Actual/Closing Amount -->
 										<div
+											v-if="!autoBalanceClosing"
 											class="text-start bg-white rounded-lg p-2 md:p-3 border border-gray-300"
 										>
 											<label
@@ -1051,9 +1055,13 @@ const props = defineProps({
 		required: true,
 		validator: (value) => value && value.length > 0,
 	},
+	autoClose: {
+		type: Boolean,
+		default: false,
+	},
 })
 
-const emit = defineEmits(["update:modelValue", "shift-closed"])
+const emit = defineEmits(["update:modelValue", "shift-closed", "auto-close-failed"])
 
 const open = computed({
 	get: () => props.modelValue,
@@ -1065,7 +1073,7 @@ const { formatCurrency, formatQuantity, formatDateTime, formatTime } =
 	useFormatters()
 const { showInfo, showSuccess, showWarning, showError } = useToast()
 const posSettingsStore = usePOSSettingsStore()
-const { hideExpectedAmount } = storeToRefs(posSettingsStore)
+const { hideExpectedAmount, autoBalanceClosing } = storeToRefs(posSettingsStore)
 
 const shiftStore = usePOSShiftStore()
 const syncStore = usePOSSyncStore()
@@ -1112,7 +1120,7 @@ watch(open, async (isOpen) => {
 		// Refresh POS settings to get latest hideExpectedAmount value
 		await posSettingsStore.reloadSettings()
 		// Re-count unsynced offline invoices — closing is blocked while > 0
-		syncStore.updatePendingCount()
+		await syncStore.updatePendingCount?.()
 		loadClosingData()
 	} else {
 		// Resume the shift duration counter
@@ -1137,11 +1145,11 @@ onBeforeUnmount(() => {
 // Shift-schedule enforcement can force the dialog open before this component
 // mounts (the expiry watcher fires while the sale page is still loading). In
 // that case watch(open) never transitions, so load the closing data here.
-onMounted(() => {
+onMounted(async () => {
 	if (open.value && props.openingShift) {
 		shiftStore.shiftTimerPaused = true
-		posSettingsStore.reloadSettings()
-		syncStore.updatePendingCount()
+		await posSettingsStore.reloadSettings?.()
+		await syncStore.updatePendingCount?.()
 		loadClosingData()
 	}
 })
@@ -1149,6 +1157,8 @@ onMounted(() => {
 async function loadClosingData() {
 	try {
 		errorMessage.value = "" // Clear any previous errors
+
+		await syncStore.updatePendingCount?.()
 
 		const data = await closingDataResource.submit({
 			opening_shift: props.openingShift,
@@ -1159,7 +1169,8 @@ async function loadClosingData() {
 			// Auto-fill each row's counted amount from the expected total so
 			// the cashier only edits the rows that really differ — but blind
 			// entry mode must NOT leak the expected value, so it stays empty.
-			const autoFill = !hideExpectedAmount.value
+			const autoFill =
+				props.autoClose || Boolean(autoBalanceClosing?.value) || !hideExpectedAmount?.value
 			data.payment_reconciliation = data.payment_reconciliation.map(
 				(payment) => {
 					const expected = Number.parseFloat(payment.expected_amount) || 0
@@ -1186,11 +1197,26 @@ async function loadClosingData() {
 		if (invoiceCount.value > 0 && invoiceCount.value <= 10) {
 			showInvoiceDetails.value = true
 		}
+
+		if (props.autoClose) {
+			if (canSubmit.value) {
+				await submitClosing()
+			} else {
+				const reason = syncStore.hasPendingInvoices
+					? syncBlockMessage.value
+					: __("Cannot close shift while a submission is in progress.")
+				errorMessage.value = reason
+				emit("auto-close-failed", new Error(reason))
+			}
+		}
 	} catch (error) {
 		console.error("Error loading closing data:", error)
 		errorMessage.value = __(
 			"Unable to load shift data. Please check your connection and try again.",
 		)
+		if (props.autoClose) {
+			emit("auto-close-failed", error)
+		}
 	}
 }
 
@@ -1228,7 +1254,7 @@ const canSubmit = computed(() => {
 })
 
 async function submitClosing() {
-	if (!closingData.value) return
+	if (!closingData.value || !canSubmit.value) return
 
 	try {
 		errorMessage.value = "" // Clear any previous errors
@@ -1270,7 +1296,7 @@ async function submitClosing() {
 		}
 
 		// If hideExpectedAmount is enabled, show success report before closing
-		if (hideExpectedAmount.value) {
+		if (!props.autoClose && !autoBalanceClosing?.value && hideExpectedAmount?.value) {
 			showSuccessReport.value = true
 			// Auto-expand invoice details in success report
 			if (invoiceCount.value > 0 && invoiceCount.value <= 10) {
@@ -1283,9 +1309,15 @@ async function submitClosing() {
 		}
 	} catch (error) {
 		console.error("Error submitting closing shift:", error)
-		errorMessage.value = __(
-			"Failed to close shift. Please verify all amounts and try again.",
-		)
+		errorMessage.value =
+			error?.messages?.join(" ") ||
+			error?.message ||
+			__(
+				"Failed to close shift. Please verify all amounts and try again.",
+			)
+		if (props.autoClose) {
+			emit("auto-close-failed", error)
+		}
 	}
 }
 
@@ -1348,7 +1380,10 @@ function closeDialog() {
 
 // UI State Computed Properties
 const shouldShowSummary = computed(
-	() => !hideExpectedAmount.value || showSuccessReport.value,
+	() =>
+		Boolean(autoBalanceClosing?.value) ||
+		!hideExpectedAmount?.value ||
+		showSuccessReport.value,
 )
 
 // Final state after "Close Shift" succeeded but the EOD print failed: the
@@ -1356,10 +1391,16 @@ const shouldShowSummary = computed(
 const isPrintFailureState = computed(() => Boolean(eodPrintFailed.value))
 
 const isInEntryMode = computed(
-	() => hideExpectedAmount.value && !showSuccessReport.value,
+	() =>
+		!autoBalanceClosing?.value &&
+		hideExpectedAmount?.value &&
+		!showSuccessReport.value,
 )
 
 const reconciliationMessage = computed(() => {
+	if (props.autoClose || autoBalanceClosing?.value) {
+		return __("Closing amounts are automatically balanced with expected amounts")
+	}
 	if (isInEntryMode.value) {
 		return __("Enter the actual counted amounts for each payment method")
 	}

@@ -49,12 +49,18 @@ vi.mock("../composables/useFormatters", () => ({
 
 vi.mock("../composables/useToast", () => ({ useToast: () => toastSpies }))
 
+const storeRefs = vi.hoisted(() => ({
+	hideExpectedAmount: false,
+	autoBalanceClosing: false,
+}))
+
 vi.mock("../stores/posSettings", async () => {
 	const { defineStore } = await import("pinia")
-	const { ref } = await import("vue")
+	const { computed } = await import("vue")
 	return {
 		usePOSSettingsStore: defineStore("posSettings", () => ({
-			hideExpectedAmount: ref(false),
+			hideExpectedAmount: computed(() => storeRefs.hideExpectedAmount),
+			autoBalanceClosing: computed(() => storeRefs.autoBalanceClosing),
 			reloadSettings,
 		})),
 	}
@@ -72,27 +78,40 @@ vi.mock("../stores/posShift", async () => {
 	}
 })
 
+const syncStoreRefs = vi.hoisted(() => ({
+	pendingInvoicesCount: 0,
+}))
+const updatePendingCountSpy = vi.hoisted(() => vi.fn())
+
 // The dialog blocks closing over unsynced offline invoices / in-flight submits.
 // Mock both stores so the test env never touches the offline worker.
 vi.mock("../stores/posSync", async () => {
 	const { defineStore } = await import("pinia")
 	const { computed, ref } = await import("vue")
-	const pendingInvoicesCount = ref(0)
 	return {
-		usePOSSyncStore: defineStore("posSync", () => ({
-			pendingInvoicesCount,
-			hasPendingInvoices: computed(() => pendingInvoicesCount.value > 0),
-			updatePendingCount: vi.fn().mockResolvedValue(undefined),
-		})),
+		usePOSSyncStore: defineStore("posSync", () => {
+			const pendingInvoicesCount = ref(0)
+			return {
+				pendingInvoicesCount,
+				hasPendingInvoices: computed(() => pendingInvoicesCount.value > 0),
+				updatePendingCount: updatePendingCountSpy.mockImplementation(async () => {
+					pendingInvoicesCount.value = syncStoreRefs.pendingInvoicesCount
+				}),
+			}
+		}),
 	}
 })
+
+const cartStoreRefs = vi.hoisted(() => ({
+	isSubmitting: false,
+}))
 
 vi.mock("../stores/posCart", async () => {
 	const { defineStore } = await import("pinia")
 	const { ref } = await import("vue")
 	return {
 		usePOSCartStore: defineStore("posCart", () => ({
-			isSubmitting: ref(false),
+			isSubmitting: ref(cartStoreRefs.isSubmitting),
 		})),
 	}
 })
@@ -336,5 +355,225 @@ describe("ShiftClosingDialog counted-amount prefill", () => {
 		expect(row.closing_text).toBe("-19.750")
 		expect(row.closing_amount).toBe(-19750)
 		expect(row.difference).toBe(0)
+	})
+})
+
+describe("ShiftClosingDialog auto-balance closing", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		storeRefs.hideExpectedAmount = false
+		storeRefs.autoBalanceClosing = true
+		reloadSettings.mockResolvedValue(undefined)
+		submitClosingShift.submit.mockResolvedValue({ name: CLOSING_SHIFT_NAME })
+		getClosingShiftData.submit.mockResolvedValue({
+			pos_profile: POS_PROFILE,
+			payment_reconciliation: [
+				{ mode_of_payment: "Cash", expected_amount: 150000 },
+				{ mode_of_payment: "QRIS", expected_amount: 50000 },
+			],
+			pos_transactions: [],
+		})
+		printEODReport.mockResolvedValue({ method: "silent", success: true, printed: true })
+	})
+
+	it("with autoBalanceClosing on, no closing amount input is rendered and submit sends closing_amount == expected", async () => {
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: false, openingShift: "POS-OPEN-0001" },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await rendered.setProps({ modelValue: true })
+		await flushPromises()
+
+		// No closing amount input should be rendered
+		expect(rendered.findAll("input")).toHaveLength(0)
+		expect(rendered.html()).not.toContain("Enter actual amount for")
+
+		// Submit should send closing_amount == expected
+		await rendered.vm.submitClosing()
+		await flushPromises()
+
+		expect(submitClosingShift.submit).toHaveBeenCalledTimes(1)
+		const sentClosing = submitClosingShift.submit.mock.calls[0][0].closing_shift
+		const sentRows = sentClosing.payment_reconciliation
+		expect(sentRows.map((r) => r.closing_amount)).toEqual([150000, 50000])
+		expect(sentRows.map((r) => r.expected_amount)).toEqual([150000, 50000])
+		expect(sentRows.map((r) => r.difference)).toEqual([0, 0])
+	})
+})
+
+describe("ShiftClosingDialog autoClose mode", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		syncStoreRefs.pendingInvoicesCount = 0
+		cartStoreRefs.isSubmitting = false
+		storeRefs.hideExpectedAmount = true
+		storeRefs.autoBalanceClosing = false
+		reloadSettings.mockResolvedValue(undefined)
+		submitClosingShift.submit.mockResolvedValue({ name: CLOSING_SHIFT_NAME })
+		getClosingShiftData.submit.mockResolvedValue({
+			pos_profile: POS_PROFILE,
+			payment_reconciliation: [
+				{ mode_of_payment: "Cash", expected_amount: 150000 },
+				{ mode_of_payment: "QRIS", expected_amount: 50000 },
+			],
+			pos_transactions: [],
+		})
+		printEODReport.mockResolvedValue({ method: "silent", success: true, printed: true })
+	})
+
+	it("with autoClose prop on, auto-fills counted amounts, auto-submits, calls printEODReport, and emits shift-closed", async () => {
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await flushPromises()
+
+		expect(submitClosingShift.submit).toHaveBeenCalledTimes(1)
+		const sentClosing = submitClosingShift.submit.mock.calls[0][0].closing_shift
+		const sentRows = sentClosing.payment_reconciliation
+		expect(sentRows.map((r) => r.closing_amount)).toEqual([150000, 50000])
+		expect(printEODReport).toHaveBeenCalledWith(CLOSING_SHIFT_NAME, POS_PROFILE)
+		expect(rendered.emitted("shift-closed")).toBeTruthy()
+	})
+
+	it("with autoClose prop on and printEODReport failure, keeps reprint final state", async () => {
+		printEODReport.mockRejectedValue(new Error("Printer paper out"))
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await flushPromises()
+
+		expect(submitClosingShift.submit).toHaveBeenCalledTimes(1)
+		expect(rendered.vm.isPrintFailureState).toBe(true)
+		expect(rendered.emitted("shift-closed")).toBeFalsy()
+	})
+
+	it("with autoClose prop on and submit failure, keeps dialog open in manual mode and emits auto-close-failed", async () => {
+		submitClosingShift.submit.mockRejectedValue(new Error("Server error"))
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await flushPromises()
+
+		expect(rendered.emitted("auto-close-failed")).toBeTruthy()
+		expect(rendered.vm.errorMessage).toBe("Server error")
+		expect(rendered.vm.open).toBe(true)
+	})
+
+	it("with autoClose prop on and loadClosingData failure, keeps dialog open in manual mode and emits auto-close-failed", async () => {
+		getClosingShiftData.submit.mockRejectedValue(new Error("Network disconnect"))
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await flushPromises()
+
+		expect(rendered.emitted("auto-close-failed")).toBeTruthy()
+		expect(rendered.vm.errorMessage).toBe(
+			"Unable to load shift data. Please check your connection and try again.",
+		)
+		expect(rendered.vm.open).toBe(true)
+		expect(submitClosingShift.submit).not.toHaveBeenCalled()
+	})
+
+	it("with autoClose prop on, does not submit and emits auto-close-failed when offline invoices are pending sync", async () => {
+		syncStoreRefs.pendingInvoicesCount = 2
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await flushPromises()
+
+		expect(updatePendingCountSpy).toHaveBeenCalled()
+		expect(submitClosingShift.submit).not.toHaveBeenCalled()
+		expect(rendered.emitted("shift-closed")).toBeFalsy()
+		expect(rendered.emitted("auto-close-failed")).toBeTruthy()
+		expect(rendered.vm.open).toBe(true)
+	})
+
+	it("with autoClose prop on, does not submit and emits auto-close-failed when cart submission is in progress", async () => {
+		cartStoreRefs.isSubmitting = true
+		const rendered = mount(ShiftClosingDialog, {
+			props: { modelValue: true, openingShift: "POS-OPEN-0001", autoClose: true },
+			global: {
+				plugins: [createPinia()],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: {
+					FrappeUIStub: {
+						template:
+							"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+					},
+				},
+			},
+			shallow: true,
+		})
+		await flushPromises()
+
+		expect(submitClosingShift.submit).not.toHaveBeenCalled()
+		expect(rendered.emitted("shift-closed")).toBeFalsy()
+		expect(rendered.emitted("auto-close-failed")).toBeTruthy()
+		expect(rendered.vm.open).toBe(true)
 	})
 })

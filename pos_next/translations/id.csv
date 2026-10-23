@@ -3493,3 +3493,14 @@ work_order cannot be modified directly,work_order tidak dapat diubah langsung
 "{0} items added","{0} item ditambahkan",""
 "No new items to add","Tidak ada item baru",""
 "Failed to fetch items","Gagal mengambil item",""
+Auto-balance Closing,Penyeimbangan Otomatis Penutupan
+Closing amount is set to the expected amount; cashier enters no counted amounts,Jumlah penutupan diatur sama dengan jumlah yang diharapkan; kasir tidak memasukkan jumlah hitungan fisik
+Closing amounts are automatically balanced with expected amounts,Jumlah penutupan diseimbangkan secara otomatis dengan jumlah yang diharapkan
+"Shift schedule has ended, but payment is in progress. Auto-close is deferred.","Jadwal shift telah berakhir, tetapi pembayaran sedang berlangsung. Penutupan otomatis ditunda."
+"Shift schedule has ended, but cart has items. Auto-close is deferred.","Jadwal shift telah berakhir, tetapi keranjang masih berisi item. Penutupan otomatis ditunda."
+"Shift schedule has ended, but invoices are pending sync. Auto-close is deferred.","Jadwal shift telah berakhir, tetapi faktur masih menunggu sinkronisasi. Penutupan otomatis ditunda."
+Automatic shift closing failed. Please close the shift manually.,Penutupan shift otomatis gagal. Silakan tutup shift secara manual.
+Your shift was closed automatically by the system,Shift Anda telah ditutup secara otomatis oleh sistem
+"Your shift was closed automatically by the system, but the EOD report failed to print.","Shift Anda telah ditutup secara otomatis oleh sistem, tetapi laporan EOD gagal dicetak."
+EOD report did not print,Laporan EOD gagal dicetak
+Cannot close shift while a submission is in progress.,Tidak dapat menutup shift saat transaksi sedang diproses.

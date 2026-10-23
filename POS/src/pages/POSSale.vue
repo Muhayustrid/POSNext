@@ -547,7 +547,9 @@
 			<ShiftClosingDialog
 				v-model="uiStore.showCloseShiftDialog"
 				:opening-shift="shiftStore.currentShift?.name"
+				:auto-close="isAutoClosing"
 				@shift-closed="handleShiftClosed"
+				@auto-close-failed="handleAutoCloseFailed"
 			/>
 
 			<!-- Draft Invoices Dialog -->
@@ -1082,6 +1084,7 @@ import {
 	hydrateLocalOnlyInvoice,
 	printWithSilentFallback,
 } from "@/utils/printInvoice";
+import { printEODReport } from "@/utils/printEod";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
 import { ensureIminSdk, getTransport } from "@/utils/print/transport";
 
@@ -1533,8 +1536,10 @@ onMounted(async () => {
 		// singletons — their state survives component remounts.
 		// We include the shift name in the key so that a different user's shift
 		// (even on the same POS Profile) correctly triggers re-initialization.
-		const currentInitKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
-		if (_initializedKey && _initializedKey === currentInitKey) {
+		const currentInitKey = shiftStore.currentShift?.name
+			? `${shiftStore.profileName}::${shiftStore.currentShift.name}`
+			: null;
+		if (_initializedKey && currentInitKey && _initializedKey === currentInitKey) {
 			log.debug("Skipping init — already initialized (remount)");
 			startActivityTracking();
 			updateLayoutBounds();
@@ -1569,11 +1574,49 @@ onMounted(async () => {
 		uiStore.setLoading(false);
 	}
 
+	async function checkRecentAutoClosedShift() {
+		if (offlineStore.isOffline) return;
+		try {
+			const closingShiftName = await call(
+				"pos_next.api.shifts.get_recent_auto_closed_shift"
+			);
+			if (!closingShiftName) return;
+
+			const storageKey = `pos_auto_closed_printed_${closingShiftName}`;
+			if (typeof localStorage !== "undefined" && localStorage.getItem(storageKey)) {
+				return;
+			}
+
+			try {
+				const result = await printEODReport(closingShiftName);
+				if (result?.printed) {
+					if (typeof localStorage !== "undefined") {
+						localStorage.setItem(storageKey, "1");
+					}
+					showInfo(__("Your shift was closed automatically by the system"));
+				} else {
+					throw result?.error || new Error(__("EOD report did not print"));
+				}
+			} catch (printErr) {
+				console.warn("[auto-close] EOD reprint failed", printErr);
+				showWarning(
+					__(
+						"Your shift was closed automatically by the system, but the EOD report failed to print."
+					),
+					__("Print failed")
+				);
+			}
+		} catch (err) {
+			console.warn("[auto-close] failed to check recent auto-closed shift", err);
+		}
+	}
+
 	async function initPOS() {
 		const hasShift = await shiftStore.checkShift();
 
 		if (!hasShift) {
 			uiStore.showOpenShiftDialog = true;
+			await checkRecentAutoClosedShift();
 			return;
 		}
 
@@ -1621,7 +1664,9 @@ onMounted(async () => {
 		// Load tax rules (depends on settings being loaded)
 		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
-		_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
+		_initializedKey = shiftStore.currentShift?.name
+			? `${shiftStore.profileName}::${shiftStore.currentShift.name}`
+			: null;
 	}
 });
 
@@ -1642,35 +1687,102 @@ watch(
 	{ flush: "post" },
 );
 
-// Shift schedule: warning toast before the deadline, forced closing after it.
-// Already-open payment/return dialogs are never torn down — a submission in
-// flight must settle (the guard in handlePaymentCompleted / handleCreateReturn
-// refuses only NEW attempts, and the server gate decides by its own clock).
-// The forced closing dialog waits for the in-flight submit to settle before
-// opening, so it can never race an accepted transaction with a closing whose
-// expected amounts were loaded before that transaction landed.
+// Shift schedule: warning toast before deadline, auto-close dialog after it.
+// Auto-close is deferred while cart has items, payment/submit is in flight,
+// or offline invoices are pending sync. While deferred, show a single warning toast.
+const isAutoClosing = ref(false);
+const autoClosedShiftIds = new Set();
 let scheduleWarned = false;
-let pendingForceClose = false;
+let scheduleDeferredWarned = false;
 
-function forceScheduleClose() {
-	if (!offlineStore.isOffline) {
-		uiStore.showOpenShiftDialog = false;
-		uiStore.showCloseShiftDialog = true;
-	} else {
+watch(
+	() => uiStore.showCloseShiftDialog,
+	(isOpen) => {
+		if (!isOpen) {
+			isAutoClosing.value = false;
+		}
+	}
+);
+
+function getScheduleDeferReason() {
+	if (cartStore.isSubmitting) {
+		return __(
+			"Shift schedule has ended, but payment is in progress. Auto-close is deferred."
+		);
+	}
+	if (cartStore.invoiceItems.length > 0) {
+		return __(
+			"Shift schedule has ended, but cart has items. Auto-close is deferred."
+		);
+	}
+	if (offlineStore.pendingInvoicesCount > 0) {
+		return __(
+			"Shift schedule has ended, but invoices are pending sync. Auto-close is deferred."
+		);
+	}
+	return null;
+}
+
+function triggerScheduleAutoClose(shiftName) {
+	if (offlineStore.isOffline) {
 		showWarning(
 			__(
 				"Shift schedule has ended. You are offline — reconnect to close the shift."
 			)
 		);
+		return;
 	}
+
+	autoClosedShiftIds.add(shiftName);
+	isAutoClosing.value = true;
+	uiStore.showOpenShiftDialog = false;
+	uiStore.showCloseShiftDialog = true;
+}
+
+function checkScheduleAutoClose() {
+	const status = shiftStore.scheduleStatus;
+	if (!isScheduleBlocking(status)) {
+		scheduleDeferredWarned = false;
+		return;
+	}
+
+	const shiftName = shiftStore.currentShift?.name;
+	if (!shiftName || autoClosedShiftIds.has(shiftName)) return;
+
+	const deferReason = getScheduleDeferReason();
+	if (deferReason) {
+		if (!scheduleDeferredWarned) {
+			scheduleDeferredWarned = true;
+			showWarning(deferReason);
+		}
+		return;
+	}
+
+	scheduleDeferredWarned = false;
+	triggerScheduleAutoClose(shiftName);
+}
+
+function handleAutoCloseFailed(error) {
+	isAutoClosing.value = false;
+	showError(
+		error?.messages?.join(" ") ||
+		error?.message ||
+		__("Automatic shift closing failed. Please close the shift manually.")
+	);
 }
 
 watch(
-	() => shiftStore.scheduleStatus,
-	(status) => {
+	[
+		() => shiftStore.scheduleStatus,
+		() => cartStore.isSubmitting,
+		() => cartStore.invoiceItems.length,
+		() => offlineStore.pendingInvoicesCount,
+	],
+	() => {
+		const status = shiftStore.scheduleStatus;
 		if (!status?.enabled) {
 			scheduleWarned = false;
-			pendingForceClose = false;
+			scheduleDeferredWarned = false;
 			return;
 		}
 
@@ -1689,24 +1801,7 @@ watch(
 
 		scheduleWarned = false;
 
-		if (!isScheduleBlocking(status)) return;
-
-		if (cartStore.isSubmitting) {
-			pendingForceClose = true;
-			return;
-		}
-		pendingForceClose = false;
-		forceScheduleClose();
-	}
-);
-
-watch(
-	() => cartStore.isSubmitting,
-	(submitting) => {
-		if (!submitting && pendingForceClose) {
-			pendingForceClose = false;
-			forceScheduleClose();
-		}
+		checkScheduleAutoClose();
 	}
 );
 
@@ -2070,6 +2165,7 @@ function handleCloseExistingShift() {
 }
 
 async function handleShiftClosed() {
+	isAutoClosing.value = false;
 	uiStore.showCloseShiftDialog = false;
 	showSuccess(__("Shift closed successfully"));
 

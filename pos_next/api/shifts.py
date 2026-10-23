@@ -7,7 +7,7 @@ import json
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import cint, flt, get_datetime, getdate, nowdate, nowtime
+from frappe.utils import add_to_date, cint, flt, get_datetime, getdate, now_datetime, nowdate, nowtime
 
 from pos_next.api.utilities import get_wallet_payment_modes
 from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
@@ -711,3 +711,21 @@ def _closing_time_info(shift):
 	if shift.pos_schedule_deadline:
 		return {"closing_time": shift.pos_schedule_deadline, "closing_source": "estimate"}
 	return {"closing_time": None, "closing_source": None}
+
+
+@frappe.whitelist()
+def get_recent_auto_closed_shift():
+	"""Return the user's most recent auto-closed POS Closing Shift created in the last 24h."""
+	cutoff = add_to_date(now_datetime(), hours=-24)
+	return frappe.db.get_value(
+		"POS Closing Shift",
+		{
+			"user": frappe.session.user,
+			"auto_closed": 1,
+			"docstatus": 1,
+			"creation": [">=", cutoff],
+		},
+		"name",
+		order_by="creation desc",
+	)
+

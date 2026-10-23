@@ -67,6 +67,7 @@
   "display_discount_amount",
   "show_customer_balance",
   "hide_expected_amount",
+  "auto_balance_closing",
   "section_break_misc",
   "use_limit_search",
   "column_break_misc",
@@ -539,6 +540,13 @@
    "label": "Hide Expected Amount"
   },
   {
+   "default": "0",
+   "description": "Closing amount is set to the expected amount; cashier enters no counted amounts",
+   "fieldname": "auto_balance_closing",
+   "fieldtype": "Check",
+   "label": "Auto-balance Closing"
+  },
+  {
    "fieldname": "section_break_misc",
    "fieldtype": "Section Break",
    "label": "Search"
@@ -966,7 +974,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-14 21:00:00.000000",
+ "modified": "2026-10-23 08:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

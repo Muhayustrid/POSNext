@@ -251,6 +251,11 @@ doc_events = {
 # spammed every System Manager's notifications. Task functions stay in
 # pos_next/tasks/branding_monitor.py (still covered by tests).
 scheduler_events = {
+	"cron": {
+		"*/5 * * * *": [
+			"pos_next.tasks.auto_close_shifts.auto_close_expired_shifts",
+		],
+	},
 	"daily": [
 		"pos_next.tasks.cleanup_expired_promotions.cleanup_expired_promotions",
 		"pos_next.tasks.reject_overdue.notify_overdue_drafts",

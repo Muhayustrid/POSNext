@@ -21,6 +21,7 @@ SALES_MANAGEMENT_FIELDS = (
 	"allow_user_to_edit_rate",
 	"allow_write_off_change",
 	"auto_apply_offers",
+	"auto_balance_closing",
 	"disable_rounded_total",
 	"max_discount_allowed",
 	"print_mode",

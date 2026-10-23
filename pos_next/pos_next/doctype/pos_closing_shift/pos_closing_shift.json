@@ -12,6 +12,7 @@
   "column_break_3",
   "posting_date",
   "pos_opening_shift",
+  "auto_closed",
   "section_break_5",
   "company",
   "column_break_7",
@@ -197,11 +198,18 @@
   {
    "fieldname": "section_break_if3m1",
    "fieldtype": "Section Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_closed",
+   "fieldtype": "Check",
+   "label": "Auto-closed by System",
+   "read_only": 1
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-23 01:26:41.295794",
+ "modified": "2026-10-23 15:45:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Closing Shift",
