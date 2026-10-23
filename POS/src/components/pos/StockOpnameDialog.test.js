@@ -211,8 +211,14 @@ describe("StockOpnameDialog list", () => {
 
 		const header = wrapper.find('[data-testid="list-header"]')
 		expect(header.exists()).toBe(true)
-		for (const label of ["ID", "Status", "Posting Date", "Items"])
-			expect(header.text()).toContain(label)
+		// shared list order: ID, dates, numbers, Status, Actions (docs/UI_GUIDELINES.md)
+		expect(header.findAll("th").map((th) => th.text())).toEqual([
+			"ID",
+			"Posting Date",
+			"Items",
+			"Status",
+			"Actions",
+		])
 		expect(listRow(wrapper, "SR-0001")).toBeTruthy()
 	})
 
@@ -227,14 +233,14 @@ describe("StockOpnameDialog list", () => {
 			]),
 		)
 		const wrapper = await mountOpenDialog()
-		const dot = (name) =>
-			listRow(wrapper, name).find('[data-testid="status-dot"]')
+		const pill = (name) =>
+			listRow(wrapper, name).find('[data-testid="status-pill"]')
 
-		expect(dot("SR-RET").classes()).toContain("bg-red-500")
-		expect(dot("SR-STAGE").classes()).toContain("bg-orange-400")
-		expect(dot("SR-PROC").classes()).toContain("bg-blue-500")
-		expect(dot("SR-DONE").classes()).toContain("bg-green-500")
-		expect(dot("SR-VOID").classes()).toContain("bg-gray-400")
+		expect(pill("SR-RET").classes()).toContain("bg-red-50")
+		expect(pill("SR-STAGE").classes()).toContain("bg-orange-50")
+		expect(pill("SR-PROC").classes()).toContain("bg-blue-50")
+		expect(pill("SR-DONE").classes()).toContain("bg-green-50")
+		expect(pill("SR-VOID").classes()).toContain("bg-gray-50")
 		// the label stays the raw workflow state, never a derived tone name
 		expect(listRow(wrapper, "SR-PROC").text()).toContain("Approved")
 	})

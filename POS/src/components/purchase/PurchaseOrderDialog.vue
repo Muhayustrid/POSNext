@@ -58,7 +58,7 @@
 				<div class="rounded-xl border border-gray-200 bg-white">
 					<!-- desktop column header; rows below share the same grid -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3"
 					>
 						<span>{{ __("PO Number") }}</span>
 						<span>{{ __("Supplier") }}</span>
@@ -1063,7 +1063,7 @@ const dialogTitle = computed(() => {
 
 function statusPill(status) {
 	return [
-		"inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
 		STATUS_TONES[status] || "bg-gray-50 text-gray-700 ring-gray-200",
 	]
 }

@@ -43,7 +43,7 @@
 				<div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
 					<!-- desktop column header -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_7rem_8rem_7rem] md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_7rem_8rem_11rem] md:gap-x-3"
 					>
 						<span>{{ __("Request") }}</span>
 						<span>{{ __("Purpose") }}</span>
@@ -71,7 +71,7 @@
 							v-for="r in requests"
 							:key="r.name"
 							type="button"
-							class="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 text-start transition-colors hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_7rem_8rem_7rem] md:gap-y-0"
+							class="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 text-start transition-colors hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_7rem_8rem_11rem] md:gap-y-0"
 							@click="openDetail(r.name)"
 						>
 							<span class="flex min-w-0 items-center gap-1.5">
@@ -198,15 +198,15 @@
 				</section>
 
 				<!-- Items child table (ERPNext / Frappe grid feel) -->
-				<section class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+				<section class="rounded-xl border border-gray-200 bg-white">
 					<div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
 						<h4 class="text-sm font-semibold text-gray-900">
 							{{ __("Items") }} <span class="text-red-500">*</span>
 						</h4>
 					</div>
 
-					<div class="md:overflow-x-auto">
-						<div class="md:min-w-[620px]">
+					<div>
+						<div>
 							<!-- Desktop & Tablet Table Header -->
 							<div
 								class="hidden border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_1.75rem_minmax(0,1.5fr)_5.5rem_4.5rem_8rem_minmax(0,1fr)_2.25rem] md:items-center md:gap-x-2"
@@ -413,7 +413,7 @@
 					</div>
 
 					<!-- Add Row & Delete Selected footer -->
-					<div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
+					<div class="flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
 						<div class="flex items-center gap-2">
 							<Button variant="subtle" size="sm" data-testid="add-row" @click="addRow">
 								<template #prefix>
@@ -667,15 +667,15 @@
 							</section>
 
 							<!-- Draft: editable Items child table -->
-							<section v-if="detail.workflow_state === 'Draft' && !detail.is_system_generated" class="overflow-hidden rounded-xl border border-gray-200 bg-white">
+							<section v-if="detail.workflow_state === 'Draft' && !detail.is_system_generated" class="rounded-xl border border-gray-200 bg-white">
 								<div class="flex items-center justify-between border-b border-gray-100 px-4 py-3">
 									<h4 class="text-sm font-semibold text-gray-900">
 										{{ __("Items") }} <span class="text-red-500">*</span>
 									</h4>
 								</div>
 
-								<div class="md:overflow-x-auto">
-									<div class="md:min-w-[620px]">
+								<div>
+									<div>
 										<!-- Desktop & Tablet Table Header -->
 										<div
 											class="hidden border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_1.75rem_minmax(0,1.5fr)_5.5rem_4.5rem_8rem_minmax(0,1fr)_2.25rem] md:items-center md:gap-x-2"
@@ -882,7 +882,7 @@
 								</div>
 
 								<!-- Add Row & Delete Selected footer -->
-								<div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
+								<div class="flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
 									<div class="flex items-center gap-2">
 										<Button variant="subtle" size="sm" data-testid="add-row" @click="addRow">
 											<template #prefix>
@@ -1263,7 +1263,7 @@ const STATUS_TONES = {
 
 function statusPill(status) {
 	return [
-		"inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
 		STATUS_TONES[status] || "bg-gray-50 text-gray-700 ring-gray-200",
 	]
 }

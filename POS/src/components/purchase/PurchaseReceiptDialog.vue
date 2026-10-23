@@ -132,18 +132,18 @@
 				<div class="rounded-xl border border-gray-200 bg-white">
 					<!-- desktop column header; rows below share the same grid -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:gap-x-3"
 						:class="
 							showPrices
-								? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_8rem_minmax(0,1.2fr)_2.5rem]'
-								: 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_8rem_2.5rem]'
+								? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_minmax(0,1.2fr)_10rem_2.5rem]'
+								: 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_10rem_2.5rem]'
 						"
 					>
 						<span>{{ __("Receipt No") }}</span>
 						<span>{{ __("Supplier") }}</span>
 						<span>{{ __("Posting Date") }}</span>
-						<span>{{ __("Status") }}</span>
 						<span v-if="showPrices" class="text-end">{{ __("Grand Total") }}</span>
+						<span>{{ __("Status") }}</span>
 						<span></span>
 					</div>
 
@@ -178,8 +178,8 @@
 								class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:gap-y-0 md:gap-x-3"
 								:class="
 									showPrices
-										? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_8rem_minmax(0,1.2fr)_2.5rem]'
-										: 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_8rem_2.5rem]'
+										? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_minmax(0,1.2fr)_10rem_2.5rem]'
+										: 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_10rem_2.5rem]'
 								"
 							>
 								<div class="flex min-w-0 items-center gap-1.5 md:order-1">
@@ -198,7 +198,7 @@
 									</span>
 								</div>
 								<!-- status sits top-right on cards, in its own column on desktop -->
-								<div class="justify-self-end md:order-4 md:justify-self-start">
+								<div class="justify-self-end md:order-5 md:justify-self-start">
 									<span :class="statusPill(receipt.workflow_state || receipt.status)">
 										{{ __(receipt.workflow_state || receipt.status) }}
 									</span>
@@ -209,7 +209,7 @@
 								<p class="text-xs text-gray-500 md:order-3 md:text-sm md:text-gray-700">
 									{{ formatDate(receipt.posting_date) }}
 								</p>
-								<div v-if="showPrices" class="text-end md:order-5">
+								<div v-if="showPrices" class="text-end md:order-4">
 									<p
 										v-if="'grand_total' in receipt && receipt.grand_total != null"
 										class="text-sm font-medium tabular-nums text-gray-900"
@@ -375,7 +375,7 @@ function resolveConfirm(value) {
 
 function statusPill(status) {
 	return [
-		"inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
 		STATUS_TONES[status] || "bg-blue-50 text-blue-700 ring-blue-200",
 	]
 }

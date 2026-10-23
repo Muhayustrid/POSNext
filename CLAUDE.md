@@ -33,6 +33,7 @@ Frappe/ERPNext app (`pos_next`) with a Vue 3 POS SPA in `POS/`. Origin fork: `Mu
 ## Conventions
 - Branches: work happens on `main`. `develop` (origin default) intentionally differs; never sync it casually.
 - Conventional commits with scope; descriptions in Indonesian.
+- SPA list/grid/status layout rules: `docs/UI_GUIDELINES.md`.
 - Translations: allowed languages come from POS Settings; new UI strings need CSV entries (`docs/LOCALIZATION.md`).
 
 ## Traps

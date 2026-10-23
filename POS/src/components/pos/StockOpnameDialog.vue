@@ -39,9 +39,9 @@
 								class="hidden border-b border-gray-200 bg-gray-50 text-xs font-medium text-gray-500 md:table-row"
 							>
 								<th class="px-4 py-2 text-start font-medium">{{ __("ID") }}</th>
-								<th class="px-4 py-2 text-start font-medium">{{ __("Status") }}</th>
 								<th class="px-4 py-2 text-start font-medium">{{ __("Posting Date") }}</th>
 								<th class="px-4 py-2 text-end font-medium">{{ __("Items") }}</th>
+								<th class="w-44 px-4 py-2 text-start font-medium">{{ __("Status") }}</th>
 								<th class="w-px px-4 py-2"><span class="sr-only">{{ __("Actions") }}</span></th>
 							</tr>
 						</thead>
@@ -55,7 +55,7 @@
 								@click="openDoc(o.name)"
 								@keydown.enter="openDoc(o.name)"
 							>
-								<td class="col-span-2 min-w-0 break-all font-semibold text-gray-900 md:break-normal md:px-4 md:py-3">
+								<td class="order-1 min-w-0 break-all font-semibold text-gray-900 md:break-normal md:px-4 md:py-3">
 									{{ o.name }}
 									<p
 										v-if="o.returned && o.reject_reason"
@@ -65,21 +65,16 @@
 										{{ o.reject_reason }}
 									</p>
 								</td>
-								<td class="md:px-4 md:py-3">
-									<span class="inline-flex items-center gap-1.5">
-										<span
-											data-testid="status-dot"
-											:class="['h-2 w-2 shrink-0 rounded-full', toneClass(o)]"
-										></span>
-										<span class="text-gray-700">{{ o.workflow_state }}</span>
-									</span>
-								</td>
-								<td class="text-end text-gray-700 md:px-4 md:py-3 md:text-start">{{ formatDate(o.posting_date) }}</td>
-								<td class="text-xs tabular-nums text-gray-500 md:px-4 md:py-3 md:text-end md:text-sm md:text-gray-900">
+								<td class="order-3 text-gray-700 md:px-4 md:py-3">{{ formatDate(o.posting_date) }}</td>
+								<td class="order-4 text-end text-xs tabular-nums text-gray-500 md:px-4 md:py-3 md:text-sm md:text-gray-900">
 									<span class="md:hidden">{{ __("{0} items", [o.item_count]) }}</span>
 									<span class="hidden md:inline">{{ o.item_count }}</span>
 								</td>
-								<td class="text-end empty:hidden md:px-4 md:py-3 md:empty:table-cell">
+								<!-- status sits top-right on cards, before Actions on desktop -->
+								<td class="order-2 justify-self-end md:px-4 md:py-3">
+									<span data-testid="status-pill" :class="statusPill(o)">{{ o.workflow_state }}</span>
+								</td>
+								<td class="order-5 col-span-2 text-end empty:hidden md:px-4 md:py-3 md:empty:table-cell">
 									<Button
 										v-if="!o.docstatus && o.editable"
 										data-testid="row-continue"
@@ -796,6 +791,22 @@ function toneClass(row) {
 	if (row.processing) return "bg-blue-500"
 	if (row.returned || row.editable) return "bg-red-500"
 	return "bg-orange-400"
+}
+
+const PILL_TONES = {
+	"bg-green-500": "bg-green-50 text-green-700 ring-green-200",
+	"bg-gray-400": "bg-gray-50 text-gray-500 ring-gray-200",
+	"bg-blue-500": "bg-blue-50 text-blue-700 ring-blue-200",
+	"bg-red-500": "bg-red-50 text-red-700 ring-red-200",
+	"bg-orange-400": "bg-orange-50 text-orange-700 ring-orange-200",
+}
+
+// list pill, same shape as the other SPA lists (docs/UI_GUIDELINES.md)
+function statusPill(row) {
+	return [
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		PILL_TONES[toneClass(row)],
+	]
 }
 
 const editable = computed(() => !!editor.value?.editable)
