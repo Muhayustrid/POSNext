@@ -38,3 +38,4 @@ pos_next.patches.v2_22_0.add_offline_price_mismatch_field
 pos_next.patches.v2_23_0.install_stock_opname_workflow
 pos_next.patches.v2_24_0.remove_backdate_entry_page
 pos_next.patches.v2_25_0.install_reject_request_workflow
+pos_next.patches.v2_26_0.merge_shift_profiles
