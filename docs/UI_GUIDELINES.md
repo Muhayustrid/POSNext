@@ -91,6 +91,4 @@ Pick one per screen; prefer the pager for HQ-facing lists.
 ## 5. Known deviations to fix later
 
 - `InvoiceManagement.vue` lists: not yet audited against these rules.
-- Stock Opname list has no status filter chips (backend `list_opnames` has no
-  status filter yet).
 - Reject Request uses "Load More", the others use a pager.

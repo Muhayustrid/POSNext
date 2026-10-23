@@ -201,6 +201,30 @@ class TestStockOpnameOverride(FrappeTestCase):
 			(0, 0, 0, 0),
 		)
 
+	def test_draft_fills_per_uom_valuation_rate(self):
+		# warehouse_app shows "Valuation Rate (as per UOM)" next to the native
+		# rate; an outlet count never sends a rate, so it must mirror the native one.
+		if not frappe.get_meta("Stock Reconciliation Item").has_field("custom_valuation_rate_per_uom"):
+			self.skipTest("warehouse_app per-UOM fields not installed")
+		item = _make_test_item(uoms=[{"uom": "Box", "conversion_factor": 6}])
+		_seed_stock(item, self.warehouse, 12)
+		doc = frappe.get_doc(
+			{
+				"doctype": DOCTYPE,
+				"company": self.company,
+				"purpose": "Stock Reconciliation",
+				"set_warehouse": self.warehouse,
+				"items": [
+					{"item_code": item, "warehouse": self.warehouse, "custom_uom": "Box", "custom_qty_after": 1}
+				],
+			}
+		)
+		self.addCleanup(self._delete_sr, None, doc)
+		doc.insert(ignore_permissions=True)
+		row = doc.items[0]
+		self.assertTrue(row.valuation_rate)
+		self.assertAlmostEqual(row.custom_valuation_rate_per_uom, row.valuation_rate * 6, places=2)
+
 	def test_submit_with_all_rows_equal_raises_clear_message(self):
 		item = _make_test_item()
 		_seed_stock(item, self.warehouse, 5)

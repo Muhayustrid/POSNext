@@ -3484,3 +3484,12 @@ return_reason cannot be modified directly,return_reason tidak dapat diubah langs
 total_amount cannot be modified directly,total_amount tidak dapat diubah langsung
 work_order cannot be modified directly,work_order tidak dapat diubah langsung
 {0} cannot be modified directly,{0} tidak dapat diubah langsung
+"Search ID or item...","Cari ID atau item...",""
+"Stock opname is back in draft","Stock opname kembali ke draf",""
+"Failed to revise stock opname","Gagal merevisi stock opname",""
+"Revise","Revisi",""
+"Fetch Items","Ambil Item",""
+"Not counted","Belum dihitung",""
+"{0} items added","{0} item ditambahkan",""
+"No new items to add","Tidak ada item baru",""
+"Failed to fetch items","Gagal mengambil item",""

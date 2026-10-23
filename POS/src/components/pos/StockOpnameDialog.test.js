@@ -84,6 +84,8 @@ const ATTACH_URL = "pos_next.api.stock_opname.attach_opname_files"
 const REMOVE_URL = "pos_next.api.stock_opname.remove_opname_attachment"
 const SEARCH_URL = "pos_next.api.stock_opname.search_opname_items"
 const GROUPS_URL = "pos_next.api.items.get_item_groups"
+const STATES_URL = "pos_next.api.stock_opname.get_opname_states"
+const FETCH_URL = "pos_next.api.stock_opname.fetch_opname_items"
 
 function mockCall(url, impl) {
 	handlers.calls[url] = vi.fn(impl)
@@ -192,6 +194,7 @@ beforeEach(() => {
 	mockCall(LIST_URL, () => Promise.resolve([]))
 	mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC }))
 	mockCall(GROUPS_URL, () => Promise.resolve([]))
+	mockCall(STATES_URL, () => Promise.resolve([]))
 	globalThis.fetch = vi.fn(() =>
 		Promise.resolve({
 			ok: true,
@@ -301,6 +304,94 @@ describe("StockOpnameDialog list", () => {
 		const wrapper = await mountOpenDialog()
 		expect(findButton(wrapper, "Continue")).toBeUndefined()
 		expect(findButton(wrapper, "New Count")).toBeUndefined()
+	})
+})
+
+describe("StockOpnameDialog list filters", () => {
+	it("renders status chips from the workflow and filters by status", async () => {
+		mockCall(STATES_URL, () =>
+			Promise.resolve(["Draft", "Rejected", "Approved"]),
+		)
+		const listCall = mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		const wrapper = await mountOpenDialog()
+
+		const chips = wrapper.findAll('[data-testid="status-chip"]')
+		expect(chips.map((c) => c.text())).toEqual([
+			"All",
+			"Draft",
+			"Rejected",
+			"Approved",
+		])
+		await chips.find((c) => c.text() === "Rejected").trigger("click")
+		await flushPromises()
+		expect(listCall.mock.calls.at(-1)[0]).toMatchObject({
+			status: "Rejected",
+			start: 0,
+		})
+		// a filtered page cannot tell whether an open count exists elsewhere
+		expect(findButton(wrapper, "New Count")).toBeUndefined()
+	})
+
+	it("searches after the debounce and resets to page 1", async () => {
+		const listCall = mockCall(LIST_URL, () => Promise.resolve([]))
+		const wrapper = await mountOpenDialog()
+		await wrapper.find('[data-testid="list-search"]').setValue("  ITEM-A ")
+		await new Promise((r) => setTimeout(r, 400))
+		await flushPromises()
+		expect(listCall.mock.calls.at(-1)[0]).toMatchObject({
+			search: "ITEM-A",
+			start: 0,
+		})
+		expect(wrapper.text()).toContain("Try a different search or status")
+	})
+})
+
+describe("StockOpnameDialog revise", () => {
+	it("revises a rejected count back to an editable draft without leaving the page", async () => {
+		const REJ = {
+			...DRAFT_DOC,
+			name: "SR-RET",
+			workflow_state: "Rejected",
+			returned: true,
+			editable: true,
+			actions: ["Revise"],
+		}
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{
+					...ROW_DRAFT,
+					name: "SR-RET",
+					workflow_state: "Rejected",
+					returned: true,
+				},
+			]),
+		)
+		mockCall(GET_URL, () => Promise.resolve(REJ))
+		const submitCall = mockCall(SUBMIT_URL, () =>
+			Promise.resolve({
+				...REJ,
+				workflow_state: "Draft",
+				returned: false,
+				modified: "m2",
+				actions: ["Submit"],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper, "SR-RET")
+
+		const primary = wrapper.find('[data-testid="primary-action"]')
+		expect(primary.text()).toContain("Revise")
+		await primary.trigger("click")
+		await flushPromises()
+		expect(submitCall.mock.calls[0][0]).toMatchObject({
+			name: "SR-RET",
+			action: "Revise",
+		})
+		// stays on the doc, now a draft with Submit as the next step
+		expect(wrapper.find('[data-testid="doc-header"]').text()).toContain("Draft")
+		expect(wrapper.find('[data-testid="primary-action"]').text()).toContain(
+			"Submit",
+		)
 	})
 })
 
@@ -860,6 +951,40 @@ describe("StockOpnameDialog item grid", () => {
 			item_code: "MILK",
 			batch_no: "B1",
 		})
+	})
+
+	it("fetches warehouse items as blank rows and saves only counted ones", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(FETCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+				{ item_code: "ITEM-B", item_name: "Beta", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const saveCall = mockCall(SAVE_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				items: [{ ...DRAFT_DOC.items[0], item_code: "ITEM-A", item_name: "Alpha", qty: 4 }],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await wrapper.find('[data-testid="fetch-items"]').trigger("click")
+		await flushPromises()
+
+		const inputs = wrapper.findAll('[data-testid="qty-input"]')
+		expect(inputs).toHaveLength(2)
+		// blind count: no qty is prefilled
+		expect(inputs.map((i) => i.element.value)).toEqual(["", ""])
+		await inputs[0].setValue("4")
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+
+		// a blank row is "not counted", never a 0 that would wipe the stock
+		expect(saveCall.mock.calls[0][0].data.items.map((i) => i.item_code)).toEqual(["ITEM-A"])
+		// the uncounted row survives the save so the count can continue
+		expect(wrapper.findAll('[data-testid="qty-input"]')).toHaveLength(2)
 	})
 
 	it("rejects a duplicate plain item and clears the row", async () => {

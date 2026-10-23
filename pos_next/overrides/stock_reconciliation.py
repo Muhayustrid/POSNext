@@ -21,6 +21,7 @@ from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import (
 	StockReconciliation,
 )
 from frappe import _
+from frappe.utils import flt
 
 from pos_next.services.production import _resolve_profile
 from pos_next.stock_opname_setup import HQ_ROLES
@@ -66,6 +67,7 @@ class CustomStockReconciliation(StockReconciliation):
 				row.custom_qty_before = 0
 				row.custom_qty_difference_per_uom = 0
 		super().validate()
+		self._fill_per_uom_valuation_rate()
 		# Draft rows have no live current qty yet, so ERPNext's differences read
 		# as "counted vs zero"; blank them (HQ Desk shows live values instead).
 		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
@@ -78,6 +80,22 @@ class CustomStockReconciliation(StockReconciliation):
 				row.quantity_difference = 0
 				row.amount_difference = 0
 			self.difference_amount = 0
+
+	def _fill_per_uom_valuation_rate(self):
+		"""Mirror ERPNext's default valuation_rate into warehouse_app's
+		`custom_valuation_rate_per_uom` (outlet counts never send a rate), so the
+		Desk row shows both. An explicit rate, or an allowed zero, is kept."""
+		if not frappe.get_meta("Stock Reconciliation Item").has_field("custom_valuation_rate_per_uom"):
+			return
+		for row in self.items:
+			rate = row.get("custom_valuation_rate_per_uom")
+			if rate not in (None, "") and (flt(rate) or row.get("allow_zero_valuation_rate")):
+				continue
+			if flt(row.valuation_rate):
+				factor = flt(row.get("custom_conversion_factor")) or 1
+				row.custom_valuation_rate_per_uom = flt(
+					flt(row.valuation_rate) * factor, row.precision("custom_valuation_rate_per_uom")
+				)
 
 	def submit(self):
 		# The background worker reloads from DB, losing the in-memory

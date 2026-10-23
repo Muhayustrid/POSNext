@@ -439,6 +439,59 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		)
 		self.assertEqual(again["workflow_state"], STATE_DRAFT)
 
+	def test_multi_role_user_gets_each_action_once(self):
+		from pos_next.api.stock_opname import save_opname
+
+		# one transition row per allowed role must not repeat the action
+		for role in ("POSNext Manager", "Stock Manager"):
+			frappe.get_doc(
+				{"doctype": "Has Role", "parent": self.cashier, "parenttype": "User", "parentfield": "roles", "role": role}
+			).insert(ignore_permissions=True)
+		frappe.clear_cache(user=self.cashier)
+
+		def drop_roles():
+			frappe.set_user(ADMIN)
+			frappe.db.delete("Has Role", {"parent": self.cashier, "role": ("in", ["POSNext Manager", "Stock Manager"])})
+			frappe.clear_cache(user=self.cashier)
+
+		self.addCleanup(drop_roles)
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self.assertEqual(payload["actions"], ["Submit"])
+
+	def test_rejected_offers_revise_action(self):
+		from pos_next.api.stock_opname import get_opname, save_opname, submit_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		frappe.set_user(ADMIN)
+		frappe.get_doc(DOCTYPE, payload["name"]).db_set("workflow_state", STATE_REJECTED)
+		frappe.db.commit()
+		self._cashier()
+		got = get_opname(self.profile, payload["name"])
+		self.assertEqual(got["actions"], ["Revise"])
+		revised = submit_opname(self.profile, payload["name"], action="Revise")
+		self.assertEqual(revised["workflow_state"], STATE_DRAFT)
+		self.assertTrue(revised["editable"])
+		self.assertFalse(revised["returned"])
+		self.assertEqual(revised["actions"], ["Submit"])
+
+	def test_list_filters_by_status_and_search(self):
+		from pos_next.api.stock_opname import get_opname_states, list_opnames, save_opname
+
+		self._cashier()
+		first = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 1}]})
+		frappe.db.set_value(DOCTYPE, first["name"], {"docstatus": 2, "workflow_state": "Cancelled"})
+		second = save_opname(self.profile, {"items": [{"item_code": self.other_plain, "qty": 2}]})
+
+		names = lambda **kw: [r["name"] for r in list_opnames(self.profile, **kw)]  # noqa: E731
+		self.assertEqual(names(status=STATE_DRAFT), [second["name"]])
+		self.assertEqual(names(status="Cancelled"), [first["name"]])
+		self.assertEqual(names(search=self.other_plain), [second["name"]])
+		self.assertEqual(names(search=first["name"]), [first["name"]])
+		self.assertEqual(names(search="no-such-opname-xyz"), [])
+		self.assertEqual(get_opname_states(self.profile)[0], STATE_DRAFT)
+
 	def test_foreign_profile_denied(self):
 		from pos_next.api import stock_opname
 
@@ -631,6 +684,22 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		serial_rows = [r for r in data if r[0] == self.serial_item]
 		self.assertEqual({r[4] for r in serial_rows}, set(self.serials))
 		self.assertEqual(len([r for r in data if r[0] == self.plain]), 1)
+
+	def test_fetch_items_lists_warehouse_items_without_qty_or_rate(self):
+		from pos_next.api.stock_opname import fetch_opname_items
+
+		self._cashier()
+		rows = fetch_opname_items(self.profile)
+		by_code = {}
+		for r in rows:
+			by_code.setdefault(r["item_code"], []).append(r)
+		self.assertEqual(len(by_code[self.plain]), 1)
+		self.assertEqual({r["batch_no"] for r in by_code[self.batch_item]}, {self.batch_a, self.batch_b})
+		self.assertEqual(set(by_code[self.serial_item][0]["serial_nos"]), set(self.serials))
+		# blind count: no quantity, rate or amount ever reaches the outlet
+		allowed = {"item_code", "item_name", "stock_uom", "has_batch_no", "has_serial_no", "batch_no", "serial_nos", "uoms"}
+		for r in rows:
+			self.assertLessEqual(set(r.keys()), allowed)
 
 	def test_template_item_group_filter_includes_descendants(self):
 		from pos_next.api.stock_opname import _template_rows

@@ -7,16 +7,55 @@
 		<template #body-content>
 			<!-- LIST -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<div class="flex flex-wrap items-center justify-end gap-3">
-					<div class="flex items-center gap-2">
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<div class="relative w-full sm:w-72">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="searchTerm"
+							type="search"
+							data-testid="list-search"
+							class="h-8 w-full rounded-lg border border-gray-200 bg-white ps-8 pe-2 text-sm focus:border-gray-400 focus:outline-none"
+							:placeholder="__('Search ID or item...')"
+							:aria-label="__('Search ID or item...')"
+							@input="onSearchInput"
+						/>
+					</div>
+					<div class="ms-auto flex items-center gap-2">
 						<RefreshButton :loading="loading" @click="loadList()" />
-						<Button v-if="page === 0 && !hasOpenOpname" variant="solid" @click="openNew">
+						<Button v-if="page === 0 && !filtered && !hasOpenOpname" variant="solid" @click="openNew">
 							<template #prefix>
 								<FeatherIcon name="plus" class="h-4 w-4" />
 							</template>
 							{{ __("New Count") }}
 						</Button>
 					</div>
+				</div>
+
+				<div
+					v-if="statusTabs.length > 1"
+					class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5"
+					role="group"
+					:aria-label="__('Status')"
+				>
+					<button
+						v-for="tab in statusTabs"
+						:key="tab.value"
+						type="button"
+						data-testid="status-chip"
+						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						:class="
+							statusFilter === tab.value
+								? 'border-gray-900 bg-gray-900 text-white'
+								: 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
+						"
+						:aria-pressed="statusFilter === tab.value"
+						@click="setStatusFilter(tab.value)"
+					>
+						{{ tab.label }}
+					</button>
 				</div>
 
 				<div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -30,7 +69,9 @@
 					</div>
 					<div v-else-if="!opnames.length" class="px-4 py-8 text-center">
 						<p class="text-sm font-medium text-gray-900">{{ __("No stock opname yet") }}</p>
-						<p class="mt-1 text-xs text-gray-500">{{ __("Start one with New Count") }}</p>
+						<p class="mt-1 text-xs text-gray-500">
+							{{ filtered ? __("Try a different search or status") : __("Start one with New Count") }}
+						</p>
 					</div>
 					<table v-else class="w-full text-sm">
 						<thead>
@@ -311,6 +352,12 @@
 										{{ g.item_group }}
 									</option>
 								</select>
+								<Button variant="subtle" data-testid="fetch-items" :loading="fetching" @click="fetchItems">
+									<template #prefix>
+										<FeatherIcon name="list" class="h-4 w-4" />
+									</template>
+									{{ __("Fetch Items") }}
+								</Button>
 								<Button variant="subtle" @click="downloadTemplate">
 									<template #prefix>
 										<FeatherIcon name="download" class="h-4 w-4" />
@@ -494,6 +541,7 @@
 										<input
 											v-else-if="row.item_code"
 											v-model.number="row.qty"
+											:placeholder="__('Not counted')"
 											type="number"
 											min="0"
 											step="any"
@@ -708,6 +756,7 @@ watch(
 		if (v) {
 			view.value = "list"
 			page.value = 0
+			loadStates()
 			loadList()
 		}
 	},
@@ -729,6 +778,7 @@ const editor = ref(null)
 const snapshot = ref(null)
 
 const itemGroups = ref([])
+const fetching = ref(false)
 const itemGroup = ref("")
 
 const saving = ref(false)
@@ -840,6 +890,8 @@ async function loadList() {
 				pos_profile: props.posProfile,
 				start: page.value * PAGE_SIZE,
 				page_length: PAGE_SIZE + 1,
+				status: statusFilter.value || undefined,
+				search: searchTerm.value.trim() || undefined,
 			})) || []
 		hasMore.value = rows.length > PAGE_SIZE
 		opnames.value = rows.slice(0, PAGE_SIZE)
@@ -853,6 +905,43 @@ async function loadList() {
 function goPage(n) {
 	page.value = Math.max(n, 0)
 	loadList()
+}
+
+// Status chips follow the active workflow's states, so an admin flow works too.
+const states = ref([])
+const statusFilter = ref("")
+const searchTerm = ref("")
+const filtered = computed(
+	() => !!(statusFilter.value || searchTerm.value.trim()),
+)
+const statusTabs = computed(() => [
+	{ value: "", label: __("All") },
+	...states.value.map((s) => ({ value: s, label: __(s) })),
+])
+
+async function loadStates() {
+	if (!props.posProfile || states.value.length) return
+	try {
+		states.value =
+			(await call(`${API}.get_opname_states`, {
+				pos_profile: props.posProfile,
+			})) || []
+	} catch {
+		// chips are optional: the list still works unfiltered
+	}
+}
+
+function setStatusFilter(value) {
+	if (statusFilter.value === value) return
+	statusFilter.value = value
+	goPage(0)
+}
+
+let listSearchTimer = null
+onBeforeUnmount(() => clearTimeout(listSearchTimer))
+function onSearchInput() {
+	clearTimeout(listSearchTimer)
+	listSearchTimer = setTimeout(() => goPage(0), 350)
 }
 
 // ---------------------------------------------------------------------------
@@ -1292,6 +1381,7 @@ function checkBatchDuplicate(row) {
 }
 
 function toggleSerial(row, serial) {
+	row.uncounted = false
 	const i = row.serial_nos.indexOf(serial)
 	if (i === -1) row.serial_nos.push(serial)
 	else row.serial_nos.splice(i, 1)
@@ -1305,13 +1395,15 @@ function scanSerial(row, event) {
 		showError(__("Unknown serial"))
 		return
 	}
+	row.uncounted = false
 	if (!row.serial_nos.includes(value)) row.serial_nos.push(value)
 }
 
 function buildItems() {
-	// an Add Row row without a picked item is not a count
+	// an Add Row row without a picked item is not a count, nor is a fetched
+	// row left blank: saving it as 0 would wipe that item's stock
 	return editor.value.items
-		.filter((r) => r.item_code)
+		.filter((r) => r.item_code && !isUncounted(r))
 		.map((r) => {
 			const out = {
 				item_code: r.item_code,
@@ -1327,6 +1419,59 @@ function buildItems() {
 			}
 			return out
 		})
+}
+
+function isUncounted(row) {
+	return row.is_serial ? !!row.uncounted : row.qty === "" || row.qty == null
+}
+
+// Like ERPNext's "Fetch Items from Warehouse", minus quantities (blind count):
+// every item of the warehouse lands as a blank row the outlet fills in.
+async function fetchItems() {
+	if (fetching.value) return
+	fetching.value = true
+	try {
+		const rows =
+			(await call(`${API}.fetch_opname_items`, {
+				pos_profile: props.posProfile,
+				item_group: itemGroup.value || undefined,
+			})) || []
+		const items = editor.value.items
+		let added = 0
+		for (const item of rows) {
+			const exists = items.some(
+				(r) =>
+					r.item_code === item.item_code &&
+					(!item.has_batch_no || r.batch_no === item.batch_no),
+			)
+			if (exists) continue
+			const serial = !!item.has_serial_no
+			items.push(
+				blankRow({
+					item_code: item.item_code,
+					item_name: item.item_name || item.item_code,
+					stock_uom: item.stock_uom,
+					uom: item.stock_uom,
+					uoms: altUoms(item),
+					qty: "",
+					batch_no: item.batch_no || null,
+					batches: item.batch_no ? [{ batch_no: item.batch_no }] : [],
+					has_batch_no: item.has_batch_no,
+					has_serial_no: item.has_serial_no,
+					serial_options: serial ? [...(item.serial_nos || [])] : [],
+					is_serial: serial,
+					uncounted: serial,
+				}),
+			)
+			added++
+		}
+		if (added) showSuccess(__("{0} items added", [added]))
+		else showSuccess(__("No new items to add"))
+	} catch (err) {
+		showError(errMsg(err, "Failed to fetch items"))
+	} finally {
+		fetching.value = false
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1358,7 +1503,11 @@ async function save() {
 			pos_profile: props.posProfile,
 			data,
 		})
+		const uncounted = editor.value.items.filter(
+			(r) => r.item_code && isUncounted(r),
+		)
 		applyEditor(payload)
+		editor.value.items.push(...uncounted)
 		// a save response only carries the ticked serials; refetch so the
 		// remaining serials of a serial item stay tickable
 		await ensureSerialOptions()
@@ -1377,6 +1526,8 @@ async function save() {
 async function submitAction(action) {
 	if (submitting.value || !action) return
 	actionsMenuOpen.value = false
+	// a returned count's action sends it back to draft for editing
+	if (editor.value.returned) return reviseAction(action)
 	const ok = await confirmAsk({
 		title: __("Submit Stock Opname"),
 		message: __("After submitting you cannot edit until HQ decides"),
@@ -1403,6 +1554,24 @@ async function submitAction(action) {
 		goList()
 	} catch (err) {
 		showError(errMsg(err, "Failed to submit stock opname"))
+	} finally {
+		submitting.value = false
+	}
+}
+
+async function reviseAction(action) {
+	submitting.value = true
+	try {
+		applyEditor(
+			await call(`${API}.submit_opname`, {
+				pos_profile: props.posProfile,
+				name: editor.value.name,
+				action,
+			}),
+		)
+		showSuccess(__("Stock opname is back in draft"))
+	} catch (err) {
+		showError(errMsg(err, "Failed to revise stock opname"))
 	} finally {
 		submitting.value = false
 	}
@@ -1582,6 +1751,7 @@ function errMsg(err, fallback) {
 
 if (props.modelValue) {
 	view.value = "list"
+	loadStates()
 	loadList()
 }
 </script>

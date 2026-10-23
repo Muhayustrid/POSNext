@@ -14,7 +14,13 @@ import math
 
 import frappe
 from frappe import ValidationError, _
-from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name
+from frappe.model.workflow import (
+	apply_workflow,
+	get_transitions,
+	get_workflow,
+	get_workflow_name,
+	has_approval_access,
+)
 from frappe.utils import (
 	add_days,
 	cint,
@@ -93,11 +99,24 @@ def _state_flags(doc_or_row, wf, roles):
 	}
 
 
-def _submit_actions(doc, wf):
-	"""Actions the user may apply to submit, from the initial state only."""
-	if wf is None or doc.is_new() or doc.get("workflow_state") != _initial_state(wf):
+def _doc_actions(doc, wf):
+	"""Workflow actions the outlet may apply: submit from the initial state, or
+	send back (revise) from a returned state; approval stages stay in Desk.
+
+	One entry per action name: the workflow has a transition row per allowed
+	role, so a user holding several roles would otherwise get duplicates.
+	Self-approval is checked here so no action is offered that would fail.
+	"""
+	if wf is None or doc.is_new():
 		return []
-	return [transition["action"] for transition in get_transitions(doc)]
+	state = doc.get("workflow_state")
+	if state != _initial_state(wf) and state not in _returned_states(wf):
+		return []
+	actions = []
+	for transition in get_transitions(doc, wf):
+		if transition["action"] not in actions and has_approval_access(frappe.session.user, doc, transition):
+			actions.append(transition["action"])
+	return actions
 
 
 def _parse_data(data):
@@ -468,7 +487,7 @@ def _payload(doc):
 		"editable": flags["editable"],
 		"returned": flags["returned"],
 		"processing": flags["processing"],
-		"actions": _submit_actions(doc, wf),
+		"actions": _doc_actions(doc, wf),
 		"items": items,
 		"attachments": _attachments(doc.name),
 		"activity": _activity(doc),
@@ -493,14 +512,32 @@ def _attachments(name):
 
 
 @frappe.whitelist()
-def list_opnames(pos_profile, start=0, page_length=50):
-	"""Newest-first opnames of the profile warehouse, one page at a time."""
+def list_opnames(pos_profile, start=0, page_length=50, status=None, search=None):
+	"""Newest-first opnames of the profile warehouse, one page at a time.
+
+	`status` filters on the workflow state; `search` matches the opname ID or
+	a counted item's code/name.
+	"""
 	_company, warehouse = _profile_warehouse(pos_profile)
 	try:
+		filters = {"set_warehouse": warehouse}
+		if status:
+			filters["workflow_state"] = status
+		or_filters = None
+		search = (search or "").strip()
+		if search:
+			like = f"%{search}%"
+			or_filters = [
+				["name", "like", like],
+				["Stock Reconciliation Item", "item_code", "like", like],
+				["Stock Reconciliation Item", "item_name", "like", like],
+			]
 		rows = frappe.get_all(
 			DOCTYPE,
-			filters={"set_warehouse": warehouse},
-			fields=["name", "posting_date", "posting_time", "workflow_state", "docstatus", "modified"],
+			filters=filters,
+			or_filters=or_filters,
+			fields=["name", "posting_date", "posting_time", "workflow_state", "docstatus", "modified", "creation"],
+			distinct=True,
 			order_by="creation desc",
 			limit_start=max(cint(start), 0),
 			limit_page_length=min(max(cint(page_length), 1), 100),
@@ -532,6 +569,14 @@ def list_opnames(pos_profile, start=0, page_length=50):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "List Stock Opnames Error")
 		frappe.throw(_("Error fetching stock opnames: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_opname_states(pos_profile):
+	"""Workflow state names in workflow order, for the list status filter."""
+	_profile_warehouse(pos_profile)
+	wf = _workflow()
+	return [s.state for s in wf.states] if wf else []
 
 
 @frappe.whitelist()
@@ -673,8 +718,12 @@ def save_opname(pos_profile, data):
 
 @frappe.whitelist()
 def submit_opname(pos_profile, name, action=None):
-	"""Preserve an outlet-set posting date, else stamp now; apply the workflow's
-	submit action from the initial state to send it to the first approval stage."""
+	"""Apply an outlet workflow action and return the fresh payload.
+
+	From the initial state (submit) an outlet-set posting date is preserved,
+	else stamped now. From a returned state the action sends the count back
+	to the initial state (revise) so the outlet can edit it again.
+	"""
 	_company, warehouse = _profile_warehouse(pos_profile)
 	try:
 		doc = _get_doc(name)
@@ -682,7 +731,7 @@ def submit_opname(pos_profile, name, action=None):
 		wf = _workflow()
 		if wf is None:
 			frappe.throw(_("No active workflow for Stock Reconciliation; ask HQ to activate one"), ValidationError)
-		actions = _submit_actions(doc, wf)
+		actions = _doc_actions(doc, wf)
 		if not actions:
 			frappe.throw(_("You are not allowed to submit this count, ask HQ"), ValidationError)
 		if action:
@@ -692,17 +741,18 @@ def submit_opname(pos_profile, name, action=None):
 			action = actions[0]
 		else:
 			frappe.throw(_("Choose an action: {0}").format(", ".join(actions)), ValidationError)
-		_assert_not_frozen(doc.posting_date or nowdate())
-		# Preserve an outlet backdate (save already capped and guarded it); only
-		# stamp now when the posting date is still the save-moment default (today).
-		if getdate(doc.posting_date or nowdate()) >= getdate(nowdate()):
-			doc.posting_date = nowdate()
-			doc.posting_time = nowtime()
-		doc.set_posting_time = 1
-		doc.save()
+		if doc.workflow_state == _initial_state(wf):
+			_assert_not_frozen(doc.posting_date or nowdate())
+			# Preserve an outlet backdate (save already capped and guarded it); only
+			# stamp now when the posting date is still the save-moment default (today).
+			if getdate(doc.posting_date or nowdate()) >= getdate(nowdate()):
+				doc.posting_date = nowdate()
+				doc.posting_time = nowtime()
+			doc.set_posting_time = 1
+			doc.save()
 		apply_workflow(doc, action)
 		doc.reload()
-		return {"name": doc.name, "workflow_state": doc.workflow_state}
+		return _payload(doc)
 	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
@@ -890,8 +940,10 @@ def search_opname_items(pos_profile, search_term=None, start=0, limit=10):
 		frappe.throw(_("Error searching items: {0}").format(str(e)))
 
 
-def _template_rows(warehouse, item_group=None):
-	"""Blank count rows: one per item with a Bin, per stocked batch / warehouse serial."""
+def _warehouse_items(warehouse, item_group=None):
+	"""Count rows for every item with a Bin in the warehouse: one per stocked
+	batch, one per serial item (its warehouse serials as options), one per plain
+	item. Never carries a quantity (blind count)."""
 	item_codes = frappe.get_all("Bin", filters={"warehouse": warehouse}, pluck="item_code", distinct=True)
 	if not item_codes:
 		return []
@@ -909,10 +961,17 @@ def _template_rows(warehouse, item_group=None):
 
 	rows = []
 	for item in items:
+		base = {
+			"item_code": item.item_code,
+			"item_name": item.item_name,
+			"stock_uom": item.stock_uom,
+			"has_batch_no": int(bool(item.has_batch_no)),
+			"has_serial_no": int(bool(item.has_serial_no)),
+		}
 		if item.has_batch_no:
 			for batch in get_batch_qty(item_code=item.item_code, warehouse=warehouse) or []:
 				if (batch.get("qty") or 0) > 0:
-					rows.append([item.item_code, item.item_name, item.stock_uom, batch.get("batch_no"), "", ""])
+					rows.append({**base, "batch_no": batch.get("batch_no")})
 		elif item.has_serial_no:
 			serials = frappe.get_all(
 				"Serial No",
@@ -920,10 +979,39 @@ def _template_rows(warehouse, item_group=None):
 				pluck="name",
 				order_by="name asc",
 			)
-			for serial in serials:
-				rows.append([item.item_code, item.item_name, item.stock_uom, "", serial, ""])
+			rows.append({**base, "serial_nos": serials})
 		else:
-			rows.append([item.item_code, item.item_name, item.stock_uom, "", "", ""])
+			rows.append(base)
+	return rows
+
+
+def _template_rows(warehouse, item_group=None):
+	"""Blank count rows: one per item with a Bin, per stocked batch / warehouse serial."""
+	rows = []
+	for row in _warehouse_items(warehouse, item_group):
+		head = [row["item_code"], row["item_name"], row["stock_uom"]]
+		if "serial_nos" in row:
+			rows.extend([*head, "", serial, ""] for serial in row["serial_nos"])
+		else:
+			rows.append([*head, row.get("batch_no") or "", "", ""])
+	return rows
+
+
+@frappe.whitelist()
+def fetch_opname_items(pos_profile, item_group=None):
+	"""Item list of the profile warehouse for the count sheet, like ERPNext's
+	"Fetch Items from Warehouse" but without any quantity (blind count)."""
+	_company, warehouse = _profile_warehouse(pos_profile)
+	rows = _warehouse_items(warehouse, item_group)
+	uom_map = {}
+	for u in frappe.get_all(
+		"UOM Conversion Detail",
+		filters={"parent": ["in", list({r["item_code"] for r in rows}) or [""]]},
+		fields=["parent", "uom", "conversion_factor"],
+	):
+		uom_map.setdefault(u.parent, []).append({"uom": u.uom, "conversion_factor": u.conversion_factor})
+	for row in rows:
+		row["uoms"] = [u for u in uom_map.get(row["item_code"], []) if u["uom"] != row["stock_uom"]]
 	return rows
 
 
