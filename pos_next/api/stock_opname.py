@@ -941,27 +941,30 @@ def search_opname_items(pos_profile, search_term=None, start=0, limit=10):
 
 
 def _warehouse_items(warehouse, item_group=None):
-	"""Count rows for every item with stock ledger history in the warehouse:
+	"""Count rows for every stock item of `item_group` (incl. sub-groups), or, with
+	no group, every item with stock ledger history in the warehouse:
 	one per stocked batch, one per serial item (its warehouse serials as options),
 	one per plain item. Never carries a quantity (blind count)."""
-	item_codes = frappe.get_all(
-		"Stock Ledger Entry",
-		filters={"warehouse": warehouse, "is_cancelled": 0},
-		pluck="item_code",
-		distinct=True,
-	)
-	if not item_codes:
-		return []
+	filters = {"is_stock_item": 1, "disabled": 0}
+	if item_group:
+		groups = [item_group, *(frappe.db.get_descendants("Item Group", item_group) or [])]
+		filters["item_group"] = ("in", groups)
+	else:
+		item_codes = frappe.get_all(
+			"Stock Ledger Entry",
+			filters={"warehouse": warehouse, "is_cancelled": 0},
+			pluck="item_code",
+			distinct=True,
+		)
+		if not item_codes:
+			return []
+		filters["name"] = ("in", item_codes)
 	items = frappe.get_all(
 		"Item",
-		filters={"name": ("in", item_codes), "is_stock_item": 1, "disabled": 0},
+		filters=filters,
 		fields=["item_code", "item_name", "stock_uom", "item_group", "has_batch_no", "has_serial_no"],
 		order_by="item_code asc",
 	)
-	if item_group:
-		groups = set(frappe.db.get_descendants("Item Group", item_group) or [])
-		groups.add(item_group)
-		items = [i for i in items if i.item_group in groups]
 	from erpnext.stock.doctype.batch.batch import get_batch_qty
 
 	rows = []
@@ -991,7 +994,7 @@ def _warehouse_items(warehouse, item_group=None):
 
 
 def _template_rows(warehouse, item_group=None):
-	"""Blank count rows: one per item with stock ledger history, per stocked batch / warehouse serial."""
+	"""Blank count rows from `_warehouse_items`, one per stocked batch / warehouse serial."""
 	rows = []
 	for row in _warehouse_items(warehouse, item_group):
 		head = [row["item_code"], row["item_name"], row["stock_uom"]]

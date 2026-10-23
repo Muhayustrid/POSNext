@@ -3504,3 +3504,4 @@ Your shift was closed automatically by the system,Shift Anda telah ditutup secar
 "Your shift was closed automatically by the system, but the EOD report failed to print.","Shift Anda telah ditutup secara otomatis oleh sistem, tetapi laporan EOD gagal dicetak."
 EOD report did not print,Laporan EOD gagal dicetak
 Cannot close shift while a submission is in progress.,Tidak dapat menutup shift saat transaksi sedang diproses.
+Items with transactions,Item yang pernah bertransaksi

@@ -769,6 +769,12 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		self.assertIn(item, [r[0] for r in _template_rows(self.warehouse, child)])
 		self.assertNotIn(item, [r[0] for r in _template_rows(self.warehouse, other)])
 
+		# A chosen group lists all its stock items, even without ledger history here.
+		never_moved = _make_test_item(item_group=child)
+		frappe.db.commit()
+		self.assertIn(never_moved, [r[0] for r in _template_rows(self.warehouse, parent)])
+		self.assertNotIn(never_moved, [r[0] for r in _template_rows(self.warehouse)])
+
 	def test_import_merges_and_keeps_rows_not_in_file(self):
 		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template, save_opname
 

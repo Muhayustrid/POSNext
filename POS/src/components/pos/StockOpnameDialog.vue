@@ -347,7 +347,7 @@
 									:title="__('Item Group')"
 									class="h-8 rounded-md border border-gray-300 bg-white py-0 pe-8 ps-2 text-sm text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 								>
-									<option value="">{{ __("All item groups") }}</option>
+									<option value="">{{ __("Items with transactions") }}</option>
 									<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
 										{{ g.item_group }}
 									</option>
