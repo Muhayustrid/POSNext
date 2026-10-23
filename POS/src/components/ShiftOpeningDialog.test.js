@@ -131,6 +131,17 @@ function mountDialog(props = {}) {
 		props: { modelValue: false, ...props },
 		global: {
 			config: { globalProperties: { __: globalThis.__ } },
+			stubs: {
+				Dialog: {
+					template:
+						"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+				},
+				Button: {
+					props: ["disabled"],
+					template:
+						"<button :disabled='disabled' v-bind='$attrs' @click=\"$emit('click')\"><slot /></button>",
+				},
+			},
 		},
 		shallow: true,
 	})
@@ -229,7 +240,11 @@ describe("ShiftOpeningDialog refuses a profile held by another cashier", () => {
 		wrapper.vm.selectedProfile = {
 			...PROFILES[0],
 			locked: true,
-			active_shift: { name: "POPEN-1", user_name: "Jalu", since: "10-10-2026 05:35" },
+			active_shift: {
+				name: "POPEN-1",
+				user_name: "Jalu",
+				since: "10-10-2026 05:35",
+			},
 		}
 
 		await wrapper.vm.nextStep()
@@ -238,7 +253,7 @@ describe("ShiftOpeningDialog refuses a profile held by another cashier", () => {
 		expect(wrapper.vm.showBlocked).toBe(true)
 		expect(wrapper.vm.blockedMessage).toContain("Jalu")
 		const dialogData = resources.instances.find(
-			(r) => r.url === "pos_next.api.shifts.get_opening_dialog_data"
+			(r) => r.url === "pos_next.api.shifts.get_opening_dialog_data",
 		)
 		expect(dialogData.fetch).not.toHaveBeenCalled()
 	})
@@ -251,5 +266,254 @@ describe("ShiftOpeningDialog refuses a profile held by another cashier", () => {
 
 		expect(wrapper.vm.step).toBe(2)
 		expect(wrapper.vm.showBlocked).toBe(false)
+	})
+})
+
+describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
+	const DIALOG_DATA_URL = "pos_next.api.shifts.get_opening_dialog_data"
+
+	it("only cash modes render an input, label is Modal Awal, non-cash modes sent with opening_amount 0", async () => {
+		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+			payments_method: [
+				{
+					name: "pm1",
+					parent: "Profile 1",
+					mode_of_payment: "Cash",
+					mode_type: "Cash",
+				},
+				{
+					name: "pm2",
+					parent: "Profile 1",
+					mode_of_payment: "QRIS",
+					mode_type: "Bank",
+				},
+			],
+			slots: { "Profile 1": [] },
+		})
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+		await wrapper.vm.nextStep()
+		await flushPromises()
+
+		expect(wrapper.vm.step).toBe(2)
+		expect(wrapper.text()).toContain("Modal Awal")
+		expect(wrapper.text()).not.toContain("Opening Balance (Optional)")
+
+		// Only one input for Cash; no input rendered for QRIS
+		const inputs = wrapper.findAll("input")
+		expect(inputs).toHaveLength(1)
+
+		// Set cash amount
+		wrapper.vm.openingBalances.Cash = "50000"
+		await wrapper.vm.openShift()
+		await flushPromises()
+
+		expect(shiftMocks.createOpeningShift.submit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				pos_profile: "Profile 1",
+				company: "Test Co",
+				balance_details: [
+					{ mode_of_payment: "Cash", opening_amount: 50000 },
+					{ mode_of_payment: "QRIS", opening_amount: 0 },
+				],
+			}),
+		)
+	})
+
+	it("shows a picker with both options and defaults to first when two slots are open", async () => {
+		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+			payments_method: [
+				{
+					name: "pm1",
+					parent: "Profile 1",
+					mode_of_payment: "Cash",
+					mode_type: "Cash",
+				},
+			],
+			slots: {
+				"Profile 1": [
+					{
+						shift_name: "Shift 2",
+						start_time: "13:00:00",
+						end_time: "21:00:00",
+						open_now: true,
+					},
+					{
+						shift_name: "Shift 1",
+						start_time: "05:00:00",
+						end_time: "15:00:00",
+						open_now: true,
+					},
+				],
+			},
+		})
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+		await wrapper.vm.nextStep()
+		await flushPromises()
+
+		// Slot picker select exists
+		const select = wrapper.find("select")
+		expect(select.exists()).toBe(true)
+
+		const options = select.findAll("option")
+		expect(options).toHaveLength(2)
+		expect(options[0].text()).toContain("Shift 2")
+		expect(options[1].text()).toContain("Shift 1")
+
+		// Default selection is first open slot
+		expect(wrapper.vm.selectedSlot).toBe("Shift 2")
+
+		// Submit sends default shift_slot
+		await wrapper.vm.openShift()
+		await flushPromises()
+
+		expect(shiftMocks.createOpeningShift.submit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				shift_slot: "Shift 2",
+			}),
+		)
+
+		// Picking the second slot sends that slot
+		await select.setValue("Shift 1")
+		await wrapper.vm.openShift()
+		await flushPromises()
+
+		expect(shiftMocks.createOpeningShift.submit).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				shift_slot: "Shift 1",
+			}),
+		)
+	})
+
+	it("shows slot name without a picker when only one slot is open", async () => {
+		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+			payments_method: [
+				{
+					name: "pm1",
+					parent: "Profile 1",
+					mode_of_payment: "Cash",
+					mode_type: "Cash",
+				},
+			],
+			slots: {
+				"Profile 1": [
+					{
+						shift_name: "Morning",
+						start_time: "05:00:00",
+						end_time: "15:00:00",
+						open_now: true,
+					},
+					{
+						shift_name: "Night",
+						start_time: "22:00:00",
+						end_time: "06:00:00",
+						open_now: false,
+					},
+				],
+			},
+		})
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+		await wrapper.vm.nextStep()
+		await flushPromises()
+
+		// No select picker
+		expect(wrapper.find("select").exists()).toBe(false)
+
+		// Name of the slot shows
+		expect(wrapper.text()).toContain("Morning")
+		expect(wrapper.vm.selectedSlot).toBe("Morning")
+
+		await wrapper.vm.openShift()
+		await flushPromises()
+
+		expect(shiftMocks.createOpeningShift.submit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				shift_slot: "Morning",
+			}),
+		)
+	})
+
+	it("shows outside shift hours message and disables open button when no slots are open", async () => {
+		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+			payments_method: [
+				{
+					name: "pm1",
+					parent: "Profile 1",
+					mode_of_payment: "Cash",
+					mode_type: "Cash",
+				},
+			],
+			slots: {
+				"Profile 1": [
+					{
+						shift_name: "Morning",
+						start_time: "05:00:00",
+						end_time: "15:00:00",
+						open_now: false,
+					},
+					{
+						shift_name: "Afternoon",
+						start_time: "13:00:00",
+						end_time: "21:00:00",
+						open_now: false,
+					},
+				],
+			},
+		})
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+		await wrapper.vm.nextStep()
+		await flushPromises()
+
+		// Outside shift hours message shows
+		expect(wrapper.text().toLowerCase()).toContain("outside shift hours")
+
+		// Open Shift button is disabled
+		const openButton = wrapper
+			.findAll("button")
+			.find((b) => b.text().includes("Open Shift"))
+		expect(openButton.attributes("disabled")).toBeDefined()
+
+		// Attempting to open does not call submit
+		await wrapper.vm.openShift()
+		await flushPromises()
+		expect(shiftMocks.createOpeningShift.submit).not.toHaveBeenCalled()
+	})
+
+	it("profile without slots opens without a slot picker and does not send shift_slot", async () => {
+		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+			payments_method: [
+				{
+					name: "pm1",
+					parent: "Profile 1",
+					mode_of_payment: "Cash",
+					mode_type: "Cash",
+				},
+			],
+			slots: { "Profile 1": [] },
+		})
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+		await wrapper.vm.nextStep()
+		await flushPromises()
+
+		expect(wrapper.find("select").exists()).toBe(false)
+		expect(wrapper.text().toLowerCase()).not.toContain("outside shift hours")
+
+		const openButton = wrapper
+			.findAll("button")
+			.find((b) => b.text().includes("Open Shift"))
+		expect(openButton.attributes("disabled")).toBeUndefined()
+
+		await wrapper.vm.openShift()
+		await flushPromises()
+
+		expect(shiftMocks.createOpeningShift.submit).toHaveBeenCalledWith({
+			pos_profile: "Profile 1",
+			company: "Test Co",
+			balance_details: [{ mode_of_payment: "Cash", opening_amount: 0 }],
+		})
 	})
 })

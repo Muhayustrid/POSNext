@@ -3505,3 +3505,6 @@ Your shift was closed automatically by the system,Shift Anda telah ditutup secar
 EOD report did not print,Laporan EOD gagal dicetak
 Cannot close shift while a submission is in progress.,Tidak dapat menutup shift saat transaksi sedang diproses.
 Items with transactions,Item yang pernah bertransaksi
+Modal Awal,Modal Awal
+Outside shift hours,Di luar jam shift
+A shift cannot be opened outside shift hours.,Shift tidak dapat dibuka di luar jam shift.

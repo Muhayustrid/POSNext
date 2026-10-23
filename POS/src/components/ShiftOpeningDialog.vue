@@ -91,9 +91,65 @@
 						</div>
 					</div>
 
+					<!-- Shift slot selector / display -->
+					<div v-if="hasProfileSlots" class="mb-2">
+						<!-- Two or more open slots: show picker, default is first -->
+						<div v-if="openSlots.length > 1" class="flex flex-col gap-1 text-start">
+							<label for="shift-slot-select" class="block text-sm font-medium text-gray-700 mb-1">
+								{{ __("Shift") }}
+							</label>
+							<select
+								id="shift-slot-select"
+								v-model="selectedSlot"
+								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
+							>
+								<option
+									v-for="slot in openSlots"
+									:key="slot.shift_name"
+									:value="slot.shift_name"
+								>
+									{{ slot.shift_name }} ({{ hhmm(slot.start_time) }} – {{ hhmm(slot.end_time) }})
+								</option>
+							</select>
+						</div>
+
+						<!-- Exactly one open slot: show name without a picker -->
+						<div
+							v-else-if="openSlots.length === 1"
+							class="text-start p-3 bg-gray-50 rounded-lg border border-gray-200"
+						>
+							<div class="flex items-center justify-between">
+								<span class="text-xs font-medium text-gray-500 uppercase tracking-wider">
+									{{ __("Shift") }}
+								</span>
+								<span class="text-xs text-blue-700 font-medium">
+									🕒 {{ hhmm(openSlots[0].start_time) }} – {{ hhmm(openSlots[0].end_time) }}
+								</span>
+							</div>
+							<p class="text-sm font-semibold text-gray-900 mt-1">
+								{{ openSlots[0].shift_name }}
+							</p>
+						</div>
+
+						<!-- Zero open slots: outside shift hours message -->
+						<div
+							v-else
+							class="rounded-lg bg-amber-50 border border-amber-200 p-4 text-start"
+						>
+							<div class="flex items-center gap-2">
+								<span class="text-amber-800 font-medium text-sm">
+									⚠️ {{ __("Outside shift hours") }}
+								</span>
+							</div>
+							<p class="text-xs text-amber-700 mt-1">
+								{{ __("A shift cannot be opened outside shift hours.") }}
+							</p>
+						</div>
+					</div>
+
 					<div>
 						<label class="block text-sm font-medium text-gray-700 mb-3 text-start">
-							{{ __("Opening Balance (Optional)") }}
+							{{ __("Modal Awal") }}
 						</label>
 
 						<div v-if="dialogDataResource.loading" class="text-center py-4">
@@ -102,9 +158,9 @@
 							></div>
 						</div>
 
-						<div v-else-if="paymentMethods.length > 0" class="flex flex-col gap-3">
+						<div v-else-if="cashPaymentMethods.length > 0" class="flex flex-col gap-3">
 							<div
-								v-for="method in paymentMethods"
+								v-for="method in cashPaymentMethods"
 								:key="method.name"
 								class="flex items-center gap-3 p-3 border rounded-lg"
 							>
@@ -112,24 +168,14 @@
 									<label class="text-sm font-medium text-gray-700">
 										{{ method.mode_of_payment }}
 									</label>
-									<p
-										v-if="!isCashMethod(method)"
-										class="text-xs text-gray-500"
-									>
-										{{ __("Hanya Cash yang punya saldo awal") }}
-									</p>
 								</div>
 								<div class="w-32">
-									<!-- native input: Vue drives the value so the thousand
-										separators appear while typing (frappe-ui Input only
-										syncs the formatted value back on blur) -->
 									<input
-										class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 disabled:bg-gray-100 disabled:text-gray-400"
-										:value="isCashMethod(method) ? openingBalances[method.mode_of_payment] : '0'"
+										class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
+										:value="openingBalances[method.mode_of_payment]"
 										inputmode="decimal"
 										autocomplete="off"
 										placeholder="0"
-										:disabled="!isCashMethod(method)"
 										@input="
 											openingBalances[method.mode_of_payment] =
 												formatAmountInput($event.target.value)
@@ -250,6 +296,7 @@
 						theme="blue"
 						@click="openShift"
 						:loading="createShiftResource.loading"
+						:disabled="isOutsideShiftHours"
 					>
 						{{ __("Open Shift") }}
 					</Button>
@@ -341,11 +388,57 @@ const paymentMethods = computed(() => {
 	)
 })
 
+// Cash-only payment methods shown in Modal Awal
+const cashPaymentMethods = computed(() => {
+	return paymentMethods.value.filter(isCashMethod)
+})
+
 // Only Cash-type modes of payment may carry an opening balance; non-cash
 // (QRIS, debit, ...) stays locked at 0 so it can't double-count a shift.
 function isCashMethod(method) {
-	return method.mode_type === "Cash"
+	return (
+		method.mode_type === "Cash" ||
+		(!method.mode_type &&
+			String(method.mode_of_payment).toLowerCase() === "cash")
+	)
 }
+
+const selectedSlot = ref(null)
+
+// Shift slots for selected profile
+const profileSlots = computed(() => {
+	if (!dialogDataResource.data?.slots || !selectedProfile.value) return []
+	return dialogDataResource.data.slots[selectedProfile.value.name] || []
+})
+
+const hasProfileSlots = computed(() => {
+	return profileSlots.value.length > 0
+})
+
+const openSlots = computed(() => {
+	return profileSlots.value.filter((s) => s.open_now)
+})
+
+const isOutsideShiftHours = computed(() => {
+	return hasProfileSlots.value && openSlots.value.length === 0
+})
+
+watch(
+	openSlots,
+	(slots) => {
+		if (slots && slots.length > 0) {
+			if (
+				!selectedSlot.value ||
+				!slots.some((s) => s.shift_name === selectedSlot.value)
+			) {
+				selectedSlot.value = slots[0].shift_name
+			}
+		} else {
+			selectedSlot.value = null
+		}
+	},
+	{ immediate: true },
+)
 
 // Watch dialog open state.
 // Reset happens when the dialog OPENS (inside initDialog), never on close:
@@ -392,6 +485,7 @@ function resetDialog() {
 	selectedProfile.value = null
 	openingBalances.value = {}
 	existingShift.value = null
+	selectedSlot.value = null
 	profilesResource.reset()
 	dialogDataResource.reset()
 	createShiftResource.reset()
@@ -405,6 +499,7 @@ function hhmm(time) {
 
 function selectPosProfile(profile) {
 	selectedProfile.value = profile
+	selectedSlot.value = null
 }
 
 const showBlocked = ref(false)
@@ -440,14 +535,15 @@ async function nextStep() {
 }
 
 async function openShift() {
-	if (!selectedProfile.value) return
+	if (!selectedProfile.value || isOutsideShiftHours.value) return
 
-	// Prepare balance details
+	// Prepare balance details: all payment methods are sent so closing can reconcile them,
+	// but only Cash may carry an opening amount; non-cash is strictly 0.
 	const balance_details = paymentMethods.value.map((method) => ({
 		mode_of_payment: method.mode_of_payment,
-		opening_amount: parseAmountInput(
-			openingBalances.value[method.mode_of_payment],
-		),
+		opening_amount: isCashMethod(method)
+			? parseAmountInput(openingBalances.value[method.mode_of_payment])
+			: 0,
 	}))
 
 	try {
@@ -455,6 +551,7 @@ async function openShift() {
 			pos_profile: selectedProfile.value.name,
 			company: selectedProfile.value.company,
 			balance_details,
+			...(selectedSlot.value ? { shift_slot: selectedSlot.value } : {}),
 		})
 
 		// manager on a profile that is already active: the server joined the
