@@ -171,6 +171,31 @@
 						</Button>
 					</div>
 
+					<div
+						v-if="shiftOptions.length > 0"
+						data-test="shift-filter"
+						class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs"
+					>
+						<button
+							type="button"
+							class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+							:class="selectedShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+							@click="selectedShift = ''"
+						>
+							{{ __('All shifts') }}
+						</button>
+						<button
+							v-for="opt in shiftOptions"
+							:key="opt"
+							type="button"
+							class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+							:class="selectedShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+							@click="selectedShift = opt"
+						>
+							{{ opt }}
+						</button>
+					</div>
+
 			</div>
 		</template>
 
@@ -224,6 +249,13 @@
 										<h4 class="text-sm font-bold text-gray-900">
 											{{ invoice.name }}
 										</h4>
+										<span
+											v-if="getShiftBadge(invoice)"
+											data-test="shift-badge"
+											class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+										>
+											{{ getShiftBadge(invoice) }}
+										</span>
 										<span
 											:class="[
 												'px-2 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap',
@@ -1211,6 +1243,7 @@
 
 <script setup>
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
+import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter";
 import { useToast } from "@/composables/useToast";
 import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
 import { getPaymentIcon } from "@/utils/payment";
@@ -1257,6 +1290,10 @@ const showDialog = computed({
 	set: (val) => emit("update:modelValue", val),
 });
 
+watch(showDialog, (visible) => {
+	if (!visible) selectedShift.value = "";
+});
+
 // State
 const originalInvoice = ref(null);
 // Stores the return document created by ERPNext's make_sales_return().
@@ -1267,6 +1304,11 @@ const returnReason = ref("");
 const paymentMethods = ref([]);
 const refundPayments = ref([]);
 const invoiceList = ref([]);
+const {
+	options: shiftOptions,
+	selected: selectedShift,
+	filtered: shiftFilteredInvoices,
+} = useShiftFilter(invoiceList);
 const invoiceListFilter = ref("");
 const itemSearchFilter = ref("");
 const submitError = ref("");
@@ -1777,7 +1819,7 @@ const filterInvoicesByTerm = (invoices, searchTerm) => {
 const normalizedSearchTerm = computed(() => invoiceListFilter.value?.trim() || "");
 
 const filteredInvoiceList = computed(() => {
-	return filterInvoicesByTerm(invoiceList.value, normalizedSearchTerm.value);
+	return filterInvoicesByTerm(shiftFilteredInvoices.value, normalizedSearchTerm.value);
 });
 
 // Autocomplete suggestions - reuses filtered list, just limits results

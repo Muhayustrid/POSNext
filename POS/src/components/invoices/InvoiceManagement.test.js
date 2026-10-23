@@ -7,6 +7,8 @@ import { createPinia, setActivePinia } from "pinia"
 
 // frappe-ui double: Button forwards clicks, FeatherIcon marks its name.
 // createResource returns a never-resolving stub — stores must construct but not fetch.
+const callMock = vi.hoisted(() => vi.fn(async () => []))
+
 vi.mock("frappe-ui", async () => {
 	const { defineComponent, reactive } = await import("vue")
 	const Button = defineComponent({
@@ -32,7 +34,7 @@ vi.mock("frappe-ui", async () => {
 		createDocumentResource: createResource,
 		Dialog: defineComponent({ template: "<div><slot /></div>" }),
 		LoadingIndicator: defineComponent({ template: "<i />" }),
-		call: vi.fn(async () => []),
+		call: callMock,
 	}
 })
 
@@ -317,5 +319,119 @@ describe("InvoiceManagement cashier column", () => {
 		expect(cells[0][2]).toContain("Budi")
 		expect(cells[1].length).toBe(5) // draft, customer, items, total, actions — no cashier cell
 		expect(cells[2][2]).toContain("o@x.com")
+	})
+})
+
+describe("InvoiceManagement shift badge and filter", () => {
+	beforeEach(() => {
+		callMock.mockImplementation(async (method) => {
+			if (method === "pos_next.api.partial_payments.get_unpaid_invoices") {
+				return [
+					invoice("UNPAID-1", { status: "Unpaid", shift_slot: "SHIFT 1" }),
+					invoice("UNPAID-2", { status: "Unpaid", shift_slot: "SHIFT 2" }),
+				]
+			}
+			if (method === "pos_next.api.partial_payments.get_unpaid_summary") {
+				return { count: 2, total_outstanding: 2000, total_paid: 0 }
+			}
+			return []
+		})
+	})
+
+	it("renders shift badges on history rows and filters by selected shift", async () => {
+		const rows = [
+			invoice("INV-0001", { shift_slot: "SHIFT 1" }),
+			invoice("INV-0002", { shift_slot: "SHIFT 2" }),
+			invoice("INV-0003", { pos_profile: "Legacy Outlet" }),
+		]
+		const wrapper = await mountOnTab("history", { historyInvoices: rows })
+
+		const badges = wrapper.findAll('[data-test="shift-badge"]')
+		const historyBadges = badges.filter((badge) =>
+			badge.element.closest("tr")?.textContent.includes("INV-"),
+		)
+		expect(historyBadges).toHaveLength(3)
+		expect(historyBadges.map((badge) => badge.text())).toEqual([
+			"SHIFT 1",
+			"SHIFT 2",
+			"Legacy Outlet",
+		])
+		expect(badges).toHaveLength(6) // Desktop table and mobile cards overall
+		const mobileBadges = badges.filter((badge) => !badge.element.closest("tr"))
+		expect(mobileBadges).toHaveLength(3)
+
+		expect(badges[0].classes()).toContain("rounded-full")
+		expect(badges[0].classes()).toContain("ring-1")
+		expect(badges[0].classes()).toContain("ring-inset")
+
+		const allFilterChips = wrapper.findAll('[data-test="shift-filter"] button')
+		const filterChips = allFilterChips.slice(-4)
+		expect(filterChips.map((button) => button.text())).toEqual([
+			"All shifts",
+			"Legacy Outlet",
+			"SHIFT 1",
+			"SHIFT 2",
+		])
+
+		await filterChips[2].trigger("click")
+		await flushPromises()
+		expect(wrapper.findAll("tbody tr")).toHaveLength(1)
+		expect(wrapper.find("tbody tr").text()).toContain("INV-0001")
+
+		await filterChips[0].trigger("click")
+		await flushPromises()
+		expect(wrapper.findAll("tbody tr")).toHaveLength(3)
+	})
+
+	it("renders shift badges on return rows and filters by shift", async () => {
+		const rows = [
+			invoice("RET-0001", { is_return: true, shift_slot: "SHIFT 1" }),
+			invoice("RET-0002", { is_return: true, shift_slot: "SHIFT 2" }),
+		]
+		const wrapper = await mountOnTab("returns", { historyInvoices: rows })
+
+		const badges = wrapper.findAll('[data-test="shift-badge"]')
+		expect(badges).toHaveLength(4) // Desktop table and mobile cards
+		expect(badges.map((badge) => badge.text())).toEqual([
+			"SHIFT 1",
+			"SHIFT 2",
+			"SHIFT 1",
+			"SHIFT 2",
+		])
+
+		const allFilterChips = wrapper.findAll('[data-test="shift-filter"] button')
+		const filterChips = allFilterChips.slice(-3)
+		expect(filterChips.map((button) => button.text())).toEqual([
+			"All shifts",
+			"SHIFT 1",
+			"SHIFT 2",
+		])
+		await filterChips[2].trigger("click")
+		await flushPromises()
+		expect(wrapper.findAll("tbody tr")).toHaveLength(1)
+		expect(wrapper.find("tbody tr").text()).toContain("RET-0002")
+	})
+
+	it("renders and filters badges on unpaid invoices", async () => {
+		const wrapper = await mountOnTab("partial")
+		await flushPromises()
+
+		const badges = wrapper.findAll('[data-test="shift-badge"]')
+		expect(badges.map((badge) => badge.text())).toEqual([
+			"SHIFT 1",
+			"SHIFT 2",
+		])
+		const filterChips = wrapper.findAll('[data-test="shift-filter"] button')
+		expect(filterChips.map((button) => button.text())).toEqual([
+			"All shifts",
+			"SHIFT 1",
+			"SHIFT 2",
+		])
+
+		await filterChips[2].trigger("click")
+		await flushPromises()
+		expect(wrapper.findAll('[data-test="shift-badge"]')).toHaveLength(1)
+		expect(wrapper.text()).toContain("UNPAID-2")
+		expect(wrapper.text()).not.toContain("UNPAID-1")
 	})
 })

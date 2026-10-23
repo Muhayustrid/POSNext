@@ -193,6 +193,32 @@
 									</button>
 								</div>
 
+								<!-- Shift Filter Chips -->
+								<div
+									v-if="unpaidShiftOptions.length > 0"
+									data-test="shift-filter"
+									class="flex items-center gap-1.5 overflow-x-auto pb-1 mb-4 text-xs"
+								>
+									<button
+										type="button"
+										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										:class="selectedUnpaidShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+										@click="selectedUnpaidShift = ''"
+									>
+										{{ __('All shifts') }}
+									</button>
+									<button
+										v-for="opt in unpaidShiftOptions"
+										:key="opt"
+										type="button"
+										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										:class="selectedUnpaidShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+										@click="selectedUnpaidShift = opt"
+									>
+										{{ opt }}
+									</button>
+								</div>
+
 								<!-- Summary -->
 								<div
 									v-if="filteredUnpaidSummary.count > 0"
@@ -301,12 +327,19 @@
 										<div class="p-4 border-b bg-gray-50">
 											<div class="flex items-start justify-between">
 												<div>
-													<div class="flex items-center gap-2">
+													<div class="flex items-center gap-2 flex-wrap">
 														<h3
 															class="text-lg font-bold text-gray-900"
 														>
 															{{ invoice.name }}
 														</h3>
+														<span
+															v-if="getShiftBadge(invoice)"
+															data-test="shift-badge"
+															class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+														>
+															{{ getShiftBadge(invoice) }}
+														</span>
 														<span
 															:class="[
 																'px-2 py-0.5 text-xs font-semibold rounded-full',
@@ -552,9 +585,35 @@
 									/>
 								</div>
 
+								<!-- Shift Filter Chips -->
+								<div
+									v-if="historyShiftOptions.length > 0"
+									data-test="shift-filter"
+									class="flex items-center gap-1.5 overflow-x-auto pb-1 mb-4 text-xs"
+								>
+									<button
+										type="button"
+										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										:class="selectedHistoryShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+										@click="selectedHistoryShift = ''"
+									>
+										{{ __('All shifts') }}
+									</button>
+									<button
+										v-for="opt in historyShiftOptions"
+										:key="opt"
+										type="button"
+										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										:class="selectedHistoryShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+										@click="selectedHistoryShift = opt"
+									>
+										{{ opt }}
+									</button>
+								</div>
+
 								<!-- Empty State -->
 								<div
-									v-if="filteredHistoryInvoices.length === 0"
+									v-if="historyPager.total === 0"
 									class="flex flex-col items-center justify-center py-16 text-center"
 								>
 									<svg
@@ -718,20 +777,29 @@
 														}}
 													</td>
 													<td class="px-4 py-3">
-														<span
-															:class="[
-																'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
-																getInvoiceStatusColor(invoice),
-															]"
-														>
+														<div class="flex items-center gap-1.5 flex-wrap">
+															<span
+																v-if="getShiftBadge(invoice)"
+																data-test="shift-badge"
+																class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+															>
+																{{ getShiftBadge(invoice) }}
+															</span>
 															<span
 																:class="[
-																	'w-1.5 h-1.5 rounded-full',
-																	getStatusDotClass(invoice),
+																	'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
+																	getInvoiceStatusColor(invoice),
 																]"
-															></span>
-															{{ __(invoice.status) }}
-														</span>
+															>
+																<span
+																	:class="[
+																		'w-1.5 h-1.5 rounded-full',
+																		getStatusDotClass(invoice),
+																	]"
+																></span>
+																{{ __(invoice.status) }}
+															</span>
+														</div>
 													</td>
 													<td class="px-4 py-3 text-end" @click.stop>
 														<button
@@ -772,6 +840,13 @@
 													<div class="font-semibold text-gray-900">
 														{{ invoice.name }}
 													</div>
+													<span
+														v-if="getShiftBadge(invoice)"
+														data-test="shift-badge"
+														class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200 mt-1"
+													>
+														{{ getShiftBadge(invoice) }}
+													</span>
 													<div
 														class="flex items-center gap-1 text-xs text-gray-500 mt-0.5"
 													>
@@ -1114,9 +1189,35 @@
 
 							<!-- Return Invoices Tab -->
 							<div v-if="activeTab === 'returns'">
+								<!-- Shift Filter Chips -->
+								<div
+									v-if="returnsShiftOptions.length > 0"
+									data-test="shift-filter"
+									class="flex items-center gap-1.5 overflow-x-auto pb-1 mb-4 text-xs"
+								>
+									<button
+										type="button"
+										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										:class="selectedReturnsShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+										@click="selectedReturnsShift = ''"
+									>
+										{{ __('All shifts') }}
+									</button>
+									<button
+										v-for="opt in returnsShiftOptions"
+										:key="opt"
+										type="button"
+										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										:class="selectedReturnsShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+										@click="selectedReturnsShift = opt"
+									>
+										{{ opt }}
+									</button>
+								</div>
+
 								<!-- Empty State -->
 								<div
-									v-if="returnInvoices.length === 0"
+									v-if="returnsPager.total === 0"
 									class="flex flex-col items-center justify-center py-16 text-center"
 								>
 									<svg
@@ -1260,20 +1361,29 @@
 														}}
 													</td>
 													<td class="px-4 py-3">
-														<span
-															:class="[
-																'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
-																getInvoiceStatusColor(invoice),
-															]"
-														>
+														<div class="flex items-center gap-1.5 flex-wrap">
+															<span
+																v-if="getShiftBadge(invoice)"
+																data-test="shift-badge"
+																class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+															>
+																{{ getShiftBadge(invoice) }}
+															</span>
 															<span
 																:class="[
-																	'w-1.5 h-1.5 rounded-full',
-																	getStatusDotClass(invoice),
+																	'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
+																	getInvoiceStatusColor(invoice),
 																]"
-															></span>
-															{{ __(invoice.status) }}
-														</span>
+															>
+																<span
+																	:class="[
+																		'w-1.5 h-1.5 rounded-full',
+																		getStatusDotClass(invoice),
+																	]"
+																></span>
+																{{ __(invoice.status) }}
+															</span>
+														</div>
 													</td>
 													<td class="px-4 py-3 text-end" @click.stop>
 														<button
@@ -1314,6 +1424,13 @@
 													<div class="font-semibold text-gray-900">
 														{{ invoice.name }}
 													</div>
+													<span
+														v-if="getShiftBadge(invoice)"
+														data-test="shift-badge"
+														class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200 mt-1"
+													>
+														{{ getShiftBadge(invoice) }}
+													</span>
 													<div class="text-xs text-gray-500 mt-0.5">
 														{{ formatDate(invoice.posting_date) }} ·
 														{{ formatTime(invoice.posting_time) }}
@@ -1398,6 +1515,7 @@ import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import { useInvoiceFilters } from "@/composables/useInvoiceFilters";
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter";
 import { getInvoiceStatusColor } from "@/utils/invoice";
 import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { useFormatters } from "@/composables/useFormatters";
@@ -1500,7 +1618,7 @@ const selectedInvoice = ref(null);
 const showPaymentDialog = ref(false);
 
 // Filtered unpaid invoices based on payment amounts
-const filteredUnpaidInvoices = computed(() => {
+const statusFilteredUnpaidInvoices = computed(() => {
 	if (unpaidFilter.value === "partial") {
 		// Partially paid: status is 'Partly Paid' only
 		return unpaidInvoices.value.filter((inv) => inv.status === "Partly Paid");
@@ -1515,6 +1633,12 @@ const filteredUnpaidInvoices = computed(() => {
 	}
 	return unpaidInvoices.value; // "all"
 });
+
+const {
+	options: unpaidShiftOptions,
+	selected: selectedUnpaidShift,
+	filtered: filteredUnpaidInvoices,
+} = useShiftFilter(statusFilteredUnpaidInvoices);
 
 // Filtered summary based on selected filter
 const filteredUnpaidSummary = computed(() => {
@@ -1533,6 +1657,12 @@ const returnInvoices = computed(() => {
 	return allInvoices.filter((inv) => inv.is_return);
 });
 
+const {
+	options: returnsShiftOptions,
+	selected: selectedReturnsShift,
+	filtered: shiftFilteredReturnInvoices,
+} = useShiftFilter(returnInvoices);
+
 // Filtered history using the composable (exclude returns, show in separate tab)
 const filteredHistoryInvoices = computed(() => {
 	// Filter out return invoices, then apply all filters from the store
@@ -1545,6 +1675,12 @@ const filteredHistoryInvoices = computed(() => {
 
 	return tempFilters.filteredInvoices.value;
 });
+
+const {
+	options: historyShiftOptions,
+	selected: selectedHistoryShift,
+	filtered: shiftFilteredHistoryInvoices,
+} = useShiftFilter(filteredHistoryInvoices);
 
 // Client-side pagination: only the current page's rows hit the DOM.
 const PAGE_SIZE = 20;
@@ -1582,9 +1718,12 @@ function usePaged(list, size = PAGE_SIZE) {
 	});
 }
 
-const historyPager = usePaged(filteredHistoryInvoices);
+const historyPager = usePaged(shiftFilteredHistoryInvoices);
 const draftsPager = usePaged(computed(() => props.draftInvoices));
-const returnsPager = usePaged(returnInvoices);
+const returnsPager = usePaged(shiftFilteredReturnInvoices);
+
+watch(selectedHistoryShift, () => historyPager.reset());
+watch(selectedReturnsShift, () => returnsPager.reset());
 
 // New filters mean new result sets — start back at page 1
 filterStore.$subscribe(() => {

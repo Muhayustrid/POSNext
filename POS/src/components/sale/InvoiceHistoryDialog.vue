@@ -6,33 +6,59 @@
 		icon="clock"
 	>
 		<template v-if="!viewingInvoice" #toolbar>
-			<div class="flex items-center gap-2">
-				<div class="relative flex-1">
-					<FeatherIcon
-						name="search"
-						class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
-					/>
-					<input
-						v-model="searchTerm"
-						type="text"
-						:placeholder="__('Search by invoice number, buyer, or customer...')"
-						class="w-full h-10 ps-10 pe-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-						@input="onSearchInput"
-					/>
+			<div class="flex flex-col gap-2">
+				<div class="flex items-center gap-2">
+					<div class="relative flex-1">
+						<FeatherIcon
+							name="search"
+							class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+						/>
+						<input
+							v-model="searchTerm"
+							type="text"
+							:placeholder="__('Search by invoice number, buyer, or customer...')"
+							class="w-full h-10 ps-10 pe-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							@input="onSearchInput"
+						/>
+					</div>
+					<button
+						type="button"
+						class="w-10 h-10 shrink-0 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+						:disabled="invoicesResource.loading"
+						:title="__('Refresh')"
+						:aria-label="__('Refresh')"
+						@click="loadInvoices"
+					>
+						<FeatherIcon
+							name="refresh-cw"
+							:class="['w-4 h-4', invoicesResource.loading && !isLoadingMore && 'animate-spin']"
+						/>
+					</button>
 				</div>
-				<button
-					type="button"
-					class="w-10 h-10 shrink-0 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-					:disabled="invoicesResource.loading"
-					:title="__('Refresh')"
-					:aria-label="__('Refresh')"
-					@click="loadInvoices"
+				<div
+					v-if="shiftOptions.length > 0"
+					data-test="shift-filter"
+					class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs"
 				>
-					<FeatherIcon
-						name="refresh-cw"
-						:class="['w-4 h-4', invoicesResource.loading && !isLoadingMore && 'animate-spin']"
-					/>
-				</button>
+					<button
+						type="button"
+						class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+						:class="selectedShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+						@click="selectedShift = ''"
+					>
+						{{ __('All shifts') }}
+					</button>
+					<button
+						v-for="opt in shiftOptions"
+						:key="opt"
+						type="button"
+						class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+						:class="selectedShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+						@click="selectedShift = opt"
+					>
+						{{ opt }}
+					</button>
+				</div>
 			</div>
 		</template>
 
@@ -69,6 +95,13 @@
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-2 flex-wrap">
 							<h4 class="text-sm font-semibold text-gray-900">{{ invoice.name }}</h4>
+							<span
+								v-if="getShiftBadge(invoice)"
+								data-test="shift-badge"
+								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+							>
+								{{ getShiftBadge(invoice) }}
+							</span>
 							<span
 								v-if="invoice.is_return"
 								class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
@@ -165,6 +198,7 @@ import {
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 import PosDialogShell from "@/components/common/PosDialogShell.vue"
+import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter"
 import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
@@ -196,6 +230,11 @@ const emit = defineEmits([
 
 const show = ref(props.modelValue)
 const invoices = ref([])
+const {
+	options: shiftOptions,
+	selected: selectedShift,
+	filtered: shiftFilteredInvoices,
+} = useShiftFilter(invoices)
 const searchTerm = ref("")
 const page = ref(0)
 const pageSize = 20
@@ -264,6 +303,7 @@ watch(show, (val) => {
 	if (!val) {
 		viewingInvoice.value = null
 		searchTerm.value = ""
+		selectedShift.value = ""
 		page.value = 0
 		invoices.value = []
 		hasMore.value = true
@@ -278,10 +318,11 @@ watch(showReturnDialog, (val) => {
 })
 
 const filteredInvoices = computed(() => {
-	if (!searchTerm.value) return invoices.value
+	const base = shiftFilteredInvoices.value
+	if (!searchTerm.value) return base
 
 	const term = searchTerm.value.toLowerCase()
-	return invoices.value.filter(
+	return base.filter(
 		(inv) =>
 			inv.name.toLowerCase().includes(term) ||
 			inv.customer_name?.toLowerCase().includes(term) ||

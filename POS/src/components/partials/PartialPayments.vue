@@ -147,8 +147,34 @@
 
 						<!-- Invoices List -->
 						<div v-else class="p-6 flex flex-col gap-4">
+							<!-- Shift Filter Chips -->
 							<div
-								v-for="invoice in invoices"
+								v-if="shiftOptions.length > 0"
+								data-test="shift-filter"
+								class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs"
+							>
+								<button
+									type="button"
+									class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+									:class="selectedShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+									@click="selectedShift = ''"
+								>
+									{{ __('All shifts') }}
+								</button>
+								<button
+									v-for="opt in shiftOptions"
+									:key="opt"
+									type="button"
+									class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+									:class="selectedShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
+									@click="selectedShift = opt"
+								>
+									{{ opt }}
+								</button>
+							</div>
+
+							<div
+								v-for="invoice in filteredInvoices"
 								:key="invoice.name"
 								class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
 							>
@@ -156,10 +182,17 @@
 								<div class="p-4 border-b bg-gray-50">
 									<div class="flex items-start justify-between">
 										<div>
-											<div class="flex items-center gap-2">
+											<div class="flex items-center gap-2 flex-wrap">
 												<h3 class="text-lg font-bold text-gray-900">
 													{{ invoice.name }}
 												</h3>
+												<span
+													v-if="getShiftBadge(invoice)"
+													data-test="shift-badge"
+													class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+												>
+													{{ getShiftBadge(invoice) }}
+												</span>
 												<span
 													:class="[
 														'px-2 py-0.5 text-xs font-semibold rounded-full',
@@ -343,6 +376,7 @@ import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/
 import { getInvoiceStatusColor } from "@/utils/invoice";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import { usePOSSettingsStore } from "@/stores/posSettings";
+import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter";
 import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
 import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
@@ -367,6 +401,11 @@ const emit = defineEmits(["update:modelValue"]);
 const show = ref(props.modelValue);
 const loading = ref(false);
 const invoices = ref([]);
+const {
+	options: shiftOptions,
+	selected: selectedShift,
+	filtered: filteredInvoices,
+} = useShiftFilter(invoices);
 const summary = ref({
 	count: 0,
 	total_outstanding: 0,

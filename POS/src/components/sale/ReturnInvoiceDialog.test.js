@@ -85,7 +85,7 @@ vi.mock("@/components/common/PosDialogShell.vue", () => ({
 			title: { type: String, default: "" },
 			size: { type: String, default: "md" },
 		},
-		template: `<div><slot /><slot name="actions" /></div>`,
+		template: `<div><slot name="toolbar" /><slot /><slot name="actions" /></div>`,
 	}),
 }))
 
@@ -423,5 +423,56 @@ describe("ReturnInvoiceDialog refund code gate", () => {
 		const invoiceData = JSON.parse(wrapper.vm.createReturnResource.opts.makeParams().invoice)
 		expect(invoiceData.refund_confirmation_code).toBe("REFUND12")
 		expect(invoiceData.discount_confirmation_code).toBeUndefined()
+	})
+
+	describe("ReturnInvoiceDialog shift badge and filter", () => {
+		it("renders shift badge on returnable invoices and filters by selected shift", async () => {
+			const wrapper = await mountDialog()
+			await flushPromises()
+
+			wrapper.vm.invoiceList = [
+				{
+					name: "INV-001",
+					customer_name: "Customer A",
+					grand_total: 15000,
+					posting_date: "2026-10-23",
+					status: "Paid",
+					shift_slot: "SHIFT 1",
+				},
+				{
+					name: "INV-002",
+					customer_name: "Customer B",
+					grand_total: 25000,
+					posting_date: "2026-10-23",
+					status: "Paid",
+					shift_slot: "SHIFT 2",
+				},
+			]
+			await flushPromises()
+
+			const badges = wrapper.findAll('[data-test="shift-badge"]')
+			expect(badges.length).toBe(2)
+			expect(badges[0].text()).toBe("SHIFT 1")
+			expect(badges[0].classes()).toContain("rounded-full")
+			expect(badges[0].classes()).toContain("ring-1")
+			expect(badges[0].classes()).toContain("ring-inset")
+
+			const filterChips = wrapper.findAll('[data-test="shift-filter"] button')
+			expect(filterChips.length).toBe(3) // All shifts + SHIFT 1 + SHIFT 2
+
+			// Click SHIFT 2
+			const shift2Btn = filterChips.find((b) => b.text().includes("SHIFT 2"))
+			await shift2Btn.trigger("click")
+			await flushPromises()
+
+			const visibleBadges = wrapper.findAll('[data-test="shift-badge"]')
+			expect(visibleBadges.length).toBe(1)
+			expect(visibleBadges[0].text()).toBe("SHIFT 2")
+
+			// Click All shifts
+			await filterChips[0].trigger("click")
+			await flushPromises()
+			expect(wrapper.findAll('[data-test="shift-badge"]').length).toBe(2)
+		})
 	})
 })
