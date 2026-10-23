@@ -618,7 +618,7 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		frappe.set_user(ADMIN)
 		# Count UOM for the Excel import tests: Pack x12, Dus absent (rejected).
 		cls.uom_item = _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": 12}])
-		# Stock in cls.warehouse so every fixture item has a Bin there (the
+		# Stock in cls.warehouse so every fixture item has an SLE there (the
 		# template source). Plain + batch via _seed_stock; serials need a
 		# serial_no column on the receipt row.
 		_seed_stock(cls.plain, cls.warehouse, 5)
@@ -700,6 +700,26 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		allowed = {"item_code", "item_name", "stock_uom", "has_batch_no", "has_serial_no", "batch_no", "serial_nos", "uoms"}
 		for r in rows:
 			self.assertLessEqual(set(r.keys()), allowed)
+
+	def test_fetch_items_excludes_bin_without_stock_ledger_entry(self):
+		from erpnext.stock.utils import get_bin
+
+		from pos_next.api.stock_opname import _template_rows, fetch_opname_items
+
+		frappe.set_user(ADMIN)
+		bin_only_item = _make_test_item()
+		get_bin(bin_only_item, self.warehouse)
+		frappe.db.commit()
+
+		self._cashier()
+		rows = fetch_opname_items(self.profile)
+		item_codes = {r["item_code"] for r in rows}
+		self.assertIn(self.plain, item_codes)
+		self.assertNotIn(bin_only_item, item_codes)
+
+		template_items = [r[0] for r in _template_rows(self.warehouse)]
+		self.assertIn(self.plain, template_items)
+		self.assertNotIn(bin_only_item, template_items)
 
 	def test_template_item_group_filter_includes_descendants(self):
 		from pos_next.api.stock_opname import _template_rows

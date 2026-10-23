@@ -941,10 +941,15 @@ def search_opname_items(pos_profile, search_term=None, start=0, limit=10):
 
 
 def _warehouse_items(warehouse, item_group=None):
-	"""Count rows for every item with a Bin in the warehouse: one per stocked
-	batch, one per serial item (its warehouse serials as options), one per plain
-	item. Never carries a quantity (blind count)."""
-	item_codes = frappe.get_all("Bin", filters={"warehouse": warehouse}, pluck="item_code", distinct=True)
+	"""Count rows for every item with stock ledger history in the warehouse:
+	one per stocked batch, one per serial item (its warehouse serials as options),
+	one per plain item. Never carries a quantity (blind count)."""
+	item_codes = frappe.get_all(
+		"Stock Ledger Entry",
+		filters={"warehouse": warehouse, "is_cancelled": 0},
+		pluck="item_code",
+		distinct=True,
+	)
 	if not item_codes:
 		return []
 	items = frappe.get_all(
@@ -986,7 +991,7 @@ def _warehouse_items(warehouse, item_group=None):
 
 
 def _template_rows(warehouse, item_group=None):
-	"""Blank count rows: one per item with a Bin, per stocked batch / warehouse serial."""
+	"""Blank count rows: one per item with stock ledger history, per stocked batch / warehouse serial."""
 	rows = []
 	for row in _warehouse_items(warehouse, item_group):
 		head = [row["item_code"], row["item_name"], row["stock_uom"]]
