@@ -8,14 +8,18 @@ import unittest
 from unittest.mock import Mock, patch
 
 import frappe
-from frappe.utils import cint
+from frappe.tests.utils import FrappeTestCase
+from frappe.utils import cint, flt, now_datetime
 
+from pos_next.api.invoices import submit_invoice
+from pos_next.api.shifts import create_opening_shift
 from pos_next.shift_schedule import (
 	apply_schedule_snapshot,
 	freeze_schedule_snapshot,
 	get_profile_slots,
 	open_slots_now,
 )
+from pos_next.tests._posi_test_utils import POSInvoiceModeMixin
 
 
 def _dt(*args):
@@ -370,4 +374,153 @@ class TestShiftSlotsAPI(unittest.TestCase):
 			# Check that frappe.get_doc was called with shift_slot
 			call_args = mock_get_doc.call_args[0][0]
 			self.assertEqual(call_args.get("shift_slot"), "Morning")
+
+
+class TestOneOpenShift(POSInvoiceModeMixin, FrappeTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.cashier_a = f"cashier_a_{frappe.generate_hash(length=8)}@example.com"
+		cls.cashier_b = f"cashier_b_{frappe.generate_hash(length=8)}@example.com"
+		for email in (cls.cashier_a, cls.cashier_b):
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": email,
+					"first_name": email.split("@")[0],
+					"roles": [{"role": "POSNext Cashier"}],
+				}
+			).insert(ignore_permissions=True)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user("Administrator")
+		for email in (getattr(cls, "cashier_a", None), getattr(cls, "cashier_b", None)):
+			if email and frappe.db.exists("User", email):
+				try:
+					frappe.db.delete("Error Log", {"owner": email})
+					frappe.delete_doc("User", email, force=1, ignore_permissions=True)
+				except Exception:
+					pass
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		for email in (self.cashier_a, self.cashier_b):
+			if not frappe.db.exists("POS Profile User", {"parent": self.profile.name, "user": email}):
+				pu = frappe.get_doc(
+					{
+						"doctype": "POS Profile User",
+						"parent": self.profile.name,
+						"parenttype": "POS Profile",
+						"parentfield": "pos_users",
+						"user": email,
+					}
+				).insert(ignore_permissions=True)
+				self.addCleanup(self._delete_profile_user, pu.name)
+
+		frappe.db.set_value(
+			"POS Opening Shift", self.shift.name, "user", self.cashier_a, update_modified=False
+		)
+		self.shift.reload()
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		super().tearDown()
+
+	def _delete_profile_user(self, name):
+		frappe.db.delete("POS Profile User", {"name": name})
+
+	def _cleanup_shift(self, shift_name):
+		frappe.set_user("Administrator")
+		if frappe.db.exists("POS Opening Shift", shift_name):
+			frappe.db.set_value("POS Opening Shift", shift_name, "docstatus", 2, update_modified=False)
+			frappe.delete_doc("POS Opening Shift", shift_name, force=1, ignore_permissions=True)
+
+	def test_second_open_refused_while_first_inside_window(self):
+		deadline = now_datetime() + datetime.timedelta(hours=2)
+		frappe.db.set_value(
+			"POS Opening Shift",
+			self.shift.name,
+			{
+				"pos_schedule_enabled": 1,
+				"pos_schedule_enforce_closing": 1,
+				"pos_schedule_deadline": deadline,
+			},
+			update_modified=False,
+		)
+		frappe.set_user(self.cashier_b)
+		with self.assertRaises(frappe.exceptions.ValidationError) as ctx:
+			create_opening_shift(
+				self.profile.name,
+				self.profile.company,
+				[{"mode_of_payment": self.mode[0], "amount": 0}],
+			)
+		self.assertIn("Only one shift can be open per POS Profile", str(ctx.exception))
+
+	def test_expired_open_shift_closed_then_new_opens(self):
+		submit_invoice(self._payload())
+		deadline = now_datetime() - datetime.timedelta(minutes=10)
+		frappe.db.set_value(
+			"POS Opening Shift",
+			self.shift.name,
+			{
+				"pos_schedule_enabled": 1,
+				"pos_schedule_enforce_closing": 1,
+				"pos_schedule_deadline": deadline,
+			},
+			update_modified=False,
+		)
+
+		frappe.set_user(self.cashier_b)
+		res = create_opening_shift(
+			self.profile.name,
+			self.profile.company,
+			[{"mode_of_payment": self.mode[0], "amount": 0}],
+		)
+
+		self.shift.reload()
+		self.assertEqual(self.shift.status, "Closed")
+		self.assertTrue(self.shift.pos_closing_shift)
+
+		closing = frappe.get_doc("POS Closing Shift", self.shift.pos_closing_shift)
+		self.closing = closing
+		self.assertEqual(closing.docstatus, 1)
+		self.assertEqual(closing.auto_closed, 1)
+		recon = [r for r in closing.payment_reconciliation if r.mode_of_payment == self.mode[0]]
+		self.assertTrue(recon)
+		self.assertGreater(flt(recon[0].expected_amount), 0)
+		self.assertEqual(flt(recon[0].closing_amount), flt(recon[0].expected_amount))
+		self.assertEqual(flt(recon[0].difference), 0)
+
+		b_shift_name = res["pos_opening_shift"]["name"]
+		self.assertNotEqual(b_shift_name, self.shift.name)
+		self.addCleanup(self._cleanup_shift, b_shift_name)
+		b_shift = frappe.get_doc("POS Opening Shift", b_shift_name)
+		self.assertEqual(b_shift.status, "Open")
+		self.assertEqual(b_shift.user, self.cashier_b)
+
+	def test_manager_resume_unchanged(self):
+		deadline = now_datetime() + datetime.timedelta(hours=2)
+		frappe.db.set_value(
+			"POS Opening Shift",
+			self.shift.name,
+			{
+				"pos_schedule_enabled": 1,
+				"pos_schedule_enforce_closing": 1,
+				"pos_schedule_deadline": deadline,
+			},
+			update_modified=False,
+		)
+		frappe.set_user("Administrator")
+		res = create_opening_shift(
+			self.profile.name,
+			self.profile.company,
+			[{"mode_of_payment": self.mode[0], "amount": 0}],
+		)
+		self.assertTrue(res.get("resumed"))
+		self.assertEqual(res["pos_opening_shift"]["name"], self.shift.name)
+		self.shift.reload()
+		self.assertEqual(self.shift.status, "Open")
+		self.assertFalse(self.shift.pos_closing_shift)
 

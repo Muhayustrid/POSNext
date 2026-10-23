@@ -10,6 +10,7 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import add_to_date, cint, flt, get_datetime, getdate, now_datetime, nowdate, nowtime
 
 from pos_next.api.utilities import get_wallet_payment_modes
+from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
 from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
 	get_active_profile_shift,
 	throw_profile_in_use,
@@ -166,6 +167,15 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 	# add a User-row lock if that ever matters.
 	frappe.db.get_value("POS Profile", pos_profile, "name", for_update=True)
 
+	# One profile = one active shift. If an active shift exists and is past its
+	# schedule deadline, force-close it so the incoming shift can open cleanly.
+	active = get_active_profile_shift(pos_profile)
+	if active:
+		deadline = frappe.db.get_value("POS Opening Shift", active.name, "pos_schedule_deadline")
+		if deadline and get_datetime(deadline) < now_datetime():
+			_submit_closing(active.name, auto_balance=True, auto_closed=True)
+			active = None
+
 	# Check if user already has an open shift
 	existing_shift = check_opening_shift(frappe.session.user)
 	if existing_shift:
@@ -175,7 +185,6 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 
 	# One profile = one active shift. A manager joins the active shift
 	# (resume) instead of opening a second drawer; anyone else is refused.
-	active = get_active_profile_shift(pos_profile)
 	if active:
 		if not is_management_user():
 			throw_profile_in_use(pos_profile, active)

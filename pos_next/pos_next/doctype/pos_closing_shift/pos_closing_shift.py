@@ -498,6 +498,7 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 		shift_user != frappe.session.user
 		and not is_management_user()
 		and not getattr(frappe.flags, "pos_next_backdate_entry", None)
+		and not getattr(frappe.flags, "pos_next_auto_close", None)
 	):
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
@@ -743,11 +744,12 @@ def make_closing_shift_from_opening(opening_shift):
 		frappe.throw(_("POS Opening Shift is required"), frappe.MandatoryError)
 
 	# read-level gate, same ownership rule as submit_closing_shift: only the
-	# shift owner (or a management user) may derive the closing data of a shift
+	# shift owner (or a management user, backdate entry, or auto-close) may derive the closing data of a shift
 	if (
 		frappe.db.get_value("POS Opening Shift", opening_shift_name, "user") != frappe.session.user
 		and not is_management_user()
 		and not getattr(frappe.flags, "pos_next_backdate_entry", None)
+		and not getattr(frappe.flags, "pos_next_auto_close", None)
 	):
 		frappe.throw(_("You can only view your own closing shift"), frappe.PermissionError)
 
@@ -879,56 +881,64 @@ def _submit_closing(
 	opening_shift = frappe.get_doc("POS Opening Shift", opening_shift_name)
 
 	# The payload is untrusted client JSON: only the shift owner (or a
-	# management user, or backdate entry) may close a shift at all.
+	# management user, backdate entry, or auto-close) may close a shift at all.
 	if (
 		opening_shift.user != frappe.session.user
 		and not is_management_user()
 		and not getattr(frappe.flags, "pos_next_backdate_entry", None)
+		and not auto_closed
 	):
 		frappe.throw(_("You can only close your own shift"), frappe.PermissionError)
 
-	# COR-BE-15: printed drafts join the closing here, in the explicit close
-	# flow, before the server recomputes the totals below. The read endpoints
-	# (get_pos_invoices / make_closing_shift_from_opening as a preview) no
-	# longer submit anything as a GET side effect.
-	for dt in ("POS Invoice", "Sales Invoice"):
-		submit_printed_invoices(opening_shift_name, dt)
-
-	# The server holds the numbers: rebuild the closing shift from the opening
-	# shift's real transactions so expected_amount, totals and taxes can never
-	# be forged. The client only contributes the physically counted
-	# closing_amount per mode of payment (rows for unknown modes are dropped).
-	server_data = make_closing_shift_from_opening(json.dumps(opening_shift.as_dict(), default=str))
-	if auto_balance or get_effective_pos_setting(opening_shift.pos_profile, "auto_balance_closing"):
-		for row in server_data.get("payment_reconciliation") or []:
-			row["closing_amount"] = row.get("expected_amount")
-	else:
-		if isinstance(counted, list):
-			counted = {
-				row.get("mode_of_payment"): row.get("closing_amount")
-				for row in counted
-				if isinstance(row, dict) and row.get("mode_of_payment")
-			}
-		if counted:
-			for row in server_data.get("payment_reconciliation") or []:
-				mode = row.get("mode_of_payment")
-				if mode in counted:
-					row["closing_amount"] = counted[mode]
-
-	if period_end_date:
-		server_data["period_end_date"] = period_end_date
-	if posting_date:
-		server_data["posting_date"] = posting_date
+	was_auto_close = getattr(frappe.flags, "pos_next_auto_close", False)
 	if auto_closed:
-		server_data["auto_closed"] = 1
+		frappe.flags.pos_next_auto_close = True
+	try:
+		# COR-BE-15: printed drafts join the closing here, in the explicit close
+		# flow, before the server recomputes the totals below. The read endpoints
+		# (get_pos_invoices / make_closing_shift_from_opening as a preview) no
+		# longer submit anything as a GET side effect.
+		for dt in ("POS Invoice", "Sales Invoice"):
+			submit_printed_invoices(opening_shift_name, dt)
 
-	closing_shift_doc = frappe.get_doc(server_data)
-	# kept only AFTER the explicit ownership gate above — the cashier must
-	# always be able to close their own shift regardless of role setup
-	closing_shift_doc.flags.ignore_permissions = True
-	closing_shift_doc.save()
-	closing_shift_doc.submit()
-	return closing_shift_doc.name
+		# The server holds the numbers: rebuild the closing shift from the opening
+		# shift's real transactions so expected_amount, totals and taxes can never
+		# be forged. The client only contributes the physically counted
+		# closing_amount per mode of payment (rows for unknown modes are dropped).
+		server_data = make_closing_shift_from_opening(json.dumps(opening_shift.as_dict(), default=str))
+		if auto_balance or get_effective_pos_setting(opening_shift.pos_profile, "auto_balance_closing"):
+			for row in server_data.get("payment_reconciliation") or []:
+				row["closing_amount"] = row.get("expected_amount")
+		else:
+			if isinstance(counted, list):
+				counted = {
+					row.get("mode_of_payment"): row.get("closing_amount")
+					for row in counted
+					if isinstance(row, dict) and row.get("mode_of_payment")
+				}
+			if counted:
+				for row in server_data.get("payment_reconciliation") or []:
+					mode = row.get("mode_of_payment")
+					if mode in counted:
+						row["closing_amount"] = counted[mode]
+
+		if period_end_date:
+			server_data["period_end_date"] = period_end_date
+		if posting_date:
+			server_data["posting_date"] = posting_date
+		if auto_closed:
+			server_data["auto_closed"] = 1
+
+		closing_shift_doc = frappe.get_doc(server_data)
+		# kept only AFTER the explicit ownership gate above — the cashier must
+		# always be able to close their own shift regardless of role setup
+		closing_shift_doc.flags.ignore_permissions = True
+		closing_shift_doc.save()
+		closing_shift_doc.submit()
+		return closing_shift_doc.name
+	finally:
+		if auto_closed:
+			frappe.flags.pos_next_auto_close = was_auto_close
 
 
 @frappe.whitelist()
