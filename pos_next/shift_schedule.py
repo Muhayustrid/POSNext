@@ -3,7 +3,8 @@
 
 """Shift schedule enforcement.
 
-HQ configures optional shift hours on a POS Profile. At open time the schedule
+HQ configures shift hours as the slots of a Shift Group (POS Profile Group);
+a profile without a group (or a group without slots) runs unscheduled. At open time the schedule
 is snapshotted onto the POS Opening Shift and re-resolved authoritatively at
 submit; afterwards the snapshot is frozen (client edits to the fields are
 discarded — only a direct frappe.db.set_value by an admin can extend a
@@ -44,51 +45,6 @@ def validate_group_link(group):
 	if frappe.db.get_value("POS Profile Group", group) is None:
 		frappe.throw(
 			_("POS Profile Group {0} does not exist").format(group),
-			title=GATE_TITLE,
-		)
-
-
-def get_effective_schedule(pos_profile):
-	"""Return the schedule of a POS Profile (profile-level only).
-
-	The Shift Group (POS Profile Group doctype) pushes its hours onto member
-	profiles at group-save time, so the profile row stays the single source
-	of truth read at shift open.
-	"""
-	values = frappe.db.get_value(
-		"POS Profile", pos_profile, ("name", *SCHEDULE_FIELDS, "pos_profile_group"), as_dict=True
-	)
-	if not values:
-		frappe.throw(_("POS Profile {0} does not exist").format(pos_profile))
-
-	validate_group_link(values.pos_profile_group)
-	validate_schedule_values(values)
-	return values
-
-
-def validate_schedule_values(schedule, label=None):
-	"""Reject a broken schedule early: malformed times, negative warning.
-
-	`label` names the failing document in the error (a POS Profile by
-	default; the Shift Group passes its own name because it pushes the same
-	values down to every member).
-	"""
-	if not cint(schedule.pos_schedule_enabled):
-		return
-
-	start = _as_time_delta(schedule.pos_schedule_start)
-	end = _as_time_delta(schedule.pos_schedule_end)
-	if start is None or end is None:
-		frappe.throw(
-			_("{0}: shift schedule is enabled but the start/end times are missing or invalid.").format(
-				label or f"POS Profile {schedule.name}"
-			),
-			title=GATE_TITLE,
-		)
-
-	if cint(schedule.pos_schedule_warning_minutes) < 0:
-		frappe.throw(
-			_("Schedule Warning Minutes must be zero or greater."),
 			title=GATE_TITLE,
 		)
 
@@ -221,28 +177,14 @@ def apply_schedule_snapshot(opening):
 		return
 
 	opening.shift_slot = None
-	schedule = get_effective_schedule(opening.pos_profile)
-
-	for field in SCHEDULE_FIELDS:
-		setattr(opening, field, schedule[field])
-
+	validate_group_link(group)
+	# no slots: the shift runs unscheduled (hours live only on Shift Group slots)
+	opening.pos_schedule_enabled = 0
+	opening.pos_schedule_start = None
+	opening.pos_schedule_end = None
+	opening.pos_schedule_warning_minutes = 0
+	opening.pos_schedule_enforce_closing = 0
 	opening.pos_schedule_deadline = None
-	if not cint(schedule.pos_schedule_enabled):
-		return
-
-	now = now_datetime()
-	window = resolve_window(now, schedule.pos_schedule_start, schedule.pos_schedule_end)
-	if window:
-		opening.pos_schedule_deadline = window[1]
-	elif cint(schedule.pos_schedule_enforce_closing):
-		frappe.throw(
-			_("{0} is outside the scheduled shift hours ({1} – {2}). A shift cannot be opened now.").format(
-				now.strftime("%H:%M"),
-				schedule.pos_schedule_start,
-				schedule.pos_schedule_end,
-			),
-			title=GATE_TITLE,
-		)
 
 
 def freeze_schedule_snapshot(opening):
@@ -448,11 +390,10 @@ def validate_group_membership(doc):
 
 
 def validate_profile_schedule(doc, method=None):
-	"""doc_events validate hook on POS Profile: validate the schedule settings
-	and the profile-group link at save time, not only when a shift opens."""
+	"""doc_events validate hook on POS Profile: validate the profile-group
+	link at save time, not only when a shift opens."""
 	validate_group_link(doc.get("pos_profile_group"))
 	validate_group_membership(doc)
-	validate_schedule_values(doc)
 
 
 @frappe.whitelist()

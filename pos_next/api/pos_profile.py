@@ -29,33 +29,13 @@ def _assert_profile_or_manager(pos_profile):
 	frappe.throw(_("You don't have access to this POS Profile"), frappe.PermissionError)
 
 
-def _resolve_schedule_params(parameters):
-	"""Shift schedule defaults for create_pos_profile.
-
-	Absent/empty `pos_schedule_enabled` means "not provided" and defaults to
-	enabled (the field's default) — it never silently disables the schedule.
-	Only an explicit 0 opts out. Time values are validated on insert by
-	pos_next.shift_schedule.validate_profile_schedule (enabled without
-	start/end is rejected with a clear error).
-	"""
-	enabled = parameters.get("pos_schedule_enabled")
-	return {
-		"pos_schedule_enabled": 1 if enabled in (None, "") else cint(enabled),
-		"pos_schedule_start": parameters.get("pos_schedule_start"),
-		"pos_schedule_end": parameters.get("pos_schedule_end"),
-		"pos_schedule_warning_minutes": cint(parameters.get("pos_schedule_warning_minutes") or 0),
-		"pos_schedule_enforce_closing": cint(parameters.get("pos_schedule_enforce_closing") or 0),
-	}
-
-
 @frappe.whitelist()
 def get_pos_profiles():
 	"""Get all POS Profiles accessible by current user"""
 	pos_profiles = frappe.db.sql(
 		"""
 		SELECT DISTINCT p.name, p.company, p.currency, p.warehouse,
-			p.selling_price_list, p.write_off_account, p.write_off_cost_center,
-			p.pos_schedule_enabled, p.pos_schedule_start, p.pos_schedule_end
+			p.selling_price_list, p.write_off_account, p.write_off_cost_center
 		FROM `tabPOS Profile` p
 		INNER JOIN `tabPOS Profile User` u ON u.parent = p.name
 		WHERE p.disabled = 0 AND u.user = %s
@@ -635,9 +615,6 @@ def create_pos_profile(*arg, **parameters):
 		- customer_groups: List of customer groups (filters)
 		- brands: List of brands (filters)
 		- apply_discount_on: Discount application method
-		- pos_schedule_enabled: Shift schedule master switch (default 1; only an explicit 0 disables)
-		- pos_schedule_start / pos_schedule_end: Shift hours, required when enabled
-		- pos_schedule_warning_minutes / pos_schedule_enforce_closing
 	"""
 
 	# Extract list parameters
@@ -665,8 +642,6 @@ def create_pos_profile(*arg, **parameters):
 	pos_profile.company = user_company
 
 	pos_profile.update(parameters)
-	# schedule fields explicitly (never via blind update): absent = default on
-	pos_profile.update(_resolve_schedule_params(parameters))
 
 	# Child tables
 	if not payments or len(payments) == 0:

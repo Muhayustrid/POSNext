@@ -399,49 +399,6 @@ CUSTOM_FIELDS = {
 			"read_only": 1,
 			"description": "Shift Group this profile belongs to (set from the group's Members table). Shifts opened on this profile follow the group's shift slots.",
 		},
-		{
-			"fieldname": "pos_schedule_enabled",
-			"label": "Enable Shift Schedule",
-			"fieldtype": "Check",
-			"insert_after": "pos_profile_group",
-			# string, not int: Custom Field.default is a Data column and Frappe's
-			# version-diff formatter chokes on ints during migrate
-			"default": "1",
-			"description": "Restrict this POS Profile to configured shift hours (site timezone). On by default for new profiles — set times or assign a Shift Group.",
-		},
-		{
-			"fieldname": "pos_schedule_start",
-			"label": "Shift Start Time",
-			"fieldtype": "Time",
-			"insert_after": "pos_schedule_enabled",
-			"depends_on": "pos_schedule_enabled",
-		},
-		{
-			"fieldname": "pos_schedule_end",
-			"label": "Shift End Time",
-			"fieldtype": "Time",
-			"insert_after": "pos_schedule_start",
-			"depends_on": "pos_schedule_enabled",
-			"description": "An end time earlier than the start time runs past midnight.",
-		},
-		{
-			"fieldname": "pos_schedule_warning_minutes",
-			"label": "Schedule Warning Minutes",
-			"fieldtype": "Int",
-			"insert_after": "pos_schedule_end",
-			"default": 0,
-			"depends_on": "pos_schedule_enabled",
-			"description": "Minutes before the schedule ends to warn the cashier. 0 disables the warning.",
-		},
-		{
-			"fieldname": "pos_schedule_enforce_closing",
-			"label": "Enforce Closing After Schedule",
-			"fieldtype": "Check",
-			"insert_after": "pos_schedule_warning_minutes",
-			"default": 0,
-			"depends_on": "pos_schedule_enabled",
-			"description": "When enabled, sales, payments and refunds are blocked after the schedule ends; only closing the shift is allowed.",
-		},
 	],
 	"Promotional Scheme": [
 		{

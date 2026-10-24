@@ -196,12 +196,11 @@ class TestGroupSync(unittest.TestCase):
 
 
 class TestNewProfileDefaults(unittest.TestCase):
-	def test_schedule_enabled_by_default_for_new_profiles_only(self):
+	def test_profile_has_no_schedule_fields(self):
 		fields = {f["fieldname"]: f for f in CUSTOM_FIELDS["POS Profile"]}
-		# string, not int — Custom Field.default is a Data column
-		self.assertEqual(fields["pos_schedule_enabled"]["default"], "1")
-		# the default lives in the custom field meta, so existing rows (all 0)
-		# are untouched — only new profiles start enabled
+		# shift hours live only on the Shift Group slots
+		for field in ("pos_schedule_enabled", "pos_schedule_start", "pos_schedule_end"):
+			self.assertNotIn(field, fields)
 		self.assertEqual(fields["pos_profile_group"]["label"], "Shift Group")
 		# read-only mirror: membership is edited on the Shift Group only
 		self.assertTrue(fields["pos_profile_group"]["read_only"])
@@ -246,55 +245,6 @@ class TestMultiCompanyDocTypeMeta(unittest.TestCase):
 		fields = self._fields("POS Profile Group")
 		self.assertNotIn("reqd", fields["company"])
 		self.assertEqual(fields["company"]["hidden"], 1)
-
-
-class TestCreateProfileScheduleParams(unittest.TestCase):
-	"""create_pos_profile must default the schedule on and never disable it
-	silently — only an explicit 0 opts out."""
-
-	def test_absent_params_default_enabled(self):
-		from pos_next.api.pos_profile import _resolve_schedule_params
-
-		resolved = _resolve_schedule_params({})
-		self.assertEqual(resolved["pos_schedule_enabled"], 1)
-		self.assertIsNone(resolved["pos_schedule_start"])
-
-	def test_empty_or_none_enabled_still_enabled(self):
-		from pos_next.api.pos_profile import _resolve_schedule_params
-
-		for value in ("", None):
-			with self.subTest(value=value):
-				# absent / blank means "not provided" — never a silent disable
-				self.assertEqual(_resolve_schedule_params({"pos_schedule_enabled": value})["pos_schedule_enabled"], 1)
-
-	def test_explicit_zero_opts_out(self):
-		from pos_next.api.pos_profile import _resolve_schedule_params
-
-		resolved = _resolve_schedule_params({"pos_schedule_enabled": 0})
-		self.assertEqual(resolved["pos_schedule_enabled"], 0)
-
-	def test_full_schedule_passthrough(self):
-		from pos_next.api.pos_profile import _resolve_schedule_params
-
-		resolved = _resolve_schedule_params(
-			{
-				"pos_schedule_enabled": "1",
-				"pos_schedule_start": "05:00:00",
-				"pos_schedule_end": "12:00:00",
-				"pos_schedule_warning_minutes": "15",
-				"pos_schedule_enforce_closing": "1",
-			}
-		)
-		self.assertEqual(
-			resolved,
-			{
-				"pos_schedule_enabled": 1,
-				"pos_schedule_start": "05:00:00",
-				"pos_schedule_end": "12:00:00",
-				"pos_schedule_warning_minutes": 15,
-				"pos_schedule_enforce_closing": 1,
-			},
-		)
 
 
 if __name__ == "__main__":

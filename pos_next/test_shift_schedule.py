@@ -29,7 +29,6 @@ from pos_next.shift_schedule import (
 	validate_group_membership,
 	validate_invoice,
 	validate_profile_schedule,
-	validate_schedule_values,
 )
 
 WINDOW = {
@@ -95,103 +94,51 @@ class TestResolveWindow(unittest.TestCase):
 		self.assertIsNone(_as_time_delta("99:99:99"))
 
 
-class TestScheduleValidation(unittest.TestCase):
-	def _sched(self, **overrides):
-		return frappe._dict({"name": "Profile 1", **WINDOW, **overrides})
-
-	def test_enabled_schedule_requires_valid_times(self):
-		with patch("pos_next.shift_schedule.frappe.throw", side_effect=_throw):
-			with self.assertRaises(RuntimeError):
-				validate_schedule_values(self._sched(pos_schedule_start=None))
-			with self.assertRaises(RuntimeError):
-				validate_schedule_values(self._sched(pos_schedule_end="not-a-time"))
-			with self.assertRaises(RuntimeError):
-				validate_schedule_values(self._sched(pos_schedule_start="09:00"))  # no seconds
-
-	def test_negative_warning_rejected(self):
-		with patch("pos_next.shift_schedule.frappe.throw", side_effect=_throw):
-			with self.assertRaises(RuntimeError):
-				validate_schedule_values(self._sched(pos_schedule_warning_minutes=-5))
-
-	def test_zero_warning_and_midnight_ok(self):
-		validate_schedule_values(self._sched(pos_schedule_start="00:00:00", pos_schedule_warning_minutes=0))
-
-	def test_disabled_schedule_skips_validation(self):
-		validate_schedule_values(self._sched(pos_schedule_enabled=0, pos_schedule_start="garbage"))
-
-
 class TestApplyScheduleSnapshot(unittest.TestCase):
-	def _apply(self, schedule, now, group="no-group"):
+	"""Without Shift Group slots a shift runs unscheduled, whatever old hours
+	are still stored on the POS Profile row."""
+
+	def _apply(self, now, group="no-group"):
 		# group: "no-group" = field empty, None = group doc missing, str = existing group name
 		opening = Mock()
 		opening.pos_profile = "Profile 1"
 		# pre-set tampered values: apply must overwrite all of them
-		opening.pos_schedule_enabled = 0
+		opening.pos_schedule_enabled = 1
+		opening.pos_schedule_enforce_closing = 1
 		opening.pos_schedule_deadline = "1999-01-01 00:00:00"
-		values = frappe._dict(
-			{
-				"name": "Profile 1",
-				"company": "Outlet",
-				"pos_profile_group": None if group == "no-group" else "Group A",
-				**schedule,
-			}
+		profile = frappe._dict(
+			{"name": "Profile 1", "pos_profile_group": None if group == "no-group" else "Group A", **WINDOW}
 		)
 
 		def get_value(doctype, name, fields=None, as_dict=False):
 			if doctype == "POS Profile Group":
 				return group if group != "no-group" else None
-			return values
+			return profile
 
 		with (
 			patch("pos_next.shift_schedule.frappe.db.get_value", side_effect=get_value),
+			patch("pos_next.shift_schedule._group_slots", return_value=[]),
 			patch("pos_next.shift_schedule.now_datetime", return_value=now),
 		):
 			apply_schedule_snapshot(opening)
 		return opening
 
-	def test_snapshots_schedule_and_deadline(self):
-		opening = self._apply(WINDOW, _dt(2026, 9, 7, 12, 0))
-		self.assertEqual(opening.pos_schedule_enabled, 1)
-		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 9, 7, 22, 0))
-
-	def test_overnight_deadline_crosses_midnight(self):
-		opening = self._apply(OVERNIGHT, _dt(2026, 9, 7, 23, 30))
-		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 9, 8, 5, 0))
-
-	def test_overwrites_client_supplied_snapshot(self):
-		opening = self._apply(WINDOW, _dt(2026, 9, 7, 12, 0))
-		self.assertEqual(opening.pos_schedule_enabled, 1)
-		self.assertNotEqual(opening.pos_schedule_deadline, "1999-01-01 00:00:00")
-
-	def test_disabled_schedule_zeroes_snapshot(self):
-		opening = self._apply({**WINDOW, "pos_schedule_enabled": 0}, _dt(2026, 9, 7, 12, 0))
+	def _assert_unscheduled(self, opening):
 		self.assertEqual(opening.pos_schedule_enabled, 0)
+		self.assertEqual(opening.pos_schedule_enforce_closing, 0)
 		self.assertIsNone(opening.pos_schedule_deadline)
+		self.assertIsNone(opening.shift_slot)
 
-	def test_rejects_opening_outside_enforced_window(self):
-		with self.assertRaises(frappe.exceptions.ValidationError):
-			self._apply(WINDOW, _dt(2026, 9, 7, 23, 0))
+	def test_no_group_ignores_profile_hours(self):
+		# 23:00 is outside the profile's old enforced 09:00-22:00 window
+		self._assert_unscheduled(self._apply(_dt(2026, 9, 7, 23, 0)))
 
-	def test_allows_opening_outside_window_when_not_enforced(self):
-		opening = self._apply({**WINDOW, "pos_schedule_enforce_closing": 0}, _dt(2026, 9, 7, 23, 0))
-		self.assertIsNone(opening.pos_schedule_deadline)
-
-	def test_cross_company_group_link_accepted(self):
-		# groups are company-neutral: any existing group may be linked
-		opening = self._apply(WINDOW, _dt(2026, 9, 7, 12, 0), group="HQ Parent")
-		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 9, 7, 22, 0))
-
-	def test_cross_company_group_link_accepted_when_schedule_disabled(self):
-		opening = self._apply({**WINDOW, "pos_schedule_enabled": 0}, _dt(2026, 9, 7, 12, 0), group="HQ Parent")
-		self.assertIsNone(opening.pos_schedule_deadline)
+	def test_group_without_slots_is_unscheduled(self):
+		self._assert_unscheduled(self._apply(_dt(2026, 9, 7, 23, 0), group="HQ Parent"))
 
 	def test_missing_group_rejected(self):
 		with self.assertRaises(frappe.exceptions.ValidationError):
-			self._apply(WINDOW, _dt(2026, 9, 7, 12, 0), group=None)
-
-	def test_no_group_still_works(self):
-		opening = self._apply(WINDOW, _dt(2026, 9, 7, 12, 0))
-		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 9, 7, 22, 0))
+			self._apply(_dt(2026, 9, 7, 12, 0), group=None)
 
 
 class TestFreezeSnapshot(unittest.TestCase):
@@ -734,21 +681,18 @@ class TestExtendDeadline(unittest.TestCase):
 
 
 class TestProfileGroupHooks(unittest.TestCase):
-	def test_profile_save_validates_group_and_schedule(self):
+	def test_profile_save_validates_group(self):
 		doc = Mock()
 		doc.get = lambda field: {"pos_profile_group": "Group A"}.get(field)
 		group_check = Mock()
 		membership_check = Mock()
-		sched_check = Mock()
 		with (
 			patch("pos_next.shift_schedule.validate_group_link", group_check),
 			patch("pos_next.shift_schedule.validate_group_membership", membership_check),
-			patch("pos_next.shift_schedule.validate_schedule_values", sched_check),
 		):
 			validate_profile_schedule(doc)
 		group_check.assert_called_once_with("Group A")
 		membership_check.assert_called_once_with(doc)
-		sched_check.assert_called_once_with(doc)
 
 
 class TestGroupMembershipAuthority(unittest.TestCase):

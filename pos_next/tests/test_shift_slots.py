@@ -163,7 +163,7 @@ class TestShiftSlots(unittest.TestCase):
 		self.assertEqual(opening.shift_slot, "Morning")
 		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 10, 23, 15, 0))
 
-	def test_group_without_slots_keeps_profile_schedule(self):
+	def test_group_without_slots_ignores_profile_schedule(self):
 		now = _dt(2026, 10, 23, 12, 0)
 		profile_data = frappe._dict(
 			{
@@ -190,18 +190,16 @@ class TestShiftSlots(unittest.TestCase):
 
 		with (
 			patch("pos_next.shift_schedule.frappe.db.get_value", side_effect=mock_get_value),
-			patch("pos_next.shift_schedule.get_profile_slots", return_value=[]),
+			patch("pos_next.shift_schedule._group_slots", return_value=[]),
 			patch("pos_next.shift_schedule.now_datetime", return_value=now),
 		):
 			apply_schedule_snapshot(opening)
 
+		# hours live only on Shift Group slots: old profile hours are ignored
 		self.assertIsNone(opening.shift_slot)
-		self.assertEqual(opening.pos_schedule_enabled, 1)
-		self.assertEqual(opening.pos_schedule_start, "09:00:00")
-		self.assertEqual(opening.pos_schedule_end, "22:00:00")
-		self.assertEqual(opening.pos_schedule_warning_minutes, 15)
-		self.assertEqual(opening.pos_schedule_enforce_closing, 1)
-		self.assertEqual(opening.pos_schedule_deadline, _dt(2026, 10, 23, 22, 0))
+		self.assertEqual(opening.pos_schedule_enabled, 0)
+		self.assertEqual(opening.pos_schedule_enforce_closing, 0)
+		self.assertIsNone(opening.pos_schedule_deadline)
 
 	def test_slot_snapshot_frozen_on_save(self):
 		opening = Mock()
