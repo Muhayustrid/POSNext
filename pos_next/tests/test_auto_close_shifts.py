@@ -38,6 +38,20 @@ class TestAutoCloseShifts(POSInvoiceModeMixin, FrappeTestCase):
 		)
 		return deadline
 
+	def test_task_module_imports_in_a_fresh_interpreter(self):
+		# The scheduler worker imports the task cold; a circular import there
+		# fails silently (create_log=0) and no shift is ever auto-closed.
+		import subprocess
+		import sys
+
+		result = subprocess.run(
+			[sys.executable, "-c", "import pos_next.tasks.auto_close_shifts"],
+			capture_output=True,
+			text=True,
+			cwd=frappe.utils.get_bench_path() + "/sites",
+		)
+		self.assertEqual(result.returncode, 0, result.stderr[-500:])
+
 	def test_job_closes_enforced_shift_past_grace_period(self):
 		# Submit a sale so expected_amount > 0
 		submit_invoice(self._payload())

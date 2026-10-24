@@ -10,7 +10,6 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import add_to_date, cint, flt, get_datetime, getdate, now_datetime, nowdate, nowtime
 
 from pos_next.api.utilities import get_wallet_payment_modes
-from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
 from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
 	get_active_profile_shift,
 	throw_profile_in_use,
@@ -173,6 +172,9 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 	if active:
 		deadline = frappe.db.get_value("POS Opening Shift", active.name, "pos_schedule_deadline")
 		if deadline and get_datetime(deadline) < now_datetime():
+			# Local import: pos_closing_shift imports pos_next.api (circular at module load).
+			from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
+
 			_submit_closing(active.name, auto_balance=True, auto_closed=True)
 			active = None
 
