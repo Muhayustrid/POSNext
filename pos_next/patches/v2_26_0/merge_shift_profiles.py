@@ -60,7 +60,8 @@ def _resolve_profile_schedule(profile_name: str, fallback_slot: bool = False) ->
 	enforce = prof.pos_schedule_enforce_closing if prof.pos_schedule_enforce_closing is not None else 1
 	group_name = prof.pos_profile_group
 
-	if (not start or not end) and group_name:
+	# 00:00:00 comes back as timedelta(0), which is falsy: compare with None.
+	if (start is None or end is None) and group_name:
 		group_data = frappe.db.get_value(
 			"POS Profile Group",
 			group_name,
@@ -73,14 +74,14 @@ def _resolve_profile_schedule(profile_name: str, fallback_slot: bool = False) ->
 			as_dict=True,
 		)
 		if group_data:
-			start = start or group_data.pos_schedule_start
-			end = end or group_data.pos_schedule_end
+			start = group_data.pos_schedule_start if start is None else start
+			end = group_data.pos_schedule_end if end is None else end
 			if not prof.pos_schedule_warning_minutes and group_data.pos_schedule_warning_minutes:
 				warning = group_data.pos_schedule_warning_minutes
 			if group_data.pos_schedule_enforce_closing is not None:
 				enforce = group_data.pos_schedule_enforce_closing
 
-	if not start or not end:
+	if start is None or end is None:
 		if not fallback_slot:
 			return None
 		start = "00:00:00"
@@ -200,9 +201,7 @@ def merge_company(company: str) -> dict:
 
 		# Move POS Profile User rows to kept profile without duplicates
 		parentfield = _get_pos_profile_user_parentfield()
-		existing_users = set(
-			frappe.get_all("POS Profile User", filters={"parent": kept.name}, pluck="user")
-		)
+		existing_users = set(frappe.get_all("POS Profile User", filters={"parent": kept.name}, pluck="user"))
 		for p in disabled:
 			users_to_add = frappe.get_all("POS Profile User", filters={"parent": p.name}, pluck="user")
 			for u in users_to_add:
@@ -245,9 +244,7 @@ def merge_company(company: str) -> dict:
 		)
 		group_doc.insert(ignore_permissions=True)
 
-		frappe.db.set_value(
-			"POS Profile", kept.name, "pos_profile_group", group_name, update_modified=False
-		)
+		frappe.db.set_value("POS Profile", kept.name, "pos_profile_group", group_name, update_modified=False)
 
 		return {
 			"status": "merged",
@@ -297,9 +294,7 @@ def merge_company(company: str) -> dict:
 		)
 		group_doc.insert(ignore_permissions=True)
 
-		frappe.db.set_value(
-			"POS Profile", prof.name, "pos_profile_group", group_name, update_modified=False
-		)
+		frappe.db.set_value("POS Profile", prof.name, "pos_profile_group", group_name, update_modified=False)
 
 		return {
 			"status": "single",

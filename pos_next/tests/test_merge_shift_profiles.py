@@ -10,7 +10,11 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from pos_next.patches.v2_26_0.merge_shift_profiles import _format_time, merge_company
+from pos_next.patches.v2_26_0.merge_shift_profiles import (
+	_format_time,
+	_resolve_profile_schedule,
+	merge_company,
+)
 from pos_next.tests.price_group_helpers import make_test_company, make_test_pos_profile, make_test_warehouse
 
 ADMIN = "Administrator"
@@ -36,9 +40,9 @@ class TestMergeShiftProfiles(FrappeTestCase):
 		cls._make_profile_user(cls.keep, ADMIN)
 		cls._make_profile_user(cls.disable, ADMIN)
 		cls.cashier = f"shift-merge.{cls.suffix}@example.com"
-		frappe.get_doc(
-			{"doctype": "User", "email": cls.cashier, "first_name": "Shift Merge Tester"}
-		).insert(ignore_permissions=True)
+		frappe.get_doc({"doctype": "User", "email": cls.cashier, "first_name": "Shift Merge Tester"}).insert(
+			ignore_permissions=True
+		)
 		cls._make_profile_user(cls.disable, cls.cashier)
 		cls._make_profile_user(cls.fallback, cls.cashier)
 		cls._make_opening_shift_rows(cls.keep, 3)
@@ -63,13 +67,10 @@ class TestMergeShiftProfiles(FrappeTestCase):
 
 		cls.warehouse_company = make_test_company(f"ShiftWarehouses{cls.suffix}")
 		cls.warehouses = [
-			make_test_warehouse(f"ShiftWarehouse{i}{cls.suffix}", cls.warehouse_company)
-			for i in (1, 2)
+			make_test_warehouse(f"ShiftWarehouse{i}{cls.suffix}", cls.warehouse_company) for i in (1, 2)
 		]
 		cls.different_warehouse_profiles = [
-			make_test_pos_profile(
-				f"ShiftWarehouse{i}{cls.suffix}", cls.warehouse_company, warehouse
-			)
+			make_test_pos_profile(f"ShiftWarehouse{i}{cls.suffix}", cls.warehouse_company, warehouse)
 			for i, warehouse in enumerate(cls.warehouses, 1)
 		]
 		for profile in cls.different_warehouse_profiles:
@@ -132,11 +133,11 @@ class TestMergeShiftProfiles(FrappeTestCase):
 				VALUES (%s, %s, NOW(), NOW(), %s, 1, %s, %s, %s)""",
 				(
 					name,
-				ADMIN,
-				ADMIN,
-				"Open" if active and index == 0 else "Closed",
-				profile,
-				frappe.db.get_value("POS Profile", profile, "company"),
+					ADMIN,
+					ADMIN,
+					"Open" if active and index == 0 else "Closed",
+					profile,
+					frappe.db.get_value("POS Profile", profile, "company"),
 				),
 			)
 
@@ -145,7 +146,14 @@ class TestMergeShiftProfiles(FrappeTestCase):
 		frappe.set_user(ADMIN)
 		profiles = [
 			getattr(cls, name, None)
-			for name in ("keep", "disable", "fallback", "single", "open_profiles", "different_warehouse_profiles")
+			for name in (
+				"keep",
+				"disable",
+				"fallback",
+				"single",
+				"open_profiles",
+				"different_warehouse_profiles",
+			)
 		]
 		flat_profiles = []
 		for item in profiles:
@@ -154,15 +162,14 @@ class TestMergeShiftProfiles(FrappeTestCase):
 			elif item:
 				flat_profiles.append(item)
 		for profile in flat_profiles:
-			frappe.db.delete("POS Opening Shift", {"pos_profile": profile, "name": ["like", "_Test Shift Merge %"]})
+			frappe.db.delete(
+				"POS Opening Shift", {"pos_profile": profile, "name": ["like", "_Test Shift Merge %"]}
+			)
 			frappe.db.delete("POS Profile User", {"parent": profile})
 			frappe.db.delete("POS Profile Group Member", {"pos_profile": profile})
 			frappe.db.set_value("POS Profile", profile, "pos_profile_group", "", update_modified=False)
 
-		group_names = [
-			getattr(cls, name, None)
-			for name in ("group_keep", "group_disable")
-		]
+		group_names = [getattr(cls, name, None) for name in ("group_keep", "group_disable")]
 		group_names.extend(
 			f"{company} Shifts"
 			for company in (
@@ -215,15 +222,12 @@ class TestMergeShiftProfiles(FrappeTestCase):
 		for profile in (self.disable, self.fallback):
 			self.assertEqual(frappe.db.get_value("POS Profile", profile, "disabled"), 1)
 			self.assertFalse(frappe.db.get_value("POS Profile", profile, "pos_profile_group"))
-		self.assertEqual(
-			frappe.db.get_value("POS Profile", self.keep, "pos_profile_group"), result["group"]
-		)
+		self.assertEqual(frappe.db.get_value("POS Profile", self.keep, "pos_profile_group"), result["group"])
 
 		group = frappe.get_doc("POS Profile Group", result["group"])
 		self.assertEqual([row.pos_profile for row in group.profiles], [self.keep])
 		slots = {
-			row.shift_name: (_format_time(row.start_time), _format_time(row.end_time))
-			for row in group.shifts
+			row.shift_name: (_format_time(row.start_time), _format_time(row.end_time)) for row in group.shifts
 		}
 		self.assertEqual(slots[self.group_keep], ("05:00:00", "15:00:00"))
 		self.assertEqual(slots[self.group_disable], ("13:00:00", "21:00:00"))
@@ -249,6 +253,14 @@ class TestMergeShiftProfiles(FrappeTestCase):
 		self.assertEqual(_format_time(group.shifts[0].start_time), "05:00:00")
 		self.assertEqual(_format_time(group.shifts[0].end_time), "15:00:00")
 
+	def test_midnight_start_is_a_schedule(self):
+		# MariaDB returns 00:00:00 as timedelta(0), which is falsy.
+		self._schedule(self.single, None, "00:00:00", "23:59:59")
+		self.addCleanup(self._schedule, self.single, None, "05:00:00", "15:00:00")
+		slot = _resolve_profile_schedule(self.single)
+		self.assertIsNotNone(slot)
+		self.assertEqual((slot["start_time"], slot["end_time"]), ("00:00:00", "23:59:59"))
+
 	def test_open_shift_skips_company_and_logs_error(self):
 		with patch("pos_next.patches.v2_26_0.merge_shift_profiles.frappe.log_error") as log_error:
 			result = merge_company(self.open_company)
@@ -258,9 +270,7 @@ class TestMergeShiftProfiles(FrappeTestCase):
 		self.assertEqual(result["disabled"], [])
 		self.assertIsNone(result["group"])
 		log_error.assert_called_once()
-		self.assertEqual(
-			frappe.db.get_value("POS Profile", self.open_profiles[0], "disabled"), 0
-		)
+		self.assertEqual(frappe.db.get_value("POS Profile", self.open_profiles[0], "disabled"), 0)
 		self.assertFalse(frappe.db.exists("POS Profile Group", f"{self.open_company} Shifts"))
 
 	def test_profiles_with_different_warehouses_are_untouched(self):
