@@ -11,8 +11,9 @@
   "column_break_name",
   "section_break_schedule",
   "shifts",
-  "column_break_schedule",
+  "section_break_slot_rules",
   "pos_schedule_warning_minutes",
+  "column_break_schedule",
   "pos_schedule_enforce_closing",
   "section_break_members",
   "profiles"
@@ -51,6 +52,10 @@
    "options": "POS Shift Slot"
   },
   {
+   "fieldname": "section_break_slot_rules",
+   "fieldtype": "Section Break"
+  },
+  {
    "fieldname": "column_break_schedule",
    "fieldtype": "Column Break"
   },
@@ -84,7 +89,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-24 14:00:00.000000",
+ "modified": "2026-10-24 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Profile Group",

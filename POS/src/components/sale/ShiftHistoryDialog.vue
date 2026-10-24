@@ -91,7 +91,7 @@
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('POS Profile') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('Cashier') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-center">{{ __('Times (Open - Close)') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Opening') }}</th>
+									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Modal Awal') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Closing') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Sales') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Cash Diff') }}</th>
@@ -344,7 +344,7 @@ function exportToCSV() {
 		__('Cashier'),
 		__('Open Time'),
 		__('Close Time'),
-		__('Opening Amount'),
+		__('Modal Awal'),
 		__('Closing Amount'),
 		__('Total Sales'),
 		__('Cash Difference'),

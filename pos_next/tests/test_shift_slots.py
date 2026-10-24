@@ -368,6 +368,7 @@ class TestShiftSlotsAPI(unittest.TestCase):
 			patch("pos_next.api.shifts.frappe.db.sql", return_value=pos_profiles),
 			patch("pos_next.api.shifts.get_wallet_payment_modes", return_value=[]),
 			patch("pos_next.api.shifts.frappe.get_list", return_value=[]),
+			patch("pos_next.api.shifts.get_modal_awal_modes", return_value={"Cash"}),
 			patch("pos_next.api.shifts.get_profile_slots", return_value=[SLOT_MORNING]),
 			patch("pos_next.api.shifts.open_slots_now", return_value=[SLOT_MORNING]),
 		):
@@ -378,6 +379,57 @@ class TestShiftSlotsAPI(unittest.TestCase):
 			slot_entry = data["slots"]["Profile 1"][0]
 			self.assertEqual(slot_entry["shift_name"], "Morning")
 			self.assertTrue(slot_entry["open_now"])
+
+	def test_only_drawer_cash_mode_flagged_for_modal_awal(self):
+		# sites type E-Wallet / Debit Card as "Cash" too: only the profile's
+		# drawer cash mode may carry a Modal Awal
+		from pos_next.api.shifts import get_opening_dialog_data
+
+		pos_profiles = [frappe._dict({"name": "Profile 1", "company": "Company 1"})]
+		methods = [
+			{"parent": "Profile 1", "mode_of_payment": "Cash"},
+			{"parent": "Profile 1", "mode_of_payment": "E-Wallet"},
+		]
+		with (
+			patch("pos_next.api.shifts.frappe.db.sql", return_value=pos_profiles),
+			patch("pos_next.api.shifts.get_wallet_payment_modes", return_value=[]),
+			patch("pos_next.api.shifts.frappe.get_list", return_value=methods),
+			patch("pos_next.api.shifts.frappe.get_cached_value", return_value="IDR"),
+			patch("pos_next.api.shifts.get_modal_awal_modes", return_value={"Cash"}),
+			patch("pos_next.api.shifts.get_profile_slots", return_value=[]),
+			patch("pos_next.api.shifts.open_slots_now", return_value=[]),
+		):
+			data = get_opening_dialog_data()
+		flags = {m["mode_of_payment"]: m["is_drawer_cash"] for m in data["payments_method"]}
+		self.assertEqual(flags, {"Cash": True, "E-Wallet": False})
+
+	def test_non_drawer_opening_amount_forced_to_zero(self):
+		created_doc = Mock()
+		created_doc.as_dict.return_value = {"name": "POSA-OS-26-00001"}
+		with (
+			patch("pos_next.api.shifts._check_profile_access"),
+			patch("pos_next.api.shifts.frappe.db.get_value"),
+			patch("pos_next.api.shifts.check_opening_shift", return_value=None),
+			patch("pos_next.api.shifts.get_active_profile_shift", return_value=None),
+			patch("pos_next.api.shifts.get_modal_awal_modes", return_value={"Cash"}),
+			patch("pos_next.api.shifts.frappe.get_doc", return_value=created_doc),
+			patch("pos_next.api.shifts.frappe.get_cached_doc"),
+		):
+			create_opening_shift(
+				"Profile 1",
+				"Company 1",
+				[
+					{"mode_of_payment": "Cash", "opening_amount": 50000},
+					{"mode_of_payment": "E-Wallet", "opening_amount": 20000},
+				],
+			)
+		created_doc.set.assert_called_once_with(
+			"balance_details",
+			[
+				{"mode_of_payment": "Cash", "amount": 50000},
+				{"mode_of_payment": "E-Wallet", "amount": 0},
+			],
+		)
 
 	def test_create_opening_shift_passes_shift_slot(self):
 		from pos_next.api.shifts import create_opening_shift
@@ -392,6 +444,7 @@ class TestShiftSlotsAPI(unittest.TestCase):
 			patch("pos_next.api.shifts.frappe.db.get_value"),
 			patch("pos_next.api.shifts.check_opening_shift", return_value=None),
 			patch("pos_next.api.shifts.get_active_profile_shift", return_value=None),
+			patch("pos_next.api.shifts.get_modal_awal_modes", return_value={"Cash"}),
 			patch("pos_next.api.shifts.frappe.get_doc", return_value=created_doc) as mock_get_doc,
 			patch("pos_next.api.shifts.frappe.get_cached_doc"),
 		):

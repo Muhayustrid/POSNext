@@ -36,12 +36,6 @@
 										<p class="text-sm text-gray-500 mt-1">
 											{{ profile.company }}
 										</p>
-										<p
-											v-if="profile.pos_schedule_enabled && profile.pos_schedule_start && profile.pos_schedule_end"
-											class="text-sm font-medium text-blue-700 mt-1"
-										>
-											🕒 {{ hhmm(profile.pos_schedule_start) }} – {{ hhmm(profile.pos_schedule_end) }}
-										</p>
 									</div>
 									<div class="flex flex-col items-end gap-1">
 										<span
@@ -393,14 +387,10 @@ const cashPaymentMethods = computed(() => {
 	return paymentMethods.value.filter(isCashMethod)
 })
 
-// Only Cash-type modes of payment may carry an opening balance; non-cash
-// (QRIS, debit, ...) stays locked at 0 so it can't double-count a shift.
+// Only the profile's drawer cash mode carries a Modal Awal; every other mode
+// (QRIS, debit, e-wallet, ...) stays at 0 so it can't double-count a shift.
 function isCashMethod(method) {
-	return (
-		method.mode_type === "Cash" ||
-		(!method.mode_type &&
-			String(method.mode_of_payment).toLowerCase() === "cash")
-	)
+	return Boolean(method.is_drawer_cash)
 }
 
 const selectedSlot = ref(null)

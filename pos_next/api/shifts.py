@@ -14,7 +14,7 @@ from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
 	get_active_profile_shift,
 	throw_profile_in_use,
 )
-from pos_next.services.cash_mode import get_cash_mode_of_payment
+from pos_next.services.cash_mode import get_cash_mode_of_payment, get_modal_awal_modes
 from pos_next.services.sales_recap import (
 	build_recap,
 	period_hourly,
@@ -75,11 +75,11 @@ def get_opening_dialog_data():
 		)
 
 		# Set currency from pos profile
+		modal_awal = {p: get_modal_awal_modes(p) for p in pos_profiles_list}
 		for mode in data["payments_method"]:
 			mode["currency"] = frappe.get_cached_value("POS Profile", mode["parent"], "currency")
-			# Cash-ness comes from Mode of Payment.type: only Cash may carry an
-			# opening balance (the dialog locks non-cash inputs at 0).
-			mode["mode_type"] = frappe.db.get_value("Mode of Payment", mode["mode_of_payment"], "type")
+			# only the configured modes (default: the drawer cash mode) take a Modal Awal
+			mode["is_drawer_cash"] = mode["mode_of_payment"] in modal_awal[mode["parent"]]
 	else:
 		data["payments_method"] = []
 
@@ -207,15 +207,16 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 	)
 
 	# Add balance details - map opening_amount to amount
-	# Only Cash-type Modes of Payment may carry an opening balance: a non-cash
+	# Only the Modal Awal modes may carry an opening balance: a non-cash
 	# opening amount double-counts the previous shift's takings. Forcing to 0
 	# (instead of throwing) keeps older clients working while the trust
 	# boundary still guarantees a clean opening drawer.
+	modal_awal_modes = get_modal_awal_modes(pos_profile)
 	formatted_balance_details = []
 	for detail in balance_details:
 		mode = detail.get("mode_of_payment")
 		opening_amount = flt(detail.get("opening_amount", 0))
-		if opening_amount and frappe.db.get_value("Mode of Payment", mode, "type") != "Cash":
+		if opening_amount and mode not in modal_awal_modes:
 			opening_amount = 0
 		formatted_balance_details.append(
 			{"mode_of_payment": mode, "amount": opening_amount}

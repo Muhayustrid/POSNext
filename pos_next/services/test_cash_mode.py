@@ -99,3 +99,30 @@ class TestCashModeResolution(FrappeTestCase):
 	def test_generic_cash_for_missing_profile(self):
 		self.assertEqual(get_cash_mode_of_payment(f"NO-SUCH-PROFILE-{self.tag}"), "Cash")
 		self.assertEqual(get_cash_mode_of_payment(None), "Cash")
+
+
+class TestModalAwalModes(FrappeTestCase):
+	def test_empty_setting_falls_back_to_cash_mode(self):
+		from unittest.mock import patch
+
+		from pos_next.services.cash_mode import get_modal_awal_modes
+
+		with (
+			patch("pos_next.services.cash_mode.frappe.get_all", return_value=[]),
+			patch("pos_next.services.cash_mode.get_cash_mode_of_payment", return_value="Cash Outlet"),
+		):
+			self.assertEqual(get_modal_awal_modes("P1"), {"Cash Outlet"})
+
+	def test_global_setting_lists_modes(self):
+		from pos_next.services.cash_mode import get_modal_awal_modes
+
+		settings = frappe.get_single("POS Next Global Settings")
+		before = [r.mode_of_payment for r in settings.modal_awal_modes]
+		modes = frappe.get_all("Mode of Payment", pluck="name", limit=2)
+		try:
+			settings.set("modal_awal_modes", [{"mode_of_payment": m} for m in modes])
+			settings.save(ignore_permissions=True)
+			self.assertEqual(get_modal_awal_modes("any profile"), set(modes))
+		finally:
+			settings.set("modal_awal_modes", [{"mode_of_payment": m} for m in before])
+			settings.save(ignore_permissions=True)

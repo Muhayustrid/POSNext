@@ -206,7 +206,7 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 		row(__("Average / Order"), money(summary.average_sale)),
 		DIVIDER,
 		title(__("CASH SUMMARY")),
-		row(__("Opening Balance"), money(summary.opening_cash)),
+		row(__("Modal Awal"), money(summary.opening_cash)),
 		row(__("Cash Payment"), money(summary.cash_collected)),
 		// no expense ledger exists: print an honest dash, never a fake zero
 		row(

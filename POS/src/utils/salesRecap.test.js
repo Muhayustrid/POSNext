@@ -235,7 +235,7 @@ describe("buildRecapHTML", () => {
 	it("carries the money figures in the company currency", () => {
 		const html = buildRecapHTML(PERIOD_SUMMARY, { printedAt })
 		expect(html).toMatch(/Total Sales<\/span><span>Rp\s?5[.,]000[.,]000</)
-		expect(html).toMatch(/Opening Balance<\/span><span>Rp\s?900[.,]000</)
+		expect(html).toMatch(/Modal Awal<\/span><span>Rp\s?900[.,]000</)
 		expect(html).toContain("<span>Total Order</span><span>38</span>")
 		expect(html).toContain("Total Refund (2)")
 		expect(html).toContain("Service Charge")

@@ -309,7 +309,7 @@
 					</div>
 					<dl class="mt-4 flex flex-col">
 						<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
-							<dt class="text-sm text-gray-600">{{ __("Opening Balance") }}</dt>
+							<dt class="text-sm text-gray-600">{{ __("Modal Awal") }}</dt>
 							<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.opening_cash) }}</dd>
 						</div>
 						<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">

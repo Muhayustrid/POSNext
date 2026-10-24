@@ -53,3 +53,18 @@ def get_cash_mode_of_payment(pos_profile):
 					return row.mode_of_payment
 
 	return "Cash"
+
+
+def get_modal_awal_modes(pos_profile):
+	"""Modes of payment that may carry a Modal Awal (opening balance).
+
+	POS Next Global Settings `modal_awal_modes` when set, else only the
+	profile's cash drawer mode. Sites type E-Wallet / Debit Card as "Cash"
+	too, so Mode of Payment.type alone would open them with a balance.
+	"""
+	configured = frappe.get_all(
+		"POS Modal Awal Mode",
+		filters={"parenttype": "POS Next Global Settings", "parentfield": "modal_awal_modes"},
+		pluck="mode_of_payment",
+	)
+	return set(configured) or {get_cash_mode_of_payment(pos_profile)}

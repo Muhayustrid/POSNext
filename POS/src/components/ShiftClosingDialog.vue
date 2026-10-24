@@ -538,7 +538,7 @@
 										>
 											<label
 												class="block text-xs font-medium text-gray-500 uppercase mb-0.5 md:mb-1"
-												>{{ __("Opening") }}</label
+												>{{ __("Modal Awal") }}</label
 											>
 											<div
 												class="text-base md:text-lg font-semibold text-gray-900"

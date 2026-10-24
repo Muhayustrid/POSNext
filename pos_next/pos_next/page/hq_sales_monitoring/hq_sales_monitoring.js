@@ -1187,13 +1187,13 @@ class HQSalesMonitor {
 				<a class="btn btn-xs btn-default hq-title-link" href="/app/pos-opening-shift?status=Open">${__("View all")} →</a></div>
 			<div class="hq-table-scroll"><table class="hq-table">
 				<thead><tr>${this._sort_th(__("Cashier / Outlet"), "name", t, false)}
-				${this._sort_th(__("Opening Balance"), "opening", t, true)}
+				${this._sort_th(__("Modal Awal"), "opening", t, true)}
 				${this._sort_th(__("Net Sales"), "sales", t, true)}
 				${this._sort_th(__("Cash"), "cash", t, true)}
 				${this._sort_th(__("Expected Closing"), "expected", t, true)}</tr></thead>
 				<tbody>${rows || `<tr><td colspan="5" class="hq-muted">${__("No open shifts")}</td></tr>`}</tbody>
 			</table></div>
-			<div class="hq-kpi-sub hq-muted">${__("Expected closing = opening balance + cash sales - cash returns - change")}</div>
+			<div class="hq-kpi-sub hq-muted">${__("Expected closing = Modal Awal + cash sales - cash returns - change")}</div>
 		</div>`;
 	}
 

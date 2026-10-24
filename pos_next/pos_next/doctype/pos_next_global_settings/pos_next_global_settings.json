@@ -20,6 +20,8 @@
   "opname_max_backdate_days",
   "column_break_negative_stock",
   "enable_automatic_stock_sync",
+  "section_break_shift",
+  "modal_awal_modes",
   "section_break_localization",
   "allowed_locales",
   "tab_sales",
@@ -236,6 +238,18 @@
    "fieldname": "enable_automatic_stock_sync",
    "fieldtype": "Check",
    "label": "Enable Automatic Stock Sync"
+  },
+  {
+   "fieldname": "section_break_shift",
+   "fieldtype": "Section Break",
+   "label": "Shift"
+  },
+  {
+   "description": "Modes of payment the cashier enters a Modal Awal for when opening a shift. Other modes open at 0. If empty, only the POS Profile's cash mode.",
+   "fieldname": "modal_awal_modes",
+   "fieldtype": "Table MultiSelect",
+   "label": "Modal Awal Payment Modes",
+   "options": "POS Modal Awal Mode"
   },
   {
    "fieldname": "section_break_localization",
@@ -1021,7 +1035,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-23 08:00:00.000000",
+ "modified": "2026-10-24 15:30:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",
