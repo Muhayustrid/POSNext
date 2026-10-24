@@ -773,6 +773,29 @@ export async function silentPrintInvoice(
 	const format = printFormat || DEFAULT_PRINT_FORMAT
 	const resolvedDoctype = doctype || "Sales Invoice"
 
+	// iMin text mode lays the receipt out from the invoice doc, so the server
+	// print-format render is not needed at all: one round trip, not two.
+	if (posProfile) await ensureTransportInitialized(posProfile)
+	if (isIminTextMode()) {
+		try {
+			const doc = await call("pos_next.api.invoices.get_invoice", {
+				invoice_name: invoiceName,
+			})
+			if (doc?.items?.length > 0) {
+				await silentPrintInvoiceFromDoc({
+					...doc,
+					pos_profile: posProfile || doc.pos_profile,
+				})
+				return true
+			}
+		} catch (err) {
+			// A post-print failure must surface as-is (COR-FE-10); anything
+			// else falls through to the server-HTML path below.
+			if (isPostPrintFailure(err)) throw err
+			log.warn("Text-mode doc fetch failed, using server receipt:", err?.message || err)
+		}
+	}
+
 	const [htmlResult, docResult] = await Promise.allSettled([
 		fetchServerPrintHTML(resolvedDoctype, invoiceName, format),
 		call("pos_next.api.invoices.get_invoice", { invoice_name: invoiceName }),
@@ -810,6 +833,16 @@ export async function silentPrintInvoice(
 	return true
 }
 
+/** True when the current transport config prints iMin receipts as text. */
+function isIminTextMode() {
+	try {
+		const c = getTransport().getConfig() || {}
+		return c.driver === "imin" && c.print_mode === "text"
+	} catch {
+		return false
+	}
+}
+
 /**
  * Silent-print a full invoice dict through the print transport (local/offline
  * receipts already have the HTML ready, so this skips the get_html_and_style
@@ -827,6 +860,9 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
 		// Copy 2, when the profile prints one: the compact crew slip built from
 		// the doc we already hold. The driver drops it for single copies.
 		crewHTML: buildCrewSlipHTML(invoiceData, { dots }),
+		// iMin text mode builds both sheets from the doc itself; other
+		// drivers ignore it and print the HTML above.
+		receiptDoc: invoiceData,
 		logContext: {
 			reference_doctype: invoiceData?.doctype || "Sales Invoice",
 			reference_name: invoiceData?.name,

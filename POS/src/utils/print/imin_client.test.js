@@ -474,9 +474,10 @@ describe("createIminDriver", () => {
 				}),
 				config: { copies: 2, copyDelayMs: COPY_DELAY_MS },
 			})
-			expect(logInfo).toHaveBeenCalledTimes(2)
-
-			const sheets = logInfo.mock.calls.map((call) => call[1])
+			const sheets = logInfo.mock.calls
+				.filter((call) => call[0] === "sheet printed")
+				.map((call) => call[1])
+			expect(sheets).toHaveLength(2)
 			for (const [idx, sheet] of sheets.entries()) {
 				// 1-based sheet index and the bitmap height the estimate came from.
 				expect(sheet).toMatchObject({
@@ -824,6 +825,123 @@ describe("createIminDriver", () => {
 			expect(avail).toBe(true)
 			expect(status.ok).toBe(true)
 			expect(factory).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	describe("text mode (printMode: text)", () => {
+		const doc = {
+			name: "PINV-1",
+			company: "ROPI",
+			posting_date: "2026-10-24",
+			posting_time: "14:58:06",
+			pos_queue_number: 7,
+			grand_total: 12000,
+			items: [{ item_name: "Americano Ice", qty: 1, rate: 12000 }],
+			payments: [{ mode_of_payment: "Cash", amount: 12000 }],
+		}
+		const textPrinter = () => {
+			const calls = []
+			const rec =
+				(name) =>
+				(...args) =>
+					calls.push([name, ...args])
+			const p = makeFakePrinter({
+				setTextTypeface: rec("typeface"),
+				setAlignment: rec("align"),
+				setTextSize: rec("size"),
+				setTextStyle: rec("style"),
+				printText: rec("text"),
+				printAndFeedPaper: rec("feed"),
+				partialCut: rec("cut"),
+				printSingleBitmap: vi.fn(async (url) => {
+					calls.push(["bitmap", url])
+					return 1
+				}),
+			})
+			return { p, calls }
+		}
+
+		it("sends text commands, the logo as the only bitmap, and never renders", async () => {
+			const { p, calls } = textPrinter()
+			const render = vi.fn()
+			const d = createIminDriver({
+				factory: () => p,
+				loadLogo: async () => ({ dataURL: "data:logo", height: 80 }),
+			})
+			const res = await d.printHTML("<div/>", {
+				render,
+				receiptDoc: doc,
+				config: { printMode: "text", paper: "58mm", cut: true, copies: 1 },
+			})
+			expect(render).not.toHaveBeenCalled()
+			expect(res.copies).toBe(1)
+			const bitmaps = calls.filter((c) => c[0] === "bitmap")
+			expect(bitmaps).toEqual([["bitmap", "data:logo"]])
+			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
+			expect(texts).toContain("007")
+			expect(texts.some((t) => t.startsWith("1x Americano Ice"))).toBe(true)
+			// Monospace on, default restored at the end; feed + cut after the text.
+			expect(calls[0]).toEqual(["typeface", 1])
+			const lastText = calls.map((c) => c[0]).lastIndexOf("text")
+			const tail = calls.slice(lastText + 1).map((c) => c[0])
+			expect(tail).toContain("cut")
+			expect(calls.filter((c) => c[0] === "typeface").at(-1)).toEqual(["typeface", 0])
+		})
+
+		it("prints the logo before the company line", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({
+				factory: () => p,
+				loadLogo: async () => ({ dataURL: "data:logo", height: 80 }),
+			})
+			await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: { printMode: "text", copies: 1 },
+			})
+			const logoAt = calls.findIndex((c) => c[0] === "bitmap")
+			const companyAt = calls.findIndex((c) => c[0] === "text" && c[1] === "ROPI")
+			expect(logoAt).toBeGreaterThan(-1)
+			expect(logoAt).toBeLessThan(companyAt)
+		})
+
+		it("prints without a logo when it cannot be loaded", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: { printMode: "text", copies: 1 },
+			})
+			expect(calls.some((c) => c[0] === "bitmap")).toBe(false)
+			expect(calls.some((c) => c[0] === "text" && c[1] === "ROPI")).toBe(true)
+		})
+
+		it("adds the crew slip as a second text sheet without needing crewHTML", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			const res = await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: {
+					printMode: "text",
+					crewSlipEnabled: true,
+					copies: 1,
+					copyDelayMs: 0,
+					printSpeed: 2000,
+				},
+			})
+			expect(res.copies).toBe(2)
+			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
+			expect(texts.indexOf("ORDER")).toBeGreaterThan(texts.indexOf("Thank you"))
+		}, SLOW_TEST_TIMEOUT_MS)
+
+		it("stays bitmap when no doc is passed (closing report, test page)", async () => {
+			const render = vi.fn(async () => ({ dataURL: "data:x", width: 384 }))
+			const d = createIminDriver({ factory: () => printer })
+			await d.printHTML("<div/>", {
+				render,
+				config: { printMode: "text", copies: 1 },
+			})
+			expect(render).toHaveBeenCalledTimes(1)
+			expect(printer.printSingleBitmap).toHaveBeenCalledWith("data:x", 1)
 		})
 	})
 })

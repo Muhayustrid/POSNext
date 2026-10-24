@@ -3180,6 +3180,13 @@ def get_invoice(invoice_name):
 	invoice_dict["cashier_name"] = (
 		frappe.db.get_value("User", invoice.owner, "full_name") or invoice.owner
 	)
+	# Same address line the "POS Next Receipt" format prints, so a receipt
+	# built client-side (iMin text mode) carries it too.
+	invoice_dict["company_address_line"] = (
+		frappe.db.get_value("Address", invoice.company_address, "address_line1")
+		if invoice.get("company_address")
+		else ""
+	) or ""
 	return invoice_dict
 
 

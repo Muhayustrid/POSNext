@@ -34,6 +34,8 @@ PRINT_CONFIG_FIELDS = (
 	"imin_side_margin",
 	"imin_top_margin",
 	"imin_queue_gap",
+	"imin_print_mode",
+	"imin_print_speed",
 	"imin_eod_print_copies",
 	"imin_eod_copy_delay_ms",
 	"imin_eod_feed_dots",
@@ -56,6 +58,8 @@ MAX_LINE_SPACING = 150
 MAX_SIDE_MARGIN_DOTS = 64
 MAX_TOP_MARGIN_DOTS = 128
 MAX_QUEUE_GAP_DOTS = 128
+MIN_PRINT_SPEED = 100
+MAX_PRINT_SPEED = 2000
 
 # Integer knobs: fieldname -> (response key, default, lo, hi).
 #
@@ -77,6 +81,8 @@ _INT_KNOBS = {
 	"imin_side_margin": ("side_margin", 16, 0, MAX_SIDE_MARGIN_DOTS),
 	"imin_top_margin": ("top_margin", 0, 0, MAX_TOP_MARGIN_DOTS),
 	"imin_queue_gap": ("queue_gap", 40, 0, MAX_QUEUE_GAP_DOTS),
+	# Head throughput, dots/s: only sizes the wait between two sheets.
+	"imin_print_speed": ("print_speed", 400, MIN_PRINT_SPEED, MAX_PRINT_SPEED),
 	"imin_eod_print_copies": ("eod_copies", 1, 1, MAX_COPIES),
 	"imin_eod_copy_delay_ms": ("eod_copy_delay_ms", 800, 0, MAX_COPY_DELAY_MS),
 	"imin_eod_feed_dots": ("eod_feed_dots", 160, 8, MAX_FEED_DOTS),
@@ -94,6 +100,7 @@ _OR_DEFAULT_KNOBS = {"imin_print_copies", "imin_eod_print_copies"}
 _SELECT_KNOBS = {
 	"print_driver": ("browser", "qz", "imin"),
 	"imin_paper_width": ("58mm", "80mm", "custom"),
+	"imin_print_mode": ("bitmap", "text"),
 }
 _CHECK_KNOBS = ("imin_cut_paper", "imin_crew_slip_enabled", "print_fallback_enabled")
 
@@ -133,6 +140,7 @@ def _normalized_print_config(settings):
 		"driver": _get_setting(settings, "print_driver") or "browser",
 		"paper": _get_setting(settings, "imin_paper_width") or "58mm",
 		"custom_dots": _get_setting(settings, "imin_custom_dots") or 384,
+		"print_mode": "text" if _get_setting(settings, "imin_print_mode") == "text" else "bitmap",
 		"cut": bool(_get_setting(settings, "imin_cut_paper")),
 		"crew_slip_enabled": bool(_get_setting(settings, "imin_crew_slip_enabled")),
 		# Check defaulting to 1 means "unset is enabled": when the row is

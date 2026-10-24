@@ -1335,6 +1335,24 @@
 													__('58mm = 384 dots, 80mm = 576 dots, custom = isi jumlah dots di bawah.')
 												"
 											/>
+											<SelectField
+												v-model="settings.imin_print_mode"
+												:label="__('Mode Cetak iMin')"
+												:options="iminPrintModeOptions"
+												:description="
+													__('Teks = jauh lebih cepat, struk dikirim sebagai teks printer (font bawaan printer), logo tetap gambar. Gambar = tampilan persis format cetak, lebih lambat.')
+												"
+											/>
+											<NumberField
+												v-model="settings.imin_print_speed"
+												:label="__('Kecepatan Printer (dots/detik)')"
+												:description="
+													__('Dipakai untuk menunggu lembar sebelumnya selesai sebelum rangkap/slip crew berikutnya. Terlalu kecil = jeda lama; terlalu besar = jeda sobek hilang. Default 400. 100–2000.')
+												"
+												:min="100"
+												:max="2000"
+												:step="50"
+											/>
 											<NumberField
 												v-if="settings.imin_paper_width === 'custom'"
 												v-model="settings.imin_custom_dots"
@@ -1744,6 +1762,8 @@ const settings = ref({
 	imin_side_margin: 16,
 	imin_top_margin: 0,
 	imin_queue_gap: 40,
+	imin_print_mode: "bitmap",
+	imin_print_speed: 400,
 	imin_eod_print_copies: 1,
 	imin_eod_copy_delay_ms: 800,
 	imin_eod_feed_dots: 160,
@@ -1818,6 +1838,10 @@ const printModeOptions = [
 	{ label: __("Off"), value: "Off" },
 	{ label: __("Manual"), value: "Manual" },
 	{ label: __("Auto"), value: "Auto" },
+];
+const iminPrintModeOptions = [
+	{ label: __("Teks (cepat)"), value: "text" },
+	{ label: __("Gambar (persis format cetak)"), value: "bitmap" },
 ];
 const paperWidthOptions = [
 	{ label: __("58mm (384 dots)"), value: "58mm" },
