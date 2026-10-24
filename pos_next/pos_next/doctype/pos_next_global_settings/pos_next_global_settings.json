@@ -105,6 +105,8 @@
   "imin_copy_delay_ms",
   "imin_crew_slip_enabled",
   "imin_queue_gap",
+  "imin_print_mode",
+  "imin_print_speed",
   "column_break_imin",
   "imin_font_scale",
   "imin_crew_font_scale",
@@ -794,6 +796,23 @@
    "label": "Queue Number Gap (dots)"
   },
   {
+   "default": "bitmap",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "bitmap = receipt is drawn as an image (exact print-format look, slower). text = receipt is sent as printer text commands with only the logo as an image (much faster, uses the printer's own monospace font). Text mode needs the invoice data, so it applies to the POS receipt and crew slip; closing reports stay bitmap.",
+   "fieldname": "imin_print_mode",
+   "fieldtype": "Select",
+   "label": "iMin Print Mode",
+   "options": "bitmap\ntext"
+  },
+  {
+   "default": "400",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "How fast the iMin head pushes paper, in dots per second (8 dots = 1 mm). Used only to wait for one sheet to finish before the next sheet (copy / crew slip) starts. Too low = idle wait between sheets; too high = the tear-off pause gets swallowed. 100-2000.",
+   "fieldname": "imin_print_speed",
+   "fieldtype": "Int",
+   "label": "Printer Speed (dots/second)"
+  },
+  {
    "fieldname": "column_break_imin",
    "fieldtype": "Column Break"
   },
@@ -1043,7 +1062,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-26 12:00:00.000000",
+ "modified": "2026-10-26 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",

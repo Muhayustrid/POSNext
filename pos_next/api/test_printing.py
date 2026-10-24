@@ -294,6 +294,25 @@ class TestPrintingAPI(FrappeTestCase):
 			cfg = get_print_config(self.profile)
 		self.assertFalse(cfg["crew_slip_enabled"])
 
+	def test_print_mode_defaults_to_bitmap(self):
+		with _settings_row():
+			cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["print_mode"], "bitmap")
+
+	def test_print_mode_text_only_when_explicit(self):
+		with _settings_row(imin_print_mode="text"):
+			self.assertEqual(get_print_config(self.profile)["print_mode"], "text")
+		with _settings_row(imin_print_mode="garbage"):
+			self.assertEqual(get_print_config(self.profile)["print_mode"], "bitmap")
+
+	def test_print_speed_defaults_and_clamps(self):
+		with _settings_row():
+			self.assertEqual(get_print_config(self.profile)["print_speed"], 400)
+		with _settings_row(imin_print_speed=5):
+			self.assertEqual(get_print_config(self.profile)["print_speed"], 100)
+		with _settings_row(imin_print_speed=99999):
+			self.assertEqual(get_print_config(self.profile)["print_speed"], 2000)
+
 	def test_line_spacing_defaults_to_100(self):
 		cfg = get_print_config(self.profile)
 		self.assertIn("line_spacing", cfg)

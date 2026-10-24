@@ -205,6 +205,14 @@ const MAX_COPY_DELAY_MS = 10000
 const DEFAULT_COPIES = 1
 const DEFAULT_COPY_DELAY_MS = 800
 /**
+ * Head throughput in dots/s, used only to reserve wall-clock time for the
+ * sheet still printing before the next one starts (see imin_client). Mirrors
+ * the server's imin_print_speed default and band.
+ */
+export const DEFAULT_PRINT_SPEED = 400
+const MIN_PRINT_SPEED = 100
+const MAX_PRINT_SPEED = 2000
+/**
  * The Closing/EOD lane defaults to a single report: unlike a sale there is no
  * customer copy to hand over, so one sheet is the norm.
  */
@@ -249,6 +257,17 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 	const paper = device.paper ?? server.paper ?? "58mm"
 	const customDots = device.customDots ?? server.customDots ?? undefined
 	const cut = device.cut ?? server.cut ?? false
+	// Paper-level like `cut`: one head, one speed, one mode for every lane.
+	// Text mode only ever applies to receipt/crew prints that carry a doc;
+	// the driver falls back to bitmap on its own when there is none.
+	const printMode =
+		(device.printMode ?? server.printMode) === "text" ? "text" : "bitmap"
+	const printSpeed = clampInt(
+		device.printSpeed ?? server.printSpeed,
+		MIN_PRINT_SPEED,
+		MAX_PRINT_SPEED,
+		DEFAULT_PRINT_SPEED,
+	)
 
 	const eod = opts.kind === "eod"
 	// One knob's per-kind key: "eod" upper-cases the first letter onto the eod
@@ -334,6 +353,8 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		paper,
 		customDots,
 		cut,
+		printMode,
+		printSpeed,
 		copies,
 		copyDelayMs,
 		feedDots,
