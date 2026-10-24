@@ -7,9 +7,7 @@
  "field_order": [
   "shift_name",
   "start_time",
-  "end_time",
-  "warning_minutes",
-  "enforce_closing"
+  "end_time"
  ],
  "fields": [
   {
@@ -32,26 +30,12 @@
    "in_list_view": 1,
    "label": "End Time",
    "reqd": 1
-  },
-  {
-   "default": "0",
-   "fieldname": "warning_minutes",
-   "fieldtype": "Int",
-   "in_list_view": 1,
-   "label": "Warning Minutes"
-  },
-  {
-   "default": "1",
-   "fieldname": "enforce_closing",
-   "fieldtype": "Check",
-   "in_list_view": 1,
-   "label": "Enforce Closing"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-23 09:00:00.000000",
+ "modified": "2026-10-24 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Shift Slot",

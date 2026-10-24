@@ -246,8 +246,8 @@ class TestShiftSlotGroupValidation(unittest.TestCase):
 				"doctype": "POS Profile Group",
 				"group_name": "Test Group",
 				"shifts": [
-					{"shift_name": "Shift 1", "start_time": "05:00:00", "end_time": "15:00:00", "warning_minutes": 0},
-					{"shift_name": "Shift 1", "start_time": "13:00:00", "end_time": "21:00:00", "warning_minutes": 0},
+					{"shift_name": "Shift 1", "start_time": "05:00:00", "end_time": "15:00:00"},
+					{"shift_name": "Shift 1", "start_time": "13:00:00", "end_time": "21:00:00"},
 				],
 			}
 		)
@@ -260,7 +260,7 @@ class TestShiftSlotGroupValidation(unittest.TestCase):
 				"doctype": "POS Profile Group",
 				"group_name": "Test Group",
 				"shifts": [
-					{"shift_name": "Shift 1", "start_time": "05:00:00", "end_time": "05:00:00", "warning_minutes": 0},
+					{"shift_name": "Shift 1", "start_time": "05:00:00", "end_time": "05:00:00"},
 				],
 			}
 		)
@@ -272,13 +272,14 @@ class TestShiftSlotGroupValidation(unittest.TestCase):
 			{
 				"doctype": "POS Profile Group",
 				"group_name": "Test Group",
+				"pos_schedule_warning_minutes": -5,
 				"shifts": [
-					{"shift_name": "Shift 1", "start_time": "05:00:00", "end_time": "15:00:00", "warning_minutes": -5},
+					{"shift_name": "Shift 1", "start_time": "05:00:00", "end_time": "15:00:00"},
 				],
 			}
 		)
 		with self.assertRaises(frappe.exceptions.ValidationError):
-			doc.validate_slots()
+			doc.validate()
 
 	def test_sync_members_skips_pushing_schedule_when_slots_present(self):
 		doc = frappe.get_doc(
@@ -304,6 +305,30 @@ class TestShiftSlotGroupValidation(unittest.TestCase):
 		self.assertEqual(mock_profile_doc.pos_profile_group, "Group With Slots")
 		mock_profile_doc.update.assert_not_called()
 		mock_profile_doc.save.assert_called_once()
+
+
+class TestGroupWideSlotSettings(FrappeTestCase):
+	def test_group_warning_and_enforce_apply_to_every_slot(self):
+		from pos_next.shift_schedule import _group_slots
+
+		group = frappe.get_doc(
+			{
+				"doctype": "POS Profile Group",
+				"group_name": f"_T Slot Settings {frappe.generate_hash(length=6)}",
+				"pos_schedule_warning_minutes": 7,
+				"pos_schedule_enforce_closing": 0,
+				"shifts": [
+					{"shift_name": "Early", "start_time": "05:00:00", "end_time": "15:00:00"},
+					{"shift_name": "Late", "start_time": "13:00:00", "end_time": "21:00:00"},
+				],
+			}
+		).insert(ignore_permissions=True)
+
+		slots = _group_slots(group.name)
+		self.assertEqual([s["shift_name"] for s in slots], ["Early", "Late"])
+		for slot in slots:
+			self.assertEqual(slot["warning_minutes"], 7)
+			self.assertEqual(slot["enforce_closing"], 0)
 
 
 class TestShiftSlotsAPI(unittest.TestCase):

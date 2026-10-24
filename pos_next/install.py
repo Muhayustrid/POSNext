@@ -397,7 +397,7 @@ CUSTOM_FIELDS = {
 			# read-only mirror: membership is authoritative on the Shift
 			# Group's Members table (enforced by validate_group_membership)
 			"read_only": 1,
-			"description": "Shift Group this profile belongs to (set from the group's Members table). Saving the group pushes its shift hours to every member profile.",
+			"description": "Shift Group this profile belongs to (set from the group's Members table). Shifts opened on this profile follow the group's shift slots.",
 		},
 		{
 			"fieldname": "pos_schedule_enabled",

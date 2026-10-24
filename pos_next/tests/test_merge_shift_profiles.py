@@ -83,9 +83,6 @@ class TestMergeShiftProfiles(FrappeTestCase):
 			{
 				"doctype": "POS Profile Group",
 				"group_name": name,
-				"pos_schedule_enabled": 1,
-				"pos_schedule_start": start,
-				"pos_schedule_end": end,
 			}
 		).insert(ignore_permissions=True)
 
@@ -252,6 +249,9 @@ class TestMergeShiftProfiles(FrappeTestCase):
 		self.assertEqual(group.shifts[0].shift_name, self.single)
 		self.assertEqual(_format_time(group.shifts[0].start_time), "05:00:00")
 		self.assertEqual(_format_time(group.shifts[0].end_time), "15:00:00")
+		# warning + enforce moved from the profile onto the group
+		self.assertEqual(group.pos_schedule_warning_minutes, 10)
+		self.assertEqual(group.pos_schedule_enforce_closing, 1)
 
 	def test_midnight_start_is_a_schedule(self):
 		# MariaDB returns 00:00:00 as timedelta(0), which is falsy.

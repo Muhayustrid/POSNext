@@ -134,21 +134,25 @@ def _group_slots(group):
 		return []
 	slots = frappe.db.sql(
 		"""
-		SELECT shift_name, start_time, end_time, warning_minutes, enforce_closing
-		FROM `tabPOS Shift Slot`
-		WHERE parent = %s AND parenttype = 'POS Profile Group'
-		ORDER BY idx ASC
+		SELECT slot.shift_name, slot.start_time, slot.end_time,
+			grp.pos_schedule_warning_minutes AS warning_minutes,
+			grp.pos_schedule_enforce_closing AS enforce_closing
+		FROM `tabPOS Shift Slot` slot
+		INNER JOIN `tabPOS Profile Group` grp ON grp.name = slot.parent
+		WHERE slot.parent = %s AND slot.parenttype = 'POS Profile Group'
+		ORDER BY slot.idx ASC
 		""",
 		group,
 		as_dict=True,
 	)
+	# warning + enforce are group-wide: every slot carries the group's values
 	return [
 		{
 			"shift_name": s["shift_name"],
 			"start_time": _format_time_str(s["start_time"]),
 			"end_time": _format_time_str(s["end_time"]),
-			"warning_minutes": cint(s.get("warning_minutes", 0)),
-			"enforce_closing": cint(s.get("enforce_closing", 1)),
+			"warning_minutes": cint(s.get("warning_minutes")),
+			"enforce_closing": cint(s.get("enforce_closing")),
 		}
 		for s in slots
 	]

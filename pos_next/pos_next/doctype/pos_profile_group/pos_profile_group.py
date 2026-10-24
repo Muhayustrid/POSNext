@@ -6,25 +6,25 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
-from pos_next.shift_schedule import GATE_TITLE, SCHEDULE_FIELDS, _as_time_delta, validate_schedule_values
+from pos_next.shift_schedule import GATE_TITLE, _as_time_delta
 
 
 class POSProfileGroup(Document):
-	"""Shift Group: one set of shift hours shared by member POS Profiles.
+	"""Shift Group: shift slots shared by member POS Profiles.
 
 	Company-neutral: a group may hold profiles from any company (HQ groups a
-	parent and its outlet companies in one schedule template). Saving the
-	group syncs the hours onto every member profile. Membership is
+	parent and its outlet companies in one schedule template). The slots and
+	the group-wide warning/enforce settings are read at shift open; nothing is
+	pushed onto the member profiles. Membership is
 	authoritative in the Members table; the profile's `pos_profile_group`
 	link is a read-only mirror kept in step by sync_members (a profile save
 	rejects a link without a matching table row).
 	"""
 
 	def validate(self):
-		if self.shifts:
-			self.validate_slots()
-		else:
-			validate_schedule_values(self, label=_("Shift Group {0}").format(self.group_name))
+		self.validate_slots()
+		if cint(self.pos_schedule_warning_minutes) < 0:
+			frappe.throw(_("Schedule Warning Minutes must be zero or greater."), title=GATE_TITLE)
 		self.validate_members()
 
 	def on_update(self):
@@ -57,11 +57,6 @@ class POSProfileGroup(Document):
 					_("Shift slot {0}: start time and end time cannot be equal.").format(name),
 					title=GATE_TITLE,
 				)
-			if cint(row.warning_minutes) < 0:
-				frappe.throw(
-					_("Shift slot {0}: Schedule Warning Minutes must be zero or greater.").format(name),
-					title=GATE_TITLE,
-				)
 
 	def validate_members(self):
 		seen = set()
@@ -92,18 +87,11 @@ class POSProfileGroup(Document):
 				)
 
 	def sync_members(self):
-		"""Push the group schedule onto member profiles; unlink removed ones.
+		"""Mirror membership onto the profiles' `pos_profile_group` link.
 
-		Removed members keep their last synced schedule — only the group link
-		is cleared, so an outlet never silently loses its hours. Everything
-		runs in the group save's transaction: any failure aborts the whole
-		save, leaving no half-synced members. Open shifts are unaffected —
-		their schedule was snapshotted at open time and only applies to the
-		next session.
-
+		Only the link is written: slots are read from the group at shift open.
 		Company User Permissions are honoured: the whole save is aborted when
-		the user cannot write one of the affected profiles (including a
-		removed one), and only before any write happens.
+		the user cannot write one of the removed profiles, before any write.
 		"""
 		members = {row.pos_profile for row in self.profiles or []}
 		linked = set(frappe.get_all("POS Profile", filters={"pos_profile_group": self.name}, pluck="name"))
@@ -124,18 +112,8 @@ class POSProfileGroup(Document):
 		for name in removed:
 			frappe.db.set_value("POS Profile", name, "pos_profile_group", "")
 
-		values = {field: self.get(field) for field in SCHEDULE_FIELDS}
-		for name in sorted(members):
-			stored = frappe.db.get_value(
-				"POS Profile", name, ("pos_profile_group", *SCHEDULE_FIELDS), as_dict=True
-			)
-			if stored.pos_profile_group == self.name and (
-				bool(self.shifts) or all(stored[field] == values[field] for field in SCHEDULE_FIELDS)
-			):
-				continue
+		for name in sorted(members - linked):
 			profile = frappe.get_doc("POS Profile", name)
-			if not self.shifts:
-				profile.update(values)
 			profile.pos_profile_group = self.name
 			# full save so profile validation and on_update events still run;
 			# a permission failure here aborts the group save (clear error)

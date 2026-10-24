@@ -61,18 +61,20 @@ def _resolve_profile_schedule(profile_name: str, fallback_slot: bool = False) ->
 	group_name = prof.pos_profile_group
 
 	# 00:00:00 comes back as timedelta(0), which is falsy: compare with None.
-	if (start is None or end is None) and group_name:
-		group_data = frappe.db.get_value(
-			"POS Profile Group",
+	# group start/end were removed later; read them only while the columns exist
+	if (
+		(start is None or end is None)
+		and group_name
+		and frappe.db.has_column("POS Profile Group", "pos_schedule_start")
+	):
+		group_data = frappe.db.sql(
+			"""SELECT pos_schedule_start, pos_schedule_end,
+				pos_schedule_warning_minutes, pos_schedule_enforce_closing
+			FROM `tabPOS Profile Group` WHERE name = %s""",
 			group_name,
-			[
-				"pos_schedule_start",
-				"pos_schedule_end",
-				"pos_schedule_warning_minutes",
-				"pos_schedule_enforce_closing",
-			],
 			as_dict=True,
 		)
+		group_data = group_data[0] if group_data else None
 		if group_data:
 			start = group_data.pos_schedule_start if start is None else start
 			end = group_data.pos_schedule_end if end is None else end
@@ -222,15 +224,15 @@ def merge_company(company: str) -> dict:
 			{
 				"doctype": "POS Profile Group",
 				"group_name": group_name,
-				"pos_schedule_enabled": 1,
+				# warning + enforce are group-wide: strictest of the merged profiles
+				"pos_schedule_warning_minutes": max(s["warning_minutes"] for s in slots) if slots else 0,
+				"pos_schedule_enforce_closing": int(any(s["enforce_closing"] for s in slots)),
 				"shifts": [
 					{
 						"doctype": "POS Shift Slot",
 						"shift_name": s["shift_name"],
 						"start_time": s["start_time"],
 						"end_time": s["end_time"],
-						"warning_minutes": s["warning_minutes"],
-						"enforce_closing": s["enforce_closing"],
 					}
 					for s in slots
 				],
@@ -273,15 +275,14 @@ def merge_company(company: str) -> dict:
 			{
 				"doctype": "POS Profile Group",
 				"group_name": group_name,
-				"pos_schedule_enabled": 1,
+				"pos_schedule_warning_minutes": slot_info["warning_minutes"],
+				"pos_schedule_enforce_closing": slot_info["enforce_closing"],
 				"shifts": [
 					{
 						"doctype": "POS Shift Slot",
 						"shift_name": slot_info["shift_name"],
 						"start_time": slot_info["start_time"],
 						"end_time": slot_info["end_time"],
-						"warning_minutes": slot_info["warning_minutes"],
-						"enforce_closing": slot_info["enforce_closing"],
 					}
 				],
 				"profiles": [

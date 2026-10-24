@@ -16,9 +16,6 @@ from pos_next.install import CUSTOM_FIELDS
 from pos_next.pos_next.doctype.pos_profile_group.pos_profile_group import POSProfileGroup
 
 GROUP = {
-	"pos_schedule_enabled": 1,
-	"pos_schedule_start": "05:00:00",
-	"pos_schedule_end": "12:00:00",
 	"pos_schedule_warning_minutes": 15,
 	"pos_schedule_enforce_closing": 1,
 }
@@ -63,12 +60,9 @@ def _member_lookup(companies, group=None):
 
 
 class TestGroupValidation(unittest.TestCase):
-	def test_enabled_group_requires_times(self):
+	def test_negative_warning_minutes_rejected(self):
 		with self.assertRaises(frappe.exceptions.ValidationError):
-			_group(pos_schedule_start=None).validate()
-
-	def test_disabled_group_skips_time_validation(self):
-		_group(pos_schedule_enabled=0, pos_schedule_start=None).validate()
+			_group(pos_schedule_warning_minutes=-5).validate()
 
 	def test_members_of_different_companies_accepted(self):
 		doc = _group(profiles=[_row("Outlet Profile"), _row("HQ Profile")])
@@ -116,23 +110,19 @@ class TestGroupSync(unittest.TestCase):
 			doc.sync_members()
 		return get_doc, set_value, allowed_mock
 
-	def test_new_member_gets_schedule_and_link(self):
+	def test_new_member_gets_link_only(self):
 		stored = frappe._dict({"pos_profile_group": None, **{k: None for k in GROUP}})
 		get_doc, set_value, _ = self._run_sync(["Profile 1"], linked=[], stored=stored)
 		set_value.assert_not_called()
 		profile = get_doc.return_value
-		profile.update.assert_called_once_with(GROUP)
+		# slots are read from the group at shift open: no schedule is pushed
+		profile.update.assert_not_called()
 		self.assertEqual(profile.pos_profile_group, "Group A")
 		profile.save.assert_called_once()
 
 	def test_in_sync_member_not_resaved(self):
 		get_doc, _, _ = self._run_sync(["Profile 1"], linked=["Profile 1"], stored=SYNCED)
 		get_doc.assert_not_called()
-
-	def test_changed_time_resyncs_member(self):
-		stored = frappe._dict({**SYNCED, "pos_schedule_start": "09:00:00"})
-		get_doc, _, _ = self._run_sync(["Profile 1"], linked=["Profile 1"], stored=stored)
-		get_doc.return_value.save.assert_called_once()
 
 	def test_removed_member_unlinked_schedule_preserved(self):
 		# removal only clears the link — the profile keeps its last synced hours
@@ -159,7 +149,7 @@ class TestGroupSync(unittest.TestCase):
 			doc.sync_members()
 		self.assertEqual(sorted(mocks), ["HQ Profile", "Outlet Profile"])
 		for profile in mocks.values():
-			profile.update.assert_called_once_with(GROUP)
+			profile.update.assert_not_called()
 			profile.save.assert_called_once()
 
 	def test_unwritable_removed_member_aborts_before_any_write(self):
@@ -238,6 +228,17 @@ class TestMultiCompanyDocTypeMeta(unittest.TestCase):
 		self.assertEqual(fields["company"]["fetch_from"], "pos_profile.company")
 		self.assertTrue(fields["company"]["read_only"])
 		self.assertTrue(fields["company"]["in_list_view"])
+
+	def test_group_keeps_only_slot_wide_schedule_settings(self):
+		# hours live on the Shift Slots; warning + enforce are group-wide
+		group = self._fields("POS Profile Group")
+		for field in ("pos_schedule_enabled", "pos_schedule_start", "pos_schedule_end"):
+			self.assertNotIn(field, group)
+		self.assertIn("pos_schedule_warning_minutes", group)
+		self.assertIn("pos_schedule_enforce_closing", group)
+		slot = self._fields("POS Shift Slot")
+		self.assertNotIn("warning_minutes", slot)
+		self.assertNotIn("enforce_closing", slot)
 
 	def test_group_company_field_retired_not_required(self):
 		# hidden + optional: the column stays for existing records (no
