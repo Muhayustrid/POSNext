@@ -69,7 +69,7 @@ def get_pos_profiles():
 	# show it up front and refuse before the balance step. Plain read — the
 	# authoritative locked check stays in create_opening_shift.
 	if pos_profiles:
-		from frappe.utils import format_datetime, get_fullname
+		from frappe.utils import format_datetime, get_datetime, get_fullname, now_datetime
 
 		shifts = frappe.get_all(
 			"POS Opening Shift",
@@ -79,12 +79,13 @@ def get_pos_profiles():
 				"status": "Open",
 				"pos_closing_shift": ["is", "not set"],
 			},
-			fields=["name", "user", "period_start_date", "pos_profile"],
+			fields=["name", "user", "period_start_date", "pos_profile", "pos_schedule_deadline"],
 			order_by="period_start_date desc",
 		)
 		# desc + overwrite = the oldest open shift wins, like get_active_profile_shift
 		active = {s.pos_profile: s for s in shifts}
 		can_join = is_management_user()
+		now = now_datetime()
 		for p in pos_profiles:
 			s = active.get(p.name)
 			p.active_shift = s and {
@@ -93,8 +94,10 @@ def get_pos_profiles():
 				"user_name": get_fullname(s.user),
 				"since": format_datetime(s.period_start_date, "dd-MM-yyyy HH:mm"),
 			}
-			# locked = opening would be refused (someone else's shift, not a manager)
-			p.locked = bool(s and s.user != frappe.session.user and not can_join)
+			# locked = opening would be refused (someone else's shift, not a manager).
+			# A shift past its deadline is closed on the spot by create_opening_shift.
+			expired = bool(s and s.pos_schedule_deadline and get_datetime(s.pos_schedule_deadline) < now)
+			p.locked = bool(s and s.user != frappe.session.user and not can_join and not expired)
 
 	return pos_profiles
 

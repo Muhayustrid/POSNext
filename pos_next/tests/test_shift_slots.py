@@ -500,6 +500,24 @@ class TestOneOpenShift(POSInvoiceModeMixin, FrappeTestCase):
 		self.assertEqual(b_shift.status, "Open")
 		self.assertEqual(b_shift.user, self.cashier_b)
 
+	def test_profile_list_unlocks_profile_held_by_expired_shift(self):
+		# The opening dialog refuses a locked profile before calling
+		# create_opening_shift, so an expired shift must not lock it.
+		from pos_next.api.pos_profile import get_pos_profiles
+
+		for offset, expected_locked in ((120, True), (-10, False)):
+			frappe.db.set_value(
+				"POS Opening Shift",
+				self.shift.name,
+				"pos_schedule_deadline",
+				now_datetime() + datetime.timedelta(minutes=offset),
+				update_modified=False,
+			)
+			frappe.set_user(self.cashier_b)
+			row = next(p for p in get_pos_profiles() if p.name == self.profile.name)
+			frappe.set_user("Administrator")
+			self.assertEqual(row.locked, expected_locked, f"deadline offset {offset} min")
+
 	def test_manager_resume_unchanged(self):
 		deadline = now_datetime() + datetime.timedelta(hours=2)
 		frappe.db.set_value(
