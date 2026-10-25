@@ -13,6 +13,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, getdate, nowdate
 
 from pos_next.api.purchase_orders import (
+	_shipping_statuses,
 	attach_purchase_files,
 	get_purchase_order,
 	get_purchase_orders,
@@ -325,7 +326,7 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		supp.set("companies", [{"company": self.company}] if internal else [])
 		supp.save()
 
-	def _ic_po(self, qty=2):
+	def _ic_po(self, qty=2, deliver=True):
 		"""Internal-supplier PO here + factory SO/DN in the second company."""
 		if not (self.other_co and self.other_warehouse and self.ic_customer):
 			raise unittest.SkipTest("no intercompany pair available on this site")
@@ -347,11 +348,93 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		so.insert()
 		self.sos.append(so.name)
 		so.submit()
-		dn = make_delivery_note(so.name)
+		if deliver:
+			self._dispatch(so.name)
+		return po
+
+	def _dispatch(self, so_name, qty=None, submit=True):
+		dn = make_delivery_note(so_name)
+		if qty is not None:
+			for row in dn.items:
+				row.qty = qty
 		dn.insert()
 		self.dns.append(dn.name)
-		dn.submit()
-		return po
+		if submit:
+			dn.submit()
+		return dn
+
+	def _shipping(self, po_name):
+		return get_purchase_order(po_name)["shipping_status"]
+
+	def test_shipping_status_follows_so_dn_pr(self):
+		draft_po = self._po(submit=False)
+		self.assertIsNone(_shipping_statuses([draft_po["name"]]).get(draft_po["name"]))  # draft PO
+		po = self._ic_po(deliver=False)["name"]
+		so_name = self.sos[-1]
+		self.assertEqual(self._shipping(po), "preparing")  # submitted SO, nothing shipped
+		self._dispatch(so_name, qty=1, submit=False)
+		self.assertEqual(self._shipping(po), "preparing")  # a draft DN is not a dispatch
+		self._dispatch(so_name, qty=1)
+		self.assertEqual(self._shipping(po), "in_transit")
+		self._save(self._payload(get_intercompany_receipt_draft(po)), submit=1)
+		# the shipment arrived but 1 of 2 is not dispatched yet
+		self.assertEqual(self._shipping(po), "preparing")
+		self.assertNotEqual(frappe.db.get_value("Purchase Order", po, "per_received"), 100)
+		frappe.get_doc("Delivery Note", self.dns[0]).delete()  # drop the stale draft
+		self.dns.pop(0)
+		self._dispatch(so_name)
+		self.assertEqual(self._shipping(po), "in_transit")
+		last = self._save(self._payload(get_intercompany_receipt_draft(po)), submit=1)["name"]
+		self.assertEqual(self._shipping(po), "received")
+		if self.pos_profile:
+			row = next(
+				o
+				for o in get_purchase_orders(pos_profile=self.pos_profile)["orders"]
+				if o["name"] == po
+			)
+			self.assertEqual(row["shipping_status"], "received")
+		frappe.get_doc("Purchase Receipt", last).cancel()
+		self.assertEqual(self._shipping(po), "in_transit")  # cancelled PR is ignored
+
+	def test_shipping_status_after_return_and_closed_so(self):
+		from erpnext.controllers.sales_and_purchase_return import make_return_doc
+
+		po = self._ic_po()["name"]
+		pr = self._save(self._payload(get_intercompany_receipt_draft(po)), submit=1)["name"]
+		self.assertEqual(self._shipping(po), "received")
+		ret = make_return_doc("Purchase Receipt", pr)
+		for row in ret.items:
+			row.qty = -1
+			row.received_qty = -1
+		ret.insert()
+		ret.submit()
+		self.receipts.insert(0, ret.name)  # cancel the return before its original
+		# a returned unit is outstanding again; the signed return row nets once
+		self.assertEqual(
+			flt(frappe.db.get_value("Purchase Order Item", {"parent": po}, "received_qty")), 1
+		)
+		self.assertNotEqual(self._shipping(po), "received")
+
+		po2 = self._ic_po(deliver=False)["name"]
+		so2 = frappe.get_doc("Sales Order", self.sos[-1])
+		so2.update_status("Closed")
+		self.ic_restores.append(lambda: frappe.get_doc("Sales Order", so2.name).update_status("Draft"))  # unclose to cancel
+		self.assertIsNone(self._shipping(po2))  # a closed SO ships nothing more
+
+	def test_shipping_status_is_coarse_for_cashier(self):
+		po = self._ic_po()["name"]
+		ext = self._po(supplier=self.ext_supplier)["name"]
+		self.assertIsNone(_shipping_statuses([ext])[ext])  # no factory SO
+		# fully received in Desk without a factory SO is still untracked
+		self._save(self._payload(get_purchase_receipt_draft(ext)), submit=1)
+		self.assertEqual(flt(frappe.db.get_value("Purchase Order", ext, "per_received")), 100)
+		self.assertIsNone(_shipping_statuses([ext])[ext])
+		frappe.set_user(self.cashier_user)
+		try:
+			self.assertEqual(self._shipping(po), "in_transit")
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(_shipping_statuses([]), {})
 
 	def _payload(self, draft, qty=None, name=None):
 		data = {

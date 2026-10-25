@@ -317,6 +317,72 @@ def _is_delivery_ready(so_name):
 	return False
 
 
+def _shipping_statuses(po_names):
+	"""{po_name: "received" | "in_transit" | "preparing" | None} for already
+	authorized POs. Read-only, derived per item line from native counters:
+	PO Item.received_qty nets submitted PRs (returns are signed negative),
+	SO Item.delivered_qty nets submitted DNs. Factory SO/DN rows are read
+	without user permission (a cashier may not read them); only the code leaves."""
+	if not po_names:
+		return {}
+	status = {
+		name: None
+		for name in frappe.get_all(
+			"Purchase Order",
+			filters={"name": ("in", po_names), "docstatus": 1, "status": ("!=", "Closed")},
+			pluck="name",
+		)
+	}
+	if not status:
+		return {}
+	# no submitted factory SO = no tracked shipment, even if received in Desk
+	sales_orders = frappe.get_all(
+		"Sales Order",
+		filters={"inter_company_order_reference": ("in", list(status)), "docstatus": 1},
+		fields=["name", "inter_company_order_reference", "status"],
+	)
+	so_po = {so.name: so.inter_company_order_reference for so in sales_orders}
+	if not so_po:
+		return status
+	precision = frappe.get_precision("Purchase Order Item", "qty")
+	# per line, so overreceipt on one line cannot hide a missing one
+	outstanding = {
+		row.parent
+		for row in frappe.get_all(
+			"Purchase Order Item",
+			filters={"parent": ("in", list(set(so_po.values())))},
+			fields=["parent", "qty", "received_qty"],
+		)
+		if flt(flt(row.qty) - flt(row.received_qty), precision) > 0
+	}
+	for name in set(so_po.values()) - outstanding:
+		status[name] = "received"
+	so_po = {so: po for so, po in so_po.items() if po in outstanding}
+	sales_orders = [so for so in sales_orders if so.name in so_po]
+	if not so_po:
+		return status
+	for row in frappe.get_all(
+		"Delivery Note Item",
+		filters={"against_sales_order": ("in", list(so_po)), "docstatus": 1},
+		fields=["against_sales_order", "qty", "returned_qty", "received_qty"],
+	):
+		# same pending test as the receive gate and the intercompany PR mapper
+		if flt(row.received_qty) < flt(row.qty) + flt(row.returned_qty):
+			status[so_po[row.against_sales_order]] = "in_transit"
+	# a closed SO will ship nothing more — its undelivered qty is no evidence
+	open_sos = [so.name for so in sales_orders if so.status != "Closed"]
+	if open_sos:
+		for row in frappe.get_all(
+			"Sales Order Item",
+			filters={"parent": ("in", open_sos)},
+			fields=["parent", "qty", "delivered_qty"],
+		):
+			po = so_po[row.parent]
+			if not status[po] and flt(flt(row.qty) - flt(row.delivered_qty), precision) > 0:
+				status[po] = "preparing"
+	return status
+
+
 def _po_summary(doc):
 	"""Shape shared by every mutating/reading method."""
 	attachments = _attachments_summary("Purchase Order", doc.name)
@@ -330,6 +396,7 @@ def _po_summary(doc):
 			"status": doc.status,
 			"per_received": flt(doc.per_received),
 			"delivery_ready": _is_delivery_ready(so_name),
+			"shipping_status": _shipping_statuses([doc.name]).get(doc.name),
 			"supplier": doc.supplier,
 			"supplier_name": doc.supplier_name,
 			"transaction_date": doc.transaction_date,
@@ -555,8 +622,10 @@ def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=5
 		order["inter_company_order_reference"] = so_map.get(order["name"])
 		order["delivery_ready"] = so_map.get(order["name"]) in delivery_ready
 	counts = _attachment_counts("Purchase Order", [o["name"] for o in orders])
+	shipping = _shipping_statuses([o["name"] for o in orders])
 	for order in orders:
 		order["attachment_count"] = counts.get(order["name"], 0)
+		order["shipping_status"] = shipping.get(order["name"])
 	return _hide_prices({"orders": orders})
 
 
