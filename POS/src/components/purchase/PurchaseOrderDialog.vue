@@ -59,14 +59,14 @@
 				<div class="rounded-xl border border-gray-200 bg-white">
 					<!-- desktop column header; rows below share the same grid -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] xl:gap-x-3"
 					>
 						<span>{{ __("PO Number") }}</span>
 						<span>{{ __("Supplier") }}</span>
 						<span>{{ __("Transaction Date") }}</span>
 						<span>{{ __("Required By") }}</span>
 						<span>{{ __("Status") }}</span>
-						<span class="text-end">{{ __("Actions") }}</span>
+						<span>{{ __("Shipping status") }}</span>
 					</div>
 
 					<div v-if="loadingOrders" class="divide-y divide-gray-100" data-test="list-loading">
@@ -96,12 +96,8 @@
 							@click="openDoc(order.name)"
 							@keydown.enter="openDoc(order.name)"
 						>
-							<div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:gap-y-0 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3">
-								<div class="flex min-w-0 items-center gap-1.5 md:order-1">
-									<FeatherIcon
-										name="chevron-right"
-										class="h-3.5 w-3.5 shrink-0 text-gray-400"
-									/>
+							<div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 xl:gap-y-0 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] xl:gap-x-3">
+								<div class="flex min-w-0 items-center gap-1.5 xl:order-1">
 									<span class="truncate text-sm font-semibold text-gray-900">{{ order.name }}</span>
 									<span
 										v-if="order.attachment_count"
@@ -113,76 +109,28 @@
 									</span>
 								</div>
 								<!-- status sits top-right on cards, in its own column on desktop -->
-								<div class="flex items-center gap-1 justify-self-end md:order-5 md:justify-self-start">
+								<div class="flex items-center gap-1 justify-self-end xl:order-5 xl:justify-self-start">
 									<span :class="statusPill(order.status)">{{ __(order.status) }}</span>
-									<span
-										v-if="isFactoryLinked(order)"
-										class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-									>
-										{{ __("Factory SO") }}
-									</span>
 								</div>
-								<p class="col-span-2 truncate text-sm text-gray-700 md:order-2 md:col-span-1">
+								<p class="col-span-2 truncate text-sm text-gray-700 xl:order-2 xl:col-span-1">
 									{{ order.supplier_name || order.supplier }}
 								</p>
-								<p class="col-span-2 text-xs text-gray-500 md:order-3 md:col-span-1 md:text-sm md:text-gray-700">
-									<span class="md:hidden">{{ __("Ordered") }}&nbsp;</span>{{ formatDate(order.transaction_date) }}
-									<span class="md:hidden"> · {{ __("Required By") }} {{ formatDate(order.schedule_date) }}</span>
+								<p class="col-span-2 text-xs text-gray-500 xl:order-3 xl:col-span-1 xl:text-sm xl:text-gray-700">
+									<span class="xl:hidden">{{ __("Ordered") }}&nbsp;</span>{{ formatDate(order.transaction_date) }}
+									<span class="xl:hidden"> · {{ __("Required By") }} {{ formatDate(order.schedule_date) }}</span>
 								</p>
-								<p class="hidden text-sm text-gray-700 md:order-4 md:block">
+								<p class="hidden text-sm text-gray-700 xl:order-4 xl:block">
 									{{ formatDate(order.schedule_date) }}
 								</p>
-								<div
-									class="col-span-2 -mx-2 flex flex-wrap justify-start gap-0.5 md:order-6 md:col-span-1 md:mx-0 md:justify-end"
-									@click.stop
-								>
-									<button
-										v-if="order.docstatus === 0"
-										type="button"
-										class="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
-										@click="openEdit(order)"
+								<div class="col-span-2 flex items-center gap-1.5 text-xs text-gray-500 xl:order-6 xl:col-span-1 xl:text-sm">
+									<span class="text-gray-500 xl:hidden">{{ __("Shipping status") }}:</span>
+									<span
+										v-if="shippingStatusInfo(order.shipping_status)"
+										:class="shippingStatusPill(order.shipping_status)"
 									>
-										{{ __("Edit") }}
-									</button>
-									<button
-										v-if="order.docstatus === 0 && canSubmitPO"
-										type="button"
-										class="rounded px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-										@click="submitDoc(order.name)"
-									>
-										{{ __("Submit") }}
-									</button>
-									<button
-										v-if="
-											order.docstatus === 1 &&
-											order.per_received < 100 &&
-											(!poDefaults?.receive_requires_delivery_note || order.delivery_ready) &&
-											canReceivePR
-										"
-										type="button"
-										data-test="receive-button"
-										class="rounded px-2 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50"
-										@click="openReceive(order)"
-									>
-										{{ __("Receive") }}
-									</button>
-									<button
-										v-if="order.docstatus === 1 && canCancelPO && !isFactoryLinked(order)"
-										type="button"
-										class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-										@click="cancelDoc(order)"
-									>
-										{{ __("Cancel") }}
-									</button>
-									<button
-										type="button"
-										class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-										:title="__('Open in ERPNext')"
-										:aria-label="__('Open in ERPNext')"
-										@click="openInErpnext(order)"
-									>
-										<FeatherIcon name="external-link" class="h-3.5 w-3.5" />
-									</button>
+										{{ shippingStatusText(order.shipping_status) }}
+									</span>
+									<span v-else class="text-gray-400">—</span>
 								</div>
 							</div>
 						</div>
@@ -1071,6 +1019,38 @@ function statusPill(status) {
 	return [
 		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
 		STATUS_TONES[status] || "bg-gray-50 text-gray-600 ring-gray-500/20",
+	]
+}
+
+const SHIPPING_STATUS_MAP = {
+	preparing: {
+		label: "Goods being prepared",
+		tone: "bg-amber-50 text-amber-700 ring-amber-200",
+	},
+	in_transit: {
+		label: "In transit",
+		tone: "bg-blue-50 text-blue-700 ring-blue-200",
+	},
+	received: {
+		label: "Received",
+		tone: "bg-green-50 text-green-700 ring-green-200",
+	},
+}
+
+function shippingStatusInfo(status) {
+	return SHIPPING_STATUS_MAP[status] || null
+}
+
+function shippingStatusText(status) {
+	const info = shippingStatusInfo(status)
+	return info ? __(info.label) : "—"
+}
+
+function shippingStatusPill(status) {
+	const info = shippingStatusInfo(status)
+	return [
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		info?.tone || "bg-gray-50 text-gray-700 ring-gray-200",
 	]
 }
 

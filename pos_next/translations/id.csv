@@ -3516,3 +3516,7 @@ All shifts,Semua shift
 "Expected closing = Modal Awal + cash sales - cash returns - change","Estimasi closing = modal awal + penjualan tunai - retur tunai - kembalian",""
 "Modal Awal Payment Modes","Mode Pembayaran Modal Awal",""
 "Modes of payment the cashier enters a Modal Awal for when opening a shift. Other modes open at 0. If empty, only the POS Profile's cash mode.","Mode pembayaran yang diisi modal awal oleh kasir saat buka shift. Mode lain dibuka 0. Jika kosong, hanya mode tunai POS Profile.",""
+Goods being prepared,Barang disiapkan
+In transit,Dalam proses pengiriman
+Received,Sudah diterima
+Shipping status,Status pengiriman
