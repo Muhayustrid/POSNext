@@ -9,14 +9,16 @@
 			<p class="text-sm text-gray-700">{{ message }}</p>
 		</template>
 		<template #actions>
-			<Button variant="subtle" @click="onCancel">{{ __("Cancel") }}</Button>
-			<Button
-				variant="solid"
-				:theme="destructive ? 'red' : undefined"
-				@click="onConfirm"
-			>
-				{{ confirmLabel || __("Confirm") }}
-			</Button>
+			<div class="flex w-full justify-between gap-2">
+				<Button variant="subtle" @click="onCancel">{{ __("Cancel") }}</Button>
+				<Button
+					variant="solid"
+					:theme="destructive ? 'red' : undefined"
+					@click="onConfirm"
+				>
+					{{ confirmLabel || __("Confirm") }}
+				</Button>
+			</div>
 		</template>
 	</Dialog>
 </template>
