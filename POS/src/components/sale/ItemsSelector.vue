@@ -582,9 +582,6 @@
 						{{ __("{0} items found", [filteredItems.length]) }}
 					</p>
 				</div>
-
-				<!-- Branding scrolls with the items instead of pinning a bar -->
-				<POSFooter class="mt-2 -mx-1.5 sm:-mx-3 -mb-1.5 sm:-mb-3" />
 			</div>
 
 			<!-- Pagination Controls for Grid View -->
@@ -897,7 +894,6 @@
 						</tr>
 					</tbody>
 				</table>
-				<POSFooter />
 			</div>
 
 			<!-- Pagination Controls for List View -->
@@ -1004,7 +1000,6 @@
 
 <script setup>
 import LazyImage from "@/components/common/LazyImage.vue";
-import POSFooter from "@/components/common/POSFooter.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSPackagesStore } from "@/stores/posPackages";
