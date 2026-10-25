@@ -1,8 +1,11 @@
 <template>
-	<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border" :class="badgeClasses">
+	<span
+		class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset"
+		:class="[badgeClasses, sizeClasses]"
+	>
 		<svg
 			v-if="icon"
-			class="w-4 h-4"
+			class="w-3.5 h-3.5 shrink-0 me-1 -ms-0.5"
 			:class="iconClasses"
 			:fill="iconFill"
 			stroke="currentColor"
@@ -15,24 +18,28 @@
 				:d="icon"
 			/>
 		</svg>
-		<div v-if="label || value" :class="textSize">
-			<span v-if="label" class="text-gray-600">{{ label }}</span>
-			<span v-if="value" class="font-semibold text-gray-900" :class="{ 'ms-1': label }">{{
-				value
-			}}</span>
-		</div>
-		<span v-else class="font-semibold text-gray-900" :class="textSize">{{ text }}</span>
-	</div>
+		<template v-if="label || value">
+			<span v-if="label" class="opacity-80">{{ label }}</span>
+			<span
+				v-if="value"
+				class="font-semibold tabular-nums"
+				:class="{ 'ms-1': label }"
+			>{{ value }}</span>
+		</template>
+		<span v-else>{{ text }}</span>
+	</span>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
+import { STATUS_TONES } from "@/utils/statusTone"
 
 const props = defineProps({
 	variant: {
 		type: String,
-		default: "blue", // blue, green, orange, red, gray
-		validator: (value) => ["blue", "green", "orange", "red", "gray"].includes(value),
+		default: "blue", // blue, green, orange, red, gray, amber
+		validator: (value) =>
+			["blue", "green", "orange", "red", "gray", "amber"].includes(value),
 	},
 	icon: {
 		type: String,
@@ -71,18 +78,11 @@ const props = defineProps({
 		default: "sm", // xs, sm, md
 		validator: (value) => ["xs", "sm", "md"].includes(value),
 	},
-});
+})
 
 const badgeClasses = computed(() => {
-	const variants = {
-		blue: "bg-blue-50 border-blue-100",
-		green: "bg-green-50 border-green-100",
-		orange: "bg-orange-50 border-orange-100",
-		red: "bg-red-50 border-red-100",
-		gray: "bg-gray-50 border-gray-100",
-	};
-	return variants[props.variant] || variants.blue;
-});
+	return STATUS_TONES[props.variant] || STATUS_TONES.blue
+})
 
 const iconClasses = computed(() => {
 	const variants = {
@@ -91,16 +91,22 @@ const iconClasses = computed(() => {
 		orange: "text-orange-600",
 		red: "text-red-600",
 		gray: "text-gray-600",
-	};
-	return variants[props.variant] || variants.blue;
-});
+		amber: "text-amber-600",
+	}
+	return variants[props.variant] || variants.blue
+})
+
+const sizeClasses = computed(() => {
+	if (props.size === "md") return "text-sm px-2.5 py-1"
+	return "text-xs px-2 py-0.5"
+})
 
 const textSize = computed(() => {
 	const sizes = {
 		xs: "text-xs",
-		sm: "text-sm",
-		md: "text-base",
-	};
-	return sizes[props.size] || sizes.sm;
-});
+		sm: "text-xs",
+		md: "text-sm",
+	}
+	return sizes[props.size] || sizes.sm
+})
 </script>

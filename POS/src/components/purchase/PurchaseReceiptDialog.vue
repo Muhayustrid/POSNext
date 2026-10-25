@@ -21,6 +21,7 @@
 						<Button
 							v-if="canSubmitPR && currentDoc?.editable && (currentDoc?.submit_actions?.length || 0) <= 1"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							:loading="submitting"
 							@click="submitDoc(currentDoc?.submit_actions?.[0])"
@@ -33,6 +34,7 @@
 						>
 							<Button
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="primary-action"
 								@click="actionsMenuOpen = !actionsMenuOpen"
 							>
@@ -62,7 +64,7 @@
 							<button
 								type="button"
 								data-testid="doc-menu-button"
-								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+								class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 								:aria-label="__('More actions')"
 								:title="__('More actions')"
 								@click="docMenuOpen = !docMenuOpen"
@@ -89,34 +91,12 @@
 			</div>
 
 			<div v-else class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<p class="text-sm text-gray-500">
-					{{ __("Goods received from suppliers and the factory") }}
-				</p>
-
-				<div class="flex gap-2">
-					<div class="relative flex-1">
-						<FeatherIcon
-							name="search"
-							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-						/>
-						<input
-							v-model="searchTerm"
-							type="text"
-							data-test="receipt-list-search"
-							:placeholder="__('Search receipt or supplier...')"
-							class="w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-							@input="onSearch"
-						/>
-					</div>
-					<RefreshButton :loading="loadingReceipts" @click="loadReceipts" />
-				</div>
-
-				<div class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
+				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
 						v-for="chip in STATUS_CHIPS"
 						:key="chip.value"
 						type="button"
-						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						class="shrink-0 inline-flex items-center min-h-[44px] md:min-h-[40px] rounded-full border px-3.5 py-1 text-xs font-medium transition-colors touch-manipulation"
 						:class="
 							statusFilter === chip.value
 								? 'border-gray-900 bg-gray-900 text-white'
@@ -129,14 +109,32 @@
 					</button>
 				</div>
 
+				<div class="flex gap-2">
+					<div class="relative flex-1">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="searchTerm"
+							type="text"
+							data-test="receipt-list-search"
+							:placeholder="__('Search receipt or supplier...')"
+							class="h-11 md:h-10 w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							@input="onSearch"
+						/>
+					</div>
+					<RefreshButton :loading="loadingReceipts" @click="loadReceipts" />
+				</div>
+
 				<div class="rounded-xl border border-gray-200 bg-white">
 					<!-- desktop column header; rows below share the same grid -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 xl:grid xl:gap-x-3"
 						:class="
 							showPrices
-								? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_minmax(0,1.2fr)_10rem_2.5rem]'
-								: 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_10rem_2.5rem]'
+								? 'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_minmax(0,1.2fr)_10rem]'
+								: 'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_10rem]'
 						"
 					>
 						<span>{{ __("Receipt No") }}</span>
@@ -144,7 +142,6 @@
 						<span>{{ __("Posting Date") }}</span>
 						<span v-if="showPrices" class="text-end">{{ __("Grand Total") }}</span>
 						<span>{{ __("Status") }}</span>
-						<span></span>
 					</div>
 
 					<div v-if="loadingReceipts" class="divide-y divide-gray-100" data-test="list-loading">
@@ -175,18 +172,14 @@
 							@keydown.enter="openDoc(receipt.name)"
 						>
 							<div
-								class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:gap-y-0 md:gap-x-3"
+								class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 xl:gap-y-0 xl:gap-x-3"
 								:class="
 									showPrices
-										? 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_minmax(0,1.2fr)_10rem_2.5rem]'
-										: 'md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_10rem_2.5rem]'
+										? 'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_minmax(0,1.2fr)_10rem]'
+										: 'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_10rem]'
 								"
 							>
-								<div class="flex min-w-0 items-center gap-1.5 md:order-1">
-									<FeatherIcon
-										name="chevron-right"
-										class="h-3.5 w-3.5 shrink-0 text-gray-400"
-									/>
+								<div class="flex min-w-0 items-center gap-1.5 xl:order-1">
 									<span class="truncate text-sm font-semibold text-gray-900">{{ receipt.name }}</span>
 									<span
 										v-if="receipt.attachment_count"
@@ -198,18 +191,18 @@
 									</span>
 								</div>
 								<!-- status sits top-right on cards, in its own column on desktop -->
-								<div class="justify-self-end md:order-5 md:justify-self-start">
+								<div class="justify-self-end xl:order-5 xl:justify-self-start">
 									<span :class="statusPill(receipt.workflow_state || receipt.status)">
 										{{ __(receipt.workflow_state || receipt.status) }}
 									</span>
 								</div>
-								<p class="col-span-2 truncate text-sm text-gray-700 md:order-2 md:col-span-1">
+								<p class="col-span-2 truncate text-sm text-gray-700 xl:order-2 xl:col-span-1">
 									{{ receipt.supplier_name || receipt.supplier }}
 								</p>
-								<p class="text-xs text-gray-500 md:order-3 md:text-sm md:text-gray-700">
+								<p class="text-xs text-gray-500 xl:order-3 xl:text-sm xl:text-gray-700">
 									{{ formatDate(receipt.posting_date) }}
 								</p>
-								<div v-if="showPrices" class="text-end md:order-4">
+								<div v-if="showPrices" class="text-end xl:order-4">
 									<p
 										v-if="'grand_total' in receipt && receipt.grand_total != null"
 										class="text-sm font-medium tabular-nums text-gray-900"
@@ -219,17 +212,6 @@
 									<p v-if="receipt.docstatus === 1" class="text-xs text-gray-500">
 										{{ __("Billed {0}%", [Math.round(receipt.per_billed || 0)]) }}
 									</p>
-								</div>
-								<div class="hidden justify-end md:order-6 md:flex" @click.stop>
-									<button
-										type="button"
-										class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-										:title="__('Open in ERPNext')"
-										:aria-label="__('Open in ERPNext')"
-										@click="openInErpnext(receipt)"
-									>
-										<FeatherIcon name="external-link" class="h-3.5 w-3.5" />
-									</button>
 								</div>
 							</div>
 						</div>
@@ -284,10 +266,10 @@ const STATUS_CHIPS = [
 ]
 
 const STATUS_TONES = {
-	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	"To Bill": "bg-purple-50 text-purple-700 ring-purple-200",
-	Completed: "bg-green-50 text-green-700 ring-green-200",
-	Cancelled: "bg-red-50 text-red-700 ring-red-200",
+	Draft: "bg-orange-50 text-orange-700 ring-orange-600/20",
+	"To Bill": "bg-amber-50 text-amber-700 ring-amber-600/20",
+	Completed: "bg-green-50 text-green-700 ring-green-600/20",
+	Cancelled: "bg-gray-50 text-gray-600 ring-gray-500/20",
 }
 
 const { showSuccess, showError } = useToast()
@@ -376,7 +358,7 @@ function resolveConfirm(value) {
 function statusPill(status) {
 	return [
 		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-		STATUS_TONES[status] || "bg-blue-50 text-blue-700 ring-blue-200",
+		STATUS_TONES[status] || "bg-blue-50 text-blue-700 ring-blue-600/20",
 	]
 }
 

@@ -3530,3 +3530,7 @@ All shifts,Semua shift
 "Proof photo {0} is not attached to this stock opname","Foto bukti {0} tidak terlampir pada stock opname ini",""
 "Proof photo is required for counted rows: {0}","Foto bukti wajib diisi untuk baris yang dihitung: {0}",""
 "Only images ({0}) are allowed","Hanya gambar ({0}) yang diizinkan",""
+Goods being prepared,Barang disiapkan
+In transit,Dalam proses pengiriman
+Received,Sudah diterima
+Shipping status,Status pengiriman

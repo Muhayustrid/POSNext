@@ -38,7 +38,7 @@
 								<button
 									v-if="embedded"
 									type="button"
-									class="w-9 h-9 shrink-0 rounded-lg border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50"
+									class="flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 touch-manipulation"
 									:aria-label="__('Back')"
 									:title="__('Back')"
 									@click="show = false"
@@ -59,7 +59,8 @@
 								</div>
 								<button
 									v-if="!embedded"
-									class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+									type="button"
+									class="flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 touch-manipulation"
 									:aria-label="__('Close')"
 									@click="show = false"
 								>
@@ -118,16 +119,13 @@
 								</div>
 								<span
 									v-if="invoiceData.is_return"
-									class="px-2.5 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 flex-shrink-0"
+									:class="statusPillClass(invoiceData)"
 								>
 									{{ __("Return Invoice") }}
 								</span>
 								<span
 									v-else
-									:class="[
-										'px-2.5 py-1 text-xs font-semibold rounded-full flex-shrink-0',
-										getInvoiceStatusColor(invoiceData),
-									]"
+									:class="statusPillClass(invoiceData)"
 								>
 									{{ __(invoiceData.status) }}
 								</span>
@@ -206,7 +204,7 @@
 												{{ __("Discount:") }} {{ item.discount_percentage }}%
 											</div>
 										</div>
-										<div class="text-sm font-semibold text-gray-900 text-end">
+										<div class="text-sm font-semibold text-gray-900 text-end tabular-nums">
 											{{ formatCurrency(item.amount) }}
 										</div>
 									</div>
@@ -217,7 +215,7 @@
 							<div class="flex flex-col gap-2">
 								<div class="flex justify-between text-sm">
 									<span class="text-gray-600">{{ __("Net Total:") }}</span>
-									<span class="font-medium text-gray-900">{{
+									<span class="font-medium text-gray-900 tabular-nums">{{
 										formatCurrency(invoiceData.net_total || invoiceData.total)
 									}}</span>
 								</div>
@@ -226,7 +224,7 @@
 									class="flex justify-between text-sm"
 								>
 									<span class="text-gray-600">{{ __("Taxes:") }}</span>
-									<span class="font-medium text-gray-900">{{
+									<span class="font-medium text-gray-900 tabular-nums">{{
 										formatCurrency(invoiceData.total_taxes_and_charges)
 									}}</span>
 								</div>
@@ -235,13 +233,13 @@
 									class="flex justify-between text-sm"
 								>
 									<span class="text-gray-600">{{ __("Discount:") }}</span>
-									<span class="font-medium text-red-600"
+									<span class="font-medium text-red-600 tabular-nums"
 										>-{{ formatCurrency(invoiceData.discount_amount) }}</span
 									>
 								</div>
 								<div class="pt-2 border-t border-gray-200 flex justify-between">
 									<span class="font-semibold text-gray-900">{{ __("Grand Total") }}</span>
-									<span class="font-bold text-lg text-blue-700">{{
+									<span class="font-bold text-lg text-blue-700 tabular-nums">{{
 										formatCurrency(invoiceData.grand_total)
 									}}</span>
 								</div>
@@ -261,7 +259,7 @@
 										class="flex justify-between items-center text-sm"
 									>
 										<span class="text-gray-600">{{ payment.mode_of_payment }}</span>
-										<span class="font-medium text-gray-900">{{
+										<span class="font-medium text-gray-900 tabular-nums">{{
 											formatCurrency(payment.amount)
 										}}</span>
 									</div>
@@ -271,7 +269,7 @@
 									class="flex justify-between text-sm"
 								>
 									<span class="text-gray-600">{{ __("Paid Amount") }}</span>
-									<span class="font-semibold text-green-600">{{
+									<span class="font-semibold text-green-600 tabular-nums">{{
 										formatCurrency(invoiceData.paid_amount)
 									}}</span>
 								</div>
@@ -280,7 +278,7 @@
 									class="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2"
 								>
 									<span class="text-sm font-semibold text-gray-900">{{ __("Change", null, "payment") }}</span>
-									<span class="text-base font-bold text-gray-900">{{
+									<span class="text-base font-bold text-gray-900 tabular-nums">{{
 										formatCurrency(invoiceData.change_amount)
 									}}</span>
 								</div>
@@ -290,7 +288,7 @@
 									class="flex justify-between text-sm"
 								>
 									<span class="text-gray-600">{{ __("Customer Credit:") }}</span>
-									<span class="font-semibold text-blue-600">{{
+									<span class="font-semibold text-blue-600 tabular-nums">{{
 										formatCurrency(Math.abs(invoiceData.outstanding_amount))
 									}}</span>
 								</div>
@@ -303,7 +301,7 @@
 									class="flex justify-between text-sm"
 								>
 									<span class="text-gray-600">{{ __("Outstanding:") }}</span>
-									<span class="font-semibold text-orange-600">{{
+									<span class="font-semibold text-orange-600 tabular-nums">{{
 										formatCurrency(invoiceData.outstanding_amount)
 									}}</span>
 								</div>
@@ -325,10 +323,18 @@
 								embedded ? 'sticky -bottom-3 pt-3 pb-3' : 'px-5 py-4',
 							]"
 						>
-							<Button variant="subtle" @click="show = false">
+							<Button
+								variant="subtle"
+								class="h-11 md:h-10 touch-manipulation"
+								@click="show = false"
+							>
 								{{ embedded ? __("Back") : __("Close") }}
 							</Button>
-							<Button variant="solid" class="flex-1" @click="handlePrint">
+							<Button
+								variant="solid"
+								class="flex-1 h-11 md:h-10 touch-manipulation"
+								@click="handlePrint"
+							>
 								<template #prefix>
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path
@@ -362,7 +368,12 @@
 							<p class="mt-2 text-sm text-gray-500">
 								{{ __("Failed to load invoice details") }}
 							</p>
-							<Button v-if="embedded" class="mt-4" variant="subtle" @click="show = false">
+							<Button
+								v-if="embedded"
+								class="mt-4 h-11 md:h-10 touch-manipulation"
+								variant="subtle"
+								@click="show = false"
+							>
 								<template #prefix><FeatherIcon name="arrow-left" class="w-4 h-4 rtl:rotate-180" /></template>
 								{{ __("Back") }}
 							</Button>
@@ -377,7 +388,6 @@
 <script setup>
 import { useFormatters } from "@/composables/useFormatters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { getInvoiceStatusColor } from "@/utils/invoice";
 import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { logger } from "@/utils/logger";
 import { hydrateLocalOnlyInvoice, isLocalOnlyInvoiceName } from "@/utils/printInvoice";
@@ -386,6 +396,34 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from "vue";
 
 const log = logger.create("InvoiceDetailDialog");
 const { formatDate, formatTime } = useFormatters();
+
+function statusPillClass(invoice) {
+	const base =
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset";
+	if (invoice.is_return) {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`;
+	}
+	const status = invoice.status?.toLowerCase();
+	if (status === "cancelled" || invoice.docstatus === 2) {
+		return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`;
+	}
+	if (status === "overdue") {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`;
+	}
+	if (status === "partly paid" || status === "partially paid") {
+		return `${base} bg-orange-50 text-orange-700 ring-orange-600/20`;
+	}
+	if (status === "unpaid") {
+		return `${base} bg-amber-50 text-amber-700 ring-amber-600/20`;
+	}
+	if (status === "credit note issued") {
+		return `${base} bg-blue-50 text-blue-700 ring-blue-600/20`;
+	}
+	if (status === "paid" || invoice.docstatus === 1) {
+		return `${base} bg-green-50 text-green-700 ring-green-600/20`;
+	}
+	return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`;
+}
 
 const props = defineProps({
 	modelValue: Boolean,

@@ -1021,9 +1021,6 @@
 				@confirm="confirmClearCache"
 			/>
 
-			<!-- Footer: lives at the end of the item list (ItemsSelector); only
-			     the mobile cart tab, where that list is detached, keeps it here -->
-			<POSFooter v-if="!uiStore.isDesktop && uiStore.mobileActiveTab !== 'items'" />
 		</template>
 
 		<!-- Session Lock Screen (outside v-if/v-else so it renders even during loading) -->
@@ -1047,7 +1044,6 @@ import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import ClearCacheOverlay from "@/components/common/ClearCacheOverlay.vue";
 import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
-import POSFooter from "@/components/common/POSFooter.vue";
 import POSMenuDialog from "@/components/pos/POSMenuDialog.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";

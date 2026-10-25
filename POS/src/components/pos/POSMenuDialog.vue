@@ -4,7 +4,7 @@
 	     Rendered as a full-screen page (still a mounted overlay, no routes).
 	     z-[300] keeps it below frappe Dialog overlays (z-400/500) so nested
 	     sub-dialogs (payment, invoice detail...) stack above it. -->
-	<Transition name="fade">
+	<Transition name="pos-menu-slide" appear>
 		<div
 			v-if="open"
 			role="dialog"
@@ -18,7 +18,7 @@
 			>
 				<button
 					type="button"
-					class="flex items-center justify-center w-10 h-10 shrink-0 text-gray-700 hover:text-gray-900 transition-colors"
+					class="flex items-center justify-center w-11 h-11 shrink-0 rounded-lg text-gray-700 hover:text-gray-900 transition-colors touch-manipulation"
 					:aria-label="__('Close menu')"
 					:title="__('Back to POS')"
 					@click="back"
@@ -349,8 +349,36 @@ function close() {
 function closeIfHidden(value) {
 	if (!value) close()
 }
-
 </script>
+
+<style scoped>
+.pos-menu-slide-enter-active {
+	transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pos-menu-slide-leave-active {
+	transition: transform 200ms cubic-bezier(0.4, 0, 1, 1);
+	pointer-events: none;
+}
+
+.pos-menu-slide-enter-from,
+.pos-menu-slide-leave-to {
+	transform: translateX(-100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.pos-menu-slide-enter-active,
+	.pos-menu-slide-leave-active {
+		transition: opacity 100ms ease-out;
+	}
+
+	.pos-menu-slide-enter-from,
+	.pos-menu-slide-leave-to {
+		transform: none;
+		opacity: 0;
+	}
+}
+</style>
 
 <style scoped>
 .fade-enter-active,

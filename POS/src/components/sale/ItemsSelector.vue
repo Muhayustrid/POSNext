@@ -12,7 +12,7 @@
 					:key="option.value"
 					@click="handleFilterClick(option.value)"
 					:class="[
-						'flex items-center px-2 sm:px-3 py-2.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
+						'flex items-center min-h-[44px] sm:min-h-[40px] px-2.5 sm:px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
 						activeFilterValue === option.value
 							? 'bg-blue-50 text-blue-600 border-2 border-blue-500 shadow-sm'
 							: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100',
@@ -69,7 +69,7 @@
 						type="text"
 						:placeholder="__('Search')"
 						:class="[
-							'w-full text-[11px] sm:text-sm border rounded-lg px-2 sm:px-3 py-2 ps-7 sm:ps-10 pe-16 sm:pe-24 focus:outline-none transition-all',
+							'w-full min-h-[44px] sm:min-h-[40px] text-xs sm:text-sm border rounded-lg px-2 sm:px-3 py-2 ps-7 sm:ps-10 pe-20 sm:pe-24 focus:outline-none transition-all',
 							autoAddEnabled
 								? 'border-blue-400 bg-blue-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 								: scannerEnabled
@@ -83,7 +83,7 @@
 						<button
 							@click="toggleBarcodeScanner"
 							:class="[
-								'h-8 w-8 inline-flex items-center justify-center rounded transition-[background-color] duration-75 touch-manipulation',
+								'h-10 w-10 min-w-[40px] min-h-[40px] inline-flex items-center justify-center rounded transition-[background-color] duration-75 touch-manipulation',
 								scannerEnabled
 									? 'bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-700'
 									: 'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
@@ -116,7 +116,7 @@
 						<button
 							@click="toggleAutoAdd"
 							:class="[
-								'h-8 inline-flex items-center rounded transition-[background-color] duration-75 flex items-center gap-0.5 text-[9px] sm:text-xs font-medium px-1 sm:px-2 touch-manipulation',
+								'h-10 min-h-[40px] inline-flex items-center rounded transition-[background-color] duration-75 flex items-center gap-0.5 text-xs font-medium px-2 touch-manipulation',
 								autoAddEnabled
 									? 'bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-700'
 									: 'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
@@ -153,7 +153,7 @@
 					<button
 						@click="setViewMode('grid')"
 						:class="[
-							'p-1.5 sm:p-2 rounded transition-[background-color,box-shadow] duration-75 touch-manipulation',
+							'w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center rounded transition-[background-color,box-shadow] duration-75 touch-manipulation',
 							viewMode === 'grid'
 								? 'bg-white shadow-sm'
 								: 'hover:bg-gray-200 active:bg-gray-300',
@@ -178,7 +178,7 @@
 					<button
 						@click="setViewMode('list')"
 						:class="[
-							'p-1.5 sm:p-2 rounded transition-[background-color,box-shadow] duration-75 touch-manipulation',
+							'w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center rounded transition-[background-color,box-shadow] duration-75 touch-manipulation',
 							viewMode === 'list'
 								? 'bg-white shadow-sm'
 								: 'hover:bg-gray-200 active:bg-gray-300',
@@ -208,7 +208,7 @@
 						@click="toggleSortDropdown"
 						data-sort-button
 						:class="[
-							'p-1.5 sm:p-2 rounded-lg transition-[background-color,box-shadow] duration-75 touch-manipulation border',
+							'w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg transition-[background-color,box-shadow] duration-75 touch-manipulation border',
 							sortBy
 								? 'bg-blue-50 border-blue-400 text-blue-700 shadow-sm'
 								: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100',
@@ -418,7 +418,7 @@
 							@pointerleave="clearLongPress"
 							:class="[
 								'absolute -top-1.5 -end-1.5 sm:-top-2 sm:-end-2 rounded-md shadow-lg z-10',
-								'px-2 sm:px-2.5 py-1 sm:py-1 text-[10px] sm:text-xs font-bold',
+								'px-2 sm:px-2.5 py-1 text-xs font-bold tabular-nums',
 								'border-2 border-white cursor-pointer select-none',
 								'hover:scale-110 hover:shadow-xl transition-all duration-200',
 								getStockStatus(item.actual_qty ?? item.stock_qty ?? 0).color,
@@ -521,7 +521,7 @@
 						<div class="min-w-0">
 							<span
 								v-if="isPackageItem(item.item_code)"
-								class="inline-block mb-0.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[8px] sm:text-[9px] font-bold uppercase tracking-wide"
+								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20 mb-0.5"
 							>
 								{{ __("Package") }}
 							</span>
@@ -533,15 +533,15 @@
 							</h3>
 							<p
 								v-if="item.attributes"
-								class="text-[10px] sm:text-xs text-gray-400 truncate leading-tight"
+								class="text-xs text-gray-400 truncate leading-tight"
 							>
 								{{ Object.values(item.attributes).join(" / ") }}
 							</p>
 							<p class="leading-tight">
-								<span class="text-sm sm:text-base font-bold text-blue-700">{{
+								<span class="text-sm sm:text-base font-bold text-blue-700 tabular-nums">{{
 									formatCurrency(getDisplayRate(item))
 								}}</span>
-								<span class="text-[10px] sm:text-xs text-gray-400"
+								<span class="text-xs text-gray-400"
 									>/
 									{{
 										item.uom || item.stock_uom || __("Nos", null, "UOM")
@@ -582,15 +582,12 @@
 						{{ __("{0} items found", [filteredItems.length]) }}
 					</p>
 				</div>
-
-				<!-- Branding scrolls with the items instead of pinning a bar -->
-				<POSFooter class="mt-2 -mx-1.5 sm:-mx-3 -mb-1.5 sm:-mb-3" />
 			</div>
 
 			<!-- Pagination Controls for Grid View -->
 			<div v-if="totalPages > 1" class="px-2 sm:px-3 py-2 bg-white border-t border-gray-200">
 				<div class="flex flex-col sm:flex-row items-center justify-between gap-2">
-					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
+					<div class="text-xs text-gray-600 order-2 sm:order-1">
 						{{
 							__("{0} - {1} of {2}", [
 								(currentPage - 1) * activePageSize + 1,
@@ -604,7 +601,7 @@
 							@click="goToPage(1)"
 							:disabled="currentPage === 1"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === 1
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -618,7 +615,7 @@
 							@click="previousPage"
 							:disabled="currentPage === 1"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === 1
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -634,7 +631,7 @@
 								:key="page"
 								@click="goToPage(page)"
 								:class="[
-									'min-w-[28px] sm:min-w-[32px] px-1.5 sm:px-2.5 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color,border-color] duration-75 touch-manipulation',
+									'min-w-[40px] min-h-[40px] px-2 py-1.5 text-xs font-medium rounded-lg border transition-[background-color,border-color] duration-75 touch-manipulation',
 									currentPage === page
 										? 'bg-blue-600 text-white border-blue-600'
 										: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -648,7 +645,7 @@
 							@click="nextPage"
 							:disabled="currentPage === totalPages"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === totalPages
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -662,7 +659,7 @@
 							@click="goToPage(totalPages)"
 							:disabled="currentPage === totalPages"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === totalPages
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -696,37 +693,37 @@
 						<tr>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]"
 							>
 								{{ __("Image") }}
 							</th>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]"
 							>
 								{{ __("Name") }}
 							</th>
 							<th
 								scope="col"
-								class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]"
+								class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]"
 							>
 								{{ __("Code") }}
 							</th>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
 							>
 								{{ __("Rate") }}
 							</th>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
 							>
 								{{ __("Qty") }}
 							</th>
 							<th
 								scope="col"
-								class="hidden md:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 md:w-[80px]"
+								class="hidden md:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 md:w-[80px]"
 							>
 								{{ __("UOM") }}
 							</th>
@@ -795,7 +792,7 @@
 								>
 									<span
 										v-if="isPackageItem(item.item_code)"
-										class="me-1 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[9px] font-bold uppercase tracking-wide"
+										class="me-1 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 									>
 										{{ __("Package") }}
 									</span>
@@ -803,7 +800,7 @@
 								</div>
 								<div
 									v-if="item.attributes"
-									class="text-[10px] sm:text-xs text-gray-400 truncate leading-tight"
+									class="text-xs text-gray-400 truncate leading-tight"
 								>
 									{{ Object.values(item.attributes).join(" / ") }}
 								</div>
@@ -819,7 +816,7 @@
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
-								<div class="text-sm sm:text-base font-bold text-blue-700">
+								<div class="text-sm sm:text-base font-bold text-blue-700 tabular-nums">
 									{{ formatCurrency(getDisplayRate(item)) }}
 								</div>
 							</td>
@@ -836,7 +833,7 @@
 									@pointerleave="clearLongPress"
 									:class="[
 										'inline-block px-1.5 sm:px-3 py-0.5 sm:py-1.5 rounded-md shadow-sm',
-										'text-[10px] sm:text-sm font-bold cursor-pointer select-none',
+										'text-xs sm:text-sm font-bold tabular-nums cursor-pointer select-none',
 										'hover:scale-105 hover:shadow-md transition-all duration-200',
 										getStockStatus(item.actual_qty ?? item.stock_qty ?? 0)
 											.color,
@@ -897,13 +894,12 @@
 						</tr>
 					</tbody>
 				</table>
-				<POSFooter />
 			</div>
 
 			<!-- Pagination Controls for List View -->
 			<div v-if="totalPages > 1" class="px-2 sm:px-3 py-2 bg-white border-t border-gray-200">
 				<div class="flex flex-col sm:flex-row items-center justify-between gap-2">
-					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
+					<div class="text-xs text-gray-600 order-2 sm:order-1">
 						{{
 							__("{0} - {1} of {2}", [
 								(currentPage - 1) * activePageSize + 1,
@@ -917,7 +913,7 @@
 							@click="goToPage(1)"
 							:disabled="currentPage === 1"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === 1
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -931,7 +927,7 @@
 							@click="previousPage"
 							:disabled="currentPage === 1"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === 1
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -947,7 +943,7 @@
 								:key="page"
 								@click="goToPage(page)"
 								:class="[
-									'min-w-[28px] sm:min-w-[32px] px-1.5 sm:px-2.5 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color,border-color] duration-75 touch-manipulation',
+									'min-w-[40px] min-h-[40px] px-2 py-1.5 text-xs font-medium rounded-lg border transition-[background-color,border-color] duration-75 touch-manipulation',
 									currentPage === page
 										? 'bg-blue-600 text-white border-blue-600'
 										: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -961,7 +957,7 @@
 							@click="nextPage"
 							:disabled="currentPage === totalPages"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === totalPages
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -975,7 +971,7 @@
 							@click="goToPage(totalPages)"
 							:disabled="currentPage === totalPages"
 							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
+								'min-h-[40px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
 								currentPage === totalPages
 									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
 									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
@@ -1004,7 +1000,6 @@
 
 <script setup>
 import LazyImage from "@/components/common/LazyImage.vue";
-import POSFooter from "@/components/common/POSFooter.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSPackagesStore } from "@/stores/posPackages";

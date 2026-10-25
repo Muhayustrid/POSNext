@@ -1,7 +1,7 @@
 <template>
 	<Dialog v-model="show" :options="{ title: __('Apply'), size: 'md' }">
 		<template #body-content>
-			<div class="flex flex-col gap-4">
+			<div class="pos-dialog-bound flex flex-col gap-4">
 				<!-- Info Banner -->
 				<div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
 					<div class="flex items-start gap-2">
@@ -46,7 +46,7 @@
 							:loading="applying"
 							theme="blue"
 							variant="solid"
-							class="flex-shrink-0"
+							class="min-h-[44px] min-w-[44px] sm:min-h-[40px] sm:min-w-[40px] px-3.5 flex-shrink-0 touch-manipulation"
 						>
 							<svg
 								class="w-3.5 h-3.5"
@@ -90,7 +90,7 @@
 							v-for="card in giftCards"
 							:key="card.coupon_code"
 							@click="applyGiftCard(card)"
-							class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-purple-400 transition-all"
+							class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-purple-400 transition-all min-h-[44px] sm:min-h-[40px]"
 						>
 							<div class="flex items-center justify-between">
 								<div class="flex-1">
@@ -173,7 +173,7 @@
 						</div>
 						<div class="flex justify-between items-center">
 							<span class="text-xs text-gray-600">{{ __("Discount Amount") }}</span>
-							<span class="text-lg font-bold text-green-600">
+							<span class="text-lg font-bold text-green-600 tabular-nums">
 								-{{ formatCurrency(appliedDiscount.amount) }}
 							</span>
 						</div>
@@ -206,7 +206,7 @@
 					variant="subtle"
 					theme="red"
 					@click="removeDiscount"
-					class="flex-shrink-0"
+					class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation flex-shrink-0"
 				>
 					<template #prefix>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -221,7 +221,11 @@
 					{{ __("Remove") }}
 				</Button>
 				<div class="flex gap-2 ms-auto">
-					<Button variant="subtle" @click="show = false">
+					<Button
+						variant="subtle"
+						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
+						@click="show = false"
+					>
 						{{ __("Close") }}
 					</Button>
 				</div>

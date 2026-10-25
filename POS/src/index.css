@@ -183,18 +183,32 @@ button.active\:scale-95:active,
 }
 
 /* Comfortable touch targets for secondary header icon buttons on
-   touch-sized screens (primary controls get explicit h-11 w-11). */
+   touch-sized screens (minimum 40px on tablets <1024px, 44px on phones <640px). */
 @media (max-width: 1023.98px) {
 	.pos-icon-btn {
-		min-width: 36px;
-		min-height: 36px;
+		min-width: 40px;
+		min-height: 40px;
 	}
 }
 
-/* Phones get the full 44px tap target; tablets keep the compact 36px. */
+/* Phones get the full 44px tap target. */
 @media (max-width: 639.98px) {
 	.pos-icon-btn {
 		min-width: 44px;
 		min-height: 44px;
+	}
+}
+
+/* Cashier touch target utility: minimum 44px on phones (<640px),
+   40px on tablets and touch desktops (>=640px). */
+.pos-touch-target {
+	min-width: 44px;
+	min-height: 44px;
+}
+
+@media (min-width: 640px) {
+	.pos-touch-target {
+		min-width: 40px;
+		min-height: 40px;
 	}
 }

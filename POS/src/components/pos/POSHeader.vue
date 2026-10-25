@@ -326,7 +326,10 @@
 							:icon="printerIcon"
 							:variant="printerVariant"
 							:title="printerTitle"
-							:class="printerConnecting ? 'animate-spin' : ''"
+							:class="[
+								'pos-icon-btn touch-manipulation',
+								printerConnecting ? 'animate-spin' : '',
+							]"
 							@click="$emit('printer-click')"
 						/>
 						<span

@@ -6,7 +6,7 @@
 			}}</span>
 		</template>
 		<template #body-content>
-			<div class="flex flex-col gap-4">
+			<div class="pos-dialog-bound flex flex-col gap-4 pe-1">
 				<!-- Search Input -->
 				<div class="relative">
 					<!-- Search Icon -->
@@ -35,7 +35,7 @@
 						@input="handleSearchInput"
 						type="text"
 						:placeholder="__('Search customers by name, mobile, or email...')"
-						class="w-full border border-gray-300 rounded-md ps-6 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						class="w-full h-11 sm:h-10 min-h-[40px] border border-gray-300 rounded-md ps-7 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 						@keydown="handleKeydown"
 						autofocus
 						autocomplete="off"
@@ -45,7 +45,8 @@
 					<button
 						v-if="searchTerm"
 						@click="customerStore.clearSearch()"
-						class="absolute inset-y-0 end-0 text-gray-400 hover:text-gray-600"
+						class="absolute inset-y-0 end-0 w-11 h-11 sm:w-10 sm:h-10 flex items-center justify-center text-gray-400 hover:text-gray-600 touch-manipulation"
+						:aria-label="__('Clear')"
 					>
 						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path
@@ -151,7 +152,7 @@
 							v-memo="[customer.name, index === selectedIndex]"
 							@click="selectCustomer(customer)"
 							:class="[
-								'w-full text-start p-3 rounded-lg border transition-all duration-75',
+								'w-full text-start p-3 rounded-lg border transition-all duration-75 min-h-[44px] sm:min-h-[40px] touch-manipulation',
 								index === selectedIndex
 									? 'border-blue-500 bg-blue-50 shadow-sm'
 									: 'border-gray-200 hover:border-blue-400 hover:bg-blue-50',
@@ -164,7 +165,7 @@
 									</div>
 									<div class="text-xs text-gray-600 mt-1 gap-2">
 										<span v-if="customer.mobile_no"
-											>📱 {{ customer.mobile_no }}</span
+											class="tabular-nums">📱 {{ customer.mobile_no }}</span
 										>
 										<span v-if="customer.email_id"
 											>✉️ {{ customer.email_id }}</span
@@ -199,7 +200,7 @@
 				<div class="pt-4 border-t border-gray-200">
 					<button
 						@click="createNewCustomer"
-						class="w-full py-2 px-4 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+						class="w-full min-h-[44px] sm:min-h-[40px] py-2 px-4 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-center touch-manipulation"
 					>
 						{{ __("+ Create New Customer") }}
 					</button>
@@ -208,7 +209,7 @@
 		</template>
 
 		<template #actions>
-			<Button variant="subtle" @click="show = false">{{ __("Cancel") }}</Button>
+			<Button variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="show = false">{{ __("Cancel") }}</Button>
 		</template>
 	</Dialog>
 

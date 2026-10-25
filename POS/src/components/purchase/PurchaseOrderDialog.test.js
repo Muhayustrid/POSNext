@@ -1052,6 +1052,7 @@ describe("PurchaseOrderDialog", () => {
 		mocks.call.mockImplementation(async (method) => {
 			if (method.endsWith("get_purchase_order"))
 				return {
+					...DRAFT_ORDER,
 					name: "PO-2026-00001",
 					supplier: "SUP-1",
 					transaction_date: "2026-09-19",
@@ -1064,6 +1065,9 @@ describe("PurchaseOrderDialog", () => {
 			return { orders: [DRAFT_ORDER] }
 		})
 		const wrapper = mountOpen()
+		await flushPromises()
+
+		await wrapper.find('[data-test="po-PO-2026-00001"]').trigger("click")
 		await flushPromises()
 
 		await button(wrapper, "Edit").trigger("click")
@@ -1080,12 +1084,26 @@ describe("PurchaseOrderDialog", () => {
 
 	it("gates the submit actions behind the submit permission", async () => {
 		mocks.perms.submit = false
-		mocks.call.mockResolvedValue({ orders: [DRAFT_ORDER] })
+		mocks.call.mockImplementation(async (method, params) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [DRAFT_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return { ...DRAFT_ORDER, name: params?.name || DRAFT_ORDER.name }
+			return {}
+		})
 		const wrapper = mountOpen()
 		await flushPromises()
 
 		// list: draft row has no Submit action
 		expect(button(wrapper, "Submit")).toBeUndefined()
+
+		// doc view: draft order has no Submit button when perms.submit = false
+		await wrapper.find('[data-test="po-PO-2026-00001"]').trigger("click")
+		await flushPromises()
+		expect(button(wrapper, "Submit")).toBeUndefined()
+
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
 
 		await button(wrapper, "New Purchase Order").trigger("click")
 		// form: primary action is Save; no Submit
@@ -1098,7 +1116,11 @@ describe("PurchaseOrderDialog", () => {
 		await flushPromises()
 		await wrapper.setProps({ modelValue: true })
 		await flushPromises()
+		await wrapper.find('[data-test="po-PO-2026-00001"]').trigger("click")
+		await flushPromises()
 		expect(button(wrapper, "Submit")).toBeDefined()
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
 		await button(wrapper, "New Purchase Order").trigger("click")
 		expect(button(wrapper, "Save")).toBeDefined()
 	})
@@ -1106,69 +1128,132 @@ describe("PurchaseOrderDialog", () => {
 	// ---------- purchase receipts ----------
 
 	function mockPrFlow() {
-		mocks.call.mockImplementation(async (method) => {
+		mocks.call.mockImplementation(async (method, params) => {
 			if (method.includes("get_purchase_orders"))
 				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return { ...SUBMITTED_ORDER, name: params?.name || SUBMITTED_ORDER.name }
 			if (method.includes("get_intercompany_receipt_draft")) return PR_DRAFT
+			if (method.includes("get_purchase_receipt_draft")) return PR_DRAFT
 			return {}
 		})
 	}
 
-	async function openReceiveView(wrapper) {
+	async function openReceiveView(wrapper, poName = "PO-2026-00002") {
+		await wrapper.find(`[data-test="po-${poName}"]`).trigger("click")
+		await flushPromises()
 		await wrapper.find('[data-test="receive-button"]').trigger("click")
 		await flushPromises()
 	}
 
-	it("shows Receive only on partially received submitted POs, gated by PR create permission", async () => {
-		mocks.call.mockResolvedValue({
-			orders: [DRAFT_ORDER, SUBMITTED_ORDER, FULLY_RECEIVED_ORDER],
+	it("shows Receive only on partially received submitted POs in doc view, gated by PR create permission", async () => {
+		mocks.call.mockImplementation(async (method, params) => {
+			if (method.includes("get_purchase_orders"))
+				return {
+					orders: [DRAFT_ORDER, SUBMITTED_ORDER, FULLY_RECEIVED_ORDER],
+				}
+			if (method.includes("get_purchase_order")) {
+				if (params?.name === "PO-2026-00001") return DRAFT_ORDER
+				if (params?.name === "PO-2026-00002") return SUBMITTED_ORDER
+				if (params?.name === "PO-2026-00003") return FULLY_RECEIVED_ORDER
+			}
+			return {}
 		})
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		// one button: on the submitted PO with per_received < 100 — not on the
-		// draft, not on the fully received one (gating is per_received, not status)
-		const buttons = wrapper.findAll('[data-test="receive-button"]')
-		expect(buttons).toHaveLength(1)
-		expect(wrapper.text()).toContain("PO-2026-00002")
-
-		mocks.perms.create = false
-		await wrapper.setProps({ modelValue: false })
-		await flushPromises()
-		await wrapper.setProps({ modelValue: true })
-		await flushPromises()
+		// List view has no receive buttons (actions column removed)
 		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(0)
+
+		// Submitted PO with per_received < 100 shows Receive in doc view
+		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="receive-button"]').exists()).toBe(true)
+
+		// Draft PO doc view does not show Receive
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-test="po-PO-2026-00001"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="receive-button"]').exists()).toBe(false)
+
+		// Fully received PO doc view does not show Receive
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-test="po-PO-2026-00003"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="receive-button"]').exists()).toBe(false)
+
+		// When PR create permission is false: no Receive button in doc view
+		mocks.perms.create = false
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-test="po-PO-2026-00002"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="receive-button"]').exists()).toBe(false)
 	})
 
-	it("badges internal supplier POs once the factory SO exists", async () => {
-		mocks.call.mockResolvedValue({
-			orders: [SUBMITTED_ORDER, INTERNAL_ORDER],
+	it("removes Factory SO badge from list but keeps it in doc view", async () => {
+		mocks.call.mockImplementation(async (method, params) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER, INTERNAL_ORDER] }
+			if (method.includes("get_purchase_order")) {
+				if (params?.name === "PO-2026-00004") return INTERNAL_ORDER
+				if (params?.name === "PO-2026-00005") {
+					return {
+						...INTERNAL_ORDER,
+						name: "PO-2026-00005",
+						inter_company_order_reference: null,
+					}
+				}
+				return SUBMITTED_ORDER
+			}
+			return {}
 		})
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		// internal POs keep their Receive button too — only the draft source
-		// differs (see the routing test below)
-		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(2)
-		expect(wrapper.text()).toContain("Factory SO")
+		// List view does NOT show Factory SO badge
+		const listRow = wrapper.find(`[data-test="po-${INTERNAL_ORDER.name}"]`)
+		expect(listRow.text()).not.toContain("Factory SO")
 
-		// an internal PO whose factory SO hasn't been made yet: no badge
+		// Open doc view: doc view renders the Factory SO badge
+		await listRow.trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-testid="factory-so-badge"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="factory-so-badge"]').text()).toContain("Factory SO")
+
+		// Return to list and test internal PO without factory SO
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+
 		const notYetLinked = {
 			...INTERNAL_ORDER,
 			name: "PO-2026-00005",
 			inter_company_order_reference: null,
 		}
-		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER, notYetLinked] })
+		mocks.call.mockImplementation(async (method, params) => {
+			if (method.includes("get_purchase_orders"))
+				return { orders: [SUBMITTED_ORDER, notYetLinked] }
+			if (method.includes("get_purchase_order")) {
+				if (params?.name === "PO-2026-00005") return notYetLinked
+				return SUBMITTED_ORDER
+			}
+			return {}
+		})
 		await wrapper.setProps({ modelValue: false })
 		await flushPromises()
 		await wrapper.setProps({ modelValue: true })
 		await flushPromises()
-		expect(wrapper.findAll('[data-test="receive-button"]')).toHaveLength(2)
+
 		expect(wrapper.text()).not.toContain("Factory SO")
+		await wrapper.find('[data-test="po-PO-2026-00005"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-testid="factory-so-badge"]').exists()).toBe(false)
 	})
 
 	it("hides Receive until a Delivery Note exists when the POS Settings gate is on", async () => {
-		mocks.call.mockImplementation(async (method) => {
+		mocks.call.mockImplementation(async (method, params) => {
 			if (method.includes("get_po_defaults"))
 				return {
 					supplier: null,
@@ -1183,16 +1268,29 @@ describe("PurchaseOrderDialog", () => {
 						{ ...SUBMITTED_ORDER, name: "PO-WITH-DN", delivery_ready: true },
 					],
 				}
+			if (method.includes("get_purchase_order")) {
+				if (params?.name === "PO-NO-DN")
+					return { ...SUBMITTED_ORDER, name: "PO-NO-DN" }
+				if (params?.name === "PO-WITH-DN")
+					return { ...SUBMITTED_ORDER, name: "PO-WITH-DN", delivery_ready: true }
+			}
 			return {}
 		})
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		// only the order with a pending Delivery Note offers Receive
-		const buttons = wrapper.findAll('[data-test="receive-button"]')
+		// PO-NO-DN doc view hides Receive
+		await wrapper.find('[data-test="po-PO-NO-DN"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="receive-button"]').exists()).toBe(false)
 
-		expect(buttons).toHaveLength(1)
-		expect(buttons[0].text()).toBe("Receive")
+		// PO-WITH-DN doc view offers Receive
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+		await wrapper.find('[data-test="po-PO-WITH-DN"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.find('[data-test="receive-button"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="receive-button"]').text()).toBe("Receive")
 	})
 
 	it("Receive always calls get_intercompany_receipt_draft", async () => {
@@ -1222,9 +1320,11 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	it("renders delivery note reference without double label in receive info", async () => {
-		mocks.call.mockImplementation(async (method) => {
+		mocks.call.mockImplementation(async (method, params) => {
 			if (method.includes("get_purchase_orders"))
 				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return { ...SUBMITTED_ORDER, name: params?.name || SUBMITTED_ORDER.name }
 			if (method.includes("get_intercompany_receipt_draft"))
 				return { ...PR_DRAFT, inter_company_reference: "MAT-DN-2026-00001" }
 			return {}
@@ -1281,9 +1381,11 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	it("Save posts submit 0 without rate and opens the receipt view with Submit", async () => {
-		mocks.call.mockImplementation(async (method) => {
+		mocks.call.mockImplementation(async (method, params) => {
 			if (method.includes("get_purchase_orders"))
 				return { orders: [SUBMITTED_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return { ...SUBMITTED_ORDER, name: params?.name || SUBMITTED_ORDER.name }
 			if (method.includes("get_intercompany_receipt_draft")) return PR_DRAFT
 			if (method.includes("save_purchase_receipt"))
 				return { name: "PR-2026-00009" }
@@ -1348,9 +1450,11 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	it("routes internal POs to the Delivery Note draft and submits the DN links", async () => {
-		mocks.call.mockImplementation(async (method) => {
+		mocks.call.mockImplementation(async (method, params) => {
 			if (method.includes("get_purchase_orders"))
 				return { orders: [INTERNAL_ORDER] }
+			if (method.includes("get_purchase_order"))
+				return { ...INTERNAL_ORDER, name: params?.name || INTERNAL_ORDER.name }
 			if (method.includes("get_intercompany_receipt_draft"))
 				return {
 					...PR_DRAFT,
@@ -1368,8 +1472,7 @@ describe("PurchaseOrderDialog", () => {
 		const wrapper = mountOpen()
 		await flushPromises()
 
-		await wrapper.find('[data-test="receive-button"]').trigger("click")
-		await flushPromises()
+		await openReceiveView(wrapper, "PO-2026-00004")
 
 		expect(mocks.call).toHaveBeenCalledWith(
 			"pos_next.api.purchase_receipts.get_intercompany_receipt_draft",
@@ -1412,5 +1515,111 @@ describe("PurchaseOrderDialog", () => {
 			"Cannot receive more than ordered quantity",
 		)
 		expect(mocks.toast.success).not.toHaveBeenCalled()
+	})
+
+	// ---------- purchase list refinement & shipping status ----------
+
+	it("renders Shipping status column in header instead of Actions", async () => {
+		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER] })
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("Shipping status")
+		expect(wrapper.text()).not.toContain("Actions")
+	})
+
+	it("renders no row chevron in PO list", async () => {
+		mocks.call.mockResolvedValue({ orders: [SUBMITTED_ORDER] })
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		const row = wrapper.find(`[data-test="po-${SUBMITTED_ORDER.name}"]`)
+		expect(row.exists()).toBe(true)
+		expect(row.find('[data-icon="chevron-right"]').exists()).toBe(false)
+		expect(row.text()).not.toContain(">")
+	})
+
+	it("renders shipping status pills for preparing, in_transit, and received", async () => {
+		const poPreparing = {
+			...SUBMITTED_ORDER,
+			name: "PO-PREP",
+			shipping_status: "preparing",
+		}
+		const poInTransit = {
+			...SUBMITTED_ORDER,
+			name: "PO-TRANSIT",
+			shipping_status: "in_transit",
+		}
+		const poReceived = {
+			...SUBMITTED_ORDER,
+			name: "PO-RECV",
+			shipping_status: "received",
+		}
+
+		mocks.call.mockResolvedValue({
+			orders: [poPreparing, poInTransit, poReceived],
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		const rowPrep = wrapper.find('[data-test="po-PO-PREP"]')
+		expect(rowPrep.text()).toContain("Goods being prepared")
+
+		const rowTransit = wrapper.find('[data-test="po-PO-TRANSIT"]')
+		expect(rowTransit.text()).toContain("In transit")
+
+		const rowRecv = wrapper.find('[data-test="po-PO-RECV"]')
+		expect(rowRecv.text()).toContain("Received")
+	})
+
+	it("renders em dash fallback for missing/null/unknown shipping status without inferring from delivery_ready", async () => {
+		const poNull = {
+			...SUBMITTED_ORDER,
+			name: "PO-NULL",
+			shipping_status: null,
+			delivery_ready: true,
+		}
+		const poUndefined = {
+			...SUBMITTED_ORDER,
+			name: "PO-UNDEF",
+			shipping_status: undefined,
+			delivery_ready: true,
+		}
+		const poUnknown = {
+			...SUBMITTED_ORDER,
+			name: "PO-UNKNOWN",
+			shipping_status: "on_the_way",
+			delivery_ready: true,
+		}
+
+		mocks.call.mockResolvedValue({
+			orders: [poNull, poUndefined, poUnknown],
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		const rowNull = wrapper.find('[data-test="po-PO-NULL"]')
+		expect(rowNull.text()).toContain("—")
+		expect(rowNull.text()).not.toContain("In transit")
+
+		const rowUndef = wrapper.find('[data-test="po-PO-UNDEF"]')
+		expect(rowUndef.text()).toContain("—")
+
+		const rowUnknown = wrapper.find('[data-test="po-PO-UNKNOWN"]')
+		expect(rowUnknown.text()).toContain("—")
+	})
+
+	it("renders shipping status label for mobile view", async () => {
+		const poPreparing = {
+			...SUBMITTED_ORDER,
+			name: "PO-PREP",
+			shipping_status: "preparing",
+		}
+		mocks.call.mockResolvedValue({ orders: [poPreparing] })
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		const rowPrep = wrapper.find('[data-test="po-PO-PREP"]')
+		expect(rowPrep.text()).toContain("Shipping status:")
 	})
 })

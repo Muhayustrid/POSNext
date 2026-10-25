@@ -101,6 +101,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		payments,
 		salesTeam,
 		additionalDiscount,
+		taxRules,
 		taxInclusive,
 		isSubmitting,
 		addItem: addItemToInvoice,
@@ -2346,6 +2347,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		salesTeam,
 		additionalDiscount,
 		headerDiscountFromOffer, // True while the header additional discount is server-applied (offer)
+		taxRules,
 		taxInclusive,
 		pendingItem,
 		pendingItemQty,

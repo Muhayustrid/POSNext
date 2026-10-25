@@ -350,7 +350,6 @@ const ALL_DIALOG_STUBS = {
 	ShiftOpeningDialog: true,
 	ClearCacheOverlay: true,
 	SessionLockScreen: true,
-	POSFooter: true,
 	POSHeader: true,
 	POSMenuDialog: true,
 	BatchSerialDialog: true,

@@ -495,4 +495,33 @@ describe("PurchaseReceiptDialog", () => {
 
 		expect(wrapper.text()).not.toContain("Grand Total")
 	})
+
+	it("renders no subtitle Goods received from suppliers and the factory", async () => {
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		expect(wrapper.text()).not.toContain(
+			"Goods received from suppliers and the factory",
+		)
+	})
+
+	it("renders no row chevron in PR list", async () => {
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		const row = wrapper.find(`[data-test="pr-${PR_LIST_ROW.name}"]`)
+		expect(row.exists()).toBe(true)
+		expect(row.find('[data-icon="chevron-right"]').exists()).toBe(false)
+		expect(row.text()).not.toContain(">")
+	})
+
+	it("renders no row action buttons in list and no Shipping status column", async () => {
+		const wrapper = mountOpen()
+		await flushPromises()
+
+		const row = wrapper.find(`[data-test="pr-${PR_LIST_ROW.name}"]`)
+		expect(row.exists()).toBe(true)
+		expect(row.findAll("button")).toHaveLength(0)
+		expect(wrapper.text()).not.toContain("Shipping status")
+	})
 })

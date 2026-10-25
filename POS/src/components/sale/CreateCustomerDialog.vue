@@ -7,7 +7,7 @@
 		}"
 	>
 		<template #body-content>
-			<div class="flex flex-col gap-6">
+			<div class="pos-dialog-bound flex flex-col gap-6 pe-1">
 				<!-- Customer Name (Required) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -32,7 +32,7 @@
 							<button
 								type="button"
 								@click="showCountryDropdown = !showCountryDropdown"
-								class="flex items-center gap-1 w-24 ps-2 pe-1 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white hover:bg-gray-50"
+								class="flex items-center gap-1 w-24 ps-2 pe-1 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white hover:bg-gray-50 min-h-[44px] sm:min-h-[40px] touch-manipulation"
 							>
 								<img
 									:src="`https://flagcdn.com/h24/${currentCountryCode}.png`"
@@ -112,7 +112,7 @@
 							v-model="phoneNumber"
 							type="tel"
 							:placeholder="__('Enter phone number')"
-							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start"
+							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start min-h-[44px] sm:min-h-[40px] tabular-nums"
 							@input="updateMobileNumber"
 							required
 						/>
@@ -138,7 +138,7 @@
 					</label>
 					<select
 						v-model="customerData.customer_group"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] sm:min-h-[40px] bg-white cursor-pointer touch-manipulation"
 					>
 						<option value="">{{ __("Select Customer Group") }}</option>
 						<option v-for="group in customerGroups" :key="group" :value="group">
@@ -154,7 +154,7 @@
 					</label>
 					<select
 						v-model="customerData.territory"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] sm:min-h-[40px] bg-white cursor-pointer touch-manipulation"
 					>
 						<option value="">{{ __("Select Territory") }}</option>
 						<option
@@ -174,7 +174,7 @@
 					</label>
 					<select
 						v-model="customerData.custom_governorate"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] sm:min-h-[40px] bg-white cursor-pointer touch-manipulation"
 					>
 						<option value="">{{ __("Select Governorate") }}</option>
 						<option v-for="gov in governorates" :key="gov" :value="gov">
@@ -191,7 +191,7 @@
 					<select
 						v-model="customerData.custom_district"
 						:disabled="!customerData.custom_governorate"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] sm:min-h-[40px] bg-white cursor-pointer touch-manipulation disabled:bg-gray-100 disabled:cursor-not-allowed"
 					>
 						<option value="">
 							{{
@@ -249,7 +249,7 @@
 				<div class="flex gap-2">
 					<Button
 						variant="solid"
-						class="min-h-[44px] flex-1 sm:flex-none"
+						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation flex-1 sm:flex-none"
 						@click="handleCreate"
 						:loading="
 							createCustomerResource.loading ||
@@ -260,7 +260,7 @@
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
-					<Button variant="subtle" class="min-h-[44px]" @click="show = false">
+					<Button variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="show = false">
 						{{ __("Cancel") }}
 					</Button>
 				</div>

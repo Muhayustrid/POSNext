@@ -472,7 +472,7 @@
 						<!-- Show remaining credit (after used amount is deducted) for positive balance -->
 						<span
 							:class="[
-								'text-base font-bold',
+								'text-base font-bold tabular-nums',
 								totalAvailableCredit < 0 ? 'text-red-600' : 'text-emerald-600',
 							]"
 						>
@@ -521,7 +521,7 @@
 								<button
 									type="button"
 									@click="emit('show-offers')"
-									class="relative flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+									class="relative flex-1 flex items-center justify-center gap-1.5 h-10 min-h-[40px] px-2.5 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 									:aria-label="__('View all available offers')"
 								>
 									<svg
@@ -537,7 +537,7 @@
 											d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
 										/>
 									</svg>
-									<span class="text-[11px] font-bold text-green-700">{{
+									<span class="text-xs font-bold text-green-700">{{
 										__("Offers")
 									}}</span>
 									<span
@@ -550,7 +550,7 @@
 								<button
 									type="button"
 									@click="emit('show-coupon')"
-									class="relative flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+									class="relative flex-1 flex items-center justify-center gap-1.5 h-10 min-h-[40px] px-2.5 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 									:aria-label="__('Apply coupon or gift card')"
 								>
 									<svg
@@ -564,7 +564,7 @@
 											clip-rule="evenodd"
 										/>
 									</svg>
-									<span class="text-[11px] font-bold text-purple-700">{{
+									<span class="text-xs font-bold text-purple-700">{{
 										__("Coupon")
 									}}</span>
 									<span
@@ -610,12 +610,12 @@
 												({{ __("Free") }})</span
 											>
 										</div>
-										<div class="text-xs text-gray-500 mt-0.5">
+										<div class="text-xs text-gray-500 mt-0.5 tabular-nums">
 											{{ formatCurrency(item.rate || item.price_list_rate) }}
 											× {{ item.qty || item.quantity }}
 										</div>
 									</div>
-									<div class="text-sm font-semibold text-gray-900 text-end">
+									<div class="text-sm font-semibold text-gray-900 text-end tabular-nums">
 										{{
 											formatCurrency(
 												item.amount ||
@@ -651,12 +651,12 @@
 											}})
 										</div>
 										<div
-											class="text-[10px] text-green-600 mt-0.5 opacity-80 ps-4"
+											class="text-xs text-green-600 mt-0.5 opacity-80 ps-4"
 										>
 											{{ item.free_qty }} {{ item.uom || item.stock_uom }}
 										</div>
 									</div>
-									<div class="text-xs font-bold text-green-700 text-end">
+									<div class="text-xs font-bold text-green-700 text-end tabular-nums">
 										{{ formatCurrency(0) }}
 									</div>
 								</div>
@@ -698,7 +698,7 @@
 									</div>
 									<span
 										v-if="localAdditionalDiscount > 0"
-										class="text-xs font-bold text-red-600"
+										class="text-xs font-bold text-red-600 tabular-nums"
 									>
 										-{{ formatCurrency(calculatedAdditionalDiscount) }}
 									</span>
@@ -707,7 +707,7 @@
 								<div class="grid grid-cols-4 gap-1.5">
 									<!-- Counter Input (2/4 = 1/2) -->
 									<div
-										class="col-span-2 flex items-center border border-orange-300 rounded-lg overflow-hidden"
+										class="col-span-2 flex items-center border border-orange-300 rounded-lg overflow-hidden h-11 sm:h-10 min-h-[40px]"
 										:class="additionalDiscountLocked ? 'bg-gray-50 cursor-not-allowed' : 'bg-white'"
 										:title="additionalDiscountLockedReason"
 									>
@@ -715,7 +715,7 @@
 										<button
 											@click="decrementDiscount"
 											:disabled="additionalDiscountLocked || localAdditionalDiscount <= 0"
-											class="h-9 w-9 flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors flex-shrink-0"
+											class="h-11 w-11 sm:h-10 sm:w-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors flex-shrink-0 touch-manipulation"
 										>
 											<svg
 												class="w-4 h-4"
@@ -749,13 +749,13 @@
 											"
 											step="1"
 											:disabled="additionalDiscountLocked"
-											class="flex-1 h-9 px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+											class="flex-1 h-11 sm:h-10 min-h-[40px] px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none tabular-nums"
 										/>
 										<!-- Increment Button -->
 										<button
 											@click="incrementDiscount"
 											:disabled="additionalDiscountLocked"
-											class="h-9 w-9 flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors flex-shrink-0"
+											class="h-11 w-11 sm:h-10 sm:w-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-orange-600 hover:bg-orange-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors flex-shrink-0 touch-manipulation"
 										>
 											<svg
 												class="w-4 h-4"
@@ -780,7 +780,7 @@
 										"
 										:disabled="additionalDiscountLocked"
 										:class="[
-											'h-9 rounded-lg text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
+											'h-11 sm:h-10 min-h-[40px] rounded-lg text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed touch-manipulation',
 											additionalDiscountType === 'percentage'
 												? 'bg-orange-500 text-white'
 												: 'bg-white text-orange-600 border border-orange-300 hover:bg-orange-50',
@@ -796,7 +796,7 @@
 										"
 										:disabled="additionalDiscountLocked"
 										:class="[
-											'h-9 rounded-lg text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
+											'h-11 sm:h-10 min-h-[40px] rounded-lg text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed touch-manipulation',
 											additionalDiscountType === 'amount'
 												? 'bg-orange-500 text-white'
 												: 'bg-white text-orange-600 border border-orange-300 hover:bg-orange-50',
@@ -820,13 +820,13 @@
 											type="text"
 											:placeholder="__('Enter the code from head office')"
 											maxlength="20"
-											class="w-full h-9 border border-orange-300 rounded-lg px-3 text-sm uppercase tracking-widest bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+											class="w-full h-11 sm:h-10 min-h-[40px] border border-orange-300 rounded-lg px-3 text-sm uppercase tracking-widest bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
 											@keyup.enter="unlockWithCode"
 										/>
 										<button
 											type="button"
 											@click="unlockWithCode"
-											class="h-9 w-9 flex-shrink-0 rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center justify-center"
+											class="h-11 w-11 sm:h-10 sm:w-10 min-w-[40px] min-h-[40px] flex-shrink-0 rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center justify-center touch-manipulation"
 											:title="__('Unlock additional discount')"
 										>
 											<FeatherIcon name="unlock" class="w-4 h-4" />
@@ -837,7 +837,7 @@
 							<!-- Subtotal -->
 							<div class="flex items-center justify-between text-sm">
 								<span class="text-gray-600 text-start">{{ __("Subtotal") }}</span>
-								<span class="font-medium text-gray-900 text-end">{{
+								<span class="font-medium text-gray-900 text-end tabular-nums">{{
 									formatCurrency(subtotal)
 								}}</span>
 							</div>
@@ -847,7 +847,7 @@
 								class="flex items-center justify-between text-sm"
 							>
 								<span class="text-gray-600 text-start">{{ __("Tax") }}</span>
-								<span class="font-medium text-gray-900 text-end">{{
+								<span class="font-medium text-gray-900 text-end tabular-nums">{{
 									formatCurrency(taxAmount)
 								}}</span>
 							</div>
@@ -857,7 +857,7 @@
 								class="flex items-center justify-between text-sm"
 							>
 								<span class="text-gray-600 text-start">{{ __("Discount") }}</span>
-								<span class="font-medium text-red-600 text-end"
+								<span class="font-medium text-red-600 text-end tabular-nums"
 									>-{{ formatCurrency(discountAmount) }}</span
 								>
 							</div>
@@ -874,7 +874,7 @@
 								>
 								<span
 									:class="[
-										'font-bold text-gray-900 text-end',
+										'font-bold text-gray-900 text-end tabular-nums',
 										dynamicTextSize.grandTotal,
 									]"
 									>{{ formatCurrency(grandTotal) }}</span
@@ -899,7 +899,7 @@
 									</div>
 									<div
 										:class="[
-											'font-bold text-blue-600',
+											'font-bold text-blue-600 tabular-nums',
 											dynamicTextSize.amount,
 										]"
 									>
@@ -921,8 +921,8 @@
 									</div>
 									<div
 										:class="[
-											'font-bold text-orange-600',
-											dynamicTextSize.amount,
+											'font-bold text-orange-600 tabular-nums',
+										dynamicTextSize.amount,
 										]"
 									>
 										{{ formatCurrency(remainingAmount) }}
@@ -943,8 +943,8 @@
 									</div>
 									<div
 										:class="[
-											'font-bold text-purple-600',
-											dynamicTextSize.amount,
+											'font-bold text-purple-600 tabular-nums',
+										dynamicTextSize.amount,
 										]"
 									>
 										{{ formatCurrency(writeOffAmount) }}
@@ -964,8 +964,8 @@
 									</div>
 									<div
 										:class="[
-											'font-bold text-green-600',
-											dynamicTextSize.amount,
+											'font-bold text-green-600 tabular-nums',
+										dynamicTextSize.amount,
 										]"
 									>
 										{{ formatCurrency(changeAmount) }}
@@ -985,7 +985,7 @@
 										{{ __("Overpayment") }}
 									</div>
 									<div
-										:class="['font-bold text-red-600', dynamicTextSize.amount]"
+										:class="['font-bold text-red-600 tabular-nums', dynamicTextSize.amount]"
 									>
 										{{ formatCurrency(changeAmount) }}
 									</div>
@@ -1026,7 +1026,7 @@
 									class="text-xs font-medium text-gray-500 uppercase tracking-wider"
 									>{{ __("Write Off") }}</span
 								>
-								<span class="text-xs text-gray-400"
+								<span class="text-xs text-gray-400 tabular-nums"
 									>{{ __("Max") }}: {{ formatCurrency(writeOffLimit) }}</span
 								>
 							</div>
@@ -1045,7 +1045,7 @@
 									class="absolute inset-0 flex items-center justify-center z-10"
 								>
 									<span
-										class="text-base font-semibold tracking-wide"
+										class="text-base font-semibold tracking-wide tabular-nums"
 										:class="applyWriteOff ? 'text-white' : 'text-gray-700'"
 									>
 										{{ formatCurrency(remainingAmount) }}
@@ -1120,7 +1120,7 @@
 							<div
 								:class="[
 									'text-start font-semibold text-gray-500 uppercase tracking-wide',
-									isSmallMobile ? 'text-[10px]' : 'text-xs',
+									'text-xs',
 								]"
 							>
 								{{ __("Payment Method") }}
@@ -1204,10 +1204,10 @@
 										walletInfo.wallet_enabled
 									"
 									:class="[
-										'font-bold rounded',
+										'font-bold rounded tabular-nums',
 										isSmallMobile
-											? 'text-[8px] px-1 py-0.5'
-											: 'text-[10px] px-1.5 py-0.5',
+											? 'text-xs px-1 py-0.5'
+											: 'text-xs px-1.5 py-0.5',
 										availableWalletBalance > 0
 											? 'text-amber-700 bg-amber-100'
 											: 'text-gray-500 bg-gray-200',
@@ -1219,9 +1219,9 @@
 								<span
 									v-if="getMethodTotal(method.mode_of_payment) > 0"
 									:class="[
-										'font-bold rounded',
+										'font-bold rounded tabular-nums',
 										isSmallMobile
-											? 'text-[8px] px-0.5 py-0.5'
+											? 'text-xs px-0.5 py-0.5'
 											: 'text-xs px-1 py-0.5',
 										isWalletPaymentMethod(method.mode_of_payment)
 											? 'text-amber-600 bg-amber-200'
@@ -1255,9 +1255,9 @@
 								<span
 									v-if="getMethodTotal('Customer Credit') > 0"
 									:class="[
-										'font-bold text-emerald-600 bg-emerald-100 rounded',
+										'font-bold text-emerald-600 bg-emerald-100 rounded tabular-nums',
 										isSmallMobile
-											? 'text-[8px] px-0.5 py-0.5'
+											? 'text-xs px-0.5 py-0.5'
 											: 'text-xs px-1 py-0.5',
 									]"
 								>
@@ -1288,9 +1288,9 @@
 									<span
 										v-if="selectedReceivableAccount === acc.name"
 										:class="[
-											'font-bold text-blue-600 bg-blue-100 rounded',
+											'font-bold text-blue-600 bg-blue-100 rounded tabular-nums',
 											isSmallMobile
-												? 'text-[8px] px-0.5 py-0.5'
+												? 'text-xs px-0.5 py-0.5'
 												: 'text-xs px-1 py-0.5',
 										]"
 									>
@@ -1383,7 +1383,7 @@
 								@click="addCustomPayment(lastSelectedMethod, amount)"
 								:disabled="isQuickAmountDisabled(amount)"
 								:class="[
-									'font-semibold rounded-lg border-2 transition-all h-12 lg:h-14 text-sm lg:text-base touch-manipulation',
+									'font-semibold rounded-lg border-2 transition-all h-12 lg:h-14 text-sm lg:text-base touch-manipulation tabular-nums',
 									isQuickAmountDisabled(amount)
 										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600',
@@ -1455,7 +1455,7 @@
 									@click="addCustomPayment(lastSelectedMethod, amount)"
 									:disabled="isQuickAmountDisabled(amount)"
 									:class="[
-										'font-semibold rounded-lg border-2 transition-colors h-11 text-xs sm:text-sm touch-manipulation',
+										'font-semibold rounded-lg border-2 transition-colors h-12 text-xs sm:text-sm touch-manipulation tabular-nums',
 										isQuickAmountDisabled(amount)
 											? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 											: 'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400',
@@ -1473,7 +1473,7 @@
 								<button
 									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
 									:class="[
-										'font-bold rounded-lg border-2 h-11 text-xs sm:text-sm transition-colors touch-manipulation',
+										'font-bold rounded-lg border-2 h-12 text-xs sm:text-sm transition-colors touch-manipulation',
 										'bg-green-50 border-green-200 text-green-700 active:bg-green-100 active:border-green-400',
 									]"
 								>
@@ -1484,7 +1484,7 @@
 									:key="amount"
 									@click="addCustomPayment(lastSelectedMethod, amount)"
 									:class="[
-										'font-semibold rounded-lg border-2 h-11 text-xs sm:text-sm transition-colors touch-manipulation',
+										'font-semibold rounded-lg border-2 h-12 text-xs sm:text-sm transition-colors touch-manipulation tabular-nums',
 										'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400',
 									]"
 								>
@@ -1565,10 +1565,7 @@
 								isSmallMobile ? 'p-1.5 mb-1' : 'p-2 mb-1.5',
 							]"
 						>
-							<p
-								:class="isSmallMobile ? 'text-[10px]' : 'text-xs'"
-								class="text-blue-600"
-							>
+							<p class="text-xs text-blue-600">
 								{{ __("Select a payment method") }}
 							</p>
 						</div>
@@ -1613,7 +1610,7 @@
 											d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
 										/>
 									</svg>
-									<span class="truncate">{{
+									<span class="truncate tabular-nums">{{
 										formatCurrency(remainingAmount)
 									}}</span>
 								</button>
@@ -1700,7 +1697,7 @@
 										d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
 									/>
 								</svg>
-								<span>{{ __("Pay") }} {{ formatCurrency(remainingAmount) }}</span>
+								<span class="tabular-nums">{{ __("Pay") }} {{ formatCurrency(remainingAmount) }}</span>
 							</button>
 
 							<!-- Complete Payment Button -->
@@ -1784,7 +1781,7 @@
 								]"
 							>
 								<span>{{ currencySymbol }}</span>
-								<span class="font-mono tracking-wider">{{
+								<span class="font-mono tracking-wider tabular-nums">{{
 									numpadDisplay || "0.00"
 								}}</span>
 							</div>

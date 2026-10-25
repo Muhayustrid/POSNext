@@ -7,42 +7,12 @@
 		<template #body-content>
 			<!-- LIST VIEW -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<p class="text-sm text-gray-500">
-						{{ __("Manage supplier orders and purchasing requests") }}
-					</p>
-					<Button variant="solid" data-test="new-button" @click="openNew">
-						<template #prefix>
-							<FeatherIcon name="plus" class="w-4 h-4" />
-						</template>
-						{{ __("New Purchase Order") }}
-					</Button>
-				</div>
-
-				<div class="flex gap-2">
-					<div class="relative flex-1">
-						<FeatherIcon
-							name="search"
-							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-						/>
-						<input
-							v-model="searchTerm"
-							type="text"
-							data-test="list-search"
-							:placeholder="__('Search PO number or supplier...')"
-							class="w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-							@input="onListSearch"
-						/>
-					</div>
-					<RefreshButton :loading="loadingOrders" @click="loadOrders" />
-				</div>
-
-				<div class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
+				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
 						v-for="chip in STATUS_CHIPS"
 						:key="chip.value"
 						type="button"
-						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						class="shrink-0 inline-flex items-center min-h-[44px] md:min-h-[40px] rounded-full border px-3.5 py-1 text-xs font-medium transition-colors touch-manipulation"
 						:class="
 							statusFilter === chip.value
 								? 'border-gray-900 bg-gray-900 text-white'
@@ -55,17 +25,48 @@
 					</button>
 				</div>
 
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<div class="relative flex-1 min-w-[200px] sm:min-w-[280px]">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="searchTerm"
+							type="text"
+							data-test="list-search"
+							:placeholder="__('Search PO number or supplier...')"
+							class="h-11 md:h-10 w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							@input="onListSearch"
+						/>
+					</div>
+					<div class="ms-auto flex items-center gap-2">
+						<RefreshButton :loading="loadingOrders" @click="loadOrders" />
+						<Button
+							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
+							data-test="new-button"
+							@click="openNew"
+						>
+							<template #prefix>
+								<FeatherIcon name="plus" class="w-4 h-4" />
+							</template>
+							{{ __("New Purchase Order") }}
+						</Button>
+					</div>
+				</div>
+
 				<div class="rounded-xl border border-gray-200 bg-white">
 					<!-- desktop column header; rows below share the same grid -->
 					<div
-						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3"
+						class="hidden border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] xl:gap-x-3"
 					>
 						<span>{{ __("PO Number") }}</span>
 						<span>{{ __("Supplier") }}</span>
 						<span>{{ __("Transaction Date") }}</span>
 						<span>{{ __("Required By") }}</span>
 						<span>{{ __("Status") }}</span>
-						<span class="text-end">{{ __("Actions") }}</span>
+						<span>{{ __("Shipping status") }}</span>
 					</div>
 
 					<div v-if="loadingOrders" class="divide-y divide-gray-100" data-test="list-loading">
@@ -95,12 +96,8 @@
 							@click="openDoc(order.name)"
 							@keydown.enter="openDoc(order.name)"
 						>
-							<div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:gap-y-0 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] md:gap-x-3">
-								<div class="flex min-w-0 items-center gap-1.5 md:order-1">
-									<FeatherIcon
-										name="chevron-right"
-										class="h-3.5 w-3.5 shrink-0 text-gray-400"
-									/>
+							<div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 xl:gap-y-0 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_8.5rem_7rem_10rem_minmax(0,1.2fr)] xl:gap-x-3">
+								<div class="flex min-w-0 items-center gap-1.5 xl:order-1">
 									<span class="truncate text-sm font-semibold text-gray-900">{{ order.name }}</span>
 									<span
 										v-if="order.attachment_count"
@@ -112,76 +109,28 @@
 									</span>
 								</div>
 								<!-- status sits top-right on cards, in its own column on desktop -->
-								<div class="flex items-center gap-1 justify-self-end md:order-5 md:justify-self-start">
+								<div class="flex items-center gap-1 justify-self-end xl:order-5 xl:justify-self-start">
 									<span :class="statusPill(order.status)">{{ __(order.status) }}</span>
-									<span
-										v-if="isFactoryLinked(order)"
-										class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-									>
-										{{ __("Factory SO") }}
-									</span>
 								</div>
-								<p class="col-span-2 truncate text-sm text-gray-700 md:order-2 md:col-span-1">
+								<p class="col-span-2 truncate text-sm text-gray-700 xl:order-2 xl:col-span-1">
 									{{ order.supplier_name || order.supplier }}
 								</p>
-								<p class="col-span-2 text-xs text-gray-500 md:order-3 md:col-span-1 md:text-sm md:text-gray-700">
-									<span class="md:hidden">{{ __("Ordered") }}&nbsp;</span>{{ formatDate(order.transaction_date) }}
-									<span class="md:hidden"> · {{ __("Required By") }} {{ formatDate(order.schedule_date) }}</span>
+								<p class="col-span-2 text-xs text-gray-500 xl:order-3 xl:col-span-1 xl:text-sm xl:text-gray-700">
+									<span class="xl:hidden">{{ __("Ordered") }}&nbsp;</span>{{ formatDate(order.transaction_date) }}
+									<span class="xl:hidden"> · {{ __("Required By") }} {{ formatDate(order.schedule_date) }}</span>
 								</p>
-								<p class="hidden text-sm text-gray-700 md:order-4 md:block">
+								<p class="hidden text-sm text-gray-700 xl:order-4 xl:block">
 									{{ formatDate(order.schedule_date) }}
 								</p>
-								<div
-									class="col-span-2 -mx-2 flex flex-wrap justify-start gap-0.5 md:order-6 md:col-span-1 md:mx-0 md:justify-end"
-									@click.stop
-								>
-									<button
-										v-if="order.docstatus === 0"
-										type="button"
-										class="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
-										@click="openEdit(order)"
+								<div class="col-span-2 flex items-center gap-1.5 text-xs text-gray-500 xl:order-6 xl:col-span-1 xl:text-sm">
+									<span class="text-gray-500 xl:hidden">{{ __("Shipping status") }}:</span>
+									<span
+										v-if="shippingStatusInfo(order.shipping_status)"
+										:class="shippingStatusPill(order.shipping_status)"
 									>
-										{{ __("Edit") }}
-									</button>
-									<button
-										v-if="order.docstatus === 0 && canSubmitPO"
-										type="button"
-										class="rounded px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-										@click="submitDoc(order.name)"
-									>
-										{{ __("Submit") }}
-									</button>
-									<button
-										v-if="
-											order.docstatus === 1 &&
-											order.per_received < 100 &&
-											(!poDefaults?.receive_requires_delivery_note || order.delivery_ready) &&
-											canReceivePR
-										"
-										type="button"
-										data-test="receive-button"
-										class="rounded px-2 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50"
-										@click="openReceive(order)"
-									>
-										{{ __("Receive") }}
-									</button>
-									<button
-										v-if="order.docstatus === 1 && canCancelPO && !isFactoryLinked(order)"
-										type="button"
-										class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-										@click="cancelDoc(order)"
-									>
-										{{ __("Cancel") }}
-									</button>
-									<button
-										type="button"
-										class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-										:title="__('Open in ERPNext')"
-										:aria-label="__('Open in ERPNext')"
-										@click="openInErpnext(order)"
-									>
-										<FeatherIcon name="external-link" class="h-3.5 w-3.5" />
-									</button>
+										{{ shippingStatusText(order.shipping_status) }}
+									</span>
+									<span v-else class="text-gray-400">—</span>
 								</div>
 							</div>
 						</div>
@@ -214,6 +163,7 @@
 							<Button
 								v-if="canSubmitPO"
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="primary-action"
 								:loading="submitting"
 								@click="submitDoc(currentDoc?.name)"
@@ -229,6 +179,7 @@
 								canReceivePR
 							"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							data-test="receive-button"
 							@click="openReceive(currentDoc)"
@@ -240,7 +191,7 @@
 							<button
 								type="button"
 								data-testid="doc-menu-button"
-								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+								class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 								:aria-label="__('More actions')"
 								:title="__('More actions')"
 								@click="docMenuOpen = !docMenuOpen"
@@ -396,12 +347,12 @@
 					<button
 						type="button"
 						data-testid="receive-back"
-						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 						:aria-label="__('Back')"
 						:title="__('Back')"
 						@click="backFromReceive"
 					>
-						<FeatherIcon name="arrow-left" class="h-4 w-4" />
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
 					</button>
 					<nav class="flex min-w-0 items-center gap-1.5 text-sm">
 						<span class="text-gray-500">{{ __("Purchase Order") }}</span>
@@ -416,6 +367,7 @@
 					<div class="ms-auto flex items-center gap-2">
 						<Button
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="receive-save"
 							:disabled="hasExcessQty || saving"
 							:loading="saving"
@@ -575,12 +527,12 @@
 					<button
 						type="button"
 						data-testid="doc-back"
-						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 						:aria-label="__('Back')"
 						:title="__('Back')"
 						@click="backFromForm"
 					>
-						<FeatherIcon name="arrow-left" class="h-4 w-4" />
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
 					</button>
 					<nav class="flex min-w-0 items-center gap-1.5 text-sm">
 						<span class="text-gray-500">{{ __("Purchase Order") }}</span>
@@ -595,6 +547,7 @@
 						<Button
 							v-if="formPrimaryMode === 'save'"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							:loading="saving"
 							@click="save(false)"
@@ -604,6 +557,7 @@
 						<Button
 							v-else-if="canSubmitPO"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							:loading="submitting"
 							@click="submitDoc(form.name)"
@@ -1002,12 +956,12 @@ const STATUS_CHIPS = [
 ]
 
 const STATUS_TONES = {
-	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	"To Receive and Bill": "bg-blue-50 text-blue-700 ring-blue-200",
-	"To Receive": "bg-blue-50 text-blue-700 ring-blue-200",
-	"To Bill": "bg-purple-50 text-purple-700 ring-purple-200",
-	Completed: "bg-green-50 text-green-700 ring-green-200",
-	Cancelled: "bg-red-50 text-red-700 ring-red-200",
+	Draft: "bg-orange-50 text-orange-700 ring-orange-600/20",
+	"To Receive and Bill": "bg-blue-50 text-blue-700 ring-blue-600/20",
+	"To Receive": "bg-blue-50 text-blue-700 ring-blue-600/20",
+	"To Bill": "bg-amber-50 text-amber-700 ring-amber-600/20",
+	Completed: "bg-green-50 text-green-700 ring-green-600/20",
+	Cancelled: "bg-gray-50 text-gray-600 ring-gray-500/20",
 }
 
 const orders = ref([])
@@ -1064,7 +1018,39 @@ const dialogTitle = computed(() => {
 function statusPill(status) {
 	return [
 		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-		STATUS_TONES[status] || "bg-gray-50 text-gray-700 ring-gray-200",
+		STATUS_TONES[status] || "bg-gray-50 text-gray-600 ring-gray-500/20",
+	]
+}
+
+const SHIPPING_STATUS_MAP = {
+	preparing: {
+		label: "Goods being prepared",
+		tone: "bg-amber-50 text-amber-700 ring-amber-200",
+	},
+	in_transit: {
+		label: "In transit",
+		tone: "bg-blue-50 text-blue-700 ring-blue-200",
+	},
+	received: {
+		label: "Received",
+		tone: "bg-green-50 text-green-700 ring-green-200",
+	},
+}
+
+function shippingStatusInfo(status) {
+	return SHIPPING_STATUS_MAP[status] || null
+}
+
+function shippingStatusText(status) {
+	const info = shippingStatusInfo(status)
+	return info ? __(info.label) : "—"
+}
+
+function shippingStatusPill(status) {
+	const info = shippingStatusInfo(status)
+	return [
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+		info?.tone || "bg-gray-50 text-gray-700 ring-gray-200",
 	]
 }
 

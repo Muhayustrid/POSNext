@@ -31,14 +31,16 @@
 											<button
 												type="button"
 												@click="cancel"
-												class="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+												class="h-11 w-11 shrink-0 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
+												:aria-label="__('Close')"
+												:title="__('Close')"
 											>
-												<FeatherIcon name="x" class="h-4 w-4" />
+												<FeatherIcon name="x" class="w-5 h-5" />
 											</button>
 										</div>
 
 										<!-- Body Content -->
-										<div v-if="localItem" class="flex flex-col gap-4">
+										<div v-if="localItem" class="pos-dialog-bound flex flex-col gap-4 pe-1">
 											<!-- Item Header -->
 											<div
 												class="flex items-center gap-3 pb-4 border-b border-gray-200"
@@ -115,7 +117,7 @@
 																localItem?.has_serial_no &&
 																localSerials.length > 0
 															"
-															class="w-full h-7 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center"
+															class="w-full h-11 sm:h-10 min-h-[40px] border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center"
 														>
 															<span
 																class="text-sm font-semibold text-gray-600"
@@ -127,7 +129,7 @@
 															v-else-if="
 																localItem?.is_resolved_barcode
 															"
-															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+															class="w-full h-11 sm:h-10 min-h-[40px] border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
 															<span
 																class="text-sm font-semibold text-amber-700"
@@ -137,12 +139,12 @@
 														<!-- For non-serial items, show quantity controls -->
 														<div
 															v-else
-															class="w-full h-7 border border-gray-300 rounded-lg bg-white flex items-center overflow-hidden"
+															class="w-full h-11 sm:h-10 min-h-[40px] border border-gray-300 rounded-lg bg-white flex items-center overflow-hidden"
 														>
 															<button
 																type="button"
 																@click="decrementQuantity"
-																class="w-7 h-7 min-w-7 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-base transition-colors flex items-center justify-center border-e border-gray-300"
+																class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-base transition-colors flex items-center justify-center border-e border-gray-300 touch-manipulation"
 															>
 																−
 															</button>
@@ -155,7 +157,7 @@
 																	min="0.0001"
 																	step="any"
 																	inputmode="decimal"
-																	class="w-full text-center border-0 text-sm font-semibold focus:outline-none focus:ring-0 bg-transparent"
+																	class="w-full text-center border-0 text-sm font-semibold focus:outline-none focus:ring-0 bg-transparent tabular-nums"
 																	@input="handleQuantityInput"
 																	@blur="handleQuantityBlur"
 																	@keydown.enter="
@@ -166,7 +168,7 @@
 															<button
 																type="button"
 																@click="incrementQuantity"
-																class="w-7 h-7 min-w-7 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-base transition-colors flex items-center justify-center border-s border-gray-300"
+																class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-base transition-colors flex items-center justify-center border-s border-gray-300 touch-manipulation"
 															>
 																+
 															</button>
@@ -179,7 +181,7 @@
 															class="block text-sm font-medium text-gray-700 mb-2 text-start"
 															>{{ __("Rate") }}</label
 														>
-														<div class="relative h-7">
+														<div class="relative h-11 sm:h-10 min-h-[40px]">
 															<span
 																class="absolute inset-y-0 start-0 ps-3 flex items-center text-gray-500 text-sm font-medium"
 															>
@@ -196,7 +198,7 @@
 																		? 'bg-gray-50 cursor-not-allowed'
 																		: 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 																"
-																class="w-full h-7 border border-gray-300 rounded-lg ps-12 pe-3 text-sm font-semibold"
+																class="w-full h-11 sm:h-10 min-h-[40px] border border-gray-300 rounded-lg ps-12 pe-3 text-sm font-semibold tabular-nums"
 																:title="rateEditDisabledReason"
 																@input="calculateTotals"
 															/>
@@ -237,7 +239,7 @@
 														<!-- For resolved barcode items, UOM is read-only -->
 														<div
 															v-if="localItem?.is_resolved_barcode"
-															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+															class="w-full h-11 sm:h-10 min-h-[40px] border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
 															<span
 																class="text-sm font-semibold text-amber-700"
@@ -391,7 +393,7 @@
 																		? 'bg-gray-50 cursor-not-allowed'
 																		: 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 																"
-																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm"
+																class="w-full h-11 sm:h-10 min-h-[40px] border border-gray-300 rounded-lg px-3 pe-8 text-sm tabular-nums"
 																@input="calculateDiscount"
 															/>
 															<span
@@ -419,13 +421,13 @@
 															type="text"
 															:placeholder="__('Enter the code from head office')"
 															maxlength="20"
-															class="w-full h-9 border border-gray-300 rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+															class="w-full h-11 sm:h-10 min-h-[40px] border border-gray-300 rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 															@keyup.enter="unlockWithCode"
 														/>
 														<button
 															type="button"
 															@click="unlockWithCode"
-															class="h-9 w-9 flex-shrink-0 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center justify-center"
+															class="h-11 w-11 sm:h-10 sm:w-10 min-w-[40px] min-h-[40px] flex-shrink-0 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center justify-center touch-manipulation"
 															:title="__('Unlock discount fields')"
 														>
 															<FeatherIcon name="unlock" class="w-4 h-4" />
@@ -443,7 +445,7 @@
 													<span class="text-gray-600">{{
 														__("Subtotal:")
 													}}</span>
-													<span class="font-semibold text-gray-900">{{
+													<span class="font-semibold text-gray-900 tabular-nums">{{
 														formatCurrency(calculatedSubtotal)
 													}}</span>
 												</div>
@@ -452,7 +454,7 @@
 													class="flex items-center justify-between text-sm text-red-600"
 												>
 													<span>{{ __("Discount:") }}</span>
-													<span class="font-semibold"
+													<span class="font-semibold tabular-nums"
 														>-{{
 															formatCurrency(calculatedDiscount)
 														}}</span
@@ -466,7 +468,7 @@
 														>{{ __("Total:") }}</span
 													>
 													<span
-														class="text-lg font-bold text-blue-600"
+														class="text-lg font-bold text-blue-600 tabular-nums"
 														>{{
 															formatCurrency(calculatedTotal)
 														}}</span
@@ -481,11 +483,12 @@
 							<!-- Actions - matching frappe-ui Dialog style -->
 							<div class="px-4 pb-7 pt-4 sm:px-6">
 								<div class="flex items-center justify-end gap-2">
-									<Button variant="subtle" @click="cancel">{{
+									<Button variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="cancel">{{
 										__("Cancel")
 									}}</Button>
 									<Button
 										variant="solid"
+										class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
 										@click="updateItem"
 										:disabled="!hasStock || isCheckingStock"
 									>
