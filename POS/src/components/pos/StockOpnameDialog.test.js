@@ -1417,6 +1417,58 @@ describe("StockOpnameDialog item grid", () => {
 		expect(qtyInputs[0].element.value).toBe("11")
 		expect(qtyInputs[1].element.value).toBe("33")
 	})
+
+	it("deletes the ticked rows and select-all ticks every row", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		for (let i = 0; i < 3; i++) await wrapper.find('[data-testid="add-row"]').trigger("click")
+		expect(wrapper.find('[data-testid="delete-selected-rows"]').exists()).toBe(false)
+
+		await wrapper.findAll('[data-testid="row-checkbox"]')[1].setValue(true)
+		const del = wrapper.find('[data-testid="delete-selected-rows"]')
+		expect(del.text()).toContain("(1)")
+		await del.trigger("click")
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(2)
+
+		await wrapper.find('[data-testid="select-all-rows"]').setValue(true)
+		expect(wrapper.find('[data-testid="delete-selected-rows"]').text()).toContain("(2)")
+		await wrapper.find('[data-testid="delete-selected-rows"]').trigger("click")
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(0)
+	})
+
+	it("clicking a picked item reopens the search to change it in place", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([{ ...ROW_DRAFT, item_count: 0 }]))
+		mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC, items: [] }))
+		mockCall(SEARCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "ITEM-A", item_name: "Alpha Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+				{ item_code: "ITEM-B", item_name: "Beta Item", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await searchRow(wrapper, "item")
+		await pickResult(wrapper, "Alpha Item")
+
+		await wrapper.find('[data-testid="row-item-edit"]').trigger("click")
+		const input = wrapper.find('[data-testid="row-item-input"]')
+		expect(input.element.value).toBe("ITEM-A")
+
+		// Escape without picking keeps the old item
+		await input.trigger("keyup.escape")
+		expect(wrapper.find('[data-testid="row-item-edit"]').text()).toContain("Alpha Item")
+
+		await wrapper.find('[data-testid="row-item-edit"]').trigger("click")
+		await wrapper.find('[data-testid="row-item-input"]').setValue("beta")
+		await new Promise((r) => setTimeout(r, 400))
+		await flushPromises()
+		await pickResult(wrapper, "Beta Item")
+		expect(wrapper.findAll('[data-testid="row-item-edit"]')).toHaveLength(1)
+		expect(wrapper.find('[data-testid="row-item-edit"]').text()).toContain("Beta Item")
+	})
 })
 
 describe("StockOpnameDialog excel upload", () => {

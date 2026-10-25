@@ -377,9 +377,9 @@
 							>
 								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
-								<span class="text-end">{{ __("Qty") }}</span>
+								<span>{{ __("Qty") }}</span>
 								<span>{{ __("UOM") }}</span>
-								<span class="text-center">{{ __("Photo") }}</span>
+								<span>{{ __("Photo") }}</span>
 							</div>
 							<div
 								v-for="(row, idx) in editor.items"
@@ -404,13 +404,13 @@
 								</div>
 								<div class="min-w-0">
 									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
-									<span class="block tabular-nums md:text-end">{{ row.qty }}</span>
+									<span class="block tabular-nums">{{ row.qty }}</span>
 								</div>
 								<div class="min-w-0">
 									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
 									<span class="truncate text-gray-700">{{ row.uom }}</span>
 								</div>
-								<div class="col-span-2 flex items-center md:col-span-1 md:justify-center">
+								<div class="col-span-2 flex items-center md:col-span-1">
 									<a
 										v-if="row.pos_opname_photo"
 										:href="row.pos_opname_photo"
@@ -433,14 +433,25 @@
 						<!-- editable -->
 						<template v-else>
 							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 xl:grid xl:grid-cols-[2rem_minmax(0,3fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_8rem_2.5rem] xl:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 xl:grid xl:grid-cols-[2rem_1.75rem_minmax(0,2.5fr)_minmax(0,1fr)_7.5rem_8rem_8rem_2.5rem] xl:items-center xl:gap-x-3"
 							>
+								<div class="flex items-center justify-center">
+									<input
+										type="checkbox"
+										data-testid="select-all-rows"
+										:checked="isAllSelected"
+										:indeterminate="isPartiallySelected"
+										:aria-label="__('Select All')"
+										class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+										@change="toggleSelectAll($event.target.checked)"
+									/>
+								</div>
 								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("Batch") }}</span>
-								<span class="text-end">{{ __("Qty") }}</span>
+								<span>{{ __("Qty") }}</span>
 								<span>{{ __("UOM") }}</span>
-								<span class="text-center">{{ __("Photo") }}</span>
+								<span>{{ __("Photo") }}</span>
 								<span></span>
 							</div>
 
@@ -451,31 +462,53 @@
 								{{ __("No Data") }}
 							</p>
 
-							<div data-testid="grid-rows">
+							<div data-testid="grid-rows" class="p-2 xl:p-0">
 								<div
 									v-for="(row, idx) in editor.items"
 									:key="row.key"
-									class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 xl:grid-cols-[2rem_minmax(0,3fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_8rem_2.5rem] xl:gap-y-0 xl:py-1.5"
+									class="mb-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2.5 rounded-lg border border-gray-200 bg-white p-3.5 shadow-xs last:mb-0 xl:mb-0 xl:rounded-none xl:border-0 xl:border-b xl:border-gray-100 xl:px-3 xl:shadow-none xl:last:border-b-0 xl:grid-cols-[2rem_1.75rem_minmax(0,2.5fr)_minmax(0,1fr)_7.5rem_8rem_8rem_2.5rem] xl:gap-y-0 xl:py-1.5 xl:hover:bg-gray-50/50"
 									:class="{ 'rounded-md ring-2 ring-red-500 bg-red-50/20': row.photoRequired }"
 								>
+									<!-- phone: checkbox + row label head the card; xl: checkbox column -->
+									<div class="col-span-2 flex items-center gap-2 xl:col-span-1 xl:justify-center">
+										<input
+											v-model="row.selected"
+											type="checkbox"
+											data-testid="row-checkbox"
+											:aria-label="__('Select row {0}', [idx + 1])"
+											class="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 xl:h-4 xl:w-4"
+										/>
+										<span class="text-xs font-semibold text-gray-700 xl:hidden">{{ __("Row #{0}", [idx + 1]) }}</span>
+									</div>
 									<span class="hidden text-xs tabular-nums text-gray-400 xl:block">{{ idx + 1 }}</span>
 
 									<!-- Item cell: a link field until an item is picked -->
-									<div class="relative col-span-2 min-w-0 xl:col-span-1">
-										<template v-if="row.item_code">
-											<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
-											<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
-												{{ row.item_code }}
-											</p>
-										</template>
+									<div class="relative col-span-3 min-w-0 xl:col-span-1">
+										<button
+											v-if="row.item_code"
+											type="button"
+											data-testid="row-item-edit"
+											class="group flex min-h-[40px] w-full items-center justify-between rounded border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 text-start transition-colors hover:border-gray-300 hover:bg-gray-100/70 xl:min-h-0 xl:py-1"
+											:title="__('Click to change item')"
+											@click="editRowItem(row, idx)"
+										>
+											<span class="min-w-0 pr-1">
+												<span class="block truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</span>
+												<span v-if="row.item_code !== row.item_name" class="block truncate text-xs text-gray-400">
+													{{ row.item_code }}
+												</span>
+											</span>
+											<FeatherIcon name="edit-2" class="h-3.5 w-3.5 shrink-0 text-gray-400 opacity-60 transition-opacity xl:opacity-0 xl:group-hover:opacity-100 xl:group-focus-visible:opacity-100" />
+										</button>
 										<template v-else>
 											<input
 												v-model="row.search"
 												type="text"
 												data-testid="row-item-input"
+												:data-cell="`${idx}-item`"
 												:placeholder="__('Search item...')"
 												:aria-label="__('Item')"
-												class="h-[44px] sm:h-10 w-full rounded-md border border-dashed border-gray-300 px-2 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+												class="h-10 min-h-[40px] w-full rounded-md border border-dashed border-gray-300 bg-gray-50/50 px-2.5 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 xl:h-8 xl:min-h-0"
 												@input="searchRow(row)"
 												@keyup.enter="addExactMatch(row)"
 												@keyup.escape="closeResults(row)"
@@ -510,7 +543,7 @@
 											v-model="row.batch_no"
 											data-testid="row-batch-select"
 											:aria-label="`${row.item_name || row.item_code} — ${__('Batch')}`"
-											class="h-[44px] sm:h-10 w-full rounded-md border border-gray-300 bg-white px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											class="h-10 min-h-[40px] w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 xl:h-8 xl:min-h-0"
 											@change="checkBatchDuplicate(row)"
 										>
 											<option :value="null">{{ __("Select batch") }}</option>
@@ -522,12 +555,12 @@
 									</div>
 
 									<div class="min-w-0">
-										<span class="mb-0.5 block text-end text-xs text-gray-500 xl:hidden">{{ __("Qty") }}</span>
+										<span class="mb-0.5 block text-xs text-gray-500 xl:hidden">{{ __("Qty") }}</span>
 										<!-- serial qty is the number of ticked serials, never typed -->
 										<span
 											v-if="row.is_serial"
 											data-testid="item-qty"
-											class="block text-end text-sm tabular-nums text-gray-900"
+											class="block text-sm tabular-nums text-gray-900"
 										>
 											{{ row.serial_nos.length }}
 										</span>
@@ -541,7 +574,7 @@
 											inputmode="decimal"
 											data-testid="qty-input"
 											:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
-											class="h-[44px] sm:h-10 w-full rounded-md border border-gray-300 px-2 text-end text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											class="h-10 min-h-[40px] w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm tabular-nums focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 xl:h-8 xl:min-h-0"
 										/>
 									</div>
 
@@ -560,14 +593,14 @@
 											v-model="row.uom"
 											data-testid="uom-select"
 											:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
-											class="h-[44px] sm:h-10 w-full rounded-md border border-gray-300 bg-white px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											class="h-10 min-h-[40px] w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 xl:h-8 xl:min-h-0"
 										>
 											<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
 										</select>
 									</div>
 
 									<!-- Photo cell -->
-									<div class="flex min-w-0 flex-col items-center justify-center self-end xl:self-auto">
+									<div class="flex min-w-0 flex-col items-start justify-center self-end xl:self-auto">
 										<span v-if="row.photoRequired" data-testid="photo-required" class="mb-0.5 block text-xs font-medium text-red-600">
 											{{ __("Photo required") }}
 										</span>
@@ -644,11 +677,11 @@
 										:title="__('Remove item')"
 										@click="editor.items.splice(idx, 1)"
 									>
-										<FeatherIcon name="x" class="h-4 w-4" />
+										<FeatherIcon name="trash-2" class="h-4 w-4" />
 									</button>
 
 									<!-- serial tick list: tick the serials physically present -->
-									<div v-if="row.is_serial" class="col-span-3 mt-2 xl:col-span-7">
+									<div v-if="row.is_serial" class="col-span-3 mt-2 xl:col-span-8">
 										<ul class="flex flex-wrap gap-x-4 gap-y-1">
 											<li v-for="s in row.serial_options" :key="s">
 												<label class="flex items-center gap-1.5 text-sm text-gray-700">
@@ -680,6 +713,19 @@
 										<FeatherIcon name="plus" class="h-4 w-4" />
 									</template>
 									{{ __("Add Row") }}
+								</Button>
+								<Button
+									v-if="selectedCount > 0"
+									variant="subtle"
+									theme="red"
+									class="h-[44px] sm:h-10 touch-manipulation"
+									data-testid="delete-selected-rows"
+									@click="deleteSelectedRows"
+								>
+									<template #prefix>
+										<FeatherIcon name="trash-2" class="h-4 w-4" />
+									</template>
+									{{ __("Delete") }} ({{ selectedCount }})
 								</Button>
 								<p v-if="!editor.items.length" class="text-sm text-gray-500">
 									{{ __("Search and add only the items you physically counted.") }}
@@ -1064,6 +1110,7 @@ function blankRow(fields = {}) {
 		pos_opname_photo: null,
 		photoRequired: false,
 		uploading_photo: false,
+		selected: false,
 		// per-row link-field search state (search term + dropdown results)
 		search: "",
 		results: [],
@@ -1368,12 +1415,23 @@ async function doSearchRow(row, term) {
 function closeResults(row) {
 	clearTimeout(searchTimer)
 	row.results = []
+	restoreItem(row)
+}
+
+// Leaving an edited item cell without picking keeps the old item; an empty
+// item_code would silently drop the row (and its count) from the save.
+function restoreItem(row) {
+	if (!row.item_code && row.prevItemCode) {
+		row.item_code = row.prevItemCode
+		row.search = ""
+	}
 }
 
 // blur fires before a click on a result: closing is delayed so the click lands
 function blurRow(row) {
 	setTimeout(() => {
 		row.results = []
+		restoreItem(row)
 	}, 200)
 }
 
@@ -1402,6 +1460,41 @@ function clearSearch() {
 
 function addRow() {
 	editor.value.items.push(blankRow())
+	focusCell(editor.value.items.length - 1, "item")
+}
+
+// Like Reject Request / ERPNext grids: clicking a picked item reopens the
+// search so the row can be repointed without deleting it.
+function editRowItem(row, idx) {
+	row.prevItemCode = row.item_code
+	row.search = row.item_code
+	row.item_code = ""
+	row.results = []
+	focusCell(idx, "item")
+}
+
+function focusCell(idx, cellName) {
+	requestAnimationFrame(() => {
+		document.querySelector(`[data-cell="${idx}-${cellName}"]`)?.focus()
+	})
+}
+
+const selectedCount = computed(
+	() => editor.value?.items.filter((r) => r.selected).length || 0,
+)
+const isAllSelected = computed(
+	() => !!editor.value?.items.length && selectedCount.value === editor.value.items.length,
+)
+const isPartiallySelected = computed(
+	() => selectedCount.value > 0 && !isAllSelected.value,
+)
+
+function toggleSelectAll(checked) {
+	for (const row of editor.value.items) row.selected = checked
+}
+
+function deleteSelectedRows() {
+	editor.value.items = editor.value.items.filter((r) => !r.selected)
 }
 
 // The search endpoint already excludes the stock UOM; offer it first.
@@ -1434,7 +1527,8 @@ async function pickItem(row, item) {
 		editor.value.items.some((r) => r !== row && r.item_code === item.item_code)
 	) {
 		showError(__("{0} is already in the list", [label]))
-		clearRow(row)
+		if (row.prevItemCode) restoreItem(row)
+		else clearRow(row)
 		return
 	}
 	const base = {
