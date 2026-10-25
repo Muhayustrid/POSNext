@@ -63,410 +63,11 @@
 -->
 <template>
 	<div class="flex flex-col h-full bg-white">
-		<!-- Header with Customer -->
+		<!-- Header Section: Optional Buyer Name & DocType Toggle (Customer selection hidden per profile default) -->
 		<div class="px-2.5 py-2 border-b border-gray-200 bg-gray-50">
-			<!-- Inline Customer Search/Selection -->
-			<div ref="customerSearchContainer" class="relative">
-				<div v-if="customer">
-					<!-- Two Cards Layout: Customer Card + Document Type Card -->
-					<div class="flex items-stretch gap-2">
-						<!-- Customer Card -->
-						<div
-							class="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm min-w-0"
-						>
-							<!-- Customer Avatar & Info -->
-							<div class="flex items-center gap-2 min-w-0 flex-1 px-1.5 py-1">
-								<div
-									class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0"
-								>
-									<svg
-										class="w-4 h-4 text-white"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-										/>
-									</svg>
-								</div>
-								<div class="min-w-0 flex-1">
-									<p
-										class="text-xs font-semibold text-gray-900 truncate leading-tight"
-									>
-										{{ customer.customer_name || customer.name }}
-									</p>
-									<p
-										v-if="customer.mobile_no"
-										class="text-[10px] text-gray-500 truncate leading-tight"
-									>
-										{{ customer.mobile_no }}
-									</p>
-								</div>
-							</div>
-
-							<!-- Action Buttons -->
-							<div class="flex items-center gap-0.5 flex-shrink-0" @click.stop>
-								<button
-									type="button"
-									@click.stop="$emit('edit-customer', customer)"
-									class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
-									:title="__('Edit customer details')"
-								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-										/>
-									</svg>
-								</button>
-								<button
-									type="button"
-									@click.stop="$emit('create-customer', '')"
-									class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
-									:title="__('Create new customer')"
-								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-										stroke-width="2.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M12 4v16m8-8H4"
-										/>
-									</svg>
-								</button>
-								<button
-									type="button"
-									@click.stop="removeCustomer"
-									class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
-									:title="__('Remove customer')"
-								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-										stroke-width="2.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M6 18L18 6M6 6l12 12"
-										/>
-									</svg>
-								</button>
-							</div>
-						</div>
-
-						<!-- Document Type Card -->
-						<div
-							v-if="settingsStore.allowSalesOrder"
-							class="flex items-center bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm flex-shrink-0"
-						>
-							<div class="flex items-center bg-gray-100 rounded-lg p-0.5">
-								<button
-									type="button"
-									@click="selectDocType('Sales Invoice')"
-									class="min-h-[40px] px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
-									:class="
-										cartStore.targetDoctype === 'Sales Invoice'
-											? 'bg-white text-blue-600 shadow-sm'
-											: 'text-gray-500 hover:text-gray-700'
-									"
-									:title="__('Sales Invoice')"
-								>
-									<svg
-										class="w-3.5 h-3.5"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-										/>
-									</svg>
-									<span>{{ __("Invoice") }}</span>
-								</button>
-								<button
-									type="button"
-									@click="selectDocType('Sales Order')"
-									class="min-h-[40px] px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
-									:class="
-										cartStore.targetDoctype === 'Sales Order'
-											? 'bg-white text-orange-600 shadow-sm'
-											: 'text-gray-500 hover:text-gray-700'
-									"
-									:title="__('Sales Order')"
-								>
-									<svg
-										class="w-3.5 h-3.5"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-										/>
-									</svg>
-									<span>{{ __("Order") }}</span>
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-				<div v-else>
-					<div class="flex gap-1.5">
-						<!-- Search Input -->
-						<div class="relative flex-1">
-							<!-- Search Icon Prefix -->
-							<div
-								class="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none"
-							>
-								<svg
-									v-if="customersLoaded"
-									class="w-4 h-4 text-gray-400"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-									/>
-								</svg>
-								<div
-									v-else
-									class="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-500"
-								></div>
-							</div>
-
-							<!-- Native Input for Instant Search -->
-							<input
-								id="cart-customer-search"
-								name="cart-customer-search"
-								:value="customerSearch"
-								@input="handleSearchInput"
-								@focus="handleSearchFocus"
-								@blur="handleSearchBlur"
-								type="text"
-								:placeholder="__('Search or add customer...')"
-								class="w-full h-10 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
-								:disabled="!customersLoaded"
-								@keydown="handleKeydown"
-								autocomplete="off"
-								:aria-label="__('Search customer in cart')"
-							/>
-						</div>
-
-						<!-- Quick Create Customer Button -->
-						<button
-							type="button"
-							@click="createNewCustomer"
-							class="flex items-center justify-center w-10 h-10 bg-green-500 hover:bg-green-600 active:bg-green-700 rounded-xl text-white transition-colors shadow-sm hover:shadow touch-manipulation flex-shrink-0"
-							:title="__('Create new customer')"
-							:aria-label="__('Create new customer')"
-						>
-							<svg
-								class="w-5 h-5"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								stroke-width="2"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
-								/>
-							</svg>
-						</button>
-
-						<!-- Document Type Toggle (Sales Invoice / Sales Order) -->
-						<div
-							v-if="settingsStore.allowSalesOrder"
-							class="flex items-center bg-gray-100 rounded-xl p-0.5 h-10"
-						>
-							<button
-								type="button"
-								@click="selectDocType('Sales Invoice')"
-								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
-								:class="
-									cartStore.targetDoctype === 'Sales Invoice'
-										? 'bg-white text-blue-600 shadow-sm'
-										: 'text-gray-500 hover:text-gray-700'
-								"
-								:title="__('Sales Invoice')"
-							>
-								<svg
-									class="w-4 h-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-									/>
-								</svg>
-								<span class="hidden sm:inline">{{ __("Invoice") }}</span>
-							</button>
-							<button
-								type="button"
-								@click="selectDocType('Sales Order')"
-								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
-								:class="
-									cartStore.targetDoctype === 'Sales Order'
-										? 'bg-white text-orange-600 shadow-sm'
-										: 'text-gray-500 hover:text-gray-700'
-								"
-								:title="__('Sales Order')"
-							>
-								<svg
-									class="w-4 h-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-									/>
-								</svg>
-								<span class="hidden sm:inline">{{ __("Order") }}</span>
-							</button>
-						</div>
-					</div>
-				</div>
-
-				<!-- Customer Dropdown -->
-				<div
-					v-if="customerSearchFocused || debouncedCustomerSearch.trim().length >= 2"
-					class="absolute z-50 mt-0.5 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-hidden will-change-transform"
-				>
-					<!-- Frequent Customers Header (when showing suggestions) -->
-					<div
-						v-if="
-							customerSearchFocused &&
-							debouncedCustomerSearch.trim().length < 2 &&
-							customerResults.length > 0
-						"
-						class="px-2 py-1 bg-gray-50 border-b border-gray-200"
-					>
-						<span
-							class="text-[10px] font-medium text-gray-500 uppercase tracking-wide"
-						>
-							{{ __("Frequent Customers") }}
-						</span>
-					</div>
-
-					<!-- Customer Results -->
-					<div
-						v-if="customerResults.length > 0"
-						class="max-h-48 overflow-y-auto overscroll-contain"
-					>
-						<button
-							type="button"
-							v-for="(cust, index) in customerResults"
-							:key="cust.name"
-							@mousedown.prevent="selectCustomer(cust)"
-							:class="[
-								'w-full text-start px-2 py-1.5 flex items-center gap-1.5 border-b border-gray-100 last:border-0 touch-manipulation select-none cursor-pointer active:bg-blue-200',
-								index === selectedIndex
-									? 'bg-blue-100'
-									: 'hover:bg-blue-50 active:bg-blue-100',
-							]"
-						>
-							<div
-								class="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 pointer-events-none"
-							>
-								<span class="text-[10px] font-bold text-blue-600">{{
-									getInitials(cust.customer_name)
-								}}</span>
-							</div>
-							<div class="flex-1 min-w-0 pointer-events-none">
-								<p class="text-[11px] font-semibold text-gray-900 truncate">
-									{{ cust.customer_name }}
-								</p>
-								<p v-if="cust.mobile_no" class="text-[9px] text-gray-600">
-									{{ cust.mobile_no }}
-								</p>
-							</div>
-						</button>
-					</div>
-
-					<!-- No Results + Create New Option -->
-					<div v-else-if="debouncedCustomerSearch.trim().length >= 2">
-						<div
-							class="px-2 py-1.5 text-center text-[11px] font-medium text-gray-700 border-b border-gray-100"
-						>
-							{{ __('No results for "{0}"', [debouncedCustomerSearch]) }}
-						</div>
-					</div>
-
-					<!-- Create New Customer Option -->
-					<button
-						type="button"
-						v-if="debouncedCustomerSearch.trim().length >= 2"
-						@mousedown.prevent="createNewCustomer"
-						class="w-full text-start px-2 py-1.5 hover:bg-green-50 active:bg-green-100 flex items-center gap-1.5 border-t border-gray-200 touch-manipulation select-none cursor-pointer"
-					>
-						<div
-							class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 pointer-events-none"
-						>
-							<svg
-								class="w-3 h-3 text-green-600"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M12 4v16m8-8H4"
-								/>
-							</svg>
-						</div>
-						<div class="flex-1 pointer-events-none">
-							<p class="text-[11px] font-medium text-green-700">
-								{{ __("Create New Customer") }}
-							</p>
-							<p class="text-[9px] text-green-600">"{{ debouncedCustomerSearch }}"</p>
-						</div>
-					</button>
-				</div>
-			</div>
-
-			<!-- Optional buyer name: a receipt-only label, NOT saved as a Customer -->
-			<div class="mt-1.5">
-				<div class="relative">
+			<div class="flex items-center gap-2">
+				<!-- Optional buyer name: a receipt-only label, NOT saved as a Customer -->
+				<div class="relative flex-1 min-w-0">
 					<div
 						class="absolute inset-y-0 start-0 ps-3 flex items-center pointer-events-none"
 					>
@@ -495,6 +96,65 @@
 						autocomplete="off"
 						:aria-label="__('Buyer name')"
 					/>
+				</div>
+
+				<!-- Document Type Toggle (Sales Invoice / Sales Order) -->
+				<div
+					v-if="settingsStore.allowSalesOrder"
+					class="flex items-center bg-gray-100 rounded-xl p-0.5 h-11 sm:h-10 min-h-[40px] shrink-0"
+				>
+					<button
+						type="button"
+						@click="selectDocType('Sales Invoice')"
+						class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
+						:class="
+							cartStore.targetDoctype === 'Sales Invoice'
+								? 'bg-white text-blue-600 shadow-sm'
+								: 'text-gray-500 hover:text-gray-700'
+						"
+						:title="__('Sales Invoice')"
+					>
+						<svg
+							class="w-4 h-4"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+							/>
+						</svg>
+						<span class="hidden sm:inline">{{ __("Invoice") }}</span>
+					</button>
+					<button
+						type="button"
+						@click="selectDocType('Sales Order')"
+						class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
+						:class="
+							cartStore.targetDoctype === 'Sales Order'
+								? 'bg-white text-orange-600 shadow-sm'
+								: 'text-gray-500 hover:text-gray-700'
+						"
+						:title="__('Sales Order')"
+					>
+						<svg
+							class="w-4 h-4"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+							/>
+						</svg>
+						<span class="hidden sm:inline">{{ __("Order") }}</span>
+					</button>
 				</div>
 			</div>
 		</div>
@@ -771,20 +431,20 @@
 					{{ __("Select items to start or choose a quick action") }}
 				</p>
 
-				<!-- Quick Actions Grid -->
-				<div class="grid grid-cols-2 gap-2 sm:gap-2.5 w-full max-w-lg">
+				<!-- Quick Actions Grid (compact 2-column layout, customer-create removed) -->
+				<div class="grid grid-cols-2 gap-2 w-full max-w-md">
 					<!-- View Shift -->
 					<button
 						type="button"
 						@click="$emit('view-shift')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 active:bg-blue-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						class="flex items-center gap-2.5 p-2.5 sm:p-3 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50/60 active:bg-blue-100 transition-all shadow-xs touch-manipulation min-h-[44px] group text-start"
 						:title="__('View current shift details')"
 					>
 						<div
-							class="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-blue-100 transition-colors"
+							class="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-blue-100 transition-colors"
 						>
 							<svg
-								class="w-5 h-5 text-blue-600"
+								class="w-4 h-4 text-blue-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -803,7 +463,7 @@
 								/>
 							</svg>
 						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+						<span class="text-xs font-semibold text-gray-800 truncate">{{
 							__("View Shift")
 						}}</span>
 					</button>
@@ -812,14 +472,14 @@
 					<button
 						type="button"
 						@click="$emit('show-drafts')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 active:bg-purple-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						class="flex items-center gap-2.5 p-2.5 sm:p-3 bg-white border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50/60 active:bg-purple-100 transition-all shadow-xs touch-manipulation min-h-[44px] group text-start"
 						:title="__('View draft invoices')"
 					>
 						<div
-							class="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-purple-100 transition-colors"
+							class="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-purple-100 transition-colors"
 						>
 							<svg
-								class="w-5 h-5 text-purple-600"
+								class="w-4 h-4 text-purple-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -832,7 +492,7 @@
 								/>
 							</svg>
 						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+						<span class="text-xs font-semibold text-gray-800 truncate">{{
 							__("Draft Invoices")
 						}}</span>
 					</button>
@@ -841,14 +501,14 @@
 					<button
 						type="button"
 						@click="$emit('show-history')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						class="flex items-center gap-2.5 p-2.5 sm:p-3 bg-white border border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 transition-all shadow-xs touch-manipulation min-h-[44px] group text-start"
 						:title="__('View invoice history')"
 					>
 						<div
-							class="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-gray-100 transition-colors"
+							class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-gray-200 transition-colors"
 						>
 							<svg
-								class="w-5 h-5 text-gray-600"
+								class="w-4 h-4 text-gray-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -861,7 +521,7 @@
 								/>
 							</svg>
 						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+						<span class="text-xs font-semibold text-gray-800 truncate">{{
 							__("Invoice History")
 						}}</span>
 					</button>
@@ -870,14 +530,14 @@
 					<button
 						type="button"
 						@click="$emit('show-return')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-red-300 hover:bg-red-50 active:bg-red-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						class="flex items-center gap-2.5 p-2.5 sm:p-3 bg-white border border-gray-200 rounded-xl hover:border-rose-300 hover:bg-rose-50/60 active:bg-rose-100 transition-all shadow-xs touch-manipulation min-h-[44px] group text-start"
 						:title="__('Process return invoice')"
 					>
 						<div
-							class="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-red-100 transition-colors"
+							class="w-8 h-8 bg-rose-50 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-rose-100 transition-colors"
 						>
 							<svg
-								class="w-5 h-5 text-red-600"
+								class="w-4 h-4 text-rose-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -890,7 +550,7 @@
 								/>
 							</svg>
 						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+						<span class="text-xs font-semibold text-gray-800 truncate">{{
 							__("Return Invoice")
 						}}</span>
 					</button>
@@ -899,14 +559,14 @@
 					<button
 						type="button"
 						@click="$emit('close-shift')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 active:bg-orange-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						class="flex items-center gap-2.5 p-2.5 sm:p-3 bg-white border border-gray-200 rounded-xl hover:border-amber-300 hover:bg-amber-50/60 active:bg-amber-100 transition-all shadow-xs touch-manipulation min-h-[44px] group text-start"
 						:title="__('Close current shift')"
 					>
 						<div
-							class="w-10 h-10 bg-orange-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-orange-100 transition-colors"
+							class="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-amber-100 transition-colors"
 						>
 							<svg
-								class="w-5 h-5 text-orange-600"
+								class="w-4 h-4 text-amber-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -919,37 +579,8 @@
 								/>
 							</svg>
 						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+						<span class="text-xs font-semibold text-gray-800 truncate">{{
 							__("Close Shift")
-						}}</span>
-					</button>
-
-					<!-- Create Customer -->
-					<button
-						type="button"
-						@click="$emit('create-customer', '')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-green-300 hover:bg-green-50 active:bg-green-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
-						:title="__('Create new customer')"
-					>
-						<div
-							class="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-green-100 transition-colors"
-						>
-							<svg
-								class="w-5 h-5 text-green-600"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
-								/>
-							</svg>
-						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
-							__("Create Customer")
 						}}</span>
 					</button>
 
@@ -957,14 +588,14 @@
 					<button
 						type="button"
 						@click="$emit('show-shift-history')"
-						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 active:bg-indigo-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						class="flex items-center gap-2.5 p-2.5 sm:p-3 bg-white border border-gray-200 rounded-xl hover:border-indigo-300 hover:bg-indigo-50/60 active:bg-indigo-100 transition-all shadow-xs touch-manipulation min-h-[44px] group text-start"
 						:title="__('View shift history')"
 					>
 						<div
-							class="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-indigo-100 transition-colors"
+							class="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-100 transition-colors"
 						>
 							<svg
-								class="w-5 h-5 text-indigo-600"
+								class="w-4 h-4 text-indigo-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -977,7 +608,7 @@
 								/>
 							</svg>
 						</div>
-						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+						<span class="text-xs font-semibold text-gray-800 truncate">{{
 							__("Shift History")
 						}}</span>
 					</button>
@@ -1463,16 +1094,19 @@
 		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
 			<!-- Summary: quantity, subtotal and tax share one row -->
 			<div v-if="items.length > 0" class="mb-1.5">
-				<div class="grid grid-cols-3 gap-2 px-1 text-xs">
+				<div
+					class="grid gap-2 px-1 text-xs"
+					:class="hasConfiguredTax ? 'grid-cols-3' : 'grid-cols-2'"
+				>
 					<div class="min-w-0">
 						<div class="text-xs text-gray-500 truncate">{{ __("Total Quantity") }}</div>
 						<div class="font-bold text-gray-900 tabular-nums">{{ formatQuantity(totalQuantity) }}</div>
 					</div>
-					<div class="min-w-0 text-center">
+					<div class="min-w-0" :class="hasConfiguredTax ? 'text-center' : 'text-end'">
 						<div class="text-xs text-gray-500 truncate">{{ __("Subtotal") }}</div>
 						<div class="font-bold text-gray-900 truncate tabular-nums">{{ formatCurrency(displaySubtotal) }}</div>
 					</div>
-					<div class="min-w-0 text-end">
+					<div v-if="hasConfiguredTax" class="min-w-0 text-end">
 						<div class="text-xs text-gray-500 truncate">{{ __("Tax") }}</div>
 						<div class="font-bold text-gray-900 truncate tabular-nums">{{ formatCurrency(taxAmount) }}</div>
 					</div>
@@ -1681,6 +1315,10 @@ const props = defineProps({
 	warehouses: {
 		type: Array,
 		default: () => [],
+	},
+	taxRules: {
+		type: Array,
+		default: undefined,
 	},
 });
 
@@ -1997,6 +1635,22 @@ const displayGrandTotal = computed(() => {
 	// Always: displaySubtotal + tax - discount
 	// This makes the display consistent and intuitive
 	return displaySubtotal.value + props.taxAmount - props.discountAmount;
+});
+
+/**
+ * Determine whether the tax row should be displayed in the totals summary.
+ *
+ * Tax row must be hidden when NO tax is configured on the POS Profile,
+ * NOT simply when taxAmount == 0. A configured 0% tax (e.g. 0% VAT/PPN)
+ * must still show the Tax row. If actual taxAmount > 0 is present,
+ * show the row as a fallback.
+ */
+const hasConfiguredTax = computed(() => {
+	const rules = props.taxRules !== undefined ? props.taxRules : cartStore.taxRules;
+	if (Array.isArray(rules) && rules.length > 0) {
+		return true;
+	}
+	return (props.taxAmount || 0) > 0 || (cartStore.totalTax || 0) > 0;
 });
 
 /**
