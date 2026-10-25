@@ -48,7 +48,7 @@
 									:key="tab.id"
 									@click="activeTab = tab.id"
 									:class="[
-										'px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors',
+										'min-h-[44px] md:min-h-[40px] inline-flex items-center px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors touch-manipulation',
 										activeTab === tab.id
 											? 'text-blue-600 border-blue-600'
 											: 'text-gray-600 border-transparent hover:text-gray-900 hover:border-gray-300',
@@ -89,7 +89,8 @@
 							<button
 								v-if="!embedded"
 								@click="handleClose"
-								class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+								class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center hover:bg-gray-100 rounded-lg transition-colors touch-manipulation"
+								:aria-label="__('Close')"
 							>
 								<svg
 									class="w-5 h-5 text-gray-600"
@@ -132,7 +133,7 @@
 									<button
 										@click="unpaidFilter = 'all'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-[44px] md:min-h-[40px] inline-flex items-center px-4 py-2 rounded-lg font-medium text-sm transition-all touch-manipulation',
 											unpaidFilter === 'all'
 												? 'bg-orange-500 text-white shadow-md'
 												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
@@ -143,7 +144,7 @@
 									<button
 										@click="unpaidFilter = 'partial'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-[44px] md:min-h-[40px] inline-flex items-center px-4 py-2 rounded-lg font-medium text-sm transition-all touch-manipulation',
 											unpaidFilter === 'partial'
 												? 'bg-orange-500 text-white shadow-md'
 												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
@@ -160,7 +161,7 @@
 									<button
 										@click="unpaidFilter = 'unpaid'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-[44px] md:min-h-[40px] inline-flex items-center px-4 py-2 rounded-lg font-medium text-sm transition-all touch-manipulation',
 											unpaidFilter === 'unpaid'
 												? 'bg-orange-500 text-white shadow-md'
 												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
@@ -177,7 +178,7 @@
 									<button
 										@click="unpaidFilter = 'overdue'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-[44px] md:min-h-[40px] inline-flex items-center px-4 py-2 rounded-lg font-medium text-sm transition-all touch-manipulation',
 											unpaidFilter === 'overdue'
 												? 'bg-red-500 text-white shadow-md'
 												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
@@ -201,7 +202,7 @@
 								>
 									<button
 										type="button"
-										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 										:class="selectedUnpaidShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 										@click="selectedUnpaidShift = ''"
 									>
@@ -211,7 +212,7 @@
 										v-for="opt in unpaidShiftOptions"
 										:key="opt"
 										type="button"
-										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 										:class="selectedUnpaidShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 										@click="selectedUnpaidShift = opt"
 									>
@@ -229,7 +230,7 @@
 											<div class="text-sm text-orange-600 font-medium">
 												{{ __("Outstanding Payments") }}
 											</div>
-											<div class="text-2xl font-bold text-gray-900 mt-1">
+											<div class="text-2xl font-bold text-gray-900 mt-1 tabular-nums">
 												{{
 													formatCurrency(
 														filteredUnpaidSummary.total_outstanding
@@ -245,7 +246,7 @@
 													])
 												}}
 											</div>
-											<div class="text-sm text-gray-800 font-semibold mt-1">
+											<div class="text-sm text-gray-800 font-semibold mt-1 tabular-nums">
 												{{
 													__("{0} paid", [
 														formatCurrency(
@@ -336,16 +337,11 @@
 														<span
 															v-if="getShiftBadge(invoice)"
 															data-test="shift-badge"
-															class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+															class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 														>
 															{{ getShiftBadge(invoice) }}
 														</span>
-														<span
-															:class="[
-																'px-2 py-0.5 text-xs font-semibold rounded-full',
-																getInvoiceStatusColor(invoice),
-															]"
-														>
+														<span :class="statusPillClass(invoice)">
 															{{ __(invoice.status) }}
 														</span>
 													</div>
@@ -431,7 +427,7 @@
 															  )
 															: ''
 													"
-													class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+													class="min-h-[44px] md:min-h-[40px] px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 touch-manipulation"
 												>
 													<LoadingIndicator
 														v-if="loadingInvoiceDetails"
@@ -451,7 +447,7 @@
 													<div class="text-xs text-gray-600 mb-1">
 														{{ __("Total Amount") }}
 													</div>
-													<div class="text-base sm:text-lg font-bold text-gray-900">
+													<div class="text-base sm:text-lg font-bold text-gray-900 tabular-nums">
 														{{ formatCurrency(invoice.grand_total) }}
 													</div>
 												</div>
@@ -461,7 +457,7 @@
 													<div class="text-xs text-gray-600 mb-1">
 														{{ __("Paid") }}
 													</div>
-													<div class="text-base sm:text-lg font-bold text-green-600">
+													<div class="text-base sm:text-lg font-bold text-green-600 tabular-nums">
 														{{ formatCurrency(invoice.paid_amount) }}
 													</div>
 												</div>
@@ -471,7 +467,7 @@
 													<div class="text-xs text-gray-600 mb-1">
 														{{ __("Outstanding") }}
 													</div>
-													<div class="text-base sm:text-lg font-bold text-orange-600">
+													<div class="text-base sm:text-lg font-bold text-orange-600 tabular-nums">
 														{{
 															formatCurrency(
 																invoice.outstanding_amount
@@ -593,7 +589,7 @@
 								>
 									<button
 										type="button"
-										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 										:class="selectedHistoryShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 										@click="selectedHistoryShift = ''"
 									>
@@ -603,7 +599,7 @@
 										v-for="opt in historyShiftOptions"
 										:key="opt"
 										type="button"
-										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 										:class="selectedHistoryShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 										@click="selectedHistoryShift = opt"
 									>
@@ -640,44 +636,32 @@
 										class="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden"
 									>
 										<table class="w-full text-sm">
-											<thead>
-												<tr class="border-b border-gray-100">
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+											<thead class="bg-gray-50 border-b border-gray-200">
+												<tr>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Invoice") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Customer") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Cashier") }}
 													</th>
-													<th
-														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
 														{{ __("Total") }}
 													</th>
-													<th
-														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
 														{{ __("Paid") }}
 													</th>
-													<th
-														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
 														{{ __("Change", null, "payment") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Status") }}
 													</th>
-													<th class="px-4 py-3"></th>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
+														{{ __("Actions") }}
+													</th>
 												</tr>
 											</thead>
 											<tbody>
@@ -758,17 +742,17 @@
 														{{ invoice.cashier_name || invoice.owner || "–" }}
 													</td>
 													<td
-														class="px-4 py-3 text-end font-bold text-gray-900 whitespace-nowrap"
+														class="px-4 py-3 text-end font-bold text-gray-900 whitespace-nowrap tabular-nums"
 													>
 														{{ formatCurrency(invoice.grand_total) }}
 													</td>
 													<td
-														class="px-4 py-3 text-end text-gray-700 whitespace-nowrap"
+														class="px-4 py-3 text-end text-gray-700 whitespace-nowrap tabular-nums"
 													>
 														{{ formatCurrency(invoice.paid_amount || 0) }}
 													</td>
 													<td
-														class="px-4 py-3 text-end text-gray-700 whitespace-nowrap"
+														class="px-4 py-3 text-end text-gray-700 whitespace-nowrap tabular-nums"
 													>
 														{{
 															invoice.change_amount
@@ -781,22 +765,11 @@
 															<span
 																v-if="getShiftBadge(invoice)"
 																data-test="shift-badge"
-																class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+																class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 															>
 																{{ getShiftBadge(invoice) }}
 															</span>
-															<span
-																:class="[
-																	'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
-																	getInvoiceStatusColor(invoice),
-																]"
-															>
-																<span
-																	:class="[
-																		'w-1.5 h-1.5 rounded-full',
-																		getStatusDotClass(invoice),
-																	]"
-																></span>
+															<span :class="statusPillClass(invoice)">
 																{{ __(invoice.status) }}
 															</span>
 														</div>
@@ -804,7 +777,8 @@
 													<td class="px-4 py-3 text-end" @click.stop>
 														<button
 															@click="$emit('print-invoice', invoice)"
-															class="p-1.5 hover:bg-green-50 rounded transition-colors"
+															class="inline-flex h-11 w-11 md:h-10 md:w-10 items-center justify-center hover:bg-green-50 rounded-lg transition-colors touch-manipulation"
+															:aria-label="__('Print')"
 															:title="__('Print')"
 														>
 															<svg
@@ -843,7 +817,7 @@
 													<span
 														v-if="getShiftBadge(invoice)"
 														data-test="shift-badge"
-														class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200 mt-1"
+														class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20 mt-1"
 													>
 														{{ getShiftBadge(invoice) }}
 													</span>
@@ -867,18 +841,7 @@
 														{{ formatTime(invoice.posting_time) }}
 													</div>
 												</div>
-												<span
-													:class="[
-														'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full shrink-0',
-														getInvoiceStatusColor(invoice),
-													]"
-												>
-													<span
-														:class="[
-															'w-1.5 h-1.5 rounded-full',
-															getStatusDotClass(invoice),
-														]"
-													></span>
+												<span :class="statusPillClass(invoice)">
 													{{ __(invoice.status) }}
 												</span>
 											</div>
@@ -907,7 +870,7 @@
 													<span>{{ invoice.cashier_name || invoice.owner || "–" }}</span>
 												</div>
 												<div class="text-end shrink-0 ms-2">
-													<div class="font-bold text-gray-900">
+													<div class="font-bold text-gray-900 tabular-nums">
 														{{ formatCurrency(invoice.grand_total) }}
 													</div>
 													<div
@@ -963,33 +926,26 @@
 										class="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden"
 									>
 										<table class="w-full text-sm">
-											<thead>
-												<tr class="border-b border-gray-100">
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+											<thead class="bg-gray-50 border-b border-gray-200">
+												<tr>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Draft") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
+														{{ __("Customer") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Cashier") }}
 													</th>
-													<th
-														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
 														{{ __("Items") }}
 													</th>
-													<th
-														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
 														{{ __("Total") }}
 													</th>
-													<th class="px-4 py-3"></th>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
+														{{ __("Actions") }}
+													</th>
 												</tr>
 											</thead>
 											<tbody>
@@ -1060,12 +1016,12 @@
 														{{ draft.cashier_name || draft.owner }}
 													</td>
 													<td
-														class="px-4 py-3 text-end text-gray-700"
+														class="px-4 py-3 text-end text-gray-700 tabular-nums"
 													>
 														{{ draft.items?.length || 0 }}
 													</td>
 													<td
-														class="px-4 py-3 text-end font-bold text-gray-900 whitespace-nowrap"
+														class="px-4 py-3 text-end font-bold text-gray-900 whitespace-nowrap tabular-nums"
 													>
 														{{ formatCurrency(calculateDraftTotal(draft.items)) }}
 													</td>
@@ -1073,14 +1029,15 @@
 														<div class="flex items-center justify-end gap-1">
 															<button
 																@click="$emit('load-draft', draft)"
-																class="px-3 py-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+																class="inline-flex min-h-[44px] md:min-h-[40px] items-center px-3.5 py-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors touch-manipulation"
 																:title="__('Load draft')"
 															>
 																{{ __("Resume") }}
 															</button>
 															<button
 																@click="$emit('delete-draft', draft.draft_id)"
-																class="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
+																class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-manipulation"
+																:aria-label="__('Delete draft')"
 																:title="__('Delete draft')"
 															>
 																<svg
@@ -1139,7 +1096,7 @@
 													</div>
 												</div>
 												<div class="text-end shrink-0 ms-2">
-													<div class="font-bold text-purple-600">
+													<div class="font-bold text-purple-600 tabular-nums">
 														{{ formatCurrency(calculateDraftTotal(draft.items)) }}
 													</div>
 													<div class="text-xs text-gray-500 mt-0.5">
@@ -1152,14 +1109,15 @@
 											<div class="flex items-center justify-end gap-1 mt-3" @click.stop>
 												<button
 													@click="$emit('load-draft', draft)"
-													class="px-3 py-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+													class="inline-flex min-h-[44px] md:min-h-[40px] items-center px-3.5 py-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors touch-manipulation"
 													:title="__('Load draft')"
 												>
 													{{ __("Resume") }}
 												</button>
 												<button
 													@click="$emit('delete-draft', draft.draft_id)"
-													class="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
+													class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors touch-manipulation"
+																:aria-label="__('Delete draft')"
 													:title="__('Delete draft')"
 												>
 													<svg
@@ -1189,6 +1147,22 @@
 
 							<!-- Return Invoices Tab -->
 							<div v-if="activeTab === 'returns'">
+								<!-- Search Box -->
+								<div class="mb-4">
+									<div class="relative">
+										<FeatherIcon
+											name="search"
+											class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+										/>
+										<input
+											v-model="returnsSearchTerm"
+											type="text"
+											:placeholder="__('Search returns by invoice, customer, or original invoice...')"
+											class="w-full h-11 md:h-10 ps-10 pe-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+										/>
+									</div>
+								</div>
+
 								<!-- Shift Filter Chips -->
 								<div
 									v-if="returnsShiftOptions.length > 0"
@@ -1197,7 +1171,7 @@
 								>
 									<button
 										type="button"
-										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 										:class="selectedReturnsShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 										@click="selectedReturnsShift = ''"
 									>
@@ -1207,7 +1181,7 @@
 										v-for="opt in returnsShiftOptions"
 										:key="opt"
 										type="button"
-										class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+										class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 										:class="selectedReturnsShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 										@click="selectedReturnsShift = opt"
 									>
@@ -1247,39 +1221,29 @@
 										class="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden"
 									>
 										<table class="w-full text-sm">
-											<thead>
-												<tr class="border-b border-gray-100">
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+											<thead class="bg-gray-50 border-b border-gray-200">
+												<tr>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Return") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Customer") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Cashier") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Original Invoice") }}
 													</th>
-													<th
-														class="px-4 py-3 text-end text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
 														{{ __("Refund Total") }}
 													</th>
-													<th
-														class="px-4 py-3 text-start text-[11px] font-semibold uppercase tracking-wider text-gray-400"
-													>
+													<th class="px-4 py-2.5 text-start text-xs font-medium text-gray-500">
 														{{ __("Status") }}
 													</th>
-													<th class="px-4 py-3"></th>
+													<th class="px-4 py-2.5 text-end text-xs font-medium text-gray-500">
+														{{ __("Actions") }}
+													</th>
 												</tr>
 											</thead>
 											<tbody>
@@ -1352,7 +1316,7 @@
 														<span v-else class="text-gray-400">–</span>
 													</td>
 													<td
-														class="px-4 py-3 text-end font-bold text-red-600 whitespace-nowrap"
+														class="px-4 py-3 text-end font-bold text-red-600 whitespace-nowrap tabular-nums"
 													>
 														-{{
 															formatCurrency(
@@ -1365,22 +1329,11 @@
 															<span
 																v-if="getShiftBadge(invoice)"
 																data-test="shift-badge"
-																class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+																class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 															>
 																{{ getShiftBadge(invoice) }}
 															</span>
-															<span
-																:class="[
-																	'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full',
-																	getInvoiceStatusColor(invoice),
-																]"
-															>
-																<span
-																	:class="[
-																		'w-1.5 h-1.5 rounded-full',
-																		getStatusDotClass(invoice),
-																	]"
-																></span>
+															<span :class="statusPillClass(invoice)">
 																{{ __(invoice.status) }}
 															</span>
 														</div>
@@ -1388,7 +1341,8 @@
 													<td class="px-4 py-3 text-end" @click.stop>
 														<button
 															@click="$emit('print-invoice', invoice)"
-															class="p-1.5 hover:bg-green-50 rounded transition-colors"
+															class="inline-flex h-11 w-11 md:h-10 md:w-10 items-center justify-center hover:bg-green-50 rounded-lg transition-colors touch-manipulation"
+															:aria-label="__('Print')"
 															:title="__('Print')"
 														>
 															<svg
@@ -1427,7 +1381,7 @@
 													<span
 														v-if="getShiftBadge(invoice)"
 														data-test="shift-badge"
-														class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200 mt-1"
+														class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20 mt-1"
 													>
 														{{ getShiftBadge(invoice) }}
 													</span>
@@ -1436,18 +1390,7 @@
 														{{ formatTime(invoice.posting_time) }}
 													</div>
 												</div>
-												<span
-													:class="[
-														'inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold rounded-full shrink-0',
-														getInvoiceStatusColor(invoice),
-													]"
-												>
-													<span
-														:class="[
-															'w-1.5 h-1.5 rounded-full',
-															getStatusDotClass(invoice),
-														]"
-													></span>
+												<span :class="statusPillClass(invoice)">
 													{{ __(invoice.status) }}
 												</span>
 											</div>
@@ -1470,7 +1413,7 @@
 													</div>
 												</div>
 												<div
-													class="text-end font-bold text-red-600 shrink-0 ms-2"
+													class="text-end font-bold text-red-600 shrink-0 ms-2 tabular-nums"
 												>
 													-{{
 														formatCurrency(Math.abs(invoice.grand_total))
@@ -1509,32 +1452,34 @@
 </template>
 
 <script setup>
-import RefreshButton from "@/components/common/RefreshButton.vue";
-import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue";
-import PaymentDialog from "@/components/sale/PaymentDialog.vue";
-import { useInvoiceFilters } from "@/composables/useInvoiceFilters";
-import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
-import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter";
-import { getInvoiceStatusColor } from "@/utils/invoice";
-import { formatQueueNumber } from "@/utils/queue/queueNumber";
-import { useFormatters } from "@/composables/useFormatters";
-import { useToast } from "@/composables/useToast";
-import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
-import { Button, FeatherIcon, call, LoadingIndicator } from "frappe-ui";
-import { computed, h, onMounted, reactive, ref, watch } from "vue";
-import { isOffline } from "@/utils/offline/offlineState";
+import RefreshButton from "@/components/common/RefreshButton.vue"
+import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue"
+import PaymentDialog from "@/components/sale/PaymentDialog.vue"
+import { useInvoiceFilters } from "@/composables/useInvoiceFilters"
+import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
+import {
+	DEFAULT_CURRENCY,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency"
+import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter"
+import { formatQueueNumber } from "@/utils/queue/queueNumber"
+import { useFormatters } from "@/composables/useFormatters"
+import { useToast } from "@/composables/useToast"
+import { scheduleBlockingNow } from "@/composables/useShiftSchedule"
+import { Button, FeatherIcon, call, LoadingIndicator } from "frappe-ui"
+import { computed, h, onMounted, reactive, ref, watch } from "vue"
+import { isOffline } from "@/utils/offline/offlineState"
 import {
 	cacheUnpaidInvoices,
 	getCachedUnpaidInvoices,
 	cacheUnpaidSummary,
 	getCachedUnpaidSummary,
-} from "@/utils/offline/sync";
-import { logger } from "@/utils/logger";
+} from "@/utils/offline/sync"
+import { logger } from "@/utils/logger"
 
-const log = logger.create("InvoiceManagement");
-const { showSuccess, showError } = useToast();
-const { formatDate, formatDateTime, formatTime } = useFormatters();
+const log = logger.create("InvoiceManagement")
+const { showSuccess, showError } = useToast()
+const { formatDate, formatDateTime, formatTime } = useFormatters()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -1553,7 +1498,7 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
-});
+})
 
 const emit = defineEmits([
 	"update:modelValue",
@@ -1562,7 +1507,7 @@ const emit = defineEmits([
 	"load-draft",
 	"delete-draft",
 	"refresh-history",
-]);
+])
 
 // Shared pager footer for the paged lists (History / Drafts / Returns)
 const InvoiceListPager = {
@@ -1570,136 +1515,208 @@ const InvoiceListPager = {
 	props: { pager: { type: Object, required: true } },
 	setup(props) {
 		return () =>
-			h("div", { class: "mt-4 flex items-center justify-between text-xs text-gray-500", "data-test": "list-pager" }, [
-				h("span", __("Showing {0}–{1} of {2}", [props.pager.from, props.pager.to, props.pager.total])),
-				h("div", { class: "flex items-center gap-2" }, [
-					h(Button, {
-						variant: "ghost",
-						disabled: props.pager.page <= 1,
-						"aria-label": __("Previous page"),
-						onClick: () => props.pager.prev(),
-					}, () => h(FeatherIcon, { name: "chevron-left", class: "w-4 h-4" })),
-					h("span", __("Page {0} of {1}", [props.pager.page, props.pager.pageCount])),
-					h(Button, {
-						variant: "ghost",
-						disabled: props.pager.page >= props.pager.pageCount,
-						"aria-label": __("Next page"),
-						onClick: () => props.pager.next(),
-					}, () => h(FeatherIcon, { name: "chevron-right", class: "w-4 h-4" })),
-				]),
-			]);
+			h(
+				"div",
+				{
+					class: "mt-4 flex items-center justify-between text-xs text-gray-500",
+					"data-test": "list-pager",
+				},
+				[
+					h(
+						"span",
+						__("Showing {0}–{1} of {2}", [
+							props.pager.from,
+							props.pager.to,
+							props.pager.total,
+						]),
+					),
+					h("div", { class: "flex items-center gap-2" }, [
+						h(
+							Button,
+							{
+								variant: "ghost",
+								class:
+									"min-h-[44px] min-w-[44px] md:min-h-[40px] md:min-w-[40px] touch-manipulation inline-flex items-center justify-center",
+								disabled: props.pager.page <= 1,
+								"aria-label": __("Previous page"),
+								onClick: () => props.pager.prev(),
+							},
+							() => h(FeatherIcon, { name: "chevron-left", class: "w-4 h-4" }),
+						),
+						h(
+							"span",
+							__("Page {0} of {1}", [props.pager.page, props.pager.pageCount]),
+						),
+						h(
+							Button,
+							{
+								variant: "ghost",
+								class:
+									"min-h-[44px] min-w-[44px] md:min-h-[40px] md:min-w-[40px] touch-manipulation inline-flex items-center justify-center",
+								disabled: props.pager.page >= props.pager.pageCount,
+								"aria-label": __("Next page"),
+								onClick: () => props.pager.next(),
+							},
+							() => h(FeatherIcon, { name: "chevron-right", class: "w-4 h-4" }),
+						),
+					]),
+				],
+			)
 	},
-};
+}
 
-const show = ref(props.modelValue);
-const loading = ref(false);
+const show = ref(props.modelValue)
+const loading = ref(false)
 // History/Drafts/Returns load in the parent's refresh-history handler, which
 // emit() cannot await; track that work locally and clear it when the parent's
 // data lands (see the props watch below).
-const refreshing = ref(false);
-const activeTab = ref("partial");
+const refreshing = ref(false)
+const activeTab = ref("partial")
 
 // Initialize filter store and composable
-const filterStore = useInvoiceFiltersStore();
+const filterStore = useInvoiceFiltersStore()
 
 // Create a computed ref for history invoices to use with filter composable
-const historyInvoicesRef = computed(() => props.historyInvoices);
-const invoiceFilters = useInvoiceFilters(historyInvoicesRef);
+const historyInvoicesRef = computed(() => props.historyInvoices)
+const invoiceFilters = useInvoiceFilters(historyInvoicesRef)
 
 // Unpaid invoices data
-const unpaidInvoices = ref([]);
-const unpaidFilter = ref("all"); // "all", "partial", "unpaid"
+const unpaidInvoices = ref([])
+const unpaidFilter = ref("all") // "all", "partial", "unpaid"
 const unpaidSummary = ref({
 	count: 0,
 	total_outstanding: 0,
 	total_paid: 0,
-});
-const selectedInvoice = ref(null);
-const showPaymentDialog = ref(false);
+})
+const selectedInvoice = ref(null)
+const showPaymentDialog = ref(false)
 
 // Filtered unpaid invoices based on payment amounts
 const statusFilteredUnpaidInvoices = computed(() => {
 	if (unpaidFilter.value === "partial") {
 		// Partially paid: status is 'Partly Paid' only
-		return unpaidInvoices.value.filter((inv) => inv.status === "Partly Paid");
+		return unpaidInvoices.value.filter((inv) => inv.status === "Partly Paid")
 	}
 	if (unpaidFilter.value === "unpaid") {
 		// Totally unpaid: status is 'Unpaid'
-		return unpaidInvoices.value.filter((inv) => inv.status === "Unpaid");
+		return unpaidInvoices.value.filter((inv) => inv.status === "Unpaid")
 	}
 	if (unpaidFilter.value === "overdue") {
 		// Overdue: invoice status is Overdue
-		return unpaidInvoices.value.filter((inv) => inv.status === "Overdue");
+		return unpaidInvoices.value.filter((inv) => inv.status === "Overdue")
 	}
-	return unpaidInvoices.value; // "all"
-});
+	return unpaidInvoices.value // "all"
+})
 
 const {
 	options: unpaidShiftOptions,
 	selected: selectedUnpaidShift,
 	filtered: filteredUnpaidInvoices,
-} = useShiftFilter(statusFilteredUnpaidInvoices);
+} = useShiftFilter(statusFilteredUnpaidInvoices)
 
 // Filtered summary based on selected filter
 const filteredUnpaidSummary = computed(() => {
-	const filtered = filteredUnpaidInvoices.value;
+	const filtered = filteredUnpaidInvoices.value
 
 	return {
 		count: filtered.length,
-		total_outstanding: filtered.reduce((sum, inv) => sum + (inv.outstanding_amount || 0), 0),
+		total_outstanding: filtered.reduce(
+			(sum, inv) => sum + (inv.outstanding_amount || 0),
+			0,
+		),
 		total_paid: filtered.reduce((sum, inv) => sum + (inv.paid_amount || 0), 0),
-	};
-});
+	}
+})
 
-// Return invoices (filtered from history)
+function statusPillClass(invoice) {
+	if (!invoice) return ""
+	const base =
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset"
+	if (invoice.is_return) {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`
+	}
+	const status = invoice.status?.toLowerCase()
+	if (status === "cancelled" || invoice.docstatus === 2) {
+		return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`
+	}
+	if (status === "overdue") {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`
+	}
+	if (status === "partly paid" || status === "partially paid") {
+		return `${base} bg-orange-50 text-orange-700 ring-orange-600/20`
+	}
+	if (status === "unpaid") {
+		return `${base} bg-amber-50 text-amber-700 ring-amber-600/20`
+	}
+	if (status === "credit note issued") {
+		return `${base} bg-blue-50 text-blue-700 ring-blue-600/20`
+	}
+	if (status === "paid" || invoice.docstatus === 1) {
+		return `${base} bg-green-50 text-green-700 ring-green-600/20`
+	}
+	return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`
+}
+
+// Return invoices (filtered from history with search)
+const returnsSearchTerm = ref("")
 const returnInvoices = computed(() => {
-	const allInvoices = Array.isArray(props.historyInvoices) ? props.historyInvoices : [];
-	return allInvoices.filter((inv) => inv.is_return);
-});
+	const allInvoices = Array.isArray(props.historyInvoices)
+		? props.historyInvoices
+		: []
+	const base = allInvoices.filter((inv) => inv.is_return)
+	if (!returnsSearchTerm.value) return base
+	const term = returnsSearchTerm.value.toLowerCase()
+	return base.filter(
+		(inv) =>
+			inv.name?.toLowerCase().includes(term) ||
+			inv.customer_name?.toLowerCase().includes(term) ||
+			inv.return_against?.toLowerCase().includes(term),
+	)
+})
 
 const {
 	options: returnsShiftOptions,
 	selected: selectedReturnsShift,
 	filtered: shiftFilteredReturnInvoices,
-} = useShiftFilter(returnInvoices);
+} = useShiftFilter(returnInvoices)
 
 // Filtered history using the composable (exclude returns, show in separate tab)
 const filteredHistoryInvoices = computed(() => {
 	// Filter out return invoices, then apply all filters from the store
-	const allInvoices = Array.isArray(props.historyInvoices) ? props.historyInvoices : [];
-	const nonReturnInvoices = allInvoices.filter((inv) => !inv.is_return);
+	const allInvoices = Array.isArray(props.historyInvoices)
+		? props.historyInvoices
+		: []
+	const nonReturnInvoices = allInvoices.filter((inv) => !inv.is_return)
 
 	// Use the filter composable with non-return invoices
-	const tempInvoicesRef = computed(() => nonReturnInvoices);
-	const tempFilters = useInvoiceFilters(tempInvoicesRef);
+	const tempInvoicesRef = computed(() => nonReturnInvoices)
+	const tempFilters = useInvoiceFilters(tempInvoicesRef)
 
-	return tempFilters.filteredInvoices.value;
-});
+	return tempFilters.filteredInvoices.value
+})
 
 const {
 	options: historyShiftOptions,
 	selected: selectedHistoryShift,
 	filtered: shiftFilteredHistoryInvoices,
-} = useShiftFilter(filteredHistoryInvoices);
+} = useShiftFilter(filteredHistoryInvoices)
 
 // Client-side pagination: only the current page's rows hit the DOM.
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 20
 
 function usePaged(list, size = PAGE_SIZE) {
-	const page = ref(1);
-	const total = computed(() => list.value.length);
-	const pageCount = computed(() =>
-		Math.max(1, Math.ceil(total.value / size))
-	);
+	const page = ref(1)
+	const total = computed(() => list.value.length)
+	const pageCount = computed(() => Math.max(1, Math.ceil(total.value / size)))
 
 	// Clamp when the list shrinks below the current page
 	watch(pageCount, (n) => {
-		if (page.value > n) page.value = n;
-	});
+		if (page.value > n) page.value = n
+	})
 
 	return reactive({
 		rows: computed(() =>
-			list.value.slice((page.value - 1) * size, page.value * size)
+			list.value.slice((page.value - 1) * size, page.value * size),
 		),
 		page,
 		pageCount,
@@ -1707,29 +1724,30 @@ function usePaged(list, size = PAGE_SIZE) {
 		from: computed(() => (total.value === 0 ? 0 : (page.value - 1) * size + 1)),
 		to: computed(() => Math.min(page.value * size, total.value)),
 		next() {
-			if (page.value < pageCount.value) page.value++;
+			if (page.value < pageCount.value) page.value++
 		},
 		prev() {
-			if (page.value > 1) page.value--;
+			if (page.value > 1) page.value--
 		},
 		reset() {
-			page.value = 1;
+			page.value = 1
 		},
-	});
+	})
 }
 
-const historyPager = usePaged(shiftFilteredHistoryInvoices);
-const draftsPager = usePaged(computed(() => props.draftInvoices));
-const returnsPager = usePaged(shiftFilteredReturnInvoices);
+const historyPager = usePaged(shiftFilteredHistoryInvoices)
+const draftsPager = usePaged(computed(() => props.draftInvoices))
+const returnsPager = usePaged(shiftFilteredReturnInvoices)
 
-watch(selectedHistoryShift, () => historyPager.reset());
-watch(selectedReturnsShift, () => returnsPager.reset());
+watch(selectedHistoryShift, () => historyPager.reset())
+watch(selectedReturnsShift, () => returnsPager.reset())
+watch(returnsSearchTerm, () => returnsPager.reset())
 
 // New filters mean new result sets — start back at page 1
 filterStore.$subscribe(() => {
-	historyPager.reset();
-	returnsPager.reset();
-});
+	historyPager.reset()
+	returnsPager.reset()
+})
 
 // Tabs configuration
 const tabs = computed(() => [
@@ -1765,65 +1783,65 @@ const tabs = computed(() => [
 		activeClass: "text-red-600",
 		badge: () => returnInvoices.value.length,
 	},
-]);
+])
 
 const currentTabLabel = computed(() => {
-	return tabs.value.find((t) => t.id === activeTab.value)?.label || "";
-});
+	return tabs.value.find((t) => t.id === activeTab.value)?.label || ""
+})
 
 // Watchers
 watch(
 	() => props.modelValue,
 	(val) => {
-		show.value = val;
+		show.value = val
 		if (val) {
-			loadUnpaidInvoices();
-			loadUnpaidSummary();
+			loadUnpaidInvoices()
+			loadUnpaidSummary()
 			// Also request history refresh if we don't have data
 			if (props.historyInvoices.length === 0) {
-				emit("refresh-history");
+				emit("refresh-history")
 			}
 		}
 	},
 	// immediate: embedded mode mounts with modelValue already true and must load;
 	// standalone mounts with false, which the guard no-ops.
-	{ immediate: true }
-);
+	{ immediate: true },
+)
 
 watch(show, (val) => {
-	emit("update:modelValue", val);
-});
+	emit("update:modelValue", val)
+})
 
 // Watch for tab changes to emit refresh event for history/returns tabs
 watch(activeTab, (newTab) => {
-	historyPager.reset();
-	draftsPager.reset();
-	returnsPager.reset();
+	historyPager.reset()
+	draftsPager.reset()
+	returnsPager.reset()
 	// Always emit refresh event when switching to history or returns tabs
 	// This ensures up-to-date outstanding amounts and invoice data
 	if (newTab === "history" || newTab === "returns") {
-		emit("refresh-history");
+		emit("refresh-history")
 	} else if (newTab === "partial") {
 		// Refresh unpaid invoices when switching to partial tab
-		loadUnpaidInvoices();
-		loadUnpaidSummary();
+		loadUnpaidInvoices()
+		loadUnpaidSummary()
 	}
-});
+})
 
 // Methods
 function handleClose() {
-	show.value = false;
+	show.value = false
 }
 
 async function refreshCurrentTab() {
 	if (activeTab.value === "partial") {
-		await Promise.all([loadUnpaidInvoices(), loadUnpaidSummary()]);
-		return;
+		await Promise.all([loadUnpaidInvoices(), loadUnpaidSummary()])
+		return
 	}
 	// History/Drafts/Returns are reloaded by the parent; keep the icon spinning
 	// until it hands the fresh data back.
-	refreshing.value = true;
-	emit("refresh-history");
+	refreshing.value = true
+	emit("refresh-history")
 }
 
 // The parent replaces historyInvoices/draftInvoices when its reload finishes —
@@ -1831,224 +1849,232 @@ async function refreshCurrentTab() {
 watch(
 	() => [props.historyInvoices, props.draftInvoices],
 	() => {
-		refreshing.value = false;
-	}
-);
+		refreshing.value = false
+	},
+)
 
 async function loadUnpaidInvoices() {
-	if (!props.posProfile) return;
+	if (!props.posProfile) return
 
 	// Start loading immediately - show skeleton while fetching
-	loading.value = true;
+	loading.value = true
 
 	// Load cached data immediately for instant display
 	try {
 		const cachedInvoices = await getCachedUnpaidInvoices(props.posProfile, {
 			limit: 100,
-		});
+		})
 		if (cachedInvoices && cachedInvoices.length > 0) {
-			unpaidInvoices.value = cachedInvoices;
-			loading.value = false; // Hide skeleton once we have cached data
-			log.debug("Loaded", cachedInvoices.length, "unpaid invoices from cache (instant)");
+			unpaidInvoices.value = cachedInvoices
+			loading.value = false // Hide skeleton once we have cached data
+			log.debug(
+				"Loaded",
+				cachedInvoices.length,
+				"unpaid invoices from cache (instant)",
+			)
 		}
 	} catch (cacheError) {
-		log.debug("No cached unpaid invoices available");
+		log.debug("No cached unpaid invoices available")
 	}
 
 	// If offline, we're done - use only cached data
 	if (isOffline()) {
-		log.info("Offline mode - using cached unpaid invoices");
-		loading.value = false;
-		return;
+		log.info("Offline mode - using cached unpaid invoices")
+		loading.value = false
+		return
 	}
 
 	// Fetch fresh data from server in background
 	try {
-		const result = await call("pos_next.api.partial_payments.get_unpaid_invoices", {
-			pos_profile: props.posProfile,
-			limit: 100,
-		});
+		const result = await call(
+			"pos_next.api.partial_payments.get_unpaid_invoices",
+			{
+				pos_profile: props.posProfile,
+				limit: 100,
+			},
+		)
 
-		unpaidInvoices.value = result || [];
+		unpaidInvoices.value = result || []
 
 		// Cache for offline use
 		if (result && result.length > 0) {
-			cacheUnpaidInvoices(result, props.posProfile);
+			cacheUnpaidInvoices(result, props.posProfile)
 		}
 	} catch (error) {
-		log.error("Error loading unpaid invoices:", error);
+		log.error("Error loading unpaid invoices:", error)
 
 		// If we already have cached data, don't show error
 		if (unpaidInvoices.value.length === 0) {
-			showError(error.message || __("Failed to load unpaid invoices"));
+			showError(error.message || __("Failed to load unpaid invoices"))
 		}
 	} finally {
-		loading.value = false;
+		loading.value = false
 	}
 }
 
 async function loadUnpaidSummary() {
-	if (!props.posProfile) return;
+	if (!props.posProfile) return
 
 	// Load cached summary immediately for instant display
 	try {
-		const cachedSummary = await getCachedUnpaidSummary(props.posProfile);
-		if (cachedSummary && (cachedSummary.count > 0 || cachedSummary.total_outstanding > 0)) {
-			unpaidSummary.value = cachedSummary;
-			log.debug("Loaded unpaid summary from cache (instant)");
+		const cachedSummary = await getCachedUnpaidSummary(props.posProfile)
+		if (
+			cachedSummary &&
+			(cachedSummary.count > 0 || cachedSummary.total_outstanding > 0)
+		) {
+			unpaidSummary.value = cachedSummary
+			log.debug("Loaded unpaid summary from cache (instant)")
 		}
 	} catch (cacheError) {
-		log.debug("No cached unpaid summary available");
+		log.debug("No cached unpaid summary available")
 	}
 
 	// If offline, we're done - use only cached data
 	if (isOffline()) {
-		log.info("Offline mode - using cached unpaid summary");
-		return;
+		log.info("Offline mode - using cached unpaid summary")
+		return
 	}
 
 	// Fetch fresh summary from server in background
 	try {
-		const result = await call("pos_next.api.partial_payments.get_unpaid_summary", {
-			pos_profile: props.posProfile,
-		});
+		const result = await call(
+			"pos_next.api.partial_payments.get_unpaid_summary",
+			{
+				pos_profile: props.posProfile,
+			},
+		)
 
 		unpaidSummary.value = result || {
 			count: 0,
 			total_outstanding: 0,
 			total_paid: 0,
-		};
+		}
 
 		// Cache for offline use
 		if (result) {
-			cacheUnpaidSummary(result, props.posProfile);
+			cacheUnpaidSummary(result, props.posProfile)
 		}
 	} catch (error) {
-		log.error("Error loading summary:", error);
+		log.error("Error loading summary:", error)
 		// If we already have cached data, don't show any error - silent fail
 	}
 }
 
-const loadingInvoiceDetails = ref(false);
+const loadingInvoiceDetails = ref(false)
 
 async function selectInvoiceForPayment(invoice) {
-	loadingInvoiceDetails.value = true;
+	loadingInvoiceDetails.value = true
 	try {
 		// Fetch full invoice details including items for the payment dialog
-		const details = await call("pos_next.api.partial_payments.get_partial_payment_details", {
-			invoice_name: invoice.name,
-		});
-		selectedInvoice.value = details;
-		showPaymentDialog.value = true;
+		const details = await call(
+			"pos_next.api.partial_payments.get_partial_payment_details",
+			{
+				invoice_name: invoice.name,
+			},
+		)
+		selectedInvoice.value = details
+		showPaymentDialog.value = true
 	} catch (error) {
-		log.error("Error loading invoice details:", error);
+		log.error("Error loading invoice details:", error)
 		// Fallback to basic invoice data
-		selectedInvoice.value = invoice;
-		showPaymentDialog.value = true;
+		selectedInvoice.value = invoice
+		showPaymentDialog.value = true
 	} finally {
-		loadingInvoiceDetails.value = false;
+		loadingInvoiceDetails.value = false
 	}
 }
 
 async function handlePaymentCompleted(paymentData) {
-	if (!selectedInvoice.value) return;
+	if (!selectedInvoice.value) return
 
 	// Shift schedule: payments are blocked once a mandatory deadline has passed
 	if (scheduleBlockingNow()) {
 		showError(
 			__(
-				"Shift schedule has ended. Payments are no longer accepted — please close the shift."
-			)
-		);
-		return;
+				"Shift schedule has ended. Payments are no longer accepted — please close the shift.",
+			),
+		)
+		return
 	}
 
 	try {
 		await call("pos_next.api.partial_payments.add_payment_to_partial_invoice", {
 			invoice_name: selectedInvoice.value.name,
 			payments: paymentData.payments,
-		});
+		})
 
-		showSuccess(__("Payment added successfully"));
+		showSuccess(__("Payment added successfully"))
 
 		// Reload invoices and summary for partial tab
-		await loadUnpaidInvoices();
-		await loadUnpaidSummary();
+		await loadUnpaidInvoices()
+		await loadUnpaidSummary()
 
 		// Also refresh history data to show updated outstanding amounts
-		emit("refresh-history");
+		emit("refresh-history")
 
-		selectedInvoice.value = null;
+		selectedInvoice.value = null
 	} catch (error) {
-		console.error("Error adding payment:", error);
-		showError(error.message || __("Failed to add payment"));
+		console.error("Error adding payment:", error)
+		showError(error.message || __("Failed to add payment"))
 	}
 }
 
 function formatCurrency(amount) {
-	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
-}
-
-// Dot color inside status pill badges
-function getStatusDotClass(invoice) {
-	const status = invoice.status?.toLowerCase();
-	if (status === "paid" || invoice.docstatus === 1) return "bg-green-500";
-	if (status === "unpaid" || status === "overdue" || status === "partly paid")
-		return "bg-amber-500";
-	if (status === "credit note issued" || invoice.is_return) return "bg-purple-500";
-	if (invoice.docstatus === 2) return "bg-red-500";
-	return "bg-gray-400";
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
 
 function formatPaymentModes(invoice) {
-	const payments = Array.isArray(invoice?.payments) ? invoice.payments : [];
-	const validPayments = payments.filter((payment) => payment.mode_of_payment);
+	const payments = Array.isArray(invoice?.payments) ? invoice.payments : []
+	const validPayments = payments.filter((payment) => payment.mode_of_payment)
 
 	if (validPayments.length === 0) {
-		return __("No payment mode");
+		return __("No payment mode")
 	}
 
 	if (validPayments.length === 1) {
-		return __(validPayments[0].mode_of_payment);
+		return __(validPayments[0].mode_of_payment)
 	}
 
 	return validPayments
-		.map((payment) => `${__(payment.mode_of_payment)} ${formatCurrency(payment.amount || 0)}`)
-		.join(", ");
+		.map(
+			(payment) =>
+				`${__(payment.mode_of_payment)} ${formatCurrency(payment.amount || 0)}`,
+		)
+		.join(", ")
 }
 
 function getPaymentSourceLabel(source) {
 	// Convert source to user-friendly label
 	switch (source) {
 		case "POS":
-			return __("POS");
+			return __("POS")
 		case "POS Payment Entry":
-			return __("POS");
+			return __("POS")
 		case "Payment Entry":
-			return __("Back Office");
+			return __("Back Office")
 		default:
-			return source;
+			return source
 	}
 }
 
 function calculateDraftTotal(items) {
-	if (!items || items.length === 0) return 0;
+	if (!items || items.length === 0) return 0
 	return items.reduce(
 		(sum, item) => sum + (item.quantity || item.qty || 0) * (item.rate || 0),
-		0
-	);
+		0,
+	)
 }
 
 // Lifecycle
 onMounted(() => {
 	// Load saved filter presets from localStorage
-	filterStore.loadSavedFiltersFromStorage();
+	filterStore.loadSavedFiltersFromStorage()
 
 	if (show.value) {
-		loadUnpaidInvoices();
-		loadUnpaidSummary();
+		loadUnpaidInvoices()
+		loadUnpaidSummary()
 	}
-});
+})
 </script>
 
 <style scoped>

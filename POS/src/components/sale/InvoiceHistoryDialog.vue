@@ -17,13 +17,13 @@
 							v-model="searchTerm"
 							type="text"
 							:placeholder="__('Search by invoice number, buyer, or customer...')"
-							class="w-full h-10 ps-10 pe-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full h-11 md:h-10 ps-10 pe-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							@input="onSearchInput"
 						/>
 					</div>
 					<button
 						type="button"
-						class="w-10 h-10 shrink-0 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+						class="flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 touch-manipulation"
 						:disabled="invoicesResource.loading"
 						:title="__('Refresh')"
 						:aria-label="__('Refresh')"
@@ -42,7 +42,7 @@
 				>
 					<button
 						type="button"
-						class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+						class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 						:class="selectedShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 						@click="selectedShift = ''"
 					>
@@ -52,7 +52,7 @@
 						v-for="opt in shiftOptions"
 						:key="opt"
 						type="button"
-						class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+						class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 						:class="selectedShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 						@click="selectedShift = opt"
 					>
@@ -98,19 +98,19 @@
 							<span
 								v-if="getShiftBadge(invoice)"
 								data-test="shift-badge"
-								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 							>
 								{{ getShiftBadge(invoice) }}
 							</span>
 							<span
 								v-if="invoice.is_return"
-								class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
+								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20"
 							>
 								{{ __("Return") }}
 							</span>
 							<span
 								v-else
-								:class="['text-xs px-2 py-0.5 rounded-full font-medium', getInvoiceStatusColor(invoice)]"
+								:class="statusPillClass(invoice)"
 							>
 								{{ __(invoice.status) }}
 							</span>
@@ -142,7 +142,7 @@
 				<div class="flex items-center justify-end gap-1.5 mt-2 pt-2 border-t border-gray-100">
 					<button
 						type="button"
-						class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
+						class="inline-flex items-center gap-1.5 min-h-[44px] md:min-h-[40px] px-3 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 touch-manipulation"
 						@click="viewInvoice(invoice)"
 					>
 						<FeatherIcon name="eye" class="w-4 h-4 text-blue-600" />
@@ -150,7 +150,7 @@
 					</button>
 					<button
 						type="button"
-						class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100"
+						class="inline-flex items-center gap-1.5 min-h-[44px] md:min-h-[40px] px-3 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 touch-manipulation"
 						@click="printInvoice(invoice)"
 					>
 						<FeatherIcon name="printer" class="w-4 h-4 text-green-600" />
@@ -159,7 +159,7 @@
 					<button
 						v-if="canCreateReturn(invoice)"
 						type="button"
-						class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-orange-50"
+						class="inline-flex items-center gap-1.5 min-h-[44px] md:min-h-[40px] px-3 rounded-lg text-xs font-medium text-gray-700 hover:bg-orange-50 touch-manipulation"
 						@click="openReturnModal(invoice)"
 					>
 						<FeatherIcon name="corner-up-left" class="w-4 h-4 text-orange-600" />
@@ -169,7 +169,7 @@
 			</div>
 
 			<div v-if="hasMore" class="text-center pt-1">
-				<Button variant="subtle" :loading="isLoadingMore" @click="loadMore">
+				<Button variant="subtle" class="h-11 md:h-10 touch-manipulation" :loading="isLoadingMore" @click="loadMore">
 					{{ __('Load More') }}
 				</Button>
 			</div>
@@ -195,7 +195,6 @@ import {
 	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
-import { getInvoiceStatusColor } from "@/utils/invoice"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 import PosDialogShell from "@/components/common/PosDialogShell.vue"
 import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter"
@@ -206,6 +205,34 @@ import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue"
 
 const { showError } = useToast()
 const { formatDate, formatTime } = useFormatters()
+
+function statusPillClass(invoice) {
+	const base =
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset"
+	if (invoice.is_return) {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`
+	}
+	const status = invoice.status?.toLowerCase()
+	if (status === "cancelled" || invoice.docstatus === 2) {
+		return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`
+	}
+	if (status === "overdue") {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`
+	}
+	if (status === "partly paid" || status === "partially paid") {
+		return `${base} bg-orange-50 text-orange-700 ring-orange-600/20`
+	}
+	if (status === "unpaid") {
+		return `${base} bg-amber-50 text-amber-700 ring-amber-600/20`
+	}
+	if (status === "credit note issued") {
+		return `${base} bg-blue-50 text-blue-700 ring-blue-600/20`
+	}
+	if (status === "paid" || invoice.docstatus === 1) {
+		return `${base} bg-green-50 text-green-700 ring-green-600/20`
+	}
+	return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`
+}
 
 const props = defineProps({
 	modelValue: Boolean,

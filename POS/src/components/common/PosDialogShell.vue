@@ -25,7 +25,7 @@
 					</div>
 					<button
 						type="button"
-						class="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+						class="h-11 w-11 shrink-0 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 						:aria-label="__('Close')"
 						:title="__('Close')"
 						@click="open = false"
@@ -47,7 +47,12 @@
 					data-test="dialog-footer"
 				>
 					<slot name="footer" />
-					<Button class="ms-auto" variant="subtle" @click="open = false">
+					<Button
+						class="ms-auto min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
+						size="md"
+						variant="subtle"
+						@click="open = false"
+					>
 						{{ __("Close") }}
 					</Button>
 				</footer>

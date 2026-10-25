@@ -48,7 +48,7 @@
 									"
 									:disabled="isOffline"
 									:class="[
-										'w-full ps-10 pe-10 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+										'w-full h-11 md:h-10 ps-10 pe-10 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
 										isOffline
 											? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
 											: 'border-gray-300',
@@ -115,10 +115,7 @@
 													"
 												></span>
 												<span
-													:class="[
-														'px-1.5 py-0.5 text-xs font-medium rounded',
-														getInvoiceStatusColor(suggestion),
-													]"
+													:class="statusPillClass(suggestion)"
 												>
 													{{ __(suggestion.status) }}
 												</span>
@@ -162,6 +159,7 @@
 						</div>
 						<Button
 							variant="subtle"
+							class="h-11 md:h-10 touch-manipulation"
 							@click="loadInvoicesResource.reload()"
 							:loading="loadInvoicesResource.loading"
 							:disabled="isOffline"
@@ -178,7 +176,7 @@
 					>
 						<button
 							type="button"
-							class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+							class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 							:class="selectedShift === '' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 							@click="selectedShift = ''"
 						>
@@ -188,7 +186,7 @@
 							v-for="opt in shiftOptions"
 							:key="opt"
 							type="button"
-							class="shrink-0 rounded-full px-2.5 py-1 font-medium transition-colors border"
+							class="inline-flex shrink-0 items-center min-h-[44px] md:min-h-[40px] rounded-full px-3.5 py-1 text-xs font-medium transition-colors border touch-manipulation"
 							:class="selectedShift === opt ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'"
 							@click="selectedShift = opt"
 						>
@@ -252,15 +250,12 @@
 										<span
 											v-if="getShiftBadge(invoice)"
 											data-test="shift-badge"
-											class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200"
+											class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 										>
 											{{ getShiftBadge(invoice) }}
 										</span>
 										<span
-											:class="[
-												'px-2 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap',
-												getInvoiceStatusColor(invoice),
-											]"
+											:class="statusPillClass(invoice)"
 										>
 											{{ __(invoice.status) }}
 										</span>
@@ -277,7 +272,7 @@
 								</div>
 								<!-- Amount (End Side) -->
 								<div class="text-end flex-shrink-0">
-									<p class="text-sm font-bold text-gray-900">
+									<p class="text-sm font-bold text-gray-900 tabular-nums">
 										{{ formatCurrency(invoice.grand_total) }}
 									</p>
 								</div>
@@ -370,10 +365,7 @@
 									{{ originalInvoice.name }}
 								</h3>
 								<span
-									:class="[
-										'inline-block mt-1 px-2 py-0.5 text-xs font-semibold rounded-full',
-										getInvoiceStatusColor(originalInvoice),
-									]"
+									:class="statusPillClass(originalInvoice)"
 								>
 									{{ __(originalInvoice.status) }}
 								</span>
@@ -395,7 +387,7 @@
 								</div>
 								<div class="text-end">
 									<p class="text-xs text-gray-500 mb-1">{{ __("Total") }}</p>
-									<p class="text-xl font-bold text-gray-900">
+									<p class="text-xl font-bold text-gray-900 tabular-nums">
 										{{ formatCurrency(originalInvoice.grand_total) }}
 									</p>
 								</div>
@@ -412,10 +404,7 @@
 									{{ originalInvoice.name }}
 								</h3>
 								<span
-									:class="[
-										'px-2 py-0.5 text-xs font-semibold rounded-full',
-										getInvoiceStatusColor(originalInvoice),
-									]"
+									:class="statusPillClass(originalInvoice)"
 								>
 									{{ __(originalInvoice.status) }}
 								</span>
@@ -437,7 +426,7 @@
 						</div>
 						<div class="text-end ms-4">
 							<p class="text-xs text-gray-500 mb-1">{{ __("Total Amount") }}</p>
-							<p class="text-2xl font-bold text-gray-900">
+							<p class="text-2xl font-bold text-gray-900 tabular-nums">
 								{{ formatCurrency(originalInvoice.grand_total) }}
 							</p>
 						</div>
@@ -453,12 +442,22 @@
 							{{ __("Select Items to Return") }}
 						</label>
 						<div class="flex gap-2 self-end sm:self-auto">
-							<Button size="sm" variant="subtle" @click="selectAllFilteredItems">
+							<Button
+								size="sm"
+								variant="subtle"
+								class="min-h-[44px] md:min-h-[40px] touch-manipulation"
+								@click="selectAllFilteredItems"
+							>
 								<span class="text-xs whitespace-nowrap">{{
 									__("Select All")
 								}}</span>
 							</Button>
-							<Button size="sm" variant="subtle" @click="deselectAllItems">
+							<Button
+								size="sm"
+								variant="subtle"
+								class="min-h-[44px] md:min-h-[40px] touch-manipulation"
+								@click="deselectAllItems"
+							>
 								<span class="text-xs whitespace-nowrap">{{
 									__("Clear All")
 								}}</span>
@@ -472,7 +471,7 @@
 							v-model="itemSearchFilter"
 							type="text"
 							:placeholder="__('Search items by name or code...')"
-							class="w-full px-4 py-2.5 ps-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full h-11 md:h-10 ps-10 pe-4 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						/>
 						<FeatherIcon
 							name="search"
@@ -1090,7 +1089,7 @@
 							maxlength="20"
 							:disabled="refundCodeVerified"
 							:class="[
-								'flex-1 h-10 border rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:border-blue-500',
+								'flex-1 h-11 md:h-10 border rounded-lg px-3 text-sm uppercase tracking-widest focus:outline-none focus:ring-2 focus:border-blue-500',
 								refundCodeVerified
 									? 'bg-emerald-50 border-emerald-300 text-emerald-700'
 									: 'bg-white border-gray-300 focus:ring-orange-400',
@@ -1101,6 +1100,7 @@
 						<Button
 							v-if="!refundCodeVerified"
 							variant="subtle"
+							class="h-11 md:h-10 touch-manipulation"
 							@click="verifyRefundCode"
 							:loading="isVerifyingCode"
 						>
@@ -1132,7 +1132,7 @@
 						<Button
 							variant="subtle"
 							@click="closeReturnModal"
-							class="flex-1 sm:flex-initial"
+							class="flex-1 sm:flex-initial h-11 md:h-10 touch-manipulation"
 						>
 							<span class="text-sm">{{ __("Cancel") }}</span>
 						</Button>
@@ -1142,7 +1142,7 @@
 							@click="handleCreateReturn"
 							:disabled="!canCreateReturn || isSubmitting"
 							:loading="isSubmitting"
-							class="flex-1 sm:flex-initial"
+							class="flex-1 sm:flex-initial h-11 md:h-10 touch-manipulation"
 						>
 							<span class="text-sm whitespace-nowrap">{{
 								__("Create Return")
@@ -1255,10 +1255,38 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import PosDialogShell from "@/components/common/PosDialogShell.vue";
-import { getInvoiceStatusColor } from "@/utils/invoice";
 import { highlightSafe } from "@/utils/escapeHtml";
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+
+function statusPillClass(invoice) {
+	if (!invoice) return "";
+	const base =
+		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset";
+	if (invoice.is_return) {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`;
+	}
+	const status = invoice.status?.toLowerCase();
+	if (status === "cancelled" || invoice.docstatus === 2) {
+		return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`;
+	}
+	if (status === "overdue") {
+		return `${base} bg-red-50 text-red-700 ring-red-600/20`;
+	}
+	if (status === "partly paid" || status === "partially paid") {
+		return `${base} bg-orange-50 text-orange-700 ring-orange-600/20`;
+	}
+	if (status === "unpaid") {
+		return `${base} bg-amber-50 text-amber-700 ring-amber-600/20`;
+	}
+	if (status === "credit note issued") {
+		return `${base} bg-blue-50 text-blue-700 ring-blue-600/20`;
+	}
+	if (status === "paid" || invoice.docstatus === 1) {
+		return `${base} bg-green-50 text-green-700 ring-green-600/20`;
+	}
+	return `${base} bg-gray-50 text-gray-600 ring-gray-500/20`;
+}
 
 const { showSuccess, showError, showWarning } = useToast();
 const { isOffline } = useOfflineStatus();

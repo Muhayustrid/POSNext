@@ -18,7 +18,7 @@
 			>
 				<button
 					type="button"
-					class="flex items-center justify-center w-10 h-10 shrink-0 text-gray-700 hover:text-gray-900 transition-colors"
+					class="flex items-center justify-center w-11 h-11 shrink-0 rounded-lg text-gray-700 hover:text-gray-900 transition-colors touch-manipulation"
 					:aria-label="__('Close menu')"
 					:title="__('Back to POS')"
 					@click="back"

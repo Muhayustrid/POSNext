@@ -7,42 +7,12 @@
 		<template #body-content>
 			<!-- LIST VIEW -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<p class="text-sm text-gray-500">
-						{{ __("Manage supplier orders and purchasing requests") }}
-					</p>
-					<Button variant="solid" data-test="new-button" @click="openNew">
-						<template #prefix>
-							<FeatherIcon name="plus" class="w-4 h-4" />
-						</template>
-						{{ __("New Purchase Order") }}
-					</Button>
-				</div>
-
-				<div class="flex gap-2">
-					<div class="relative flex-1">
-						<FeatherIcon
-							name="search"
-							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-						/>
-						<input
-							v-model="searchTerm"
-							type="text"
-							data-test="list-search"
-							:placeholder="__('Search PO number or supplier...')"
-							class="w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-							@input="onListSearch"
-						/>
-					</div>
-					<RefreshButton :loading="loadingOrders" @click="loadOrders" />
-				</div>
-
-				<div class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
+				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
 						v-for="chip in STATUS_CHIPS"
 						:key="chip.value"
 						type="button"
-						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						class="shrink-0 inline-flex items-center min-h-[44px] md:min-h-[40px] rounded-full border px-3.5 py-1 text-xs font-medium transition-colors touch-manipulation"
 						:class="
 							statusFilter === chip.value
 								? 'border-gray-900 bg-gray-900 text-white'
@@ -53,6 +23,37 @@
 					>
 						{{ chip.label }}
 					</button>
+				</div>
+
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<div class="relative flex-1 min-w-[200px] sm:min-w-[280px]">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="searchTerm"
+							type="text"
+							data-test="list-search"
+							:placeholder="__('Search PO number or supplier...')"
+							class="h-11 md:h-10 w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							@input="onListSearch"
+						/>
+					</div>
+					<div class="ms-auto flex items-center gap-2">
+						<RefreshButton :loading="loadingOrders" @click="loadOrders" />
+						<Button
+							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
+							data-test="new-button"
+							@click="openNew"
+						>
+							<template #prefix>
+								<FeatherIcon name="plus" class="w-4 h-4" />
+							</template>
+							{{ __("New Purchase Order") }}
+						</Button>
+					</div>
 				</div>
 
 				<div class="rounded-xl border border-gray-200 bg-white">
@@ -214,6 +215,7 @@
 							<Button
 								v-if="canSubmitPO"
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="primary-action"
 								:loading="submitting"
 								@click="submitDoc(currentDoc?.name)"
@@ -229,6 +231,7 @@
 								canReceivePR
 							"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							data-test="receive-button"
 							@click="openReceive(currentDoc)"
@@ -240,7 +243,7 @@
 							<button
 								type="button"
 								data-testid="doc-menu-button"
-								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+								class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 								:aria-label="__('More actions')"
 								:title="__('More actions')"
 								@click="docMenuOpen = !docMenuOpen"
@@ -396,12 +399,12 @@
 					<button
 						type="button"
 						data-testid="receive-back"
-						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 						:aria-label="__('Back')"
 						:title="__('Back')"
 						@click="backFromReceive"
 					>
-						<FeatherIcon name="arrow-left" class="h-4 w-4" />
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
 					</button>
 					<nav class="flex min-w-0 items-center gap-1.5 text-sm">
 						<span class="text-gray-500">{{ __("Purchase Order") }}</span>
@@ -416,6 +419,7 @@
 					<div class="ms-auto flex items-center gap-2">
 						<Button
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="receive-save"
 							:disabled="hasExcessQty || saving"
 							:loading="saving"
@@ -575,12 +579,12 @@
 					<button
 						type="button"
 						data-testid="doc-back"
-						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 						:aria-label="__('Back')"
 						:title="__('Back')"
 						@click="backFromForm"
 					>
-						<FeatherIcon name="arrow-left" class="h-4 w-4" />
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
 					</button>
 					<nav class="flex min-w-0 items-center gap-1.5 text-sm">
 						<span class="text-gray-500">{{ __("Purchase Order") }}</span>
@@ -595,6 +599,7 @@
 						<Button
 							v-if="formPrimaryMode === 'save'"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							:loading="saving"
 							@click="save(false)"
@@ -604,6 +609,7 @@
 						<Button
 							v-else-if="canSubmitPO"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							:loading="submitting"
 							@click="submitDoc(form.name)"
@@ -1002,12 +1008,12 @@ const STATUS_CHIPS = [
 ]
 
 const STATUS_TONES = {
-	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	"To Receive and Bill": "bg-blue-50 text-blue-700 ring-blue-200",
-	"To Receive": "bg-blue-50 text-blue-700 ring-blue-200",
-	"To Bill": "bg-purple-50 text-purple-700 ring-purple-200",
-	Completed: "bg-green-50 text-green-700 ring-green-200",
-	Cancelled: "bg-red-50 text-red-700 ring-red-200",
+	Draft: "bg-orange-50 text-orange-700 ring-orange-600/20",
+	"To Receive and Bill": "bg-blue-50 text-blue-700 ring-blue-600/20",
+	"To Receive": "bg-blue-50 text-blue-700 ring-blue-600/20",
+	"To Bill": "bg-amber-50 text-amber-700 ring-amber-600/20",
+	Completed: "bg-green-50 text-green-700 ring-green-600/20",
+	Cancelled: "bg-gray-50 text-gray-600 ring-gray-500/20",
 }
 
 const orders = ref([])
@@ -1064,7 +1070,7 @@ const dialogTitle = computed(() => {
 function statusPill(status) {
 	return [
 		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-		STATUS_TONES[status] || "bg-gray-50 text-gray-700 ring-gray-200",
+		STATUS_TONES[status] || "bg-gray-50 text-gray-600 ring-gray-500/20",
 	]
 }
 

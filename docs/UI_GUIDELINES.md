@@ -92,3 +92,29 @@ Pick one per screen; prefer the pager for HQ-facing lists.
 
 - `InvoiceManagement.vue` lists: not yet audited against these rules.
 - Reject Request uses "Load More", the others use a pager.
+
+## 6. Touch targets & readability
+
+### Touch targets
+- Phones (`<640px`): minimum 44px tap target on all interactive elements.
+- Tablets and touch desktops (`>=640px`): minimum 40px touch target.
+- Never use responsive breakpoints (`sm:`, `md:`) to shrink a touch target below
+  its base size (the `sm:w-7 sm:h-7` shrink pattern is the bug: tablets get the
+  smallest targets).
+- Icon buttons use `.pos-icon-btn` (minimum 40px on tablets `<1024px`, 44px on phones)
+  or the shared `.pos-touch-target` utility.
+- Dialog close buttons must be `>=44px` on all screens.
+
+### Readability & typography
+- Minimum font size for cashier-critical values (prices, quantities, totals,
+  status labels) is `text-xs` (12px).
+- `text-2xs` (11px) is reserved strictly for non-essential captions or secondary
+  metadata; never use arbitrary smaller text (`text-[10px]`, `text-[9px]`) on
+  surfaces showing prices or quantities.
+- All monetary amounts, prices, quantities, and numeric counters must use
+  `tabular-nums` for alignment and scanability.
+
+### Dialog ergonomics
+- Dialogs maintain a single scroll region: fixed header, toolbar, and footer;
+  body scrolls (`min-h-0 flex-1 overflow-y-auto`).
+- Footer actions must remain accessible and reachable on phones.

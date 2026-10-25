@@ -13,7 +13,7 @@
 						name="check-circle"
 						class="h-12 w-12 md:h-16 md:w-16 text-green-600"
 					/>
-					<h3 class="text-base md:text-lg font-semibold text-gray-900">
+					<h3 class="text-base md:text-lg font-semibold text-gray-900 tabular-nums">
 						{{ __("Shift closed successfully") }}
 					</h3>
 					<p class="text-xs md:text-sm text-gray-500">
@@ -90,7 +90,7 @@
 								<div class="text-start text-xs text-gray-500 uppercase">
 									{{ __("Duration") }}
 								</div>
-								<div class="text-base md:text-lg font-semibold text-gray-900">
+								<div class="text-base md:text-lg font-semibold text-gray-900 tabular-nums">
 									{{ shiftDurationSnapshot }}
 								</div>
 							</div>
@@ -106,7 +106,7 @@
 									{{ __("Gross Sales") }}
 								</div>
 								<div
-									class="text-lg md:text-2xl font-bold text-blue-900 mb-0.5 md:mb-1 truncate"
+									class="text-lg md:text-2xl font-bold text-blue-900 mb-0.5 md:mb-1 truncate tabular-nums"
 								>
 									{{ formatCurrency(grossSales) }}
 								</div>
@@ -128,7 +128,7 @@
 									{{ __("Returns") }}
 								</div>
 								<div
-									class="text-lg md:text-2xl font-bold text-red-700 mb-0.5 md:mb-1 truncate"
+									class="text-lg md:text-2xl font-bold text-red-700 mb-0.5 md:mb-1 truncate tabular-nums"
 								>
 									-{{ formatCurrency(closingData.returns_total) }}
 								</div>
@@ -145,7 +145,7 @@
 									{{ __("Net Sales") }}
 								</div>
 								<div
-									class="text-lg md:text-2xl font-bold text-green-900 mb-0.5 md:mb-1 truncate"
+									class="text-lg md:text-2xl font-bold text-green-900 mb-0.5 md:mb-1 truncate tabular-nums"
 								>
 									{{ formatCurrency(closingData.grand_total) }}
 								</div>
@@ -160,7 +160,7 @@
 									{{ __("Tax Collected") }}
 								</div>
 								<div
-									class="text-lg md:text-2xl font-bold text-gray-900 mb-0.5 md:mb-1 truncate"
+									class="text-lg md:text-2xl font-bold text-gray-900 mb-0.5 md:mb-1 truncate tabular-nums"
 								>
 									{{ formatCurrency(totalTax) }}
 								</div>
@@ -281,14 +281,14 @@
 											</span>
 											<span
 												v-if="invoice.is_return"
-												class="px-1.5 py-0.5 text-xs font-medium bg-red-200 text-red-800 rounded"
+												class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20"
 											>
 												{{ __("Return") }}
 											</span>
 										</div>
 										<span
 											:class="[
-												'text-sm font-semibold',
+												'text-sm font-semibold tabular-nums',
 												invoice.is_return
 													? 'text-red-700'
 													: 'text-gray-900',
@@ -315,7 +315,7 @@
 										<span class="text-xs font-semibold text-gray-700">{{
 											__("Net Total:")
 										}}</span>
-										<span class="text-sm font-bold text-gray-900">
+										<span class="text-sm font-bold text-gray-900 tabular-nums">
 											{{ formatCurrency(closingData.grand_total) }}
 										</span>
 									</div>
@@ -388,13 +388,13 @@
 											<td class="text-start px-6 py-4 whitespace-nowrap">
 												<span
 													v-if="invoice.is_return"
-													class="px-2 py-1 text-xs font-medium bg-red-200 text-red-800 rounded"
+													class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20"
 												>
 													{{ __("Return") }}
 												</span>
 												<span
 													v-else
-													class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded"
+													class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20"
 												>
 													{{ __("Sale") }}
 												</span>
@@ -417,7 +417,7 @@
 											<td class="text-start px-6 py-4 whitespace-nowrap">
 												<span
 													:class="[
-														'text-sm font-semibold',
+														'text-sm font-semibold tabular-nums',
 														invoice.is_return
 															? 'text-red-700'
 															: 'text-gray-900',
@@ -437,7 +437,7 @@
 												{{ __("Net Total:") }}
 											</td>
 											<td class="px-6 py-4 whitespace-nowrap text-start">
-												<span class="text-base font-bold text-gray-900">
+												<span class="text-base font-bold text-gray-900 tabular-nums">
 													{{ formatCurrency(closingData.grand_total) }}
 												</span>
 											</td>
@@ -470,7 +470,7 @@
 										</h3>
 										<span
 											v-if="hideExpectedAmount && showSuccessReport"
-											class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
+											class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20"
 										>
 											{{ __("✓ Shift Closed") }}
 										</span>
@@ -541,7 +541,7 @@
 												>{{ __("Modal Awal") }}</label
 											>
 											<div
-												class="text-base md:text-lg font-semibold text-gray-900"
+												class="text-base md:text-lg font-semibold text-gray-900 tabular-nums"
 											>
 												{{ formatCurrency(payment.opening_amount) }}
 											</div>
@@ -561,14 +561,14 @@
 												>{{ __("Expected") }}</label
 											>
 											<div
-												class="text-base md:text-lg font-semibold text-gray-900"
+												class="text-base md:text-lg font-semibold text-gray-900 tabular-nums"
 											>
 												{{ formatCurrency(payment.expected_amount) }}
 											</div>
 											<div
 												class="text-xs text-gray-500 mt-0.5 md:mt-1 hidden sm:block"
 											>
-												<span v-if="getSalesForPayment(payment) > 0">
+												<span v-if="getSalesForPayment(payment) > 0" class="tabular-nums">
 													+{{
 														formatCurrency(getSalesForPayment(payment))
 													}}
@@ -590,7 +590,7 @@
 								<p class="text-xs md:text-sm text-gray-600">
 									{{ __("Total Expected") }}
 								</p>
-								<p class="text-base md:text-xl font-semibold text-gray-900">
+								<p class="text-base md:text-xl font-semibold text-gray-900 tabular-nums">
 									{{ formatCurrency(getTotalExpected) }}
 								</p>
 							</div>
@@ -626,7 +626,7 @@
 									</div>
 									<div class="text-end">
 										<p
-											class="text-sm md:text-base font-semibold text-gray-900"
+											class="text-sm md:text-base font-semibold text-gray-900 tabular-nums"
 										>
 											{{ formatCurrency(tax.amount) }}
 										</p>
@@ -721,7 +721,7 @@
 					<div
 						class="flex flex-col items-stretch justify-center gap-2 order-2 sm:flex-row sm:order-2 w-full sm:w-auto"
 					>
-						<Button variant="solid" theme="blue" @click="retryEodPrint" :loading="retryPrintLoading">
+						<Button variant="solid" theme="blue" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="retryEodPrint" :loading="retryPrintLoading">
 							{{ __("Print Ulang") }}
 						</Button>
 						<Button
@@ -732,7 +732,7 @@
 						>
 							{{ __("Export PDF") }}
 						</Button>
-						<Button variant="ghost" @click="closeDialog">{{ __("Tutup") }}</Button>
+						<Button variant="ghost" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="closeDialog">{{ __("Tutup") }}</Button>
 					</div>
 				</template>
 
@@ -740,9 +740,9 @@
 					<!-- Left side - Cancel/Close button -->
 					<Button
 						variant="subtle"
+						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation order-2 sm:order-1"
 						@click="closeDialog"
 						:disabled="submitResource.loading"
-						class="order-2 sm:order-1"
 					>
 						{{ showSuccessReport ? __("Close") : __("Cancel") }}
 					</Button>
@@ -771,6 +771,7 @@
 							v-if="!showSuccessReport"
 							variant="solid"
 							theme="blue"
+							class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation font-semibold"
 							@click="submitClosing"
 							:loading="submitResource.loading"
 							:disabled="!canSubmit"

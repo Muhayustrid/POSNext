@@ -7,36 +7,9 @@
 		<template #body-content>
 			<!-- LIST -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<div class="relative w-full sm:w-72">
-						<FeatherIcon
-							name="search"
-							class="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-						/>
-						<input
-							v-model="searchTerm"
-							type="search"
-							data-testid="list-search"
-							class="h-8 w-full rounded-lg border border-gray-200 bg-white ps-8 pe-2 text-sm focus:border-gray-400 focus:outline-none"
-							:placeholder="__('Search ID or item...')"
-							:aria-label="__('Search ID or item...')"
-							@input="onSearchInput"
-						/>
-					</div>
-					<div class="ms-auto flex items-center gap-2">
-						<RefreshButton :loading="loading" @click="loadList()" />
-						<Button v-if="page === 0 && !filtered && !hasOpenOpname" variant="solid" @click="openNew">
-							<template #prefix>
-								<FeatherIcon name="plus" class="h-4 w-4" />
-							</template>
-							{{ __("New Count") }}
-						</Button>
-					</div>
-				</div>
-
 				<div
 					v-if="statusTabs.length > 1"
-					class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5"
+					class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5"
 					role="group"
 					:aria-label="__('Status')"
 				>
@@ -45,7 +18,7 @@
 						:key="tab.value"
 						type="button"
 						data-testid="status-chip"
-						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						class="shrink-0 inline-flex items-center min-h-[44px] md:min-h-[40px] rounded-full border px-3.5 py-1 text-xs font-medium transition-colors touch-manipulation"
 						:class="
 							statusFilter === tab.value
 								? 'border-gray-900 bg-gray-900 text-white'
@@ -56,6 +29,38 @@
 					>
 						{{ tab.label }}
 					</button>
+				</div>
+
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<div class="relative w-full sm:w-72">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="searchTerm"
+							type="search"
+							data-testid="list-search"
+							class="h-11 md:h-10 w-full rounded-lg border border-gray-200 bg-white ps-8 pe-2 text-sm focus:border-gray-400 focus:outline-none"
+							:placeholder="__('Search ID or item...')"
+							:aria-label="__('Search ID or item...')"
+							@input="onSearchInput"
+						/>
+					</div>
+					<div class="ms-auto flex items-center gap-2">
+						<RefreshButton :loading="loading" @click="loadList()" />
+						<Button
+							v-if="page === 0 && !filtered && !hasOpenOpname"
+							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
+							@click="openNew"
+						>
+							<template #prefix>
+								<FeatherIcon name="plus" class="h-4 w-4" />
+							</template>
+							{{ __("New Count") }}
+						</Button>
+					</div>
 				</div>
 
 				<div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -159,12 +164,12 @@
 						<button
 							type="button"
 							data-testid="doc-back"
-							class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+							class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 							:aria-label="__('Back')"
 							:title="__('Back')"
 							@click="backToList"
 						>
-							<FeatherIcon name="arrow-left" class="h-4 w-4" />
+							<FeatherIcon name="arrow-left" class="h-5 w-5" />
 						</button>
 						<nav class="flex min-w-0 items-center gap-1.5 text-sm">
 							<span class="text-gray-500">{{ __("Stock Opname") }}</span>
@@ -185,6 +190,7 @@
 							<Button
 								v-if="primaryMode === 'save'"
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="primary-action"
 								:loading="saving"
 								@click="save"
@@ -194,6 +200,7 @@
 							<Button
 								v-else-if="primaryMode === 'submit'"
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="primary-action"
 								:loading="submitting"
 								@click="submitAction(actions[0])"
@@ -203,6 +210,7 @@
 							<div v-else-if="primaryMode === 'actions'" class="relative">
 								<Button
 									variant="solid"
+									class="h-11 md:h-10 touch-manipulation"
 									data-testid="primary-action"
 									@click="actionsMenuOpen = !actionsMenuOpen"
 								>
@@ -844,11 +852,11 @@ function toneClass(row) {
 }
 
 const PILL_TONES = {
-	"bg-green-500": "bg-green-50 text-green-700 ring-green-200",
-	"bg-gray-400": "bg-gray-50 text-gray-500 ring-gray-200",
-	"bg-blue-500": "bg-blue-50 text-blue-700 ring-blue-200",
-	"bg-red-500": "bg-red-50 text-red-700 ring-red-200",
-	"bg-orange-400": "bg-orange-50 text-orange-700 ring-orange-200",
+	"bg-green-500": "bg-green-50 text-green-700 ring-green-600/20",
+	"bg-gray-400": "bg-gray-50 text-gray-600 ring-gray-500/20",
+	"bg-blue-500": "bg-blue-50 text-blue-700 ring-blue-600/20",
+	"bg-red-500": "bg-red-50 text-red-700 ring-red-600/20",
+	"bg-orange-400": "bg-orange-50 text-orange-700 ring-orange-600/20",
 }
 
 // list pill, same shape as the other SPA lists (docs/UI_GUIDELINES.md)

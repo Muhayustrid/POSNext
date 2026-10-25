@@ -113,7 +113,7 @@
 								<button
 									type="button"
 									@click.stop="$emit('edit-customer', customer)"
-									class="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
+									class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Edit customer details')"
 								>
 									<svg
@@ -133,7 +133,7 @@
 								<button
 									type="button"
 									@click.stop="$emit('create-customer', '')"
-									class="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
+									class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Create new customer')"
 								>
 									<svg
@@ -153,7 +153,7 @@
 								<button
 									type="button"
 									@click.stop="removeCustomer"
-									class="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
+									class="w-11 h-11 sm:w-10 sm:h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Remove customer')"
 								>
 									<svg
@@ -182,7 +182,7 @@
 								<button
 									type="button"
 									@click="selectDocType('Sales Invoice')"
-									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
+									class="min-h-[40px] px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
 									:class="
 										cartStore.targetDoctype === 'Sales Invoice'
 											? 'bg-white text-blue-600 shadow-sm'
@@ -208,7 +208,7 @@
 								<button
 									type="button"
 									@click="selectDocType('Sales Order')"
-									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
+									class="min-h-[40px] px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
 									:class="
 										cartStore.targetDoctype === 'Sales Order'
 											? 'bg-white text-orange-600 shadow-sm'
@@ -491,7 +491,7 @@
 						type="text"
 						:placeholder="__('Buyer name (optional)')"
 						:title="__('e.g. Budi (not saved as a customer)')"
-						class="w-full h-11 sm:h-9 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
+						class="w-full h-11 sm:h-10 min-h-[40px] ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
 						autocomplete="off"
 						:aria-label="__('Buyer name')"
 					/>
@@ -514,7 +514,7 @@
 				<!-- Clear Cart Button -->
 				<button
 					@click="$emit('clear-cart')"
-					class="inline-flex items-center justify-center rounded-lg w-9 h-9 text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
+					class="inline-flex items-center justify-center rounded-lg w-10 h-10 min-w-[40px] min-h-[40px] text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
 					type="button"
 					:title="__('Clear all items')"
 					:aria-label="__('Clear all items')"
@@ -538,7 +538,7 @@
 					<button
 						@click="toggleCartSortDropdown"
 						:class="[
-							'inline-flex items-center justify-center rounded-lg w-9 h-9 transition-colors touch-manipulation',
+							'inline-flex items-center justify-center rounded-lg w-10 h-10 min-w-[40px] min-h-[40px] transition-colors touch-manipulation',
 							cartSortBy
 								? 'text-blue-600 hover:bg-blue-50'
 								: 'text-gray-600 hover:bg-gray-50',
@@ -677,7 +677,7 @@
 				<button
 					type="button"
 					@click="$emit('show-offers')"
-					class="relative flex items-center justify-center gap-1.5 px-2.5 h-9 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+					class="relative flex items-center justify-center gap-1.5 px-2.5 h-10 min-h-[40px] rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 					:aria-label="__('View all available offers')"
 				>
 					<svg
@@ -693,7 +693,7 @@
 							d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
 						/>
 					</svg>
-					<span class="text-[11px] font-bold text-green-700">{{ __("Offers") }}</span>
+					<span class="text-xs font-bold text-green-700">{{ __("Offers") }}</span>
 					<!-- Badge shows ONLY applied offers count - NOT eligible/pending offers -->
 					<!-- This prevents confusion where offers show as "applied" before backend validation -->
 					<span
@@ -708,7 +708,7 @@
 				<button
 					type="button"
 					@click="$emit('apply-coupon')"
-					class="relative flex items-center justify-center gap-1.5 px-2.5 h-9 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
+					class="relative flex items-center justify-center gap-1.5 px-2.5 h-10 min-h-[40px] rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
 					:aria-label="__('Apply coupon code')"
 				>
 					<svg
@@ -722,7 +722,7 @@
 							clip-rule="evenodd"
 						/>
 					</svg>
-					<span class="text-[11px] font-bold text-purple-700">{{ __("Coupon") }}</span>
+					<span class="text-xs font-bold text-purple-700">{{ __("Coupon") }}</span>
 					<span
 						v-if="appliedCouponCode"
 						class="bg-purple-600 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0 max-w-[80px] truncate"
@@ -767,7 +767,7 @@
 				<p class="text-xs sm:text-sm font-semibold text-gray-900 mb-1">
 					{{ __("Your cart is empty") }}
 				</p>
-				<p class="text-[10px] sm:text-xs text-gray-500 mb-5 sm:mb-6">
+				<p class="text-xs text-gray-500 mb-5 sm:mb-6">
 					{{ __("Select items to start or choose a quick action") }}
 				</p>
 
@@ -781,7 +781,7 @@
 						:title="__('View current shift details')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-blue-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-blue-100 transition-colors"
+							class="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-blue-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-blue-600"
@@ -816,7 +816,7 @@
 						:title="__('View draft invoices')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-purple-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-purple-100 transition-colors"
+							class="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-purple-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-purple-600"
@@ -845,7 +845,7 @@
 						:title="__('View invoice history')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-gray-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-gray-100 transition-colors"
+							class="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-gray-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-gray-600"
@@ -874,7 +874,7 @@
 						:title="__('Process return invoice')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-red-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-red-100 transition-colors"
+							class="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-red-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-red-600"
@@ -903,7 +903,7 @@
 						:title="__('Close current shift')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-orange-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-orange-100 transition-colors"
+							class="w-10 h-10 bg-orange-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-orange-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-orange-600"
@@ -932,7 +932,7 @@
 						:title="__('Create new customer')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-green-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-green-100 transition-colors"
+							class="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-green-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-green-600"
@@ -961,7 +961,7 @@
 						:title="__('View shift history')"
 					>
 						<div
-							class="w-9 h-9 sm:w-10 sm:h-10 bg-indigo-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-indigo-100 transition-colors"
+							class="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-indigo-100 transition-colors"
 						>
 							<svg
 								class="w-5 h-5 text-indigo-600"
@@ -1044,7 +1044,7 @@
 								<div class="flex items-center gap-1.5 flex-1 min-w-0">
 									<span
 										v-if="item.package_instance"
-										class="inline-flex items-center px-1.5 py-0.5 bg-blue-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
+										class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 									>
 										{{ __("PACKAGE") }}
 									</span>
@@ -1056,7 +1056,7 @@
 									<!-- Free Item Badge -->
 									<span
 										v-if="item.free_qty && item.free_qty > 0"
-										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
+										class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20"
 										:title="
 											item.is_free_item
 												? __('Free item')
@@ -1083,7 +1083,7 @@
 									<!-- Discount Badge -->
 									<div
 										v-if="item.discount_amount && item.discount_amount > 0"
-										class="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-red-50 to-orange-50 text-red-700 rounded-full text-[9px] font-bold border border-red-200 flex-shrink-0"
+										class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-orange-50 text-orange-700 ring-orange-600/20"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -1107,7 +1107,7 @@
 									v-if="item.package_instance"
 									type="button"
 									@click.stop="$emit('remove-package', item.package_instance)"
-									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-1 -m-1 touch-manipulation active:scale-90"
+									class="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-1 -m-1 touch-manipulation active:scale-90"
 									:aria-label="__('Remove {0}', [item.item_name])"
 									:title="__('Remove package')"
 								>
@@ -1159,7 +1159,7 @@
 									<!-- Package parents are priced as a unit — qty is fixed at 1 -->
 									<div
 										v-if="item.package_instance"
-										class="flex items-center bg-blue-100 border border-blue-300 rounded px-2 h-6 sm:h-7"
+										class="flex items-center bg-blue-100 border border-blue-300 rounded px-2 h-8 min-h-[32px]"
 									>
 										<span class="text-xs sm:text-sm font-bold text-blue-700">{{
 											item.quantity
@@ -1167,7 +1167,7 @@
 									</div>
 									<div
 										v-else-if="item.is_free_item"
-										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
+										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-8 min-h-[32px]"
 									>
 										<span
 											class="text-xs sm:text-sm font-bold text-green-700"
@@ -1182,7 +1182,7 @@
 									>
 										<!-- Serial count badge -->
 										<div
-											class="flex items-center bg-blue-50 border border-blue-200 rounded px-1.5 h-6 sm:h-7"
+											class="flex items-center bg-blue-50 border border-blue-200 rounded px-1.5 h-8 min-h-[32px]"
 										>
 											<FeatherIcon
 												name="hash"
@@ -1197,7 +1197,7 @@
 										<button
 											type="button"
 											@click="openEditDialog(item)"
-											class="flex items-center justify-center w-9 h-9 sm:w-7 sm:h-7 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded transition-colors shadow-sm"
+											class="flex items-center justify-center w-10 h-10 min-w-[40px] min-h-[40px] bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded transition-colors shadow-sm"
 											:title="__('Edit serials')"
 										>
 											<FeatherIcon name="edit-2" class="w-3 h-3" />
@@ -1218,7 +1218,7 @@
 											@click.stop="decrementQuantity(item)"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
+												'w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
 													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
@@ -1254,7 +1254,7 @@
 											inputmode="decimal"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-12 sm:w-20 h-9 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
+												'w-12 sm:w-20 h-10 min-h-[40px] text-center border-0 text-xs sm:text-sm font-bold focus:outline-none tabular-nums',
 												item.is_resolved_barcode
 													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
 													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500',
@@ -1271,7 +1271,7 @@
 											@click.stop="incrementQuantity(item)"
 											:disabled="item.is_resolved_barcode"
 											:class="[
-												'w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
+												'w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
 													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
@@ -1310,7 +1310,7 @@
 												item.item_uoms.length === 0
 											"
 											:class="[
-												'h-9 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
+												'h-10 min-h-[40px] text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
 												item.is_resolved_barcode
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
 													: item.item_uoms && item.item_uoms.length > 0
@@ -1395,7 +1395,7 @@
 									<!-- Price -->
 									<span
 										v-if="!isZeroPricePackageParent(item)"
-										class="text-[10px] sm:text-xs font-bold text-gray-700"
+										class="text-xs font-bold text-gray-700 tabular-nums"
 									>
 										{{ formatCurrency(item.rate) }}
 									</span>
@@ -1407,7 +1407,7 @@
 									class="ms-auto text-end flex-shrink-0"
 								>
 									<div
-										class="text-xs sm:text-sm font-bold text-blue-600 leading-none"
+										class="text-xs sm:text-sm font-bold text-blue-600 leading-none tabular-nums"
 									>
 										{{
 											formatCurrency(
@@ -1447,10 +1447,10 @@
 							<!-- Allocated component price (0 in legacy mode -> hidden). -->
 							<span
 								v-if="component.rate > 0"
-								class="font-semibold text-gray-500 flex-shrink-0"
+								class="font-semibold text-gray-500 flex-shrink-0 tabular-nums"
 								>{{ formatCurrency(component.rate) }}</span
 							>
-							<span class="font-semibold text-gray-500 flex-shrink-0"
+							<span class="font-semibold text-gray-500 flex-shrink-0 tabular-nums"
 								>x{{ formatQuantity(component.quantity) }}</span
 							>
 						</li>
@@ -1465,16 +1465,16 @@
 			<div v-if="items.length > 0" class="mb-1.5">
 				<div class="grid grid-cols-3 gap-2 px-1 text-xs">
 					<div class="min-w-0">
-						<div class="text-[10px] text-gray-500 truncate">{{ __("Total Quantity") }}</div>
-						<div class="font-bold text-gray-900">{{ formatQuantity(totalQuantity) }}</div>
+						<div class="text-xs text-gray-500 truncate">{{ __("Total Quantity") }}</div>
+						<div class="font-bold text-gray-900 tabular-nums">{{ formatQuantity(totalQuantity) }}</div>
 					</div>
 					<div class="min-w-0 text-center">
-						<div class="text-[10px] text-gray-500 truncate">{{ __("Subtotal") }}</div>
-						<div class="font-bold text-gray-900 truncate">{{ formatCurrency(displaySubtotal) }}</div>
+						<div class="text-xs text-gray-500 truncate">{{ __("Subtotal") }}</div>
+						<div class="font-bold text-gray-900 truncate tabular-nums">{{ formatCurrency(displaySubtotal) }}</div>
 					</div>
 					<div class="min-w-0 text-end">
-						<div class="text-[10px] text-gray-500 truncate">{{ __("Tax") }}</div>
-						<div class="font-bold text-gray-900 truncate">{{ formatCurrency(taxAmount) }}</div>
+						<div class="text-xs text-gray-500 truncate">{{ __("Tax") }}</div>
+						<div class="font-bold text-gray-900 truncate tabular-nums">{{ formatCurrency(taxAmount) }}</div>
 					</div>
 				</div>
 				<!-- Discount Display - Highlighted -->
@@ -1496,7 +1496,7 @@
 						</svg>
 						<span class="text-xs font-bold text-red-700">{{ __("Discount") }}</span>
 					</div>
-					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px]">{{
+					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px] tabular-nums">{{
 						formatCurrency(discountAmount)
 					}}</span>
 				</div>
@@ -1510,7 +1510,7 @@
 						__("Grand Total")
 					}}</span>
 					<span
-						class="text-lg sm:text-xl font-extrabold text-blue-600 text-center min-w-[60px]"
+						class="text-lg sm:text-xl font-extrabold text-blue-600 text-center min-w-[60px] tabular-nums"
 					>
 						{{ formatCurrency(displayGrandTotal) }}
 					</span>

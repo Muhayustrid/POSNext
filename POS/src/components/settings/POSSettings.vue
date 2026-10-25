@@ -80,6 +80,7 @@
 								:loading="saving"
 								variant="solid"
 								theme="blue"
+								class="h-11 md:h-10 touch-manipulation"
 							>
 								<template #prefix>
 									<svg
@@ -101,8 +102,10 @@
 							<RefreshButton :loading="loading" @click="loadSettings" />
 							<button
 								v-if="!embedded"
+								type="button"
 								@click="handleClose"
-								class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+								class="flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors touch-manipulation"
+								:aria-label="__('Close')"
 							>
 								<svg
 									class="w-5 h-5 text-gray-600"

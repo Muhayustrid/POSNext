@@ -31,7 +31,7 @@
 							type="button"
 							:aria-pressed="activeRange === opt.key"
 							:class="[
-								'rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors',
+								'inline-flex min-h-[44px] md:min-h-[40px] items-center rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors touch-manipulation',
 								activeRange === opt.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900',
 							]"
 							@click="setQuickFilter(opt.key)"
@@ -39,7 +39,7 @@
 							{{ opt.label }}
 						</button>
 					</div>
-					<div class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5">
+					<div class="inline-flex min-h-[44px] md:min-h-[40px] items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5">
 						<FeatherIcon name="calendar" class="w-4 h-4 text-gray-400" />
 						<input
 							type="date"
@@ -59,7 +59,7 @@
 					</div>
 					<button
 						type="button"
-						class="ms-auto w-9 h-9 rounded-lg border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+						class="ms-auto flex h-11 w-11 md:h-10 md:w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 touch-manipulation"
 						:disabled="shiftsResource.loading"
 						:title="__('Refresh')"
 						:aria-label="__('Refresh')"
@@ -85,30 +85,30 @@
 
 					<div v-else class="overflow-x-auto">
 						<table class="w-full text-left text-sm whitespace-nowrap border-collapse">
-							<thead class="bg-gray-50 border-b border-gray-100 top-0 sticky z-10">
+							<thead class="sticky top-0 z-10 border-b border-gray-200 bg-gray-50">
 								<tr>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('Shift Date') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('POS Profile') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('Cashier') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-center">{{ __('Times (Open - Close)') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Modal Awal') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Closing') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Sales') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Cash Diff') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Actions') }}</th>
+									<th class="px-5 py-2.5 text-start text-xs font-medium text-gray-500">{{ __('Shift Date') }}</th>
+									<th class="px-5 py-2.5 text-start text-xs font-medium text-gray-500">{{ __('POS Profile') }}</th>
+									<th class="px-5 py-2.5 text-start text-xs font-medium text-gray-500">{{ __('Cashier') }}</th>
+									<th class="px-5 py-2.5 text-center text-xs font-medium text-gray-500">{{ __('Times (Open - Close)') }}</th>
+									<th class="px-5 py-2.5 text-end text-xs font-medium text-gray-500">{{ __('Modal Awal') }}</th>
+									<th class="px-5 py-2.5 text-end text-xs font-medium text-gray-500">{{ __('Closing') }}</th>
+									<th class="px-5 py-2.5 text-end text-xs font-medium text-gray-500">{{ __('Sales') }}</th>
+									<th class="px-5 py-2.5 text-end text-xs font-medium text-gray-500">{{ __('Cash Diff') }}</th>
+									<th class="px-5 py-2.5 text-end text-xs font-medium text-gray-500">{{ __('Actions') }}</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-gray-50 bg-white">
-								<tr 
-									v-for="shift in shifts" 
-									:key="shift.opening_shift_name" 
+								<tr
+									v-for="shift in shifts"
+									:key="shift.opening_shift_name"
 									class="hover:bg-blue-50/50 transition-all duration-200 group relative"
 								>
 									<td class="px-5 py-4 font-semibold text-gray-900 group-hover:text-blue-700">
 										{{ formatDate(shift.date) }}
 									</td>
 									<td class="px-5 py-4">
-										<span class="px-2 py-1 bg-gray-100 text-gray-700 text-[11px] font-semibold rounded-md uppercase tracking-wide">
+										<span class="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
 											{{ shift.pos_profile }}
 										</span>
 									</td>
@@ -117,36 +117,38 @@
 									</td>
 									<td class="px-5 py-4 text-center">
 										<div class="flex items-center justify-center gap-2">
-											<span class="text-[11px] font-semibold text-green-700 bg-green-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.open_time) }}</span>
-											<svg class="w-3 h-3 text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-											<span v-if="shift.close_time" class="text-[11px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.close_time) }}</span>
-											<span v-else class="text-[11px] font-semibold text-green-600 bg-green-50 px-1.5 py-0.5 rounded italic uppercase tracking-tighter">{{ __('Running') }}</span>
+											<span class="rounded bg-green-50 px-1.5 py-0.5 text-xs font-medium text-green-700">{{ formatTime(shift.open_time) }}</span>
+											<svg class="h-3 w-3 text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+											<span v-if="shift.close_time" class="rounded bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700">{{ formatTime(shift.close_time) }}</span>
+											<span v-else class="rounded bg-green-50 px-1.5 py-0.5 text-xs font-medium text-green-700 italic">{{ __('Running') }}</span>
 										</div>
 									</td>
-									<td class="px-5 py-4 text-right tabular-nums font-medium text-gray-600">{{ formatCurrency(shift.opening_amount) }}</td>
-									<td class="px-5 py-4 text-right tabular-nums font-medium text-gray-600">{{ formatCurrency(shift.closing_amount) }}</td>
-									<td class="px-5 py-4 text-right tabular-nums font-bold text-gray-900">{{ formatCurrency(shift.sales_total) }}</td>
-									<td class="px-5 py-4 text-right">
+									<td class="px-5 py-4 text-end tabular-nums font-medium text-gray-600">{{ formatCurrency(shift.opening_amount) }}</td>
+									<td class="px-5 py-4 text-end tabular-nums font-medium text-gray-600">{{ formatCurrency(shift.closing_amount) }}</td>
+									<td class="px-5 py-4 text-end tabular-nums font-bold text-gray-900">{{ formatCurrency(shift.sales_total) }}</td>
+									<td class="px-5 py-4 text-end">
 										<span :class="['inline-flex items-center gap-1 font-bold tabular-nums', getCashDiffColor(shift.difference)]">
-											<svg v-if="shift.difference > 0" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
-											<svg v-else-if="shift.difference < 0" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+											<svg v-if="shift.difference > 0" class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
+											<svg v-else-if="shift.difference < 0" class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
 											{{ formatCurrency(shift.difference) }}
 										</span>
 									</td>
 									<!-- FIX #17: actions column — user can open either Opening or Closing shift -->
-									<td class="px-3 py-4 text-right">
+									<td class="px-3 py-4 text-end">
 										<div class="flex items-center justify-end gap-1">
 											<button
+												type="button"
 												@click.stop="openShiftDoc(shift, 'opening')"
-												class="text-[10px] font-semibold px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+												class="inline-flex min-h-[36px] md:min-h-[32px] items-center rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors touch-manipulation"
 												:title="__('View Opening Shift')"
 											>
 												{{ __('Open') }}
 											</button>
 											<button
 												v-if="shift.closing_shift_name"
+												type="button"
 												@click.stop="openShiftDoc(shift, 'closing')"
-												class="text-[10px] font-semibold px-2 py-1 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+												class="inline-flex min-h-[36px] md:min-h-[32px] items-center rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors touch-manipulation"
 												:title="__('View Closing Shift')"
 											>
 												{{ __('Close') }}
@@ -174,7 +176,7 @@
 						<button
 							@click="goToPage(currentPage - 1)"
 							:disabled="currentPage === 1 || shiftsResource.loading"
-							class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+							class="min-h-[44px] min-w-[44px] md:min-h-[40px] md:min-w-[40px] flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors touch-manipulation"
 						>
 							<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
 						</button>
@@ -182,14 +184,14 @@
 						<template v-for="page in visiblePages" :key="page">
 							<span
 								v-if="typeof page === 'string'"
-								class="w-8 h-8 flex items-center justify-center text-gray-400 text-xs select-none"
+								class="min-h-[44px] min-w-[44px] md:min-h-[40px] md:min-w-[40px] flex items-center justify-center text-gray-400 text-xs select-none"
 							>&hellip;</span>
 							<button
 								v-else
 								@click="goToPage(page)"
 								:disabled="shiftsResource.loading"
 								:class="[
-									'w-8 h-8 flex items-center justify-center rounded-lg border text-xs font-semibold transition-colors',
+									'min-h-[44px] min-w-[44px] md:min-h-[40px] md:min-w-[40px] flex items-center justify-center rounded-lg border text-xs font-semibold transition-colors touch-manipulation',
 									page === currentPage
 										? 'bg-blue-600 border-blue-600 text-white shadow-sm'
 										: 'border-gray-200 text-gray-600 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-50',
@@ -200,7 +202,7 @@
 						<button
 							@click="goToPage(currentPage + 1)"
 							:disabled="currentPage === totalPages || shiftsResource.loading"
-							class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+							class="min-h-[44px] min-w-[44px] md:min-h-[40px] md:min-w-[40px] flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors touch-manipulation"
 						>
 							<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
 						</button>
@@ -210,6 +212,7 @@
 		<template #footer>
 			<Button
 				variant="subtle"
+				class="h-11 md:h-10 touch-manipulation"
 				:disabled="shifts.length === 0"
 				@click="exportToCSV"
 			>

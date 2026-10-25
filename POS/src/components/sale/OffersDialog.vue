@@ -39,7 +39,7 @@
 
 				<!-- Offers List -->
 				<div v-else>
-					<div class="flex flex-col gap-3 max-h-[500px] overflow-y-auto pe-2">
+					<div class="pos-dialog-bound flex flex-col gap-3 max-h-[calc(100dvh-15rem)] overflow-y-auto pe-2">
 						<div
 							v-for="offer in eligibleOffers"
 							:key="offer.name"
@@ -54,7 +54,7 @@
 							<!-- Applied Badge -->
 							<div
 								v-if="isOfferApplied(offer)"
-								class="absolute top-2 end-2 bg-green-600 text-white text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"
+								class="absolute top-2 end-2 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-green-50 text-green-700 ring-green-600/20 gap-1"
 							>
 								<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
 									<path
@@ -69,11 +69,11 @@
 							<!-- Source Badge (Pricing Rule vs Promotional Scheme) -->
 							<div
 								:class="[
-									'absolute top-2 text-[10px] font-bold px-2 py-1 rounded-full',
+									'absolute top-2 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
 									isOfferApplied(offer) ? 'end-24' : 'end-2',
 									offer.source === 'Pricing Rule'
-										? 'bg-blue-600 text-white'
-										: 'bg-purple-600 text-white',
+										? 'bg-blue-50 text-blue-700 ring-blue-600/20'
+										: 'bg-purple-50 text-purple-700 ring-purple-600/20',
 								]"
 							>
 								{{
@@ -110,7 +110,7 @@
 											: 'bg-green-600',
 									]"
 								>
-									<div class="text-lg font-bold">
+									<div class="text-lg font-bold tabular-nums">
 										<span v-if="offer.discount_percentage">{{
 											__("{0}% OFF", [
 												Number(offer.discount_percentage).toFixed(2),
@@ -124,17 +124,17 @@
 								</div>
 								<div
 									v-if="offer.offer === 'Give Product'"
-									class="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full font-semibold"
+									class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-purple-50 text-purple-700 ring-purple-600/20"
 								>
 									{{ __("+ Free Item") }}
 								</div>
 								<span
 									v-if="offer.quota_limit > 0"
-									class="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+									class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset tabular-nums"
 									:class="
 										offer.quota_exhausted
-											? 'bg-red-100 text-red-700'
-											: 'bg-amber-100 text-amber-700'
+											? 'bg-red-50 text-red-700 ring-red-600/20'
+											: 'bg-amber-50 text-amber-700 ring-amber-600/20'
 									"
 								>
 									{{
@@ -163,10 +163,10 @@
 										/>
 									</svg>
 									<div>
-										<p class="text-[10px] text-gray-500">
+										<p class="text-xs text-gray-500">
 											{{ __("Min Purchase") }}
 										</p>
-										<p class="text-xs font-semibold text-gray-900">
+										<p class="text-xs font-semibold text-gray-900 tabular-nums">
 											{{ formatCurrency(offer.min_amt) }}
 										</p>
 									</div>
@@ -188,7 +188,7 @@
 										/>
 									</svg>
 									<div>
-										<p class="text-[10px] text-gray-500">
+										<p class="text-xs text-gray-500">
 											{{ __("Min Quantity") }}
 										</p>
 										<p class="text-xs font-semibold text-gray-900">
@@ -213,7 +213,7 @@
 										/>
 									</svg>
 									<div>
-										<p class="text-[10px] text-gray-500">
+										<p class="text-xs text-gray-500">
 											{{ __("Valid Until") }}
 										</p>
 										<p class="text-xs font-semibold text-gray-900">
@@ -236,7 +236,7 @@
 										/>
 									</svg>
 									<div>
-										<p class="text-[10px] text-gray-500">{{ __("Type") }}</p>
+										<p class="text-xs text-gray-500">{{ __("Type") }}</p>
 										<p class="text-xs font-semibold text-gray-900">
 											{{ offer.offer || __("Discount") }}
 										</p>
@@ -256,7 +256,7 @@
 									<span class="text-gray-600">{{
 										__("Subtotal (before tax)")
 									}}</span>
-									<span class="text-gray-900 font-semibold">
+									<span class="text-gray-900 font-semibold tabular-nums">
 										{{ formatCurrency(offersStore.cartSnapshot.subtotal) }} /
 										{{ formatCurrency(offer.min_amt) }}
 									</span>
@@ -274,7 +274,7 @@
 										}"
 									></div>
 								</div>
-								<p class="text-xs text-orange-600 mt-1 font-medium">
+								<p class="text-xs text-orange-600 mt-1 font-medium tabular-nums">
 									{{
 										__("Add {0} more to unlock", [
 											formatCurrency(offersStore.getUnlockAmount(offer)),
@@ -292,7 +292,7 @@
 									:disabled="applyingCode !== null"
 									@click="toggleOffer(offer)"
 									:class="[
-										'w-full py-2 px-4 rounded-lg font-semibold text-sm border flex items-center justify-between gap-2 transition-colors disabled:opacity-60 disabled:cursor-wait',
+										'w-full min-h-[44px] sm:min-h-[40px] py-2 px-4 rounded-lg font-semibold text-sm border flex items-center justify-between gap-2 transition-colors disabled:opacity-60 disabled:cursor-wait touch-manipulation',
 										isOfferApplied(offer)
 											? 'bg-green-100 text-green-800 border-green-300 hover:bg-green-200'
 											: 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100',
@@ -329,7 +329,7 @@
 		</template>
 		<template #actions>
 			<div class="flex justify-end w-full">
-				<Button variant="subtle" @click="show = false">
+				<Button variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="show = false">
 					{{ __("Close") }}
 				</Button>
 			</div>

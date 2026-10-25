@@ -513,14 +513,20 @@ function deleteSavedFilter(name) {
 
 .search-input {
 	width: 100%;
-	padding-block: 0.875rem;
+	min-height: 2.75rem;
 	padding-inline: 3rem;
 	border: 2px solid #e5e7eb;
 	border-radius: 12px;
-	font-size: 0.9375rem;
+	font-size: 0.875rem;
 	color: #111827;
 	background: white;
 	transition: all 0.2s;
+}
+
+@media (min-width: 768px) {
+	.search-input {
+		min-height: 2.5rem;
+	}
 }
 
 .search-input:focus {
@@ -532,13 +538,25 @@ function deleteSavedFilter(name) {
 .clear-search {
 	position: absolute;
 	inset-inline-end: 0.75rem;
-	padding: 0.375rem;
+	min-width: 44px;
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	background: transparent;
 	border: none;
 	color: #9ca3af;
 	border-radius: 6px;
 	cursor: pointer;
 	transition: all 0.15s;
+	touch-action: manipulation;
+}
+
+@media (min-width: 768px) {
+	.clear-search {
+		min-width: 40px;
+		min-height: 40px;
+	}
 }
 
 .clear-search:hover {
@@ -558,6 +576,7 @@ function deleteSavedFilter(name) {
 	align-items: center;
 	gap: 0.375rem;
 	padding: 0.5rem 0.875rem;
+	min-height: 44px;
 	background: white;
 	border: 1.5px solid #e5e7eb;
 	border-radius: 20px;
@@ -567,6 +586,13 @@ function deleteSavedFilter(name) {
 	cursor: pointer;
 	transition: all 0.15s;
 	white-space: nowrap;
+	touch-action: manipulation;
+}
+
+@media (min-width: 768px) {
+	.filter-chip {
+		min-height: 40px;
+	}
 }
 
 .filter-chip:hover {

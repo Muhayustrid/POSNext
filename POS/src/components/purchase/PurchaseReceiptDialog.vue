@@ -21,6 +21,7 @@
 						<Button
 							v-if="canSubmitPR && currentDoc?.editable && (currentDoc?.submit_actions?.length || 0) <= 1"
 							variant="solid"
+							class="h-11 md:h-10 touch-manipulation"
 							data-testid="primary-action"
 							:loading="submitting"
 							@click="submitDoc(currentDoc?.submit_actions?.[0])"
@@ -33,6 +34,7 @@
 						>
 							<Button
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="primary-action"
 								@click="actionsMenuOpen = !actionsMenuOpen"
 							>
@@ -62,7 +64,7 @@
 							<button
 								type="button"
 								data-testid="doc-menu-button"
-								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+								class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 								:aria-label="__('More actions')"
 								:title="__('More actions')"
 								@click="docMenuOpen = !docMenuOpen"
@@ -93,6 +95,24 @@
 					{{ __("Goods received from suppliers and the factory") }}
 				</p>
 
+				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
+					<button
+						v-for="chip in STATUS_CHIPS"
+						:key="chip.value"
+						type="button"
+						class="shrink-0 inline-flex items-center min-h-[44px] md:min-h-[40px] rounded-full border px-3.5 py-1 text-xs font-medium transition-colors touch-manipulation"
+						:class="
+							statusFilter === chip.value
+								? 'border-gray-900 bg-gray-900 text-white'
+								: 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
+						"
+						:aria-pressed="statusFilter === chip.value"
+						@click="setStatus(chip.value)"
+					>
+						{{ chip.label }}
+					</button>
+				</div>
+
 				<div class="flex gap-2">
 					<div class="relative flex-1">
 						<FeatherIcon
@@ -104,29 +124,11 @@
 							type="text"
 							data-test="receipt-list-search"
 							:placeholder="__('Search receipt or supplier...')"
-							class="w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+							class="h-11 md:h-10 w-full rounded-lg border border-gray-300 py-2 pe-3 ps-9 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 							@input="onSearch"
 						/>
 					</div>
 					<RefreshButton :loading="loadingReceipts" @click="loadReceipts" />
-				</div>
-
-				<div class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
-					<button
-						v-for="chip in STATUS_CHIPS"
-						:key="chip.value"
-						type="button"
-						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
-						:class="
-							statusFilter === chip.value
-								? 'border-gray-900 bg-gray-900 text-white'
-								: 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
-						"
-						:aria-pressed="statusFilter === chip.value"
-						@click="setStatus(chip.value)"
-					>
-						{{ chip.label }}
-					</button>
 				</div>
 
 				<div class="rounded-xl border border-gray-200 bg-white">
@@ -284,10 +286,10 @@ const STATUS_CHIPS = [
 ]
 
 const STATUS_TONES = {
-	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	"To Bill": "bg-purple-50 text-purple-700 ring-purple-200",
-	Completed: "bg-green-50 text-green-700 ring-green-200",
-	Cancelled: "bg-red-50 text-red-700 ring-red-200",
+	Draft: "bg-orange-50 text-orange-700 ring-orange-600/20",
+	"To Bill": "bg-amber-50 text-amber-700 ring-amber-600/20",
+	Completed: "bg-green-50 text-green-700 ring-green-600/20",
+	Cancelled: "bg-gray-50 text-gray-600 ring-gray-500/20",
 }
 
 const { showSuccess, showError } = useToast()
@@ -376,7 +378,7 @@ function resolveConfirm(value) {
 function statusPill(status) {
 	return [
 		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-		STATUS_TONES[status] || "bg-blue-50 text-blue-700 ring-blue-200",
+		STATUS_TONES[status] || "bg-blue-50 text-blue-700 ring-blue-600/20",
 	]
 }
 

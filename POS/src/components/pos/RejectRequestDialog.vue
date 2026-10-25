@@ -7,27 +7,12 @@
 		<template #body-content>
 			<!-- 1. LIST VIEW -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<p class="text-sm text-gray-500">
-						{{ __("Report unsold or damaged stock for Head Office review") }}
-					</p>
-					<div class="flex items-center gap-2">
-						<RefreshButton :loading="loading" @click="loadList()" />
-						<Button variant="solid" @click="openNew">
-							<template #prefix>
-								<FeatherIcon name="plus" class="h-4 w-4" />
-							</template>
-							{{ __("New Request") }}
-						</Button>
-					</div>
-				</div>
-
-				<div class="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
+				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
 						v-for="tab in statusTabs"
 						:key="tab.value"
 						type="button"
-						class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+						class="shrink-0 inline-flex items-center min-h-[44px] md:min-h-[40px] rounded-full border px-3.5 py-1 text-xs font-medium transition-colors touch-manipulation"
 						:class="
 							statusFilter === tab.value
 								? 'border-gray-900 bg-gray-900 text-white'
@@ -38,6 +23,21 @@
 					>
 						{{ tab.label }}
 					</button>
+				</div>
+
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<p class="text-sm text-gray-500">
+						{{ __("Report unsold or damaged stock for Head Office review") }}
+					</p>
+					<div class="ms-auto flex items-center gap-2">
+						<RefreshButton :loading="loading" @click="loadList()" />
+						<Button variant="solid" class="h-11 md:h-10 touch-manipulation" @click="openNew">
+							<template #prefix>
+								<FeatherIcon name="plus" class="h-4 w-4" />
+							</template>
+							{{ __("New Request") }}
+						</Button>
+					</div>
 				</div>
 
 				<div class="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -78,7 +78,7 @@
 								<span class="truncate text-sm font-semibold text-gray-900">{{ r.name }}</span>
 								<span
 									v-if="r.is_late"
-									class="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200"
+									class="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20"
 								>
 									{{ __("Late") }}
 								</span>
@@ -108,17 +108,17 @@
 				<div class="flex items-center gap-2">
 					<button
 						type="button"
-						class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+						class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 						:aria-label="__('Back')"
 						:title="__('Back')"
 						:disabled="submitting"
 						@click="view = 'list'"
 					>
-						<FeatherIcon name="arrow-left" class="h-4 w-4" />
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
 					</button>
 					<h3 class="truncate text-base font-semibold text-gray-900">{{ __("New Reject Request") }}</h3>
 					<Button
-						class="ms-auto"
+						class="ms-auto h-11 md:h-10 touch-manipulation"
 						variant="solid"
 						:loading="submitting"
 						:disabled="!canSubmit"
@@ -494,18 +494,18 @@
 					<div class="flex flex-wrap items-center gap-2">
 						<button
 							type="button"
-							class="-ms-1 rounded p-1 text-gray-500 hover:text-gray-900"
+							class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 							:aria-label="__('Back')"
 							:title="__('Back')"
 							@click="backToList"
 						>
-							<FeatherIcon name="arrow-left" class="h-4 w-4" />
+							<FeatherIcon name="arrow-left" class="h-5 w-5" />
 						</button>
 						<h3 class="truncate text-base font-semibold text-gray-900">{{ detail.name }}</h3>
 						<span :class="statusPill(detail.workflow_state)">{{ __(detail.workflow_state) }}</span>
 						<span
 							v-if="detail.is_late"
-							class="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-200"
+							class="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20"
 						>
 							{{ __("Late") }}
 						</span>
@@ -514,6 +514,7 @@
 							<Button
 								v-if="detail.workflow_state === 'Draft'"
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								:loading="submitting"
 								:disabled="!canSubmitDetail"
 								@click="submitDetail"
@@ -526,6 +527,7 @@
 								v-else-if="detail.workflow_state === 'Pending Approval' && detail.actions?.includes('Withdraw')"
 								variant="subtle"
 								theme="red"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="withdraw-button"
 								:loading="acting"
 								@click="doWithdraw"
@@ -537,6 +539,7 @@
 							<Button
 								v-else-if="detail.workflow_state === 'Awaiting Destruction' && detail.actions?.includes('Send Proof')"
 								variant="solid"
+								class="h-11 md:h-10 touch-manipulation"
 								data-testid="send-proof"
 								:loading="acting"
 								:disabled="!canSendProof"
@@ -1253,18 +1256,18 @@ async function loadPurposes() {
 }
 
 const STATUS_TONES = {
-	Draft: "bg-orange-50 text-orange-700 ring-orange-200",
-	"Pending Approval": "bg-blue-50 text-blue-700 ring-blue-200",
-	"Awaiting Destruction": "bg-amber-50 text-amber-700 ring-amber-200",
-	"Destruction Submitted": "bg-purple-50 text-purple-700 ring-purple-200",
-	Completed: "bg-green-50 text-green-700 ring-green-200",
-	Cancelled: "bg-gray-50 text-gray-500 ring-gray-200",
+	Draft: "bg-orange-50 text-orange-700 ring-orange-600/20",
+	"Pending Approval": "bg-blue-50 text-blue-700 ring-blue-600/20",
+	"Awaiting Destruction": "bg-amber-50 text-amber-700 ring-amber-600/20",
+	"Destruction Submitted": "bg-amber-50 text-amber-700 ring-amber-600/20",
+	Completed: "bg-green-50 text-green-700 ring-green-600/20",
+	Cancelled: "bg-gray-50 text-gray-600 ring-gray-500/20",
 }
 
 function statusPill(status) {
 	return [
 		"inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-		STATUS_TONES[status] || "bg-gray-50 text-gray-700 ring-gray-200",
+		STATUS_TONES[status] || "bg-gray-50 text-gray-600 ring-gray-500/20",
 	]
 }
 

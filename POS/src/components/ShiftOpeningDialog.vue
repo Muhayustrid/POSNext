@@ -1,7 +1,7 @@
 <template>
 	<Dialog v-model="open" :options="{ title: __('Open POS Shift'), size: 'xl' }">
 		<template #body-content>
-			<div class="flex flex-col gap-6">
+			<div class="pos-dialog-bound flex flex-col gap-6 pe-1">
 				<!-- Step 1: Select POS Profile -->
 				<div v-if="step === 1" class="flex flex-col gap-4">
 					<div>
@@ -22,7 +22,7 @@
 								:key="profile.name"
 								@click="selectPosProfile(profile)"
 								:class="[
-									'p-4 border rounded-lg cursor-pointer transition-all',
+									'p-4 border rounded-lg cursor-pointer transition-all min-h-[44px] sm:min-h-[40px] touch-manipulation',
 									selectedProfile?.name === profile.name
 										? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500'
 										: 'border-gray-200 hover:border-blue-300 hover:bg-gray-50',
@@ -79,7 +79,7 @@
 								</h3>
 								<p class="text-sm text-gray-500">{{ selectedProfile?.company }}</p>
 							</div>
-							<Button variant="subtle" @click="step = 1">{{
+							<Button variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="step = 1">{{
 								__("Change Profile")
 							}}</Button>
 						</div>
@@ -95,7 +95,7 @@
 							<select
 								id="shift-slot-select"
 								v-model="selectedSlot"
-								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
+								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer min-h-[44px] sm:min-h-[40px] touch-manipulation"
 							>
 								<option
 									v-for="slot in openSlots"
@@ -165,7 +165,7 @@
 								</div>
 								<div class="w-32">
 									<input
-										class="w-full rounded border border-gray-300 bg-transparent px-2 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0"
+										class="w-full h-11 sm:h-10 min-h-[40px] rounded border border-gray-300 bg-transparent px-3 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
 										:value="openingBalances[method.mode_of_payment]"
 										inputmode="decimal"
 										autocomplete="off"
@@ -248,10 +248,10 @@
 						</div>
 
 						<div class="flex gap-3 justify-center">
-							<Button variant="solid" theme="blue" @click="resumeShift">
+							<Button variant="solid" theme="blue" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="resumeShift">
 								{{ __("Resume Shift") }}
 							</Button>
-							<Button variant="subtle" theme="gray" @click="closeAndOpenNew">
+							<Button variant="subtle" theme="gray" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="closeAndOpenNew">
 								{{ __("Close & Open New") }}
 							</Button>
 						</div>
@@ -262,7 +262,7 @@
 
 		<template #actions>
 			<div class="flex justify-between w-full">
-				<Button v-if="step > 1 && step !== 3" variant="subtle" @click="step--">
+				<Button v-if="step > 1 && step !== 3" variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="step--">
 					{{ __("Back") }}
 				</Button>
 				<div v-else></div>
@@ -270,6 +270,7 @@
 				<div class="flex gap-2">
 					<Button
 						variant="subtle"
+						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
 						@click="closeDialog('cancelled')"
 						:disabled="createShiftResource.loading"
 					>
@@ -279,6 +280,7 @@
 						v-if="step === 1"
 						variant="solid"
 						theme="blue"
+						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
 						@click="nextStep"
 						:disabled="!selectedProfile"
 					>
@@ -288,6 +290,7 @@
 						v-if="step === 2"
 						variant="solid"
 						theme="blue"
+						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
 						@click="openShift"
 						:loading="createShiftResource.loading"
 						:disabled="isOutsideShiftHours"
@@ -314,7 +317,7 @@
 		</template>
 		<template #actions>
 			<div class="flex justify-end w-full">
-				<Button variant="solid" theme="blue" @click="showBlocked = false">
+				<Button variant="solid" theme="blue" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="showBlocked = false">
 					{{ __("OK") }}
 				</Button>
 			</div>
