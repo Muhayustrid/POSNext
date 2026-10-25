@@ -1,32 +1,60 @@
 <template>
-	<Dialog
-		v-model="show"
-		:options="{
-			title: isSalesOrder ? __('Complete Sales Order') : __('Complete Payment'),
-			size: dynamicDialogSize,
-		}"
-	>
-		<template #body-content>
-			<!-- Two Column Layout - auto-sized on mobile, constrained on desktop.
-			     lg:grid-rows-1 pins the row to the constrained height so each
-			     column scrolls internally instead of growing past the dialog
-			     (the submit button stays reachable without page scrolling). -->
+	<Transition name="fade">
+		<div
+			v-if="show"
+			role="dialog"
+			aria-modal="true"
+			:aria-label="isSalesOrder ? __('Complete Sales Order') : __('Complete Payment')"
+			class="fixed inset-0 z-[350] bg-white overflow-hidden flex flex-col h-[100dvh] rounded-none"
+		>
+			<!-- Header -->
 			<div
-				:class="[
-					'grid grid-cols-1 lg:grid-cols-5 lg:grid-rows-1 items-stretch',
-					dynamicGap,
-					isMobileView ? '' : 'overflow-hidden',
-				]"
-				:style="isMobileView ? {} : { maxHeight: dialogContentMaxHeight }"
+				class="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-6 border-b border-gray-200 bg-white"
 			>
-				<!-- Left Column (2/5): Sales Person + Invoice Summary -->
-				<div
-					:class="[
-						'lg:col-span-2 flex flex-col min-h-0',
-						isSmallMobile ? 'gap-1' : 'gap-1.5',
-						isMobileView ? 'overflow-visible' : 'overflow-hidden',
-					]"
+				<div class="flex items-center gap-3 min-w-0">
+					<button
+						type="button"
+						class="flex items-center justify-center w-11 h-11 shrink-0 rounded-lg text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors touch-manipulation disabled:opacity-50"
+						:aria-label="__('Close')"
+						:title="__('Back to POS')"
+						:disabled="isSubmitting"
+						@click="closeDialog"
+					>
+						<FeatherIcon name="arrow-left" class="w-5 h-5" />
+					</button>
+					<h2 class="text-lg font-semibold text-gray-900 truncate">
+						{{ isSalesOrder ? __("Complete Sales Order") : __("Complete Payment") }}
+					</h2>
+				</div>
+				<button
+					type="button"
+					class="flex items-center justify-center w-11 h-11 shrink-0 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors touch-manipulation disabled:opacity-50"
+					:aria-label="__('Close')"
+					:title="__('Close')"
+					:disabled="isSubmitting"
+					@click="closeDialog"
 				>
+					<FeatherIcon name="x" class="w-5 h-5" />
+				</button>
+			</div>
+
+			<!-- Main Container -->
+			<div class="flex-1 min-h-0 flex flex-col overflow-hidden bg-gray-100">
+				<!-- Content Area: on < lg it scrolls as a single column; on lg it fits screen and columns scroll internally -->
+				<div class="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden p-3 sm:p-4 lg:p-5">
+					<div
+						:class="[
+							'lg:h-full grid grid-cols-1 lg:grid-cols-5 lg:grid-rows-1 items-stretch min-h-0',
+							dynamicGap,
+						]"
+					>
+						<!-- Left Column (2/5): Sales Person + Invoice Summary -->
+						<div
+							:class="[
+								'lg:col-span-2 flex flex-col min-h-0 lg:h-full lg:overflow-hidden',
+								isSmallMobile ? 'gap-1' : 'gap-1.5',
+							]"
+						>
 					<!-- Delivery Date for Sales Orders -->
 					<div
 						v-if="isSalesOrder"
@@ -581,7 +609,7 @@
 						<!-- Items List (scrollable, takes available space) -->
 						<div
 							v-if="items.length > 0"
-							class="flex-1 overflow-y-auto divide-y divide-gray-100 min-h-0"
+							class="max-h-48 lg:max-h-none flex-1 overflow-y-auto divide-y divide-gray-100 min-h-0"
 						>
 							<div
 								v-for="(item, index) in items"
@@ -1099,16 +1127,11 @@
 				     below stay pinned — reachable without scrolling the dialog. -->
 				<div
 					:class="[
-						'lg:col-span-3 bg-gray-50 rounded-lg border border-gray-200 flex flex-col min-h-0',
+						'lg:col-span-3 bg-gray-50 rounded-lg border border-gray-200 flex flex-col min-h-0 lg:h-full',
 						isSmallMobile ? 'p-1.5' : 'p-2 lg:p-3',
 					]"
 				>
-					<div
-						:class="[
-							'flex-1 min-h-0',
-							isMobileView ? '' : 'overflow-y-auto',
-						]"
-					>
+					<div class="flex-1 min-h-0 lg:overflow-y-auto">
 					<!-- Payment Methods -->
 					<div :class="isSmallMobile ? 'mb-1' : 'mb-1.5 lg:mb-3'">
 						<div
@@ -1569,193 +1592,6 @@
 								{{ __("Select a payment method") }}
 							</p>
 						</div>
-
-						<!-- Mobile Action Buttons - Sticky so Pay/Complete stays under the thumb
-						     while the invoice summary scrolls above -->
-						<div
-							class="sticky bottom-0 z-10 -mb-4 sm:-mb-6 -mx-2 px-2 pb-4 pt-2 mt-2 bg-white rounded-t-xl shadow-[0_-4px_16px_rgba(0,0,0,0.12)]"
-							:class="isSmallMobile ? 'space-y-1' : 'space-y-1.5'"
-						>
-							<!-- Two buttons side by side when both needed -->
-							<div
-								v-if="
-									lastSelectedMethod &&
-									remainingAmount > 0 &&
-									creditSaleEnabled &&
-									paymentEntries.length === 0
-								"
-								class="grid grid-cols-2"
-								:class="isSmallMobile ? 'gap-1' : 'gap-1.5'"
-							>
-								<!-- Pay Full Amount Button -->
-								<button
-									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
-									:class="[
-										'font-bold rounded-lg bg-green-500 text-white active:bg-green-600 flex items-center justify-center',
-										mobileButtonSize.height,
-										mobileButtonSize.text,
-										mobileButtonSize.gap,
-									]"
-								>
-									<svg
-										:class="mobileButtonSize.icon"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
-										/>
-									</svg>
-									<span class="truncate tabular-nums">{{
-										formatCurrency(remainingAmount)
-									}}</span>
-								</button>
-								<!-- Pay on Account Button -->
-								<button
-									@click="addCreditAccountPayment"
-									:disabled="isSubmitting"
-									:class="[
-										'font-semibold rounded-lg flex items-center justify-center',
-										isSubmitting
-											? 'bg-orange-300 text-white cursor-not-allowed'
-											: 'bg-orange-500 text-white active:bg-orange-600',
-										mobileButtonSize.height,
-										mobileButtonSize.text,
-										mobileButtonSize.gap,
-									]"
-								>
-									<svg
-										v-if="isSubmitting"
-										:class="mobileButtonSize.icon"
-										class="animate-spin"
-										fill="none"
-										viewBox="0 0 24 24"
-									>
-										<circle
-											class="opacity-25"
-											cx="12"
-											cy="12"
-											r="10"
-											stroke="currentColor"
-											stroke-width="4"
-										></circle>
-										<path
-											class="opacity-75"
-											fill="currentColor"
-											d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-										></path>
-									</svg>
-									<svg
-										v-else
-										:class="mobileButtonSize.icon"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-										/>
-									</svg>
-									<span class="truncate">{{
-										isSubmitting ? __("Processing...") : __("On Account")
-									}}</span>
-								</button>
-							</div>
-
-							<!-- Single Pay button (when no credit sale option) -->
-							<button
-								v-else-if="lastSelectedMethod && remainingAmount > 0"
-								@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
-								:disabled="isSubmitting"
-								:class="[
-									'w-full font-bold rounded-lg flex items-center justify-center',
-									isSubmitting
-										? 'bg-green-300 text-white cursor-not-allowed'
-										: 'bg-green-500 text-white active:bg-green-600',
-									mobileButtonSize.height,
-									mobileButtonSize.text,
-									mobileButtonSize.gap,
-								]"
-							>
-								<svg
-									:class="mobileButtonSize.icon"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
-									/>
-								</svg>
-								<span class="tabular-nums">{{ __("Pay") }} {{ formatCurrency(remainingAmount) }}</span>
-							</button>
-
-							<!-- Complete Payment Button -->
-							<button
-								v-if="
-									(remainingAmount === 0 || (applyWriteOff && canWriteOff)) &&
-									(totalPaid > 0 || isZeroTotal)
-								"
-								@click="completePayment"
-								:disabled="isSubmitting || !canComplete"
-								:class="[
-									'w-full font-bold rounded-lg flex items-center justify-center',
-									isSubmitting
-										? 'bg-blue-300 text-white cursor-not-allowed'
-										: 'bg-blue-500 text-white active:bg-blue-600',
-									mobileButtonSize.height,
-									mobileButtonSize.text,
-									mobileButtonSize.gap,
-								]"
-							>
-								<svg
-									v-if="isSubmitting"
-									:class="mobileButtonSize.icon"
-									class="animate-spin"
-									fill="none"
-									viewBox="0 0 24 24"
-								>
-									<circle
-										class="opacity-25"
-										cx="12"
-										cy="12"
-										r="10"
-										stroke="currentColor"
-										stroke-width="4"
-									></circle>
-									<path
-										class="opacity-75"
-										fill="currentColor"
-										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-									></path>
-								</svg>
-								<svg
-									v-else
-									:class="mobileButtonSize.icon"
-									fill="currentColor"
-									viewBox="0 0 20 20"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-										clip-rule="evenodd"
-									/>
-								</svg>
-								<span>{{
-									isSubmitting ? __("Processing...") : __("Complete Payment")
-								}}</span>
-							</button>
-						</div>
 					</div>
 					<!-- End Mobile Payment Section -->
 
@@ -1908,10 +1744,10 @@
 					</div>
 					<!-- End scrollable block (methods + quick amounts + numpad) -->
 
-					<!-- Action Buttons - Below Keypad (Tablet/Desktop) -->
+					<!-- Action Buttons - Below Keypad (Desktop lg+) -->
 					<div
 						:class="[
-							'hidden md:flex items-center gap-2 shrink-0',
+							'hidden lg:flex items-center gap-2 shrink-0 pt-3 border-t border-gray-200',
 							isCompactMode ? 'mt-2' : 'mt-4',
 						]"
 					>
@@ -2017,8 +1853,195 @@
 				<!-- End Right Column -->
 			</div>
 			<!-- End Two Column Layout -->
-		</template>
-	</Dialog>
+		</div>
+
+		<!-- Mobile / Tablet (< lg) Sticky Footer: Always reachable -->
+		<div class="shrink-0 bg-white border-t border-gray-200 p-3 sm:p-4 shadow-lg lg:hidden">
+			<!-- Two buttons side by side when both needed -->
+			<div
+				v-if="
+					lastSelectedMethod &&
+					remainingAmount > 0 &&
+					creditSaleEnabled &&
+					paymentEntries.length === 0
+				"
+				class="grid grid-cols-2 gap-2"
+			>
+				<!-- Pay Full Amount Button -->
+				<button
+					type="button"
+					@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+					:disabled="isSubmitting"
+					:class="[
+						'font-bold rounded-lg bg-green-500 text-white active:bg-green-600 flex items-center justify-center touch-manipulation',
+						mobileButtonSize.height,
+						mobileButtonSize.text,
+						mobileButtonSize.gap,
+						isSubmitting ? 'opacity-50 cursor-not-allowed' : '',
+					]"
+				>
+					<svg
+						:class="mobileButtonSize.icon"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+						/>
+					</svg>
+					<span class="truncate tabular-nums">{{
+						formatCurrency(remainingAmount)
+					}}</span>
+				</button>
+				<!-- Pay on Account Button -->
+				<button
+					type="button"
+					@click="addCreditAccountPayment"
+					:disabled="isSubmitting"
+					:class="[
+						'font-semibold rounded-lg flex items-center justify-center touch-manipulation',
+						isSubmitting
+							? 'bg-orange-300 text-white cursor-not-allowed'
+							: 'bg-orange-500 text-white active:bg-orange-600',
+						mobileButtonSize.height,
+						mobileButtonSize.text,
+						mobileButtonSize.gap,
+					]"
+				>
+					<svg
+						v-if="isSubmitting"
+						:class="mobileButtonSize.icon"
+						class="animate-spin"
+						fill="none"
+						viewBox="0 0 24 24"
+					>
+						<circle
+							class="opacity-25"
+							cx="12"
+							cy="12"
+							r="10"
+							stroke="currentColor"
+							stroke-width="4"
+						></circle>
+						<path
+							class="opacity-75"
+							fill="currentColor"
+							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+						></path>
+					</svg>
+					<svg
+						v-else
+						:class="mobileButtonSize.icon"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+						/>
+					</svg>
+					<span class="truncate">{{
+						isSubmitting ? __("Processing...") : __("On Account")
+					}}</span>
+				</button>
+			</div>
+
+			<!-- Single Pay button (when method selected and remaining > 0 and cannot complete) -->
+			<button
+				v-else-if="lastSelectedMethod && remainingAmount > 0 && !canComplete"
+				type="button"
+				@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+				:disabled="isSubmitting"
+				:class="[
+					'w-full font-bold rounded-lg flex items-center justify-center touch-manipulation',
+					isSubmitting
+						? 'bg-green-300 text-white cursor-not-allowed'
+						: 'bg-green-500 text-white active:bg-green-600',
+					mobileButtonSize.height,
+					mobileButtonSize.text,
+					mobileButtonSize.gap,
+				]"
+			>
+				<svg
+					:class="mobileButtonSize.icon"
+					fill="none"
+					stroke="currentColor"
+					viewBox="0 0 24 24"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+					/>
+				</svg>
+				<span class="tabular-nums">{{ __("Pay") }} {{ formatCurrency(remainingAmount) }}</span>
+			</button>
+
+			<!-- Complete Payment Button -->
+			<button
+				v-else
+				type="button"
+				@click="completePayment"
+				:disabled="isSubmitting || !canComplete"
+				:class="[
+					'w-full font-bold rounded-lg flex items-center justify-center touch-manipulation',
+					isSubmitting || !canComplete
+						? 'bg-blue-300 text-white cursor-not-allowed'
+						: 'bg-blue-600 text-white active:bg-blue-700',
+					mobileButtonSize.height,
+					mobileButtonSize.text,
+					mobileButtonSize.gap,
+				]"
+			>
+				<svg
+					v-if="isSubmitting"
+					:class="mobileButtonSize.icon"
+					class="animate-spin"
+					fill="none"
+					viewBox="0 0 24 24"
+				>
+					<circle
+						class="opacity-25"
+						cx="12"
+						cy="12"
+						r="10"
+						stroke="currentColor"
+						stroke-width="4"
+					></circle>
+					<path
+						class="opacity-75"
+						fill="currentColor"
+						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+					></path>
+				</svg>
+				<svg
+					v-else
+					:class="mobileButtonSize.icon"
+					fill="currentColor"
+					viewBox="0 0 20 20"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+						clip-rule="evenodd"
+					/>
+				</svg>
+				<span>{{
+					isSubmitting ? __("Processing...") : paymentButtonText
+				}}</span>
+			</button>
+		</div>
+	</div>
+</div>
+</Transition>
 
 	<!-- Nested Radix Dialog for overpayment confirmation -->
 	<Dialog v-model="overpayConfirmVisible" :options="{ size: 'xs' }">
@@ -2083,7 +2106,7 @@ import { getPaymentIcon } from "@/utils/payment";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { useToast } from "@/composables/useToast";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";
 import { useLongPress } from "@/composables/useLongPress";
@@ -2200,6 +2223,30 @@ const emit = defineEmits([
 const show = computed({
 	get: () => props.modelValue,
 	set: (val) => emit("update:modelValue", val),
+});
+
+function closeDialog() {
+	if (props.isSubmitting) return;
+	show.value = false;
+}
+
+function handleKeyDown(event) {
+	if (
+		event.key === "Escape" &&
+		show.value &&
+		!props.isSubmitting &&
+		!overpayConfirmVisible.value
+	) {
+		closeDialog();
+	}
+}
+
+onMounted(() => {
+	window.addEventListener("keydown", handleKeyDown);
+});
+
+onUnmounted(() => {
+	window.removeEventListener("keydown", handleKeyDown);
 });
 
 const paymentMethods = ref([]);
@@ -3722,3 +3769,15 @@ watch(
 	}
 );
 </script>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+	transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+	opacity: 0;
+}
+</style>

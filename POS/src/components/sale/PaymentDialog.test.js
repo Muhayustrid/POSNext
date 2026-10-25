@@ -190,3 +190,73 @@ describe("header discount from coupon locks the additional discount", () => {
 		expect(wrapper.vm.additionalDiscountLockedReason).toBe("Locked (coupon applied)")
 	})
 })
+
+describe("fullscreen overlay layout and accessibility", () => {
+	it("renders fullscreen dialog shell with accessibility attributes when open", async () => {
+		const wrapper = mountDialog({ modelValue: true })
+		await flushPromises()
+
+		const dialog = wrapper.find('[role="dialog"]')
+		expect(dialog.exists()).toBe(true)
+		expect(dialog.attributes("aria-modal")).toBe("true")
+		expect(dialog.attributes("aria-label")).toBe("Complete Payment")
+		expect(dialog.classes()).toContain("fixed")
+		expect(dialog.classes()).toContain("inset-0")
+		expect(dialog.classes()).toContain("z-[350]")
+		expect(dialog.classes()).toContain("rounded-none")
+	})
+
+	it("uses Complete Sales Order label when targetDoctype is Sales Order", async () => {
+		const wrapper = mountDialog({ modelValue: true, targetDoctype: "Sales Order" })
+		await flushPromises()
+
+		const dialog = wrapper.find('[role="dialog"]')
+		expect(dialog.attributes("aria-label")).toBe("Complete Sales Order")
+	})
+
+	it("emits update:modelValue false on close button click", async () => {
+		const wrapper = mountDialog({ modelValue: true })
+		await flushPromises()
+
+		const closeButtons = wrapper.findAll('button[aria-label="Close"]')
+		expect(closeButtons.length).toBeGreaterThanOrEqual(1)
+		await closeButtons[0].trigger("click")
+
+		expect(wrapper.emitted("update:modelValue")).toBeTruthy()
+		expect(wrapper.emitted("update:modelValue")[0]).toEqual([false])
+	})
+
+	it("disables close buttons and blocks closing when isSubmitting is true", async () => {
+		const wrapper = mountDialog({ modelValue: true, isSubmitting: true })
+		await flushPromises()
+
+		const closeButtons = wrapper.findAll('button[aria-label="Close"]')
+		for (const btn of closeButtons) {
+			expect(btn.attributes("disabled")).toBeDefined()
+		}
+
+		wrapper.vm.closeDialog()
+		expect(wrapper.emitted("update:modelValue")).toBeFalsy()
+	})
+
+	it("closes on Escape key press when not submitting", async () => {
+		const wrapper = mountDialog({ modelValue: true })
+		await flushPromises()
+
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		await flushPromises()
+
+		expect(wrapper.emitted("update:modelValue")).toBeTruthy()
+		expect(wrapper.emitted("update:modelValue")[0]).toEqual([false])
+	})
+
+	it("does not close on Escape key press when isSubmitting is true", async () => {
+		const wrapper = mountDialog({ modelValue: true, isSubmitting: true })
+		await flushPromises()
+
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+		await flushPromises()
+
+		expect(wrapper.emitted("update:modelValue")).toBeFalsy()
+	})
+})

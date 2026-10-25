@@ -1,182 +1,255 @@
 <template>
-	<Dialog v-model="isOpen" :options="{ title: __('Choose Package Options'), size: '2xl' }">
+	<Dialog v-model="isOpen" :options="{ title: __('Choose Package Options'), size: '4xl' }">
 		<template #body-content>
-			<div v-if="pkg" class="py-2 flex flex-col gap-4">
-				<!-- Package header -->
-				<div class="flex items-start gap-3">
+			<div v-if="pkg" class="package-options py-1 flex flex-col sm:flex-row items-start gap-5">
+				<!-- Option list with item rows -->
+				<div class="package-options-list flex-1 min-w-0 w-full flex flex-col gap-4">
 					<div
-						class="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0"
+						v-for="(group, idx) in pkg.groups"
+						:key="group.group_key"
+						:class="idx > 0 ? 'border-t border-gray-200 pt-4' : ''"
 					>
-						<svg
-							class="h-6 w-6 text-blue-600"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
+						<div class="flex items-start justify-between gap-3 mb-2.5">
+							<div class="min-w-0">
+								<p
+									:id="`package-group-${group.group_key}`"
+									class="text-sm font-semibold text-gray-900 break-words"
+								>
+									{{ group.label }}
+								</p>
+								<p v-if="group.description" class="text-xs text-gray-500 mt-0.5 break-words">
+									{{ group.description }}
+								</p>
+								<p class="text-xs text-gray-600 mt-0.5">
+									{{ groupRule(group) }}
+								</p>
+							</div>
+							<span
+								class="text-xs font-bold px-2 py-1 rounded-md whitespace-nowrap shrink-0"
+								:class="groupState[group.group_key]?.satisfied
+									? 'bg-green-100 text-green-700'
+									: 'bg-orange-100 text-orange-700'"
+							>
+								{{ groupState[group.group_key]?.picked || 0 }} / {{ group.max_qty }}
+							</span>
+						</div>
+
+						<div
+							class="flex flex-col gap-2"
+							role="group"
+							:aria-labelledby="`package-group-${group.group_key}`"
 						>
+							<div
+								v-for="option in optionsForGroup(group.group_key)"
+								:key="option.option_id"
+								class="flex items-center gap-3 rounded-lg border p-2.5 sm:p-3 transition-colors motion-reduce:transition-none"
+								:class="picked(group.group_key, option.option_id) > 0
+									? 'border-blue-500 bg-blue-50/70'
+									: 'border-gray-200 bg-white hover:border-gray-300'"
+							>
+								<!-- Thumbnail -->
+								<div
+									class="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0 border border-gray-200"
+								>
+									<img
+										v-if="option.image"
+										:src="option.image"
+										:alt="option.item_name || option.item_code"
+										loading="lazy"
+										class="w-full h-full object-cover"
+									/>
+									<svg
+										v-else
+										class="w-6 h-6 text-gray-400"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										aria-hidden="true"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="1.5"
+											d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2 2v12a2 2 0 002 2z"
+										/>
+									</svg>
+								</div>
+
+								<!-- Name & price adjustment -->
+								<div class="flex-1 min-w-0">
+									<p class="text-sm font-medium text-gray-900 break-words leading-snug">
+										{{ option.item_name || option.item_code }}
+									</p>
+									<p
+										class="text-xs mt-0.5"
+										:class="option.price_adjustment
+											? 'text-blue-600 font-semibold'
+											: 'text-gray-500'"
+									>
+										{{ priceAdjustmentLabel(option) }}
+									</p>
+								</div>
+
+								<!-- Single-pick groups use a plain toggle; multi-pick groups use a stepper -->
+								<Button
+									v-if="isSinglePick(group)"
+									class="package-pick shrink-0 px-3"
+									:aria-pressed="picked(group.group_key, option.option_id) > 0"
+									:label="`${__('Choose')}: ${option.item_name || option.item_code}`"
+									:variant="picked(group.group_key, option.option_id) ? 'solid' : 'subtle'"
+									theme="blue"
+									size="sm"
+									@click="togglePick(group, option)"
+								>
+									{{ picked(group.group_key, option.option_id) ? __("Chosen") : __("Choose") }}
+								</Button>
+
+								<div v-else class="flex items-center gap-1 shrink-0">
+									<Button
+										variant="subtle"
+										size="sm"
+										:disabled="picked(group.group_key, option.option_id) <= 0"
+										:label="`${__('Decrease')}: ${option.item_name || option.item_code}`"
+										class="package-step"
+										@click="decrement(group, option)"
+									>
+										&minus;
+									</Button>
+									<span class="w-7 text-center tabular-nums text-sm font-semibold text-gray-900">
+										{{ picked(group.group_key, option.option_id) }}
+									</span>
+									<Button
+										variant="subtle"
+										size="sm"
+										:disabled="!canIncrement(group, option)"
+										:label="`${__('Increase')}: ${option.item_name || option.item_code}`"
+										class="package-step"
+										@click="increment(group, option)"
+									>
+										+
+									</Button>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Summary panel: Ringkasan Paket -->
+				<div
+					class="package-summary-panel w-full sm:w-72 md:w-80 shrink-0 sm:sticky sm:top-0 flex flex-col gap-3.5 rounded-xl border border-gray-200 bg-gray-50/70 p-4"
+				>
+					<div class="flex items-center justify-between pb-2 border-b border-gray-200">
+						<h4 class="text-sm font-semibold text-gray-900">
+							{{ __("Package Summary") }}
+						</h4>
+					</div>
+
+					<!-- Package name + base price -->
+					<div class="space-y-1">
+						<p class="text-sm font-semibold text-gray-900 break-words leading-snug">
+							{{ pkg.package_name }}
+						</p>
+						<p v-if="pkg.description" class="text-xs text-gray-500 break-words">
+							{{ pkg.description }}
+						</p>
+						<p class="text-xs text-gray-600">
+							{{ __("Base price") }}:
+							<span class="font-medium text-gray-900">{{ formatCurrency(pkg.base_price) }}</span>
+						</p>
+					</div>
+
+					<!-- Always-included items -->
+					<div v-if="pkg.items?.length" class="rounded-lg bg-white border border-gray-200 p-2.5">
+						<p class="text-xs font-semibold text-gray-700 mb-1.5">
+							{{ __("Included in this package") }}
+						</p>
+						<ul class="flex flex-col gap-1">
+							<li
+								v-for="row in pkg.items"
+								:key="row.item_code"
+								class="flex items-center justify-between gap-2 text-xs text-gray-600"
+							>
+								<span class="flex-1 min-w-0 break-words">{{ row.item_name || row.item_code }}</span>
+								<span class="text-gray-500 tabular-nums font-medium shrink-0">x{{ row.qty }}</span>
+							</li>
+						</ul>
+					</div>
+
+					<!-- Per-group selected options with qty -->
+					<div v-if="pkg.groups?.length" class="flex flex-col gap-2.5">
+						<div
+							v-for="group in pkg.groups"
+							:key="`summary-group-${group.group_key}`"
+							class="text-xs"
+						>
+							<div class="flex items-center justify-between text-gray-500 mb-1">
+								<span class="font-medium truncate">{{ group.label }}</span>
+								<span
+									class="text-[11px] tabular-nums font-medium"
+									:class="groupState[group.group_key]?.satisfied ? 'text-green-600' : 'text-orange-600'"
+								>
+									{{ groupState[group.group_key]?.picked || 0 }}/{{ group.max_qty }}
+								</span>
+							</div>
+							<ul
+								v-if="selectedOptionsForGroup(group.group_key).length"
+								class="flex flex-col gap-1 pl-2 border-l-2 border-blue-400"
+							>
+								<li
+									v-for="opt in selectedOptionsForGroup(group.group_key)"
+									:key="opt.option_id"
+									class="flex items-center justify-between gap-2 text-gray-800"
+								>
+									<span class="flex-1 min-w-0 break-words">{{ opt.item_name || opt.item_code }}</span>
+									<div class="flex items-center gap-1 shrink-0">
+										<span
+											v-if="opt.price_adjustment"
+											class="text-[11px] text-blue-600 font-medium"
+										>
+											{{ priceAdjustmentLabel(opt) }}
+										</span>
+										<span class="font-semibold text-gray-900 tabular-nums">
+											x{{ picked(group.group_key, opt.option_id) }}
+										</span>
+									</div>
+								</li>
+							</ul>
+							<p v-else class="text-xs text-gray-400 italic pl-2 border-l-2 border-gray-200">
+								{{ __("None selected") }}
+							</p>
+						</div>
+					</div>
+
+					<!-- Validation feedback -->
+					<p
+						v-if="validationError"
+						role="status"
+						class="text-xs text-orange-700 flex items-start gap-1.5 bg-orange-50 border border-orange-200 rounded-lg p-2.5"
+					>
+						<svg class="w-4 h-4 flex-shrink-0 mt-0.5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path
 								stroke-linecap="round"
 								stroke-linejoin="round"
 								stroke-width="2"
-								d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+								d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
 							/>
 						</svg>
-					</div>
-					<div class="flex-1 min-w-0">
-						<h3 class="text-sm font-semibold text-gray-900">
-							{{ pkg.package_name }}
-						</h3>
-						<p v-if="pkg.description" class="text-xs text-gray-500 mt-0.5">
-							{{ pkg.description }}
-						</p>
-						<p class="text-xs text-gray-500 mt-0.5">
-							{{ __("Base price") }}: {{ formatCurrency(pkg.base_price) }}
-						</p>
-					</div>
-				</div>
-
-				<!-- Always-included items -->
-				<div v-if="pkg.items?.length" class="rounded-lg border border-gray-200 p-3">
-					<p class="text-xs font-semibold text-gray-900 mb-2">
-						{{ __("Included in this package") }}
+						<span class="flex-1 min-w-0 break-words leading-snug">{{ validationError }}</span>
 					</p>
-					<ul class="flex flex-col gap-1">
-						<li
-							v-for="row in pkg.items"
-							:key="row.item_code"
-							class="flex items-center gap-2 text-sm text-gray-700"
-						>
-							<svg
-								class="w-4 h-4 text-green-600 flex-shrink-0"
-								fill="currentColor"
-								viewBox="0 0 20 20"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-							<span class="flex-1 truncate">{{ row.item_name || row.item_code }}</span>
-							<span class="text-xs text-gray-500">x{{ row.qty }}</span>
-						</li>
-					</ul>
-				</div>
 
-				<!-- Choice groups -->
-				<div v-for="group in pkg.groups" :key="group.group_key" class="rounded-lg border p-3"
-					:class="groupState[group.group_key].satisfied
-						? 'border-gray-200'
-						: 'border-orange-300 bg-orange-50/40'"
-				>
-					<div class="flex items-start justify-between gap-2 mb-2">
-						<div class="min-w-0">
-							<p class="text-sm font-semibold text-gray-900">{{ group.label }}</p>
-							<p v-if="group.description" class="text-xs text-gray-500">
-								{{ group.description }}
-							</p>
-							<p class="text-xs text-gray-500 mt-0.5">
-								{{ groupRule(group) }}
-							</p>
-						</div>
-						<span
-							class="text-xs font-bold px-2 py-1 rounded-md whitespace-nowrap"
-							:class="groupState[group.group_key].satisfied
-								? 'bg-green-100 text-green-700'
-								: 'bg-orange-100 text-orange-700'"
-						>
-							{{ groupState[group.group_key].picked }} / {{ group.max_qty }}
+					<!-- Running total -->
+					<div class="flex items-center justify-between gap-2 border-t border-gray-200 pt-3 mt-auto">
+						<span class="text-xs sm:text-sm font-semibold text-gray-700">{{ __("Package Total") }}</span>
+						<span class="text-base sm:text-lg font-bold tabular-nums text-gray-900">
+							{{ formatCurrency(runningTotal) }}
 						</span>
 					</div>
-
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-						<div
-							v-for="option in optionsForGroup(group.group_key)"
-							:key="option.option_id"
-							class="flex items-center gap-2 rounded-lg border-2 p-2 transition-colors"
-							:class="picked(group.group_key, option.option_id) > 0
-								? 'border-blue-500 bg-blue-50'
-								: 'border-gray-200 bg-white'"
-						>
-							<div class="flex-1 min-w-0">
-								<p class="text-sm font-medium text-gray-900 truncate">
-									{{ option.item_name || option.item_code }}
-								</p>
-								<p class="text-xs" :class="option.price_adjustment
-									? 'text-blue-600 font-semibold'
-									: 'text-gray-500'"
-								>
-									{{ priceAdjustmentLabel(option) }}
-								</p>
-							</div>
-
-							<!-- Single-pick groups use a plain toggle; multi-pick groups use a stepper -->
-							<Button
-								v-if="isSinglePick(group)"
-								:variant="picked(group.group_key, option.option_id) ? 'solid' : 'subtle'"
-								theme="blue"
-								size="sm"
-								@click="togglePick(group, option)"
-							>
-								{{ picked(group.group_key, option.option_id) ? __("Chosen") : __("Choose") }}
-							</Button>
-
-							<div v-else class="flex items-center gap-1">
-								<Button
-									variant="subtle"
-									size="sm"
-									:disabled="picked(group.group_key, option.option_id) <= 0"
-									:aria-label="__('Decrease')"
-									@click="decrement(group, option)"
-								>
-									&minus;
-								</Button>
-								<span class="w-6 text-center text-sm font-semibold text-gray-900">
-									{{ picked(group.group_key, option.option_id) }}
-								</span>
-								<Button
-									variant="subtle"
-									size="sm"
-									:disabled="!canIncrement(group, option)"
-									:aria-label="__('Increase')"
-									@click="increment(group, option)"
-								>
-									+
-								</Button>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Validation feedback -->
-				<p
-					v-if="validationError"
-					class="text-xs text-orange-700 flex items-center gap-1.5 bg-orange-50 rounded-lg p-2"
-				>
-					<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-						/>
-					</svg>
-					{{ validationError }}
-				</p>
-
-				<!-- Running total -->
-				<div
-					class="flex items-center justify-between rounded-lg bg-gray-50 border border-gray-200 p-3"
-				>
-					<span class="text-sm font-medium text-gray-700">{{ __("Package Total") }}</span>
-					<span class="text-lg font-bold text-blue-600">
-						{{ formatCurrency(runningTotal) }}
-					</span>
 				</div>
 			</div>
 		</template>
 
 		<template #actions>
-			<div class="flex gap-2 w-full">
+			<div class="package-actions flex gap-2 w-full">
 				<Button class="flex-1" variant="subtle" @click="cancel">
 					{{ __("Cancel") }}
 				</Button>
@@ -262,6 +335,10 @@ const groupState = computed(() => {
 
 function optionsForGroup(groupKey) {
 	return (props.pkg?.options || []).filter((o) => o.group_key === groupKey);
+}
+
+function selectedOptionsForGroup(groupKey) {
+	return optionsForGroup(groupKey).filter((o) => picked(groupKey, o.option_id) > 0);
 }
 
 function isSinglePick(group) {
@@ -369,3 +446,28 @@ async function confirm() {
 	}
 }
 </script>
+
+<style scoped>
+.package-options {
+	max-height: calc(100dvh - 15rem);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.package-options :deep(.package-pick),
+.package-options :deep(.package-step),
+.package-actions :deep(button) {
+	min-height: 44px;
+}
+
+.package-options :deep(.package-step) {
+	min-width: 44px;
+	padding-inline: 0;
+}
+
+.package-options :deep(button:focus-visible),
+.package-actions :deep(button:focus-visible) {
+	outline: 2px solid currentColor;
+	outline-offset: 2px;
+}
+</style>
