@@ -71,9 +71,14 @@ def _make_user(role):
 	if not frappe.db.exists("Role", role):
 		raise AssertionError(f"{role} role does not exist on this site")
 	email = f"stock-opname-{uuid.uuid4().hex[:10]}@example.com"
-	frappe.get_doc({"doctype": "User", "email": email, "first_name": "SO Test"}).insert(
-		ignore_permissions=True
-	)
+	was_in_import = frappe.flags.in_import
+	frappe.flags.in_import = True
+	try:
+		frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": "SO Test", "enabled": 1, "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+	finally:
+		frappe.flags.in_import = was_in_import
 	frappe.get_doc(
 		{
 			"doctype": "Has Role",

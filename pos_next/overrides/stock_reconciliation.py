@@ -23,6 +23,7 @@ from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import (
 from frappe import _
 from frappe.utils import flt
 
+from pos_next.api.stock_opname import _initial_state, _workflow, get_editable_open_opname
 from pos_next.services.production import _resolve_profile
 from pos_next.stock_opname_setup import HQ_ROLES
 
@@ -47,17 +48,23 @@ class CustomStockReconciliation(StockReconciliation):
 			)
 
 	def validate(self):
-		if (
-			self.is_new()
-			and self.set_warehouse
-			and frappe.db.exists(DOCTYPE, {"docstatus": 0, "set_warehouse": self.set_warehouse})
-		):
-			open_name = frappe.db.get_value(
-				DOCTYPE, {"docstatus": 0, "set_warehouse": self.set_warehouse}, "name"
-			)
-			frappe.throw(
-				_("Warehouse {0} already has an open stock opname: {1}").format(self.set_warehouse, open_name)
-			)
+		if self.set_warehouse:
+			should_check = False
+			if self.is_new():
+				should_check = True
+			else:
+				wf = _workflow()
+				if wf:
+					initial = _initial_state(wf)
+					before = self.get_doc_before_save()
+					if before and before.workflow_state != initial and self.workflow_state == initial:
+						should_check = True
+			if should_check:
+				open_name = get_editable_open_opname(self.set_warehouse, include_returned=True, exclude=self.name)
+				if open_name:
+					frappe.throw(
+						_("Warehouse {0} already has an open stock opname: {1}").format(self.set_warehouse, open_name)
+					)
 		# Blind count: the warehouse_app hook fills system-derived custom_qty_before
 		# and custom_qty_difference_per_uom in before_validate; on a draft they would
 		# leak the system qty to the outlet. Clear them — the hook recomputes both on

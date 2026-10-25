@@ -77,7 +77,7 @@ def _back_transition(wf, state, roles):
 	return None
 
 
-def _state_flags(doc_or_row, wf, roles):
+def _state_flags(doc_or_row, wf, roles=None):
 	"""editable / returned / processing for a doc or list row, from the workflow.
 
 	Without an active workflow a draft stays editable and nothing is returned.
@@ -90,6 +90,8 @@ def _state_flags(doc_or_row, wf, roles):
 	state = doc_or_row.get("workflow_state")
 	state_rows = [s for s in wf.states if s.state == state]
 	returned = state in _returned_states(wf)
+	if roles is None:
+		roles = frappe.get_roles()
 	revivable = returned and _back_transition(wf, state, roles) is not None
 	return {
 		"editable": docstatus == 0 and (state == _initial_state(wf) or revivable),
@@ -97,6 +99,37 @@ def _state_flags(doc_or_row, wf, roles):
 		# approved but not yet submitted (the >100-row background submit window)
 		"processing": docstatus == 0 and any(cint(s.doc_status) == 1 for s in state_rows),
 	}
+
+
+def get_editable_open_opname(warehouse, roles=None, include_returned=False, exclude=None):
+	"""Name of the open editable Stock Reconciliation for warehouse, or None.
+
+	Only docstatus-0 docs in the workflow's initial or revivable (returned) state
+	count; approval stages never do. Without an active workflow, any docstatus-0
+	doc counts. `include_returned` also counts returned docs this user may not
+	revise, so a Rejected count blocks a new one whatever the user's roles.
+	"""
+	if not warehouse:
+		return None
+	filters = {"docstatus": 0, "set_warehouse": warehouse}
+	if exclude:
+		filters["name"] = ("!=", exclude)
+	open_docs = frappe.get_all(
+		DOCTYPE,
+		filters=filters,
+		fields=["name", "workflow_state", "docstatus"],
+		order_by="creation desc",
+	)
+	if not open_docs:
+		return None
+	wf = _workflow()
+	if roles is None:
+		roles = frappe.get_roles()
+	for doc in open_docs:
+		flags = _state_flags(doc, wf, roles)
+		if flags["editable"] or (include_returned and flags["returned"]):
+			return doc.name
+	return None
 
 
 def _doc_actions(doc, wf):
@@ -563,7 +596,8 @@ def list_opnames(pos_profile, start=0, page_length=50, status=None, search=None)
 					"processing": flags["processing"],
 				}
 			)
-		return out
+		open_count = get_editable_open_opname(warehouse, include_returned=True)
+		return {"opnames": out, "open_count": open_count}
 	except (ValidationError, frappe.PermissionError):
 		raise
 	except Exception as e:
@@ -1043,14 +1077,13 @@ def _import_target(name, warehouse):
 	if name:
 		doc = _get_doc(name)
 		_assert_doc_warehouse(doc, warehouse)
-	else:
-		open_name = frappe.db.get_value(DOCTYPE, {"docstatus": 0, "set_warehouse": warehouse}, "name")
-		if not open_name:
-			return None
-		doc = _get_doc(open_name)
-	if not _state_flags(doc, _workflow(), frappe.get_roles())["editable"]:
-		frappe.throw(_("This stock opname can no longer be edited"), ValidationError)
-	return doc
+		if not _state_flags(doc, _workflow(), frappe.get_roles())["editable"]:
+			frappe.throw(_("This stock opname can no longer be edited"), ValidationError)
+		return doc
+	open_name = get_editable_open_opname(warehouse)
+	if not open_name:
+		return None
+	return _get_doc(open_name)
 
 
 def _parse_import(rows, warehouse):

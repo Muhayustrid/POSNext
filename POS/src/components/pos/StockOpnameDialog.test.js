@@ -295,7 +295,7 @@ describe("StockOpnameDialog list", () => {
 		expect(findButton(wrapper, "Previous").attributes("disabled")).toBeUndefined()
 	})
 
-	it("blocks New Count while only a non-editable open count exists", async () => {
+	it("shows New Count while only a non-editable open count exists", async () => {
 		mockCall(LIST_URL, () =>
 			Promise.resolve([
 				{ name: "SR-STAGE", docstatus: 0, editable: false, workflow_state: "Area Check", item_count: 1 },
@@ -303,7 +303,33 @@ describe("StockOpnameDialog list", () => {
 		)
 		const wrapper = await mountOpenDialog()
 		expect(findButton(wrapper, "Continue")).toBeUndefined()
+		expect(findButton(wrapper, "New Count")).toBeTruthy()
+	})
+
+	it("hides New Count when open_count flag is set even if blocker is not in returned rows", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({
+				opnames: [
+					{ name: "SR-OLD", docstatus: 1, editable: false, item_count: 1 },
+				],
+				open_count: "SR-BLOCKER",
+			}),
+		)
+		const wrapper = await mountOpenDialog()
 		expect(findButton(wrapper, "New Count")).toBeUndefined()
+	})
+
+	it("shows New Count when open_count flag is null with pending rows", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve({
+				opnames: [
+					{ name: "SR-STAGE", docstatus: 0, editable: false, workflow_state: "Area Check", item_count: 1 },
+				],
+				open_count: null,
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		expect(findButton(wrapper, "New Count")).toBeTruthy()
 	})
 })
 
@@ -1695,7 +1721,7 @@ describe("StockOpnameDialog navigation", () => {
 		const wrapper = await mountOpenDialog()
 
 		expect(findButton(wrapper, "Continue")).toBeUndefined()
-		expect(findButton(wrapper, "New Count")).toBeUndefined()
+		expect(findButton(wrapper, "New Count")).toBeTruthy()
 		// the row still opens read-only
 		await openSavedDoc(wrapper, "SR-PEND")
 		expect(wrapper.text()).toContain("Alpha Item")

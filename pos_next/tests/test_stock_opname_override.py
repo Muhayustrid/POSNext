@@ -30,7 +30,12 @@ from frappe.model.workflow import apply_workflow
 from frappe.tests.utils import FrappeTestCase
 
 from pos_next.api.test_production import _make_test_item, _seed_stock
-from pos_next.stock_opname_setup import STATE_APPROVED, STATE_PENDING_AM
+from pos_next.stock_opname_setup import (
+	STATE_APPROVED,
+	STATE_PENDING_AM,
+	STATE_PENDING_SM,
+	STATE_REJECTED,
+)
 
 ADMIN = "Administrator"
 DOCTYPE = "Stock Reconciliation"
@@ -39,9 +44,14 @@ DOCTYPE = "Stock Reconciliation"
 def _make_user(role):
 	"""A user holding exactly `role` (fresh users have no roles)."""
 	email = f"stock-opname-{uuid.uuid4().hex[:10]}@example.com"
-	frappe.get_doc({"doctype": "User", "email": email, "first_name": "SO Test"}).insert(
-		ignore_permissions=True
-	)
+	was_in_import = frappe.flags.in_import
+	frappe.flags.in_import = True
+	try:
+		frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": "SO Test", "enabled": 1, "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+	finally:
+		frappe.flags.in_import = was_in_import
 	frappe.get_doc(
 		{
 			"doctype": "Has Role",
@@ -256,6 +266,28 @@ class TestStockOpnameOverride(FrappeTestCase):
 		first = self._make_sr(self.warehouse, [(item, 4)])
 		first.insert(ignore_permissions=True)
 		second = self._make_sr(self.warehouse, [(item, 4)])
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			second.insert(ignore_permissions=True)
+		self.assertIn(first.name, str(ctx.exception))
+
+	def test_new_count_allowed_while_pending_approval(self):
+		item = _make_test_item()
+		_seed_stock(item, self.warehouse, 5)
+		first = self._make_sr(self.warehouse, [(item, 4)])
+		first.insert(ignore_permissions=True)
+		first.db_set("workflow_state", STATE_PENDING_SM)
+		second = self._make_sr(self.warehouse, [(item, 3)])
+		second.insert(ignore_permissions=True)
+		self.assertTrue(second.name)
+		self.assertNotEqual(first.name, second.name)
+
+	def test_new_count_refused_while_rejected_exists(self):
+		item = _make_test_item()
+		_seed_stock(item, self.warehouse, 5)
+		first = self._make_sr(self.warehouse, [(item, 4)])
+		first.insert(ignore_permissions=True)
+		first.db_set("workflow_state", STATE_REJECTED)
+		second = self._make_sr(self.warehouse, [(item, 3)])
 		with self.assertRaises(frappe.ValidationError) as ctx:
 			second.insert(ignore_permissions=True)
 		self.assertIn(first.name, str(ctx.exception))

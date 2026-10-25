@@ -94,8 +94,8 @@ in the workflow's **initial** state, or in a **returned** state if your role may
 send it back to the initial state; approval stages are read-only. An Approved
 opname that is still posting (large counts, see below) shows **Processing**.
 
-One warehouse can have only one open opname at a time: starting a new count while
-a Draft exists is refused until the previous one is submitted or deleted.
+A warehouse is blocked from starting a new count only while an editable count exists
+(Draft or a revivable returned count such as Rejected); docs in approval stages do not block.
 
 ## HQ flow (Desk)
 

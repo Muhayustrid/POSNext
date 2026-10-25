@@ -768,6 +768,8 @@ const API = "pos_next.api.stock_opname"
 // view: "list" | "doc"
 const view = ref("list")
 const opnames = ref([])
+const openCount = ref(null)
+const hasServerOpenCount = ref(false)
 const PAGE_SIZE = 20
 const page = ref(0)
 const hasMore = ref(false)
@@ -872,9 +874,13 @@ const primaryMode = computed(() => {
 	return null
 })
 
-// One open count per warehouse: any docstatus-0 opname blocks starting a new one (D5).
-// The server blocks a second open count, so the open one is always the newest (page 0).
-const hasOpenOpname = computed(() => opnames.value.some((o) => !o.docstatus))
+// A Draft or Rejected count blocks starting a new one; approval stages do not (server mirrors this).
+const hasOpenOpname = computed(() => {
+	if (hasServerOpenCount.value) {
+		return Boolean(openCount.value)
+	}
+	return opnames.value.some((o) => !o.docstatus && (o.editable || o.returned))
+})
 
 // ---------------------------------------------------------------------------
 // List
@@ -885,7 +891,7 @@ async function loadList() {
 	loading.value = true
 	try {
 		// one extra row tells whether a next page exists
-		const rows =
+		const res =
 			(await call(`${API}.list_opnames`, {
 				pos_profile: props.posProfile,
 				start: page.value * PAGE_SIZE,
@@ -893,6 +899,10 @@ async function loadList() {
 				status: statusFilter.value || undefined,
 				search: searchTerm.value.trim() || undefined,
 			})) || []
+		// shortcut: bare-list fallback only serves old test mocks; the server always sends the object
+		const rows = Array.isArray(res) ? res : res.opnames || []
+		hasServerOpenCount.value = !Array.isArray(res) && "open_count" in res
+		openCount.value = Array.isArray(res) ? null : res.open_count ?? null
 		hasMore.value = rows.length > PAGE_SIZE
 		opnames.value = rows.slice(0, PAGE_SIZE)
 	} catch (err) {

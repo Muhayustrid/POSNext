@@ -34,9 +34,14 @@ DOCTYPE = "Stock Reconciliation"
 
 def _make_user(role):
 	email = f"so-api-{uuid.uuid4().hex[:10]}@example.com"
-	frappe.get_doc({"doctype": "User", "email": email, "first_name": "SO API Test"}).insert(
-		ignore_permissions=True
-	)
+	was_in_import = frappe.flags.in_import
+	frappe.flags.in_import = True
+	try:
+		frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": "SO API Test", "enabled": 1, "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+	finally:
+		frappe.flags.in_import = was_in_import
 	frappe.get_doc(
 		{
 			"doctype": "Has Role",
@@ -420,7 +425,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		doc.add_comment("Comment", text="Rejected: salah rak")
 		frappe.db.commit()
 		self._cashier()
-		rows = list_opnames(self.profile)
+		rows = list_opnames(self.profile)["opnames"]
 		row = next(r for r in rows if r["name"] == payload["name"])
 		self.assertEqual(row["reject_reason"], "salah rak")
 		# The HQ comment bumps modified, so reload the snapshot first —
@@ -476,6 +481,51 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		self.assertFalse(revised["returned"])
 		self.assertEqual(revised["actions"], ["Submit"])
 
+	def test_revise_blocked_when_another_open_count_exists(self):
+		from pos_next.api.stock_opname import save_opname, submit_opname
+
+		self._cashier()
+		a = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, a["name"])
+
+		# B created while A is pending
+		b = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 3}]})
+
+		# HQ rejects A
+		frappe.set_user(ADMIN)
+		doc_a = frappe.get_doc(DOCTYPE, a["name"])
+		doc_a.db_set("workflow_state", STATE_REJECTED)
+		frappe.db.commit()
+
+		# Outlet attempts to revise A while B is draft -> must fail, A stays Rejected
+		self._cashier()
+		with self.assertRaises(frappe.ValidationError):
+			submit_opname(self.profile, a["name"], action="Revise")
+		self.assertEqual(frappe.get_doc(DOCTYPE, a["name"]).workflow_state, STATE_REJECTED)
+
+		# After B is submitted (pending), revising A succeeds
+		submit_opname(self.profile, b["name"])
+		revised_a = submit_opname(self.profile, a["name"], action="Revise")
+		self.assertEqual(revised_a["workflow_state"], STATE_DRAFT)
+		self.assertEqual(frappe.get_doc(DOCTYPE, a["name"]).workflow_state, STATE_DRAFT)
+
+	def test_list_opnames_open_count_flag(self):
+		from pos_next.api.stock_opname import list_opnames, save_opname, submit_opname
+
+		self._cashier()
+		a = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, a["name"])
+		res_pending = list_opnames(self.profile)
+		self.assertIsNone(res_pending.get("open_count"))
+
+		frappe.set_user(ADMIN)
+		frappe.get_doc(DOCTYPE, a["name"]).db_set("workflow_state", STATE_REJECTED)
+		frappe.db.commit()
+
+		self._cashier()
+		res_rejected = list_opnames(self.profile)
+		self.assertEqual(res_rejected.get("open_count"), a["name"])
+
 	def test_list_filters_by_status_and_search(self):
 		from pos_next.api.stock_opname import get_opname_states, list_opnames, save_opname
 
@@ -484,7 +534,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		frappe.db.set_value(DOCTYPE, first["name"], {"docstatus": 2, "workflow_state": "Cancelled"})
 		second = save_opname(self.profile, {"items": [{"item_code": self.other_plain, "qty": 2}]})
 
-		names = lambda **kw: [r["name"] for r in list_opnames(self.profile, **kw)]  # noqa: E731
+		names = lambda **kw: [r["name"] for r in list_opnames(self.profile, **kw)["opnames"]]  # noqa: E731
 		self.assertEqual(names(status=STATE_DRAFT), [second["name"]])
 		self.assertEqual(names(status="Cancelled"), [first["name"]])
 		self.assertEqual(names(search=self.other_plain), [second["name"]])
@@ -892,6 +942,28 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		self.assertEqual(got["workflow_state"], STATE_DRAFT)
 		self.assertEqual(got["items"][0]["qty"], 5)
 
+	def test_import_with_no_name_while_pending_creates_new_doc(self):
+		from pos_next.api.stock_opname import (
+			TEMPLATE_HEADER,
+			get_opname,
+			import_opname_template,
+			save_opname,
+			submit_opname,
+		)
+
+		self._cashier()
+		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		submit_opname(self.profile, draft["name"])
+		url = self._attach([TEMPLATE_HEADER, [self.other_plain, "", "", "", "", 3]])
+		# With no name passed, an open pending count does not block; a new doc is created.
+		result = import_opname_template(self.profile, url)
+		self.assertEqual(result["applied"], 1)
+		self.assertNotEqual(result["name"], draft["name"])
+		got = get_opname(self.profile, result["name"])
+		self.assertEqual(got["workflow_state"], STATE_DRAFT)
+		self.assertEqual(got["items"][0]["item_code"], self.other_plain)
+		self.assertEqual(got["items"][0]["qty"], 3)
+
 	def test_import_supports_uom_column(self):
 		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template
 
@@ -991,10 +1063,10 @@ class TestStockOpnameUom(_StockOpnameFixture):
 		# close it without posting stock, so the one-open-count guard allows a second
 		frappe.db.set_value(DOCTYPE, first["name"], "docstatus", 2)
 		save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 2}]})
-		all_rows = list_opnames(self.profile)
+		all_rows = list_opnames(self.profile)["opnames"]
 		self.assertGreaterEqual(len(all_rows), 2)
-		page1 = list_opnames(self.profile, start=0, page_length=1)
-		page2 = list_opnames(self.profile, start=1, page_length=1)
+		page1 = list_opnames(self.profile, start=0, page_length=1)["opnames"]
+		page2 = list_opnames(self.profile, start=1, page_length=1)["opnames"]
 		self.assertEqual([r["name"] for r in page1 + page2], [r["name"] for r in all_rows[:2]])
 
 	def test_unknown_uom_rejected_per_row(self):
@@ -1476,7 +1548,7 @@ class TestStockOpnameCustomWorkflow(_StockOpnameFixture):
 		frappe.db.commit()
 
 		self._cashier()
-		row = next(r for r in list_opnames(self.profile) if r["name"] == payload["name"])
+		row = next(r for r in list_opnames(self.profile)["opnames"] if r["name"] == payload["name"])
 		self.assertEqual(row["workflow_state"], "HQ Check")
 		self.assertFalse(row["editable"])
 		self.assertFalse(row["returned"])
