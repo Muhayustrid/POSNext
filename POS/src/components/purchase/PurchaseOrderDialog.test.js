@@ -712,14 +712,9 @@ describe("PurchaseOrderDialog", () => {
 			.trigger("click")
 		await flushPromises()
 
-		// Open more actions menu
-		await wrapper.find('[data-testid="doc-menu-button"]').trigger("click")
-		await flushPromises()
-
-		expect(wrapper.find('[data-testid="doc-menu-cancel"]').exists()).toBe(false)
-		expect(wrapper.find('[data-testid="doc-menu-open-erpnext"]').exists()).toBe(
-			true,
-		)
+		// no cancel and no ERPNext Desk link -> no more-actions menu at all
+		expect(wrapper.find('[data-testid="doc-menu-button"]').exists()).toBe(false)
+		expect(wrapper.text()).not.toContain("Open in ERPNext")
 	})
 
 	it("New button switches to the form view", async () => {

@@ -452,27 +452,6 @@ describe("PurchaseReceiptDialog", () => {
 		expect(mocks.toast.success).toHaveBeenCalled()
 	})
 
-	it("Open in ERPNext in menu opens ERPNext URL", async () => {
-		const openSpy = vi.spyOn(window, "open").mockImplementation(() => null)
-		const wrapper = mountOpen()
-		await flushPromises()
-
-		await wrapper.find(`[data-test="pr-${PR_LIST_ROW.name}"]`).trigger("click")
-		await flushPromises()
-
-		await wrapper.find('[data-testid="doc-menu-button"]').trigger("click")
-		await flushPromises()
-
-		const menuOpen = wrapper.find('[data-testid="doc-menu-open-erpnext"]')
-		expect(menuOpen.exists()).toBe(true)
-		await menuOpen.trigger("click")
-
-		expect(openSpy).toHaveBeenCalledWith(
-			`/app/purchase-receipt/${PR_DOC_DRAFT.name}`,
-			"_blank",
-		)
-	})
-
 	it("hides Grand Total header and column when cashier has no price permission", async () => {
 		const unpricedReceipt = {
 			name: "MAT-PRE-2026-00001",

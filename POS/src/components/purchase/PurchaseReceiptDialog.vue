@@ -15,7 +15,6 @@
 					:pending-files="[]"
 					@back="goList"
 					@attach-add="onAttachAdd"
-					@open-erpnext="openInErpnext(currentDoc)"
 				>
 					<template #actions>
 						<Button
@@ -56,33 +55,6 @@
 									@click="submitDoc(a)"
 								>
 									{{ a }}
-								</button>
-							</div>
-						</div>
-
-						<div v-if="currentDoc?.name" class="relative">
-							<button
-								type="button"
-								data-testid="doc-menu-button"
-								class="flex h-11 w-11 md:h-10 md:w-10 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
-								:aria-label="__('More actions')"
-								:title="__('More actions')"
-								@click="docMenuOpen = !docMenuOpen"
-							>
-								<FeatherIcon name="more-horizontal" class="h-4 w-4" />
-							</button>
-							<div
-								v-if="docMenuOpen"
-								data-testid="doc-menu"
-								class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-							>
-								<button
-									type="button"
-									data-testid="doc-menu-open-erpnext"
-									class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
-									@click="openInErpnext(currentDoc); docMenuOpen = false"
-								>
-									{{ __("Open in ERPNext") }}
 								</button>
 							</div>
 						</div>
@@ -288,7 +260,6 @@ const currentDoc = ref(null)
 const loadingDoc = ref(false)
 const submitting = ref(false)
 const actionsMenuOpen = ref(false)
-const docMenuOpen = ref(false)
 
 const canAttach = computed(() => currentDoc.value?.docstatus === 0)
 
@@ -371,7 +342,6 @@ async function openDoc(name) {
 	view.value = "doc"
 	loadingDoc.value = true
 	actionsMenuOpen.value = false
-	docMenuOpen.value = false
 	currentDoc.value = { name }
 	try {
 		const res = await call(`${PR_API}.get_purchase_receipt`, { name })
@@ -387,7 +357,6 @@ function goList() {
 	view.value = "list"
 	currentDoc.value = null
 	actionsMenuOpen.value = false
-	docMenuOpen.value = false
 }
 
 async function reloadDoc() {
@@ -472,12 +441,5 @@ function onSearch() {
 function setStatus(value) {
 	statusFilter.value = value
 	loadReceipts()
-}
-
-function openInErpnext(receipt) {
-	const name = typeof receipt === "string" ? receipt : receipt?.name
-	if (name) {
-		window.open(`/app/purchase-receipt/${name}`, "_blank")
-	}
 }
 </script>

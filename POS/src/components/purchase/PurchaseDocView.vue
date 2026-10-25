@@ -38,17 +38,6 @@
 
 			<div class="ms-auto flex items-center gap-2" data-testid="doc-actions">
 				<slot name="actions" />
-				<button
-					v-if="doc?.name"
-					type="button"
-					data-testid="open-erpnext"
-					class="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-					:title="__('Open in ERPNext')"
-					:aria-label="__('Open in ERPNext')"
-					@click="emit('open-erpnext')"
-				>
-					<FeatherIcon name="external-link" class="h-4 w-4" />
-				</button>
 			</div>
 		</div>
 
@@ -249,7 +238,6 @@ const emit = defineEmits([
 	"back",
 	"attach-add",
 	"attach-remove",
-	"open-erpnext",
 ])
 
 const { formatDate } = useFormatters()

@@ -202,21 +202,6 @@ describe("PurchaseDocView.vue", () => {
 		expect(badge.text()).toContain("Factory SO")
 	})
 
-	it("emits open-erpnext on click", async () => {
-		const wrapper = mountView({
-			props: {
-				title: "Purchase Order",
-				doc: baseDoc,
-				kind: "po",
-			},
-		})
-
-		const erpBtn = wrapper.find('[data-testid="open-erpnext"]')
-		expect(erpBtn.exists()).toBe(true)
-		await erpBtn.trigger("click")
-		expect(wrapper.emitted("open-erpnext")).toBeTruthy()
-	})
-
 	it("renders PR details including purchase_orders and delivery note", () => {
 		const prDoc = {
 			name: "PR-2026-00001",

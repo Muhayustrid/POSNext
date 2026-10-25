@@ -149,7 +149,6 @@
 					:pending-files="[]"
 					@back="goList"
 					@attach-add="onDocAttachAdd"
-					@open-erpnext="openInErpnext(currentDoc)"
 				>
 					<template #actions>
 						<template v-if="currentDoc?.docstatus === 0">
@@ -187,7 +186,10 @@
 							{{ __("Receive") }}
 						</Button>
 
-						<div v-if="currentDoc?.name" class="relative">
+						<div
+							v-if="currentDoc?.docstatus === 1 && canCancelPO && !isFactoryLinked(currentDoc)"
+							class="relative"
+						>
 							<button
 								type="button"
 								data-testid="doc-menu-button"
@@ -204,21 +206,12 @@
 								class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
 							>
 								<button
-									v-if="currentDoc?.docstatus === 1 && canCancelPO && !isFactoryLinked(currentDoc)"
 									type="button"
 									data-testid="doc-menu-cancel"
 									class="block w-full px-3 py-2 text-start text-sm text-red-600 hover:bg-red-50"
 									@click="cancelDoc(currentDoc); docMenuOpen = false"
 								>
 									{{ __("Cancel") }}
-								</button>
-								<button
-									type="button"
-									data-testid="doc-menu-open-erpnext"
-									class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
-									@click="openInErpnext(currentDoc); docMenuOpen = false"
-								>
-									{{ __("Open in ERPNext") }}
 								</button>
 							</div>
 						</div>
@@ -267,7 +260,6 @@
 					:pending-files="[]"
 					@back="view = 'doc'"
 					@attach-add="onReceiptAttachAdd"
-					@open-erpnext="openInErpnext(currentReceiptDoc)"
 				>
 					<template #actions>
 						<Button
@@ -306,33 +298,6 @@
 									@click="submitReceiptDoc(a)"
 								>
 									{{ a }}
-								</button>
-							</div>
-						</div>
-
-						<div v-if="currentReceiptDoc?.name" class="relative">
-							<button
-								type="button"
-								data-testid="doc-menu-button"
-								class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-								:aria-label="__('More actions')"
-								:title="__('More actions')"
-								@click="receiptMenuOpen = !receiptMenuOpen"
-							>
-								<FeatherIcon name="more-horizontal" class="h-4 w-4" />
-							</button>
-							<div
-								v-if="receiptMenuOpen"
-								data-testid="doc-menu"
-								class="absolute end-0 z-20 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-							>
-								<button
-									type="button"
-									data-testid="doc-menu-open-erpnext"
-									class="block w-full px-3 py-2 text-start text-sm text-gray-700 hover:bg-gray-50"
-									@click="openInErpnext(currentReceiptDoc); receiptMenuOpen = false"
-								>
-									{{ __("Open in ERPNext") }}
 								</button>
 							</div>
 						</div>
@@ -887,7 +852,6 @@ const currentReceiptDoc = ref(null)
 const loadingReceiptDoc = ref(false)
 const submittingReceipt = ref(false)
 const receiptActionsMenuOpen = ref(false)
-const receiptMenuOpen = ref(false)
 
 const canAttachPO = computed(() => {
 	if (!currentDoc.value) return false
@@ -1141,16 +1105,6 @@ async function cancelDoc(doc) {
 	}
 }
 
-function openInErpnext(doc) {
-	const name = typeof doc === "string" ? doc : doc?.name
-	if (!name) return
-	const doctype =
-		view.value === "receipt" || doc?.doctype === "Purchase Receipt"
-			? "purchase-receipt"
-			: "purchase-order"
-	window.open(`/app/${doctype}/${name}`, "_blank")
-}
-
 async function openDoc(name) {
 	view.value = "doc"
 	loadingDoc.value = true
@@ -1202,7 +1156,6 @@ async function openReceiptDoc(name) {
 	view.value = "receipt"
 	loadingReceiptDoc.value = true
 	receiptActionsMenuOpen.value = false
-	receiptMenuOpen.value = false
 	currentReceiptDoc.value = { name }
 	try {
 		const res = await call(`${PR_API}.get_purchase_receipt`, { name })
