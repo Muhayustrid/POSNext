@@ -32,7 +32,7 @@
 				</div>
 
 				<div class="flex flex-wrap items-center justify-between gap-3">
-					<div class="relative w-full sm:w-72">
+					<div class="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
 						<FeatherIcon
 							name="search"
 							class="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
@@ -41,7 +41,7 @@
 							v-model="searchTerm"
 							type="search"
 							data-testid="list-search"
-							class="h-11 md:h-10 w-full rounded-lg border border-gray-200 bg-white ps-8 pe-2 text-sm focus:border-gray-400 focus:outline-none"
+							class="h-[44px] sm:h-10 w-full rounded-lg border border-gray-200 bg-white ps-8 pe-2 text-sm focus:border-gray-400 focus:outline-none"
 							:placeholder="__('Search ID or item...')"
 							:aria-label="__('Search ID or item...')"
 							@input="onSearchInput"
@@ -52,7 +52,7 @@
 						<Button
 							v-if="page === 0 && !filtered && !hasOpenOpname"
 							variant="solid"
-							class="h-11 md:h-10 touch-manipulation"
+							class="h-[44px] sm:h-10 touch-manipulation"
 							@click="openNew"
 						>
 							<template #prefix>
@@ -101,7 +101,7 @@
 								@click="openDoc(o.name)"
 								@keydown.enter="openDoc(o.name)"
 							>
-								<td class="order-1 min-w-0 break-all font-semibold text-gray-900 md:break-normal md:px-4 md:py-3">
+								<td class="order-1 col-span-2 min-w-0 font-semibold text-gray-900 md:px-4 md:py-3">
 									{{ o.name }}
 									<p
 										v-if="o.returned && o.reject_reason"
@@ -116,16 +116,16 @@
 									<span class="md:hidden">{{ __("{0} items", [o.item_count]) }}</span>
 									<span class="hidden md:inline">{{ o.item_count }}</span>
 								</td>
-								<!-- status sits top-right on cards, before Actions on desktop -->
-								<td class="order-2 justify-self-end md:px-4 md:py-3">
+								<!-- status gets its own card line (workflow states can be long), before Actions on desktop -->
+								<td class="order-2 col-span-2 min-w-0 md:px-4 md:py-3">
 									<span data-testid="status-pill" :class="statusPill(o)">{{ o.workflow_state }}</span>
 								</td>
 								<td class="order-5 col-span-2 text-end empty:hidden md:px-4 md:py-3 md:empty:table-cell">
 									<Button
 										v-if="!o.docstatus && o.editable"
 										data-testid="row-continue"
-										size="sm"
 										variant="solid"
+										class="h-[44px] sm:h-10 touch-manipulation"
 										@click.stop="openDoc(o.name)"
 									>
 										<template #prefix>
@@ -164,7 +164,7 @@
 						<button
 							type="button"
 							data-testid="doc-back"
-							class="-ms-1 flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
+							class="-ms-1 flex h-[44px] w-[44px] sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 							:aria-label="__('Back')"
 							:title="__('Back')"
 							@click="backToList"
@@ -190,7 +190,7 @@
 							<Button
 								v-if="primaryMode === 'save'"
 								variant="solid"
-								class="h-11 md:h-10 touch-manipulation"
+								class="h-[44px] sm:h-10 touch-manipulation"
 								data-testid="primary-action"
 								:loading="saving"
 								@click="save"
@@ -200,7 +200,7 @@
 							<Button
 								v-else-if="primaryMode === 'submit'"
 								variant="solid"
-								class="h-11 md:h-10 touch-manipulation"
+								class="h-[44px] sm:h-10 touch-manipulation"
 								data-testid="primary-action"
 								:loading="submitting"
 								@click="submitAction(actions[0])"
@@ -210,7 +210,7 @@
 							<div v-else-if="primaryMode === 'actions'" class="relative">
 								<Button
 									variant="solid"
-									class="h-11 md:h-10 touch-manipulation"
+									class="h-[44px] sm:h-10 touch-manipulation"
 									data-testid="primary-action"
 									@click="actionsMenuOpen = !actionsMenuOpen"
 								>
@@ -240,7 +240,7 @@
 								<button
 									type="button"
 									data-testid="doc-menu-button"
-									class="flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+									class="pos-touch-target flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 touch-manipulation"
 									:aria-label="__('More actions')"
 									:title="__('More actions')"
 									@click="docMenuOpen = !docMenuOpen"
@@ -278,19 +278,6 @@
 						<div
 							class="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-200 px-4 py-3 md:grid-cols-3"
 						>
-							<div class="min-w-0">
-								<p class="text-xs text-gray-500">{{ __("ID") }}</p>
-								<p class="break-all text-sm font-semibold text-gray-900 md:break-normal">
-									{{ editor.name || __("New Count") }}
-								</p>
-							</div>
-							<div v-if="editor.workflow_state" class="min-w-0">
-								<p class="text-xs text-gray-500">{{ __("Status") }}</p>
-								<span class="inline-flex items-center gap-1.5">
-									<span :class="['h-2 w-2 shrink-0 rounded-full', toneClass(editor)]"></span>
-									<span class="text-sm text-gray-700">{{ editor.workflow_state }}</span>
-								</span>
-							</div>
 							<div v-if="editor.set_warehouse" class="min-w-0">
 								<p class="text-xs text-gray-500">{{ __("Warehouse") }}</p>
 								<p class="truncate text-sm text-gray-900">{{ editor.set_warehouse }}</p>
@@ -305,7 +292,7 @@
 											data-testid="posting-date-input"
 											:aria-label="__('Posting Date')"
 											:disabled="!editor.set_posting_time"
-											class="h-8 rounded-md border border-gray-300 px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-500"
+											class="h-[44px] sm:h-10 rounded-md border border-gray-300 px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-500"
 										/>
 										<input
 											v-model="editor.posting_time"
@@ -313,9 +300,9 @@
 											data-testid="posting-time-input"
 											:aria-label="__('Posting Time')"
 											:disabled="!editor.set_posting_time"
-											class="h-8 rounded-md border border-gray-300 px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-500"
+											class="h-[44px] sm:h-10 rounded-md border border-gray-300 px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 disabled:bg-gray-50 disabled:text-gray-500"
 										/>
-										<label class="ms-1 flex items-center gap-1.5 text-sm text-gray-700">
+										<label class="ms-1 flex min-h-[44px] sm:min-h-[40px] items-center gap-2 text-sm text-gray-700 touch-manipulation">
 											<input
 												v-model="editor.set_posting_time"
 												type="checkbox"
@@ -347,33 +334,33 @@
 						<div class="flex flex-wrap items-center justify-between gap-2 px-4 pb-3 pt-4">
 							<h4 class="text-sm font-semibold text-gray-900">{{ __("Items") }}</h4>
 							<!-- Excel tools share the section header (N4) -->
-							<div v-if="editable" data-testid="grid-toolbar" class="flex flex-wrap items-center gap-2">
+							<div v-if="editable" data-testid="grid-toolbar" class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
 								<select
 									id="so-item-group"
 									v-model="itemGroup"
 									:aria-label="__('Item Group')"
 									:title="__('Item Group')"
-									class="h-8 rounded-md border border-gray-300 bg-white py-0 pe-8 ps-2 text-sm text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+									class="h-[44px] sm:h-10 min-w-0 flex-1 sm:flex-none rounded-md border border-gray-300 bg-white py-0 pe-8 ps-2 text-sm text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 								>
 									<option value="">{{ __("Items with transactions") }}</option>
 									<option v-for="g in itemGroups" :key="g.item_group" :value="g.item_group">
 										{{ g.item_group }}
 									</option>
 								</select>
-								<Button variant="subtle" data-testid="fetch-items" :loading="fetching" @click="fetchItems">
+								<Button variant="subtle" class="h-[44px] sm:h-10 touch-manipulation" data-testid="fetch-items" :loading="fetching" @click="fetchItems">
 									<template #prefix>
 										<FeatherIcon name="list" class="h-4 w-4" />
 									</template>
 									{{ __("Fetch Items") }}
 								</Button>
-								<Button variant="subtle" @click="downloadTemplate">
+								<Button variant="subtle" class="h-[44px] sm:h-10 touch-manipulation" @click="downloadTemplate">
 									<template #prefix>
 										<FeatherIcon name="download" class="h-4 w-4" />
 									</template>
 									{{ __("Download Template") }}
 								</Button>
 								<label
-									class="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded bg-gray-100 px-2 text-base text-gray-800 hover:bg-gray-200"
+									class="inline-flex h-[44px] sm:h-10 cursor-pointer items-center gap-1.5 rounded bg-gray-100 px-2 text-base touch-manipulation text-gray-800 hover:bg-gray-200"
 									:class="{ 'pointer-events-none opacity-60': importing }"
 								>
 									<input type="file" accept=".xlsx" class="hidden" :disabled="importing" @change="onFilePicked" />
@@ -386,18 +373,20 @@
 						<!-- read-only -->
 						<template v-if="!editable">
 							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_7rem_7rem_3.5rem] md:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,3fr)_minmax(0,1fr)_minmax(0,1fr)_5rem] md:gap-x-3"
 							>
+								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
-								<span>{{ __("UOM") }}</span>
 								<span class="text-end">{{ __("Qty") }}</span>
+								<span>{{ __("UOM") }}</span>
 								<span class="text-center">{{ __("Photo") }}</span>
 							</div>
 							<div
 								v-for="(row, idx) in editor.items"
 								:key="idx"
-								class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_7rem_7rem_3.5rem] md:gap-y-0 md:py-2"
+								class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[2rem_minmax(0,3fr)_minmax(0,1fr)_minmax(0,1fr)_5rem] md:gap-y-0 md:py-2"
 							>
+								<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
 								<div class="col-span-2 min-w-0 md:col-span-1">
 									<p class="truncate font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
 									<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
@@ -414,12 +403,12 @@
 									</p>
 								</div>
 								<div class="min-w-0">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
-									<span class="truncate text-gray-700">{{ row.uom }}</span>
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+									<span class="block tabular-nums md:text-end">{{ row.qty }}</span>
 								</div>
 								<div class="min-w-0">
-									<span class="mb-0.5 block text-end text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
-									<span class="block text-end tabular-nums">{{ row.qty }}</span>
+									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
+									<span class="truncate text-gray-700">{{ row.uom }}</span>
 								</div>
 								<div class="col-span-2 flex items-center md:col-span-1 md:justify-center">
 									<a
@@ -444,13 +433,13 @@
 						<!-- editable -->
 						<template v-else>
 							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_8rem_6.5rem_6.5rem_4rem_2rem] md:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 xl:grid xl:grid-cols-[2rem_minmax(0,3fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_8rem_2.5rem] xl:gap-x-3"
 							>
 								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("Batch") }}</span>
-								<span>{{ __("UOM") }}</span>
 								<span class="text-end">{{ __("Qty") }}</span>
+								<span>{{ __("UOM") }}</span>
 								<span class="text-center">{{ __("Photo") }}</span>
 								<span></span>
 							</div>
@@ -466,13 +455,13 @@
 								<div
 									v-for="(row, idx) in editor.items"
 									:key="row.key"
-									class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_8rem_6.5rem_6.5rem_4rem_2rem] md:gap-y-0 md:py-1.5"
+									class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 xl:grid-cols-[2rem_minmax(0,3fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_8rem_2.5rem] xl:gap-y-0 xl:py-1.5"
 									:class="{ 'rounded-md ring-2 ring-red-500 bg-red-50/20': row.photoRequired }"
 								>
-									<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
+									<span class="hidden text-xs tabular-nums text-gray-400 xl:block">{{ idx + 1 }}</span>
 
 									<!-- Item cell: a link field until an item is picked -->
-									<div class="relative col-span-2 min-w-0 md:col-span-1">
+									<div class="relative col-span-2 min-w-0 xl:col-span-1">
 										<template v-if="row.item_code">
 											<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
 											<p v-if="row.item_code !== row.item_name" class="truncate text-xs text-gray-400">
@@ -486,7 +475,7 @@
 												data-testid="row-item-input"
 												:placeholder="__('Search item...')"
 												:aria-label="__('Item')"
-												class="w-full rounded-md border border-dashed border-gray-300 px-2 py-1.5 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+												class="h-[44px] sm:h-10 w-full rounded-md border border-dashed border-gray-300 px-2 text-sm focus:border-solid focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 												@input="searchRow(row)"
 												@keyup.enter="addExactMatch(row)"
 												@keyup.escape="closeResults(row)"
@@ -514,14 +503,14 @@
 									</div>
 
 									<!-- Batch cell: a select once the picked item needs a batch -->
-									<div class="col-span-3 min-w-0 md:col-span-1" :class="{ 'hidden md:block': !row.has_batch_no && !row.batch_no }">
-										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Batch") }}</span>
+									<div class="col-span-3 min-w-0 xl:col-span-1" :class="{ 'hidden xl:block': !row.has_batch_no && !row.batch_no }">
+										<span class="mb-0.5 block text-xs text-gray-500 xl:hidden">{{ __("Batch") }}</span>
 										<select
 											v-if="row.has_batch_no"
 											v-model="row.batch_no"
 											data-testid="row-batch-select"
 											:aria-label="`${row.item_name || row.item_code} — ${__('Batch')}`"
-											class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											class="h-[44px] sm:h-10 w-full rounded-md border border-gray-300 bg-white px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 											@change="checkBatchDuplicate(row)"
 										>
 											<option :value="null">{{ __("Select batch") }}</option>
@@ -533,28 +522,7 @@
 									</div>
 
 									<div class="min-w-0">
-										<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
-										<!-- serials are counted by ticking, never in a converted UOM -->
-										<span
-											v-if="row.is_serial"
-											data-testid="uom-readonly"
-											class="block truncate text-sm text-gray-500"
-										>
-											{{ row.stock_uom }}
-										</span>
-										<select
-											v-else-if="row.item_code"
-											v-model="row.uom"
-											data-testid="uom-select"
-											:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
-											class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-										>
-											<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
-										</select>
-									</div>
-
-									<div class="col-span-2 min-w-0 md:col-span-1">
-										<span class="mb-0.5 block text-end text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
+										<span class="mb-0.5 block text-end text-xs text-gray-500 xl:hidden">{{ __("Qty") }}</span>
 										<!-- serial qty is the number of ticked serials, never typed -->
 										<span
 											v-if="row.is_serial"
@@ -573,12 +541,33 @@
 											inputmode="decimal"
 											data-testid="qty-input"
 											:aria-label="`${row.item_name || row.item_code} — ${__('Qty')}`"
-											class="w-full rounded-md border border-gray-300 px-2 py-1.5 text-end text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+											class="h-[44px] sm:h-10 w-full rounded-md border border-gray-300 px-2 text-end text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
 										/>
 									</div>
 
+									<div class="min-w-0">
+										<span class="mb-0.5 block text-xs text-gray-500 xl:hidden">{{ __("UOM") }}</span>
+										<!-- serials are counted by ticking, never in a converted UOM -->
+										<span
+											v-if="row.is_serial"
+											data-testid="uom-readonly"
+											class="block truncate text-sm text-gray-500"
+										>
+											{{ row.stock_uom }}
+										</span>
+										<select
+											v-else-if="row.item_code"
+											v-model="row.uom"
+											data-testid="uom-select"
+											:aria-label="`${row.item_name || row.item_code} — ${__('UOM')}`"
+											class="h-[44px] sm:h-10 w-full rounded-md border border-gray-300 bg-white px-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+										>
+											<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">{{ u }}</option>
+										</select>
+									</div>
+
 									<!-- Photo cell -->
-									<div class="col-span-3 flex min-w-0 flex-col items-center justify-center md:col-span-1">
+									<div class="flex min-w-0 flex-col items-center justify-center self-end xl:self-auto">
 										<span v-if="row.photoRequired" data-testid="photo-required" class="mb-0.5 block text-xs font-medium text-red-600">
 											{{ __("Photo required") }}
 										</span>
@@ -596,14 +585,14 @@
 											>
 												<img :src="row.pos_opname_photo" class="h-10 w-10 object-cover" :alt="__('Proof photo')" />
 											</a>
-											<div class="flex flex-col gap-0.5">
+											<div class="flex items-center">
 												<label
 													data-testid="replace-photo-btn"
 													role="button"
 													tabindex="0"
 													:title="__('Replace photo')"
 													:aria-label="__('Replace photo')"
-													class="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+													class="pos-touch-target flex cursor-pointer items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
 													@keydown.enter.space.prevent="$event.target.querySelector('input')?.click()"
 												>
 													<input
@@ -613,17 +602,17 @@
 														data-testid="replace-photo-input"
 														@change="handlePhotoUpload(row, $event)"
 													/>
-													<FeatherIcon name="refresh-cw" class="h-3 w-3" />
+													<FeatherIcon name="refresh-cw" class="h-4 w-4" />
 												</label>
 												<button
 													type="button"
 													data-testid="remove-photo-btn"
 													:title="__('Remove photo')"
 													:aria-label="__('Remove photo')"
-													class="flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+													class="pos-touch-target flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"
 													@click="removeRowPhoto(row)"
 												>
-													<FeatherIcon name="trash-2" class="h-3 w-3" />
+													<FeatherIcon name="trash-2" class="h-4 w-4" />
 												</button>
 											</div>
 										</div>
@@ -650,7 +639,7 @@
 
 									<button
 										type="button"
-										class="col-start-3 row-start-1 flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600 md:col-start-auto md:row-start-auto"
+										class="pos-touch-target col-start-3 row-start-1 flex shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600 xl:col-start-auto xl:row-start-auto"
 										:aria-label="__('Remove item')"
 										:title="__('Remove item')"
 										@click="editor.items.splice(idx, 1)"
@@ -659,7 +648,7 @@
 									</button>
 
 									<!-- serial tick list: tick the serials physically present -->
-									<div v-if="row.is_serial" class="col-span-3 mt-2 md:col-span-7">
+									<div v-if="row.is_serial" class="col-span-3 mt-2 xl:col-span-7">
 										<ul class="flex flex-wrap gap-x-4 gap-y-1">
 											<li v-for="s in row.serial_options" :key="s">
 												<label class="flex items-center gap-1.5 text-sm text-gray-700">
@@ -686,7 +675,7 @@
 
 							<!-- Add Row footer -->
 							<div class="flex flex-wrap items-center gap-3 px-4 py-3">
-								<Button variant="subtle" data-testid="add-row" @click="addRow">
+								<Button variant="subtle" class="h-[44px] sm:h-10 touch-manipulation" data-testid="add-row" @click="addRow">
 									<template #prefix>
 										<FeatherIcon name="plus" class="h-4 w-4" />
 									</template>
