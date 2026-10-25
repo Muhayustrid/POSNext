@@ -11,6 +11,7 @@ Stock Reconciliations from the POS app; HQ approves via the Frappe Workflow
 """
 
 import math
+import os
 
 import frappe
 from frappe import ValidationError, _
@@ -351,7 +352,7 @@ def _uom_factor(item_code, custom_uom, stock_uom, has_uom_field):
 	return factor
 
 
-def _validated_rows(items, warehouse):
+def _validated_rows(items, warehouse, doc_name=None):
 	"""Validate outlet count rows; return ERPNext row dicts ready to append.
 
 	Raises ValidationError with a per-row message (item code named, unknown
@@ -367,6 +368,7 @@ def _validated_rows(items, warehouse):
 		frappe.throw(_("At least one counted item is required"), ValidationError)
 	sr_meta = frappe.get_meta("Stock Reconciliation Item")
 	has_uom_field = sr_meta.has_field("custom_uom")
+	has_photo_field = sr_meta.has_field("pos_opname_photo")
 	qty_precision = sr_meta.get_field("qty").precision
 	seen = set()
 	rows = []
@@ -405,6 +407,20 @@ def _validated_rows(items, warehouse):
 				)
 			custom_after = _counted_qty(entry.get("custom_qty_after", entry.get("qty")), item_code)
 			factor = _uom_factor(item_code, custom_uom, meta.stock_uom, has_uom_field)
+		photo = (entry.get("pos_opname_photo") or "").strip()
+		if photo:
+			if not doc_name:
+				frappe.throw(_("Proof photos can only be attached to an existing stock opname"), ValidationError)
+			if not frappe.db.exists(
+				"File",
+				{
+					"attached_to_doctype": DOCTYPE,
+					"attached_to_name": doc_name,
+					"attached_to_field": "pos_opname_photo",
+					"file_url": photo,
+				},
+			):
+				frappe.throw(_("Proof photo {0} is not attached to this stock opname").format(photo), ValidationError)
 		if has_batch:
 			if not batch_no:
 				frappe.throw(_("Batch is required for {0}").format(item_code), ValidationError)
@@ -455,6 +471,8 @@ def _validated_rows(items, warehouse):
 			row["custom_uom"] = custom_uom
 			row["custom_qty_after"] = custom_after
 			row["custom_conversion_factor"] = factor
+		if has_photo_field:
+			row["pos_opname_photo"] = photo or None
 		if has_serial:
 			# Empty count reconciles against all current serials (ERPNext
 			# rejects use_serial_batch_fields rows without serial_no).
@@ -477,6 +495,8 @@ def _payload(doc):
 		fields=["parent", "uom", "conversion_factor"],
 	):
 		uom_map.setdefault(u.parent, []).append({"uom": u.uom, "conversion_factor": u.conversion_factor})
+	sr_meta = frappe.get_meta("Stock Reconciliation Item")
+	has_photo_field = sr_meta.has_field("pos_opname_photo")
 	items = []
 	for row in doc.items:
 		if row.item_code not in meta_cache:
@@ -499,6 +519,7 @@ def _payload(doc):
 				"custom_uom": custom_uom or stock_uom,
 				"custom_qty_after": row.get("custom_qty_after") if custom_uom else row.qty,
 				"uoms": [u for u in uom_map.get(row.item_code, []) if u["uom"] != stock_uom],
+				**({"pos_opname_photo": row.get("pos_opname_photo")} if has_photo_field else {}),
 			}
 		)
 	return {
@@ -533,7 +554,11 @@ def _attachments(name):
 		return []
 	rows = frappe.get_all(
 		"File",
-		filters={"attached_to_doctype": DOCTYPE, "attached_to_name": name},
+		filters={
+			"attached_to_doctype": DOCTYPE,
+			"attached_to_name": name,
+			"attached_to_field": ["!=", "pos_opname_photo"],
+		},
 		fields=["name", "file_name", "file_url", "file_size"],
 		order_by="creation asc",
 	)
@@ -711,7 +736,7 @@ def save_opname(pos_profile, data):
 			# Validate before any back transition, so invalid rows (or a frozen
 			# posting date) cannot leave a returned doc flipped to initial with
 			# nothing applied.
-			rows = _validated_rows(data.get("items"), warehouse)
+			rows = _validated_rows(data.get("items"), warehouse, doc_name=doc.name)
 			_assert_not_frozen(posting_date or doc.posting_date or nowdate())
 			if flags["returned"]:
 				back = _back_transition(wf, doc.workflow_state, roles)
@@ -728,8 +753,9 @@ def save_opname(pos_profile, data):
 				doc.posting_time = posting_time
 				doc.set_posting_time = 1
 			doc.save()
+			_prune_row_photos(doc)
 		else:
-			rows = _validated_rows(data.get("items"), warehouse)
+			rows = _validated_rows(data.get("items"), warehouse, doc_name=None)
 			_assert_not_frozen(posting_date or nowdate())
 			doc = frappe.new_doc(DOCTYPE)
 			doc.company = company
@@ -748,6 +774,18 @@ def save_opname(pos_profile, data):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Save Stock Opname Error")
 		frappe.throw(_("Error saving stock opname: {0}").format(str(e)))
+
+
+def _prune_row_photos(doc):
+	"""Delete proof photos no row references any more (removed or replaced)."""
+	used = {row.get("pos_opname_photo") for row in doc.items}
+	for f in frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": DOCTYPE, "attached_to_name": doc.name, "attached_to_field": "pos_opname_photo"},
+		fields=["name", "file_url"],
+	):
+		if f.file_url not in used:
+			frappe.delete_doc("File", f.name, ignore_permissions=True)
 
 
 @frappe.whitelist()
@@ -775,7 +813,11 @@ def submit_opname(pos_profile, name, action=None):
 			action = actions[0]
 		else:
 			frappe.throw(_("Choose an action: {0}").format(", ".join(actions)), ValidationError)
-		if doc.workflow_state == _initial_state(wf):
+		if not wf or doc.workflow_state == _initial_state(wf):
+			missing = [r for r in doc.items if not (r.get("pos_opname_photo") or "").strip()]
+			if missing:
+				names = ", ".join(f"row {r.idx} ({r.item_code})" for r in missing)
+				frappe.throw(_("Proof photo is required for counted rows: {0}").format(names), ValidationError)
 			_assert_not_frozen(doc.posting_date or nowdate())
 			# Preserve an outlet backdate (save already capped and guarded it); only
 			# stamp now when the posting date is still the save-moment default (today).
@@ -871,6 +913,40 @@ def remove_opname_attachment(pos_profile, name, file):
 		raise frappe.PermissionError(_("Attachment {0} is not on stock opname {1}").format(file, doc.name))
 	frappe.delete_doc("File", file, ignore_permissions=True)
 	return _attachments(doc.name)
+
+
+ALLOWED_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+
+
+@frappe.whitelist()
+def attach_opname_row_photo(pos_profile, name, file_name, filedata):
+	"""Attach one proof photo to a Stock Reconciliation row."""
+	doc = _editable_doc(pos_profile, name)
+	file_name = (file_name or "").strip()
+	filedata = (filedata or "").strip()
+	if not file_name or not filedata:
+		frappe.throw(_("File name and data are required"), ValidationError)
+	ext = os.path.splitext(file_name)[1].lower()
+	if ext not in ALLOWED_PHOTO_EXTENSIONS:
+		frappe.throw(
+			_("Only images ({0}) are allowed").format(", ".join(sorted(ALLOWED_PHOTO_EXTENSIONS))),
+			ValidationError,
+		)
+	if (len(filedata) * 3) // 4 > 10 * 1024 * 1024:
+		frappe.throw(_("File {0} exceeds the {1} MB limit").format(file_name, 10), ValidationError)
+	f = frappe.get_doc(
+		{
+			"doctype": "File",
+			"attached_to_doctype": DOCTYPE,
+			"attached_to_name": doc.name,
+			"attached_to_field": "pos_opname_photo",
+			"file_name": file_name,
+			"is_private": 1,
+			"content": filedata,
+			"decode": 1,
+		}
+	).insert(ignore_permissions=True)
+	return {"file_url": f.file_url}
 
 
 @frappe.whitelist()
@@ -1192,10 +1268,12 @@ def _merge_rows(doc, ops, warehouse):
 	current = {}
 	for row in doc.items if doc else []:
 		meta = _item_flags(row.item_code)
+		photo = row.get("pos_opname_photo")
 		if meta and meta.has_serial_no:
 			current[(row.item_code, None)] = {
 				"item_code": row.item_code,
 				"serial_nos": {s.strip() for s in (row.serial_no or "").split("\n") if s.strip()},
+				"pos_opname_photo": photo,
 			}
 		else:
 			current[(row.item_code, row.batch_no)] = {
@@ -1204,6 +1282,7 @@ def _merge_rows(doc, ops, warehouse):
 				"qty": row.qty,
 				"custom_uom": row.get("custom_uom"),
 				"custom_qty_after": row.get("custom_qty_after"),
+				"pos_opname_photo": photo,
 			}
 	for op in ops:
 		if "serial" in op:
@@ -1213,19 +1292,31 @@ def _merge_rows(doc, ops, warehouse):
 			else:
 				entry["serial_nos"].discard(op["serial"])
 		else:
+			existing = current.get((op["item_code"], op["batch_no"]))
+			existing_photo = existing.get("pos_opname_photo") if existing else None
 			current[(op["item_code"], op["batch_no"])] = {
 				"item_code": op["item_code"],
 				"batch_no": op["batch_no"],
 				"qty": op["qty"],
 				"custom_uom": op.get("custom_uom"),
 				"custom_qty_after": op.get("custom_qty_after"),
+				"pos_opname_photo": existing_photo,
 			}
 	entries = []
 	for val in current.values():
 		if "serial_nos" in val:
-			entries.append({"item_code": val["item_code"], "serial_nos": sorted(val["serial_nos"])})
+			entries.append({
+				"item_code": val["item_code"],
+				"serial_nos": sorted(val["serial_nos"]),
+				"pos_opname_photo": val.get("pos_opname_photo"),
+			})
 		else:
-			entry = {"item_code": val["item_code"], "qty": val["qty"], "batch_no": val["batch_no"]}
+			entry = {
+				"item_code": val["item_code"],
+				"qty": val["qty"],
+				"batch_no": val["batch_no"],
+				"pos_opname_photo": val.get("pos_opname_photo"),
+			}
 			# Carry a count UOM through the merge so a UOM row is not silently
 			# re-imported as a stock-UOM count.
 			if val.get("custom_uom"):
@@ -1235,7 +1326,7 @@ def _merge_rows(doc, ops, warehouse):
 	if not entries:
 		return [], 0
 	applied = sum(1 for op in ops if (op["item_code"], None if "serial" in op else op["batch_no"]) in current)
-	return _validated_rows(entries, warehouse), applied
+	return _validated_rows(entries, warehouse, doc_name=doc.name if doc else None), applied
 
 
 @frappe.whitelist()

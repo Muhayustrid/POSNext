@@ -468,6 +468,18 @@ CUSTOM_FIELDS = {
 				"description": "Recipe this Work Order was produced from (BOM is its derived artifact).",
 			},
 		],
+		"Stock Reconciliation Item": [
+			{
+				"fieldname": "pos_opname_photo",
+				"label": "Proof Photo",
+				"fieldtype": "Attach Image",
+				"insert_after": "batch_no",
+				"read_only": 0,
+				"no_copy": 1,
+				"print_hide": 1,
+				"description": "Proof photo taken during stock opname count.",
+			},
+		],
 	}
 
 

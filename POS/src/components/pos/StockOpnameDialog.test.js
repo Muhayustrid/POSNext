@@ -86,6 +86,7 @@ const SEARCH_URL = "pos_next.api.stock_opname.search_opname_items"
 const GROUPS_URL = "pos_next.api.items.get_item_groups"
 const STATES_URL = "pos_next.api.stock_opname.get_opname_states"
 const FETCH_URL = "pos_next.api.stock_opname.fetch_opname_items"
+const ATTACH_PHOTO_URL = "pos_next.api.stock_opname.attach_opname_row_photo"
 
 function mockCall(url, impl) {
 	handlers.calls[url] = vi.fn(impl)
@@ -162,6 +163,7 @@ const PLAIN_ITEM = {
 	serial_nos: [],
 	has_batch_no: 0,
 	has_serial_no: 0,
+	pos_opname_photo: "/private/files/plain-photo.jpg",
 }
 
 const ROW_DRAFT = {
@@ -1752,5 +1754,198 @@ describe("StockOpnameDialog navigation", () => {
 		await openSavedDoc(wrapper, "SR-0002")
 
 		expect(wrapper.find('[data-testid="attach-link"]').element.value).toBe("")
+	})
+})
+
+describe("StockOpnameDialog proof photo per row", () => {
+	it("upload flow sets the thumbnail and sends the photo on save", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				items: [{ ...PLAIN_ITEM, pos_opname_photo: null }],
+			}),
+		)
+		const attachPhotoCall = mockCall(ATTACH_PHOTO_URL, () =>
+			Promise.resolve({ file_url: "/private/files/opname-shelf.jpg" }),
+		)
+		const saveCall = mockCall(SAVE_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				modified: "m2",
+				items: [{ ...PLAIN_ITEM, pos_opname_photo: "/private/files/opname-shelf.jpg" }],
+			}),
+		)
+
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		const photoInput = wrapper.find('[data-testid="row-photo-input"]')
+		expect(photoInput.exists()).toBe(true)
+
+		const dummyFile = new File(["dummy-binary"], "shelf.jpg", { type: "image/jpeg" })
+		Object.defineProperty(photoInput.element, "files", {
+			value: [dummyFile],
+		})
+		await photoInput.trigger("change")
+		await new Promise((r) => setTimeout(r, 20))
+		await flushPromises()
+
+		expect(attachPhotoCall).toHaveBeenCalledTimes(1)
+		expect(attachPhotoCall.mock.calls[0][0]).toMatchObject({
+			pos_profile: "POS-1",
+			name: "SR-0001",
+			file_name: "shelf.jpg",
+		})
+
+		const thumb = wrapper.find('[data-testid="photo-thumbnail-link"]')
+		expect(thumb.exists()).toBe(true)
+		expect(thumb.attributes("href")).toBe("/private/files/opname-shelf.jpg")
+
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+
+		expect(saveCall).toHaveBeenCalledTimes(1)
+		expect(saveCall.mock.calls[0][0].data.items[0]).toMatchObject({
+			item_code: "ITEM-A",
+			pos_opname_photo: "/private/files/opname-shelf.jpg",
+		})
+	})
+
+	it("keeps the photo when the upload first saves an unsaved count", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		// an unsaved count: ensureSaved must save it before the upload
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				name: undefined,
+				modified: undefined,
+				items: [{ ...PLAIN_ITEM, pos_opname_photo: null }],
+			}),
+		)
+		mockCall(SAVE_URL, () =>
+			Promise.resolve({ ...DRAFT_DOC, items: [{ ...PLAIN_ITEM, pos_opname_photo: null }] }),
+		)
+		mockCall(ATTACH_PHOTO_URL, () =>
+			Promise.resolve({ file_url: "/private/files/first.jpg" }),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		const photoInput = wrapper.find('[data-testid="row-photo-input"]')
+		Object.defineProperty(photoInput.element, "files", {
+			value: [new File(["x"], "first.jpg", { type: "image/jpeg" })],
+		})
+		await photoInput.trigger("change")
+		await new Promise((r) => setTimeout(r, 20))
+		await flushPromises()
+
+		const thumb = wrapper.find('[data-testid="photo-thumbnail-link"]')
+		expect(thumb.exists()).toBe(true)
+		expect(thumb.attributes("href")).toBe("/private/files/first.jpg")
+	})
+
+	it("submit blocked with rows highlighted when a photo is missing", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				actions: ["Submit"],
+				items: [
+					{ ...PLAIN_ITEM, item_code: "ITEM-1", pos_opname_photo: "/files/p1.jpg" },
+					{ ...PLAIN_ITEM, item_code: "ITEM-2", pos_opname_photo: null },
+				],
+			}),
+		)
+		const submitCall = mockCall(SUBMIT_URL, () => Promise.resolve({}))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+
+		expect(confirmDialog(wrapper).props("modelValue")).toBe(false)
+		expect(submitCall).not.toHaveBeenCalled()
+		expect(toasts.log.some((m) => m.includes("need a proof photo"))).toBe(true)
+
+		const errorRows = wrapper.findAll('[data-testid="photo-required"]')
+		expect(errorRows.length).toBeGreaterThan(0)
+	})
+
+	it("submit proceeds when all counted rows have photos", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				actions: ["Submit"],
+				items: [
+					{ ...PLAIN_ITEM, item_code: "ITEM-1", pos_opname_photo: "/files/p1.jpg" },
+					{ ...PLAIN_ITEM, item_code: "ITEM-2", pos_opname_photo: "/files/p2.jpg" },
+				],
+			}),
+		)
+		const submitCall = mockCall(SUBMIT_URL, () => Promise.resolve({ name: "SR-0001" }))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+
+		expect(confirmDialog(wrapper).props("modelValue")).toBe(true)
+		await clickConfirm(wrapper)
+
+		expect(submitCall).toHaveBeenCalledTimes(1)
+		expect(submitCall.mock.calls[0][0]).toMatchObject({
+			pos_profile: "POS-1",
+			name: "SR-0001",
+			action: "Submit",
+		})
+	})
+
+	it("uncounted rows need no photo", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				actions: ["Submit"],
+				items: [
+					{ ...PLAIN_ITEM, item_code: "COUNTED", qty: 5, pos_opname_photo: "/files/p.jpg" },
+					{ ...PLAIN_ITEM, item_code: "BLANK", qty: null, pos_opname_photo: null },
+				],
+			}),
+		)
+		const submitCall = mockCall(SUBMIT_URL, () => Promise.resolve({ name: "SR-0001" }))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+
+		expect(confirmDialog(wrapper).props("modelValue")).toBe(true)
+		await clickConfirm(wrapper)
+		expect(submitCall).toHaveBeenCalledTimes(1)
+	})
+
+	it("read-only doc shows photo thumbnail when present", async () => {
+		mockCall(LIST_URL, () =>
+			Promise.resolve([
+				{ name: "SR-READ", workflow_state: "Approved", docstatus: 1, editable: false, item_count: 1 },
+			]),
+		)
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				name: "SR-READ",
+				workflow_state: "Approved",
+				docstatus: 1,
+				editable: false,
+				items: [{ ...PLAIN_ITEM, pos_opname_photo: "/private/files/proof-thumb.jpg" }],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper, "SR-READ")
+
+		const thumb = wrapper.find('[data-testid="readonly-photo"]')
+		expect(thumb.exists()).toBe(true)
+		expect(thumb.attributes("href")).toBe("/private/files/proof-thumb.jpg")
 	})
 })

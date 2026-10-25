@@ -378,16 +378,17 @@
 						<!-- read-only -->
 						<template v-if="!editable">
 							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_7rem_7rem] md:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[minmax(0,1fr)_7rem_7rem_3.5rem] md:gap-x-3"
 							>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("UOM") }}</span>
 								<span class="text-end">{{ __("Qty") }}</span>
+								<span class="text-center">{{ __("Photo") }}</span>
 							</div>
 							<div
 								v-for="(row, idx) in editor.items"
 								:key="idx"
-								class="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_7rem_7rem] md:gap-y-0 md:py-2"
+								class="grid grid-cols-2 items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 text-sm last:border-b-0 md:grid-cols-[minmax(0,1fr)_7rem_7rem_3.5rem] md:gap-y-0 md:py-2"
 							>
 								<div class="col-span-2 min-w-0 md:col-span-1">
 									<p class="truncate font-medium text-gray-900">{{ row.item_name || row.item_code }}</p>
@@ -412,6 +413,20 @@
 									<span class="mb-0.5 block text-end text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
 									<span class="block text-end tabular-nums">{{ row.qty }}</span>
 								</div>
+								<div class="col-span-2 flex items-center md:col-span-1 md:justify-center">
+									<a
+										v-if="row.pos_opname_photo"
+										:href="row.pos_opname_photo"
+										target="_blank"
+										rel="noopener noreferrer"
+										data-testid="readonly-photo"
+										class="block shrink-0 overflow-hidden rounded border border-gray-200 hover:opacity-80"
+										:title="__('View proof photo')"
+									>
+										<img :src="row.pos_opname_photo" class="h-8 w-8 object-cover" :alt="__('Proof photo')" />
+									</a>
+									<span v-else class="hidden text-xs text-gray-300 md:inline">-</span>
+								</div>
 							</div>
 							<p v-if="!editor.items.length" class="px-4 py-6 text-center text-sm text-gray-400">
 								{{ __("No items") }}
@@ -421,13 +436,14 @@
 						<!-- editable -->
 						<template v-else>
 							<div
-								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_7rem_2rem] md:gap-x-3"
+								class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_8rem_6.5rem_6.5rem_4rem_2rem] md:gap-x-3"
 							>
 								<span>{{ __("No.") }}</span>
 								<span>{{ __("Item") }}</span>
 								<span>{{ __("Batch") }}</span>
 								<span>{{ __("UOM") }}</span>
 								<span class="text-end">{{ __("Qty") }}</span>
+								<span class="text-center">{{ __("Photo") }}</span>
 								<span></span>
 							</div>
 
@@ -442,7 +458,8 @@
 								<div
 									v-for="(row, idx) in editor.items"
 									:key="row.key"
-									class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_7rem_2rem] md:gap-y-0 md:py-1.5"
+									class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-2 last:border-b-0 md:grid-cols-[2rem_minmax(0,1fr)_8rem_6.5rem_6.5rem_4rem_2rem] md:gap-y-0 md:py-1.5"
+									:class="{ 'rounded-md ring-2 ring-red-500 bg-red-50/20': row.photoRequired }"
 								>
 									<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
 
@@ -552,6 +569,77 @@
 										/>
 									</div>
 
+									<!-- Photo cell -->
+									<div class="col-span-3 flex min-w-0 flex-col items-center justify-center md:col-span-1">
+										<span v-if="row.photoRequired" data-testid="photo-required" class="mb-0.5 block text-xs font-medium text-red-600">
+											{{ __("Photo required") }}
+										</span>
+										<div v-if="row.uploading_photo" class="flex h-11 w-11 items-center justify-center">
+											<FeatherIcon name="loader" class="h-5 w-5 animate-spin text-blue-600" />
+										</div>
+										<div v-else-if="row.pos_opname_photo" class="flex items-center gap-1.5" data-testid="photo-thumbnail-container">
+											<a
+												:href="row.pos_opname_photo"
+												target="_blank"
+												rel="noopener noreferrer"
+												data-testid="photo-thumbnail-link"
+												class="block shrink-0 overflow-hidden rounded border border-gray-200 hover:opacity-80"
+												:title="__('View proof photo')"
+											>
+												<img :src="row.pos_opname_photo" class="h-10 w-10 object-cover" :alt="__('Proof photo')" />
+											</a>
+											<div class="flex flex-col gap-0.5">
+												<label
+													data-testid="replace-photo-btn"
+													role="button"
+													tabindex="0"
+													:title="__('Replace photo')"
+													:aria-label="__('Replace photo')"
+													class="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+													@keydown.enter.space.prevent="$event.target.querySelector('input')?.click()"
+												>
+													<input
+														type="file"
+														accept="image/*"
+														class="hidden"
+														data-testid="replace-photo-input"
+														@change="handlePhotoUpload(row, $event)"
+													/>
+													<FeatherIcon name="refresh-cw" class="h-3 w-3" />
+												</label>
+												<button
+													type="button"
+													data-testid="remove-photo-btn"
+													:title="__('Remove photo')"
+													:aria-label="__('Remove photo')"
+													class="flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600"
+													@click="removeRowPhoto(row)"
+												>
+													<FeatherIcon name="trash-2" class="h-3 w-3" />
+												</button>
+											</div>
+										</div>
+										<label
+											v-else
+											data-testid="add-photo-btn"
+											role="button"
+											tabindex="0"
+											:aria-label="__('Add proof photo')"
+											:title="__('Add proof photo')"
+											class="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed border-gray-300 text-gray-400 hover:border-gray-400 hover:bg-gray-50 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+											@keydown.enter.space.prevent="$event.target.querySelector('input')?.click()"
+										>
+											<input
+												type="file"
+												accept="image/*"
+												class="hidden"
+												data-testid="row-photo-input"
+												@change="handlePhotoUpload(row, $event)"
+											/>
+											<FeatherIcon name="camera" class="h-5 w-5" />
+										</label>
+									</div>
+
 									<button
 										type="button"
 										class="col-start-3 row-start-1 flex h-7 w-7 shrink-0 items-center justify-center justify-self-end rounded text-gray-400 hover:bg-red-50 hover:text-red-600 md:col-start-auto md:row-start-auto"
@@ -563,7 +651,7 @@
 									</button>
 
 									<!-- serial tick list: tick the serials physically present -->
-									<div v-if="row.is_serial" class="col-span-3 mt-2 md:col-span-6">
+									<div v-if="row.is_serial" class="col-span-3 mt-2 md:col-span-7">
 										<ul class="flex flex-wrap gap-x-4 gap-y-1">
 											<li v-for="s in row.serial_options" :key="s">
 												<label class="flex items-center gap-1.5 text-sm text-gray-700">
@@ -735,6 +823,7 @@ import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { ATTACHMENT_ACCEPT, fileToBase64, sanitizePickedFiles } from "@/utils/attachments"
+import { compressImage } from "@/utils/compressImage"
 import { downloadXlsx } from "@/utils/downloadXlsx"
 
 const props = defineProps({
@@ -975,6 +1064,9 @@ function blankRow(fields = {}) {
 		serial_nos: [],
 		serial_options: [],
 		is_serial: false,
+		pos_opname_photo: null,
+		photoRequired: false,
+		uploading_photo: false,
 		// per-row link-field search state (search term + dropdown results)
 		search: "",
 		results: [],
@@ -1002,6 +1094,7 @@ function normalizeItem(item) {
 		serial_nos: [...serials],
 		serial_options: [...serials],
 		is_serial,
+		pos_opname_photo: item.pos_opname_photo || null,
 	})
 }
 
@@ -1420,6 +1513,7 @@ function buildItems() {
 				qty: r.is_serial ? r.serial_nos.length : Number(r.qty) || 0,
 			}
 			if (r.batch_no) out.batch_no = r.batch_no
+			if (r.pos_opname_photo) out.pos_opname_photo = r.pos_opname_photo
 			if (r.is_serial) {
 				// serial rows never carry a count UOM (serials are ticked)
 				out.serial_nos = [...r.serial_nos]
@@ -1538,6 +1632,20 @@ async function submitAction(action) {
 	actionsMenuOpen.value = false
 	// a returned count's action sends it back to draft for editing
 	if (editor.value.returned) return reviseAction(action)
+
+	const counted = editor.value.items.filter((r) => r.item_code && !isUncounted(r))
+	const missing = counted.filter((r) => !r.pos_opname_photo)
+	if (missing.length) {
+		for (const r of editor.value.items) {
+			r.photoRequired = missing.includes(r)
+		}
+		showError(__("{0} rows need a proof photo", [missing.length]))
+		return
+	}
+	for (const r of editor.value.items) {
+		r.photoRequired = false
+	}
+
 	const ok = await confirmAsk({
 		title: __("Submit Stock Opname"),
 		message: __("After submitting you cannot edit until HQ decides"),
@@ -1554,6 +1662,9 @@ async function submitAction(action) {
 			}
 			if (!(await sendAttachments({ link: linkInput.value.trim() }))) return
 			linkInput.value = ""
+		}
+		if (dirty.value || !editor.value.name) {
+			if (!(await save())) return
 		}
 		await call(`${API}.submit_opname`, {
 			pos_profile: props.posProfile,
@@ -1695,6 +1806,42 @@ async function ensureSaved() {
 		return false
 	}
 	return (await save()) && !!editor.value.name
+}
+
+async function handlePhotoUpload(row, event) {
+	const file = event.target?.files?.[0]
+	if (event.target) event.target.value = ""
+	if (!file) return
+	row.uploading_photo = true
+	try {
+		const compressed = await compressImage(file, { maxEdge: 1600, quality: 0.8 })
+		const b64 = await fileToBase64(compressed)
+		if (!(await ensureSaved())) return
+		// a first save rebuilds the rows: re-find this one by item + batch
+		const target = editor.value.items.includes(row)
+			? row
+			: editor.value.items.find(
+					(r) => r.item_code === row.item_code && (r.batch_no || "") === (row.batch_no || ""),
+				) || row
+		const res = await call(`${API}.attach_opname_row_photo`, {
+			pos_profile: props.posProfile,
+			name: editor.value.name,
+			file_name: compressed.name || file.name,
+			filedata: b64,
+		})
+		if (res?.file_url) {
+			target.pos_opname_photo = res.file_url
+			target.photoRequired = false
+		}
+	} catch (err) {
+		showError(errMsg(err, "Failed to upload photo"))
+	} finally {
+		row.uploading_photo = false
+	}
+}
+
+function removeRowPhoto(row) {
+	row.pos_opname_photo = null
 }
 
 async function sendAttachments(args) {

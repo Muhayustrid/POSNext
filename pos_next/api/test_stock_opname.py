@@ -55,6 +55,18 @@ def _make_user(role):
 	return email
 
 
+TINY_JPEG_B64 = (
+	"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc"
+	"5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/w"
+	"AARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIh"
+	"MUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eX"
+	"qDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEA"
+	"AwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUv"
+	"AVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOk"
+	"paanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5/ooooA//2Q=="
+)
+
+
 class _StockOpnameFixture(FrappeTestCase):
 	"""Shared fixtures: warehouse + profile + items for both test classes.
 
@@ -200,6 +212,24 @@ class _StockOpnameFixture(FrappeTestCase):
 	def _cashier(self):
 		frappe.set_user(self.cashier)
 
+	def _give_photos(self, doc_name):
+		doc = frappe.get_doc(DOCTYPE, doc_name)
+		for row in doc.items:
+			f = frappe.get_doc(
+				{
+					"doctype": "File",
+					"attached_to_doctype": DOCTYPE,
+					"attached_to_name": doc_name,
+					"attached_to_field": "pos_opname_photo",
+					"file_name": f"proof_{row.idx}.jpg",
+					"is_private": 1,
+					"content": TINY_JPEG_B64,
+					"decode": 1,
+				}
+			).insert(ignore_permissions=True)
+			row.pos_opname_photo = f.file_url
+		doc.save(ignore_permissions=True)
+
 
 class TestStockOpnameApi(_StockOpnameFixture):
 	def test_save_get_roundtrip_is_blind(self):
@@ -225,6 +255,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 				"custom_uom",
 				"custom_qty_after",
 				"uoms",
+				"pos_opname_photo",
 			},
 		)
 		# native row: the count UOM falls back to stock UOM / native qty
@@ -282,6 +313,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 
 		self._cashier()
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"])
 		frappe.set_user(self.stock_manager)
 		doc = frappe.get_doc(DOCTYPE, payload["name"])
@@ -394,6 +426,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 
 		self._cashier()
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		result = submit_opname(self.profile, payload["name"])
 		self.assertEqual(result["workflow_state"], STATE_PENDING_SM)
 		doc = frappe.get_doc(DOCTYPE, payload["name"])
@@ -405,6 +438,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 
 		self._cashier()
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"])
 		with self.assertRaises(frappe.ValidationError):
 			save_opname(
@@ -486,6 +520,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 
 		self._cashier()
 		a = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(a["name"])
 		submit_opname(self.profile, a["name"])
 
 		# B created while A is pending
@@ -504,6 +539,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		self.assertEqual(frappe.get_doc(DOCTYPE, a["name"]).workflow_state, STATE_REJECTED)
 
 		# After B is submitted (pending), revising A succeeds
+		self._give_photos(b["name"])
 		submit_opname(self.profile, b["name"])
 		revised_a = submit_opname(self.profile, a["name"], action="Revise")
 		self.assertEqual(revised_a["workflow_state"], STATE_DRAFT)
@@ -514,6 +550,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 
 		self._cashier()
 		a = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(a["name"])
 		submit_opname(self.profile, a["name"])
 		res_pending = list_opnames(self.profile)
 		self.assertIsNone(res_pending.get("open_count"))
@@ -587,6 +624,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 
 		self._cashier()
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"])
 		with self.assertRaises(WorkflowTransitionError):
 			apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Approve")
@@ -606,6 +644,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.stock_manager)
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"])
 		with self.assertRaisesRegex(frappe.ValidationError, "Self approval is not allowed"):
 			apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Approve")
@@ -646,6 +685,7 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		link_row = next(r for r in rows if r["file_name"].startswith("https://"))
 		self.assertEqual(len(remove_opname_attachment(self.profile, name, link_row["name"])), 1)
 		# pending approval: attachments are frozen
+		self._give_photos(name)
 		submit_opname(self.profile, name)
 		with self.assertRaises(frappe.ValidationError):
 			attach_opname_files(self.profile, name, link="https://example.com/late")
@@ -657,6 +697,203 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
 		with self.assertRaises(frappe.PermissionError):
 			attach_opname_files(self.foreign_profile, payload["name"], link="https://example.com/x")
+
+	def test_photo_field_exists(self):
+		meta = frappe.get_meta("Stock Reconciliation Item")
+		self.assertTrue(meta.has_field("pos_opname_photo"))
+		df = meta.get_field("pos_opname_photo")
+		self.assertEqual(df.fieldtype, "Attach Image")
+
+	def test_attach_opname_row_photo(self):
+		from pos_next.api.stock_opname import (
+			attach_opname_row_photo,
+			get_opname,
+			save_opname,
+			submit_opname,
+		)
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		name = payload["name"]
+		filedata = TINY_JPEG_B64
+		res = attach_opname_row_photo(self.profile, name, "proof.jpg", filedata)
+		self.assertIn("file_url", res)
+		file_url = res["file_url"]
+
+		# File is private and has attached_to_field="pos_opname_photo"
+		f = frappe.get_doc("File", {"file_url": file_url})
+		self.assertEqual(f.attached_to_doctype, DOCTYPE)
+		self.assertEqual(f.attached_to_name, name)
+		self.assertEqual(f.attached_to_field, "pos_opname_photo")
+		self.assertEqual(f.is_private, 1)
+
+		# _attachments must exclude files with attached_to_field="pos_opname_photo"
+		got = get_opname(self.profile, name)
+		self.assertEqual(got["attachments"], [])
+
+		# Rejects non-image extension
+		with self.assertRaises(frappe.ValidationError):
+			attach_opname_row_photo(self.profile, name, "proof.pdf", filedata)
+
+		# Rejects foreign profile
+		with self.assertRaises(frappe.PermissionError):
+			attach_opname_row_photo(self.foreign_profile, name, "proof2.png", filedata)
+
+		# Rejects pending doc
+		self._give_photos(name)
+		submit_opname(self.profile, name)
+		with self.assertRaises(frappe.ValidationError):
+			attach_opname_row_photo(self.profile, name, "proof3.png", filedata)
+
+	def test_save_photo_trust_boundary(self):
+		import base64
+
+		from pos_next.api.stock_opname import (
+			attach_opname_row_photo,
+			get_opname,
+			save_opname,
+		)
+
+		self._cashier()
+		# 1. Brand new doc cannot be created with a photo URL
+		with self.assertRaises(frappe.ValidationError):
+			save_opname(
+				self.profile,
+				{"items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": "/private/files/spoofed.jpg"}]},
+			)
+
+		# 2. Existing doc: photo not attached to this doc is rejected
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		name = payload["name"]
+		with self.assertRaises(frappe.ValidationError):
+			save_opname(
+				self.profile,
+				{
+					"name": name,
+					"modified": payload["modified"],
+					"items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": "/private/files/unattached.jpg"}],
+				},
+			)
+
+		# 3. Valid attached photo succeeds and roundtrips
+		filedata = TINY_JPEG_B64
+		res = attach_opname_row_photo(self.profile, name, "shelf.jpg", filedata)
+		saved = save_opname(
+			self.profile,
+			{
+				"name": name,
+				"modified": payload["modified"],
+				"items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": res["file_url"]}],
+			},
+		)
+		self.assertEqual(saved["items"][0]["pos_opname_photo"], res["file_url"])
+		got = get_opname(self.profile, name)
+		self.assertEqual(got["items"][0]["pos_opname_photo"], res["file_url"])
+
+	def test_save_rejects_non_photo_attachment_as_row_photo(self):
+		from pos_next.api.stock_opname import attach_opname_files, save_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		link = "https://drive.example/not-a-photo"
+		attach_opname_files(self.profile, payload["name"], link=link)
+		with self.assertRaises(frappe.ValidationError):
+			save_opname(
+				self.profile,
+				{
+					"name": payload["name"],
+					"modified": payload["modified"],
+					"items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": link}],
+				},
+			)
+
+	def test_save_prunes_replaced_row_photos(self):
+		import base64
+
+		from pos_next.api.stock_opname import attach_opname_row_photo, save_opname
+
+		self._cashier()
+		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		name = payload["name"]
+		old = attach_opname_row_photo(self.profile, name, "old.jpg", TINY_JPEG_B64)["file_url"]
+		payload = save_opname(
+			self.profile,
+			{"name": name, "modified": payload["modified"], "items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": old}]},
+		)
+		# distinct bytes: Frappe dedups identical content to one file_url
+		other = base64.b64encode(base64.b64decode(TINY_JPEG_B64) + b"2").decode()
+		new = attach_opname_row_photo(self.profile, name, "new.jpg", other)["file_url"]
+		save_opname(
+			self.profile,
+			{"name": name, "modified": payload["modified"], "items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": new}]},
+		)
+		urls = frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": DOCTYPE, "attached_to_name": name, "attached_to_field": "pos_opname_photo"},
+			pluck="file_url",
+		)
+		self.assertEqual(urls, [new])
+
+	def test_submit_opname_photo_enforcement(self):
+		from pos_next.api.stock_opname import (
+			attach_opname_row_photo,
+			save_opname,
+			submit_opname,
+		)
+
+		self._cashier()
+		payload = save_opname(
+			self.profile,
+			{"items": [{"item_code": self.plain, "qty": 4}, {"item_code": self.other_plain, "qty": 2}]},
+		)
+		name = payload["name"]
+
+		# Submitting without photos throws ValidationError naming the rows
+		with self.assertRaisesRegex(frappe.ValidationError, r"(row 1|row 2|#1|#2)"):
+			submit_opname(self.profile, name)
+
+		# Attach photo to row 1 only -> still fails naming row 2
+		filedata = TINY_JPEG_B64
+		p1 = attach_opname_row_photo(self.profile, name, "p1.jpg", filedata)["file_url"]
+		payload = save_opname(
+			self.profile,
+			{
+				"name": name,
+				"modified": payload["modified"],
+				"items": [
+					{"item_code": self.plain, "qty": 4, "pos_opname_photo": p1},
+					{"item_code": self.other_plain, "qty": 2},
+				],
+			},
+		)
+		with self.assertRaisesRegex(frappe.ValidationError, r"(row 2|#2)"):
+			submit_opname(self.profile, name)
+
+		# Attach photo to row 2 -> submit succeeds
+		p2 = attach_opname_row_photo(self.profile, name, "p2.jpg", filedata)["file_url"]
+		save_opname(
+			self.profile,
+			{
+				"name": name,
+				"modified": payload["modified"],
+				"items": [
+					{"item_code": self.plain, "qty": 4, "pos_opname_photo": p1},
+					{"item_code": self.other_plain, "qty": 2, "pos_opname_photo": p2},
+				],
+			},
+		)
+		submitted = submit_opname(self.profile, name)
+		self.assertEqual(submitted["workflow_state"], "Approval Pending by Stock Manager")
+
+		# Desk-style save and submit without photo still works (D1)
+		frappe.set_user(ADMIN)
+		doc = frappe.new_doc(DOCTYPE)
+		doc.company = self.company
+		doc.purpose = "Stock Reconciliation"
+		doc.set_warehouse = self.warehouse
+		doc.append("items", {"item_code": self.plain, "qty": 10, "warehouse": self.warehouse})
+		doc.save()
+		self.assertIsNone(doc.items[0].pos_opname_photo)
 
 
 class TestStockOpnameExcel(_StockOpnameFixture):
@@ -925,6 +1162,7 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 
 		self._cashier()
 		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(draft["name"])
 		submit_opname(self.profile, draft["name"])
 		url = self._attach([TEMPLATE_HEADER, [self.plain, "", "", "", "", 5]])
 		with self.assertRaises(frappe.ValidationError):
@@ -953,6 +1191,7 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 
 		self._cashier()
 		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(draft["name"])
 		submit_opname(self.profile, draft["name"])
 		url = self._attach([TEMPLATE_HEADER, [self.other_plain, "", "", "", "", 3]])
 		# With no name passed, an open pending count does not block; a new doc is created.
@@ -1005,6 +1244,37 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		self.assertEqual(result["applied"], 0)
 		self.assertEqual(len(result["errors"]), 1)
 		self.assertIn(self.serial_item, result["errors"][0]["message"])
+
+	def test_import_preserves_row_photos(self):
+		from pos_next.api.stock_opname import (
+			TEMPLATE_HEADER,
+			attach_opname_row_photo,
+			get_opname,
+			import_opname_template,
+			save_opname,
+		)
+
+		self._cashier()
+		draft = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		name = draft["name"]
+		filedata = TINY_JPEG_B64
+		photo = attach_opname_row_photo(self.profile, name, "p.jpg", filedata)["file_url"]
+		save_opname(
+			self.profile,
+			{
+				"name": name,
+				"modified": draft["modified"],
+				"items": [{"item_code": self.plain, "qty": 4, "pos_opname_photo": photo}],
+			},
+		)
+
+		url = self._attach([TEMPLATE_HEADER, [self.plain, "", "", "", "", 6]])
+		result = import_opname_template(self.profile, url, name=name)
+		self.assertEqual(result["applied"], 1)
+		got = get_opname(self.profile, name)
+		plain_row = next(r for r in got["items"] if r["item_code"] == self.plain)
+		self.assertEqual(plain_row["qty"], 6)
+		self.assertEqual(plain_row["pos_opname_photo"], photo)
 
 
 class TestStockOpnameUom(_StockOpnameFixture):
@@ -1379,6 +1649,7 @@ class TestStockOpnamePosting(_StockOpnameFixture):
 
 		yesterday = add_days(nowdate(), -1)
 		payload = self._save(posting_date=yesterday, posting_time="08:30:00")
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"])
 		doc = frappe.get_doc(DOCTYPE, payload["name"])
 		self.assertEqual(str(doc.posting_date), yesterday)
@@ -1389,6 +1660,7 @@ class TestStockOpnamePosting(_StockOpnameFixture):
 		from pos_next.api.stock_opname import submit_opname
 
 		payload = self._save()
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"])
 		doc = frappe.get_doc(DOCTYPE, payload["name"])
 		self.assertEqual(str(doc.posting_date), str(nowdate()))
@@ -1503,6 +1775,7 @@ class TestStockOpnameCustomWorkflow(_StockOpnameFixture):
 		self.assertTrue(payload["editable"])
 		self.assertEqual(payload["actions"], ["Send"])
 
+		self._give_photos(payload["name"])
 		result = submit_opname(self.profile, payload["name"], action="Send")
 		self.assertEqual(result["workflow_state"], "Area Check")
 		got = get_opname(self.profile, payload["name"])
@@ -1528,6 +1801,7 @@ class TestStockOpnameCustomWorkflow(_StockOpnameFixture):
 		)
 		self.assertEqual(again["workflow_state"], "Open")
 
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"], action="Send")
 
 		frappe.set_user(self.stock_manager)
@@ -1542,6 +1816,7 @@ class TestStockOpnameCustomWorkflow(_StockOpnameFixture):
 
 		self._cashier()
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"], action="Send")
 		frappe.set_user(self.stock_manager)
 		apply_workflow(frappe.get_doc(DOCTYPE, payload["name"]), "Pass")  # -> HQ Check
@@ -1560,6 +1835,7 @@ class TestStockOpnameCustomWorkflow(_StockOpnameFixture):
 
 		self._cashier()
 		payload = save_opname(self.profile, {"items": [{"item_code": self.plain, "qty": 4}]})
+		self._give_photos(payload["name"])
 		submit_opname(self.profile, payload["name"], action="Send")  # -> Area Check
 
 		# Stock Manager holds Area Check's allow_edit role; give it access to the

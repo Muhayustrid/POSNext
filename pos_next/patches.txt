@@ -41,3 +41,4 @@ pos_next.patches.v2_25_0.install_reject_request_workflow
 pos_next.patches.v2_26_0.merge_shift_profiles
 pos_next.patches.v2_27_0.group_wide_slot_settings
 pos_next.patches.v2_28_0.remove_profile_schedule_fields
+pos_next.patches.v2_29_0.add_opname_row_photo_field

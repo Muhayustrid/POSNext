@@ -218,6 +218,22 @@ Uploads are merged server-side and **do not** run the stale-save check, so an
 upload always applies to the current draft. (On-screen saving a draft that
 changed since it was loaded is refused with a "reload" message.)
 
+## Proof photos per row
+
+When counting in the POS app, every counted row requires a proof photo before
+submitting the count to HQ:
+
+- **Upload and compression**: Taking or picking a photo (`<input type="file" accept="image/*">`)
+  compresses the image on-device (max 1600px on the longest edge, ~0.8 JPEG quality)
+  before uploading it as a private file attached to the Stock Reconciliation document.
+- **Enforcement**: Photos are only required at **Submit** time from the POS SPA.
+  Draft saves without photos are valid. Uncounted blank rows do not require photos.
+- **Desk independence**: Submitting or saving directly from ERPNext Desk never requires
+  photos (the custom field `pos_opname_photo` on `Stock Reconciliation Item` is not
+  mandatory on the doctype).
+- **Template preservation**: Re-importing from an Excel template preserves photos
+  already attached to matching rows `(item_code, batch_no)`.
+
 ## When to count
 
 The posting date/time is the moment the outlet presses **Submit**, and approval
