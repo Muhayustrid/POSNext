@@ -370,7 +370,7 @@
 					<keep-alive>
 						<div
 							v-if="uiStore.isDesktop || uiStore.mobileActiveTab === 'cart'"
-							class="flex flex-col bg-gray-50 overflow-hidden flex-1"
+							class="flex flex-col bg-gray-50 overflow-hidden flex-1 lg:max-w-xl"
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart

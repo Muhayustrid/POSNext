@@ -19,11 +19,11 @@ describe("posUI left panel layout", () => {
 
 		store.updateLayoutBounds(1440);
 		const width = store.leftPanelWidth;
-		// Items panel stays slightly wider than the cart (56% split)...
-		expect(width).toBe(806);
+		// Items panel takes the space beyond the capped cart (1440 - 576)...
+		expect(width).toBe(864);
 		// ...and the cart keeps a comfortable remainder, not the old fixed
 		// 800px default that starved it on smaller laptops.
-		expect(1440 - width).toBeGreaterThanOrEqual(360);
+		expect(1440 - width).toBe(576);
 	});
 
 	it("scales the default down for smaller screens so the cart never starves", () => {
@@ -34,10 +34,11 @@ describe("posUI left panel layout", () => {
 	});
 
 	it("restores the cashier's saved divider position instead of the default", () => {
-		localStorage.setItem(WIDTH_KEY, "700");
+		localStorage.setItem(WIDTH_KEY, "800");
 		const store = usePOSUIStore();
 		store.updateLayoutBounds(1440);
-		expect(store.leftPanelWidth).toBe(700);
+		// 800 is below the 864 minimum (1440 - capped cart 576), so it clamps up.
+		expect(store.leftPanelWidth).toBe(864);
 	});
 
 	it("clamps a saved position that no longer fits the current screen", () => {
@@ -51,7 +52,7 @@ describe("posUI left panel layout", () => {
 		localStorage.setItem(WIDTH_KEY, "not-a-number");
 		const store = usePOSUIStore();
 		store.updateLayoutBounds(1440);
-		expect(store.leftPanelWidth).toBe(806);
+		expect(store.leftPanelWidth).toBe(864);
 	});
 
 	it("persists the divider position only when asked", () => {
@@ -59,8 +60,8 @@ describe("posUI left panel layout", () => {
 		store.updateLayoutBounds(1440);
 		expect(localStorage.getItem(WIDTH_KEY)).toBeNull();
 
-		store.setLeftPanelWidth(650, 1440);
+		store.setLeftPanelWidth(950, 1440);
 		store.saveLeftPanelWidth();
-		expect(localStorage.getItem(WIDTH_KEY)).toBe("650");
+		expect(localStorage.getItem(WIDTH_KEY)).toBe("950");
 	});
 });

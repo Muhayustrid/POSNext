@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 
 const LEFT_PANEL_MIN = 320;
 const RIGHT_PANEL_MIN = 360;
+const RIGHT_PANEL_MAX = 576;
 const LEFT_PANEL_WIDTH_STORAGE_KEY = "pos_left_panel_width";
 // Items panel gets a slightly larger share of the screen than the cart so the
 // cart never starves on smaller laptops; the cashier can still drag it.
@@ -135,9 +136,10 @@ export const usePOSUIStore = defineStore("posUI", () => {
 			Number.isFinite(containerWidth) && containerWidth > 0
 				? containerWidth
 				: LEFT_PANEL_MIN + RIGHT_PANEL_MIN;
-		const maxWidth = Math.max(LEFT_PANEL_MIN, safeContainerWidth - RIGHT_PANEL_MIN);
-		const clampedWidth = Math.min(Math.max(width, LEFT_PANEL_MIN), maxWidth);
-		return Number.isFinite(clampedWidth) ? clampedWidth : LEFT_PANEL_MIN;
+		const minWidth = Math.max(LEFT_PANEL_MIN, safeContainerWidth - RIGHT_PANEL_MAX);
+		const maxWidth = Math.max(minWidth, safeContainerWidth - RIGHT_PANEL_MIN);
+		const clampedWidth = Math.min(Math.max(width, minWidth), maxWidth);
+		return Number.isFinite(clampedWidth) ? clampedWidth : minWidth;
 	}
 
 	function setLeftPanelWidth(width, containerWidth = null) {

@@ -64,8 +64,9 @@
 <template>
 	<div class="flex flex-col h-full bg-white">
 		<!-- Header Section: Optional Buyer Name & DocType Toggle (Customer selection hidden per profile default) -->
-		<div class="px-2.5 py-2 border-b border-gray-200 bg-gray-50">
-			<div class="flex items-center gap-2">
+		<div class="border-b border-gray-200 bg-gray-50">
+			<div class="w-full lg:max-w-xl lg:mx-auto px-2.5 py-2 lg:px-4">
+				<div class="flex items-center gap-2">
 				<!-- Optional buyer name: a receipt-only label, NOT saved as a Customer -->
 				<div class="relative flex-1 min-w-0">
 					<div
@@ -158,14 +159,18 @@
 				</div>
 			</div>
 		</div>
+		</div>
 
 		<!-- Action Buttons Section -->
 		<!-- One row (title, offers, coupon, sort, clear) so short screens keep
 		     room for the item list. -->
 		<div
 			v-if="items.length > 0"
-			class="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-200 bg-white"
+			class="border-b border-gray-200 bg-white"
 		>
+			<div
+				class="w-full lg:max-w-xl lg:mx-auto flex items-center gap-1.5 px-2 py-1.5 lg:px-4"
+			>
 			<h2 class="text-xs font-bold text-gray-900 me-auto truncate">
 				{{ __("Cart Items") }}
 				<span class="font-semibold text-gray-400">({{ items.length }})</span>
@@ -397,11 +402,13 @@
 						{{ availableGiftCards.length }}
 					</span>
 				</button>
+				</div>
 			</div>
 		</div>
 
 		<!-- Cart Items -->
 		<div class="flex-1 overflow-y-auto p-0.5 sm:p-1.5 bg-gray-50">
+			<div class="w-full lg:max-w-xl lg:mx-auto lg:px-4 h-full">
 			<div
 				v-if="items.length === 0"
 				class="flex flex-col items-center justify-center h-full px-3 sm:px-4 py-6"
@@ -1088,10 +1095,12 @@
 					</ul>
 				</div>
 			</div>
+			</div>
 		</div>
 
 		<!-- Totals Summary -->
-		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
+		<div class="bg-white border-t border-gray-200">
+			<div class="w-full lg:max-w-xl lg:mx-auto p-1.5 sm:p-2 lg:px-4">
 			<!-- Summary: quantity, subtotal and tax share one row -->
 			<div v-if="items.length > 0" class="mb-1.5">
 				<div
@@ -1205,6 +1214,7 @@
 					</svg>
 					<span>{{ __("Hold", null, "order") }}</span>
 				</button>
+			</div>
 			</div>
 		</div>
 
@@ -1938,7 +1948,7 @@ function updateQuantity(item, event) {
 	const qty = Number.parseFloat(event.target.value);
 
 	// If the input isn't a valid number (e.g., user cleared the field), do nothing
-	if (isNaN(qty)) return;
+	if (Number.isNaN(qty)) return;
 
 	// If quantity is zero or negative, remove the item from the cart
 	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
