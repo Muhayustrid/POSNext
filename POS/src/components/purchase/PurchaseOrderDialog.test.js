@@ -896,7 +896,7 @@ describe("PurchaseOrderDialog", () => {
 		expect(lastFetch[1]).toEqual(expect.objectContaining({ uom: "Box" }))
 	})
 
-	it("Add Item appends a row; re-picking the same item bumps its qty instead", async () => {
+	it("Add Row appends a row; re-picking the same item bumps its qty instead", async () => {
 		mocks.call.mockResolvedValue({ orders: [] })
 		const wrapper = mountOpen()
 		await flushPromises()
@@ -913,6 +913,64 @@ describe("PurchaseOrderDialog", () => {
 		const qty = wrapper.findAll('[data-test="item-qty"]')
 		expect(qty).toHaveLength(1)
 		expect(Number(qty[0].element.value)).toBe(4)
+	})
+
+	it("clicking a picked item reopens the search to change it in place", async () => {
+		mocks.call.mockResolvedValue({ orders: [] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await fillForm(wrapper)
+
+		// leaving the search without a pick keeps the original item
+		await wrapper.find('[data-testid="row-item-edit"]').trigger("click")
+		expect(autocomplete(wrapper, "Search item...")).toBeTruthy()
+		await wrapper.find('[data-cell="0-item"]').trigger("keydown", { key: "Escape" })
+		expect(wrapper.find('[data-testid="row-item-edit"]').text()).toContain("Roti Tawar")
+
+		const prevImpl = mocks.call.getMockImplementation()
+		mocks.call.mockImplementation(async (method, params) => {
+			if (method.includes("get_purchase_item_details"))
+				return { item_code: params.item_code, item_name: "Roti Manis", uom: "Nos", uoms: [{ uom: "Nos" }] }
+			return prevImpl(method, params)
+		})
+		await wrapper.find('[data-testid="row-item-edit"]').trigger("click")
+		await autocomplete(wrapper, "Search item...").vm.$emit("update:modelValue", "ITEM-2")
+		await flushPromises()
+		const rows = wrapper.findAll('[data-testid="row-item-edit"]')
+		expect(rows).toHaveLength(1)
+		expect(rows[0].text()).toContain("Roti Manis")
+	})
+
+	it("a row being changed keeps its item and is not reused by Add Row", async () => {
+		mocks.call.mockResolvedValue({ orders: [] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await fillForm(wrapper)
+
+		await wrapper.find('[data-testid="row-item-edit"]').trigger("click")
+		// Save mid-edit must still count the original item
+		expect(wrapper.find('[data-test="order-summary"]').text()).toContain("3 Nos")
+		await wrapper.find('[data-test="add-item"]').trigger("click")
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(2)
+	})
+
+	it("select-all + Delete (n) removes the checked rows", async () => {
+		mocks.call.mockResolvedValue({ orders: [] })
+		const wrapper = mountOpen()
+		await flushPromises()
+		await button(wrapper, "New Purchase Order").trigger("click")
+		await fillForm(wrapper)
+		await wrapper.find('[data-test="add-item"]').trigger("click")
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(2)
+
+		expect(wrapper.find('[data-testid="delete-selected-rows"]').exists()).toBe(false)
+		await wrapper.find('[data-testid="select-all-rows"]').setValue(true)
+		const del = wrapper.find('[data-testid="delete-selected-rows"]')
+		expect(del.text()).toContain("(2)")
+		await del.trigger("click")
+		expect(wrapper.findAll('[data-testid="row-checkbox"]')).toHaveLength(0)
 	})
 
 	it("blocks save with inline errors for zero qty and Required By before the order date", async () => {

@@ -413,41 +413,44 @@
 						</div>
 					</div>
 
-					<div v-if="receive.items.length" class="overflow-x-auto">
+					<div v-if="receive.items.length" class="-mx-4 overflow-x-auto">
 						<table class="w-full text-sm" data-test="receive-table">
-							<thead>
-								<tr class="border-b border-gray-200 text-xs font-medium uppercase text-gray-500">
-									<th class="py-2 text-start">{{ __("Item") }}</th>
-									<th class="py-2 text-end">{{ __("Ordered") }}</th>
-									<th class="py-2 text-end">{{ __("Received") }}</th>
-									<th class="py-2 text-end">{{ __("Remaining") }}</th>
-									<th class="py-2 text-end w-40">{{ __("Qty") }}</th>
+							<thead class="border-y border-gray-200 bg-gray-50 text-xs text-gray-500">
+								<tr>
+									<th class="w-12 px-3 py-2 text-start font-medium">{{ __("No.") }}</th>
+									<th class="px-3 py-2 text-start font-medium">{{ __("Item") }}</th>
+									<th class="px-3 py-2 text-start font-medium">{{ __("Ordered") }}</th>
+									<th class="px-3 py-2 text-start font-medium">{{ __("Received") }}</th>
+									<th class="px-3 py-2 text-start font-medium">{{ __("Remaining") }}</th>
+									<th class="w-48 px-3 py-2 text-start font-medium">{{ __("Qty") }}</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-gray-100">
 								<tr
-									v-for="row in receive.items"
+									v-for="(row, idx) in receive.items"
 									:key="row.purchase_order_item || row.item_code"
+									class="hover:bg-gray-50/50"
 								>
-									<td class="py-2.5 pe-3">
+									<td class="px-3 py-1.5 text-xs tabular-nums text-gray-400">{{ idx + 1 }}</td>
+									<td class="px-3 py-1.5">
 										<div class="font-medium text-gray-900">
 											{{ row.item_name || row.item_code }}
 										</div>
-										<div v-if="row.item_name && row.item_code" class="text-xs text-gray-500">
+										<div v-if="row.item_name && row.item_code" class="text-xs text-gray-400">
 											{{ row.item_code }}
 										</div>
 									</td>
-									<td class="py-2.5 px-3 text-end tabular-nums text-gray-700">
+									<td class="px-3 py-1.5 tabular-nums text-gray-700">
 										{{ row.ordered_qty }}
 									</td>
-									<td class="py-2.5 px-3 text-end tabular-nums text-gray-700">
+									<td class="px-3 py-1.5 tabular-nums text-gray-700">
 										{{ row.received_qty }}
 									</td>
-									<td class="py-2.5 px-3 text-end tabular-nums text-gray-700">
+									<td class="px-3 py-1.5 tabular-nums text-gray-700">
 										{{ row.pending_qty }}
 									</td>
-									<td class="py-2.5 ps-3 text-end">
-										<div class="flex items-center justify-end gap-1.5">
+									<td class="px-3 py-1.5">
+										<div class="flex items-center gap-1.5">
 											<input
 												v-model.number="row.qty"
 												data-test="receive-qty"
@@ -455,8 +458,9 @@
 												type="number"
 												min="0"
 												step="any"
+												inputmode="decimal"
 												:aria-label="`${row.item_name} — ${__('Qty')}`"
-												class="w-28 rounded-lg border border-gray-300 px-2 py-1 text-end text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+												class="h-10 min-h-[40px] w-28 rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm tabular-nums focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 md:h-8 md:min-h-0"
 											/>
 											<span class="text-xs text-gray-500">{{ row.uom }}</span>
 										</div>
@@ -594,7 +598,7 @@
 					</div>
 				</section>
 
-				<!-- B — items: ERPNext-style grid, rows are added below the table -->
+				<!-- B — items: Reject Request-style grid, rows are added below the table -->
 				<section class="rounded-xl border border-gray-200 bg-white">
 					<div class="flex items-center justify-between px-4 pb-2 pt-4">
 						<h4 class="text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -603,108 +607,165 @@
 					</div>
 					<div ref="itemsRef" data-test="items-table">
 						<div
-							class="hidden border-y border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 md:grid md:grid-cols-[2rem_minmax(0,1fr)_7rem_9rem_2rem] md:gap-3"
+							class="hidden border-y border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 xl:grid xl:grid-cols-[2rem_1.75rem_minmax(0,3fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem] xl:items-center xl:gap-x-3"
 						>
-							<span>#</span>
+							<div class="flex items-center justify-center">
+								<input
+									type="checkbox"
+									data-testid="select-all-rows"
+									:checked="isAllSelected"
+									:indeterminate="isPartiallySelected"
+									:aria-label="__('Select All')"
+									class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+									@change="toggleSelectAll($event.target.checked)"
+								/>
+							</div>
+							<span>{{ __("No.") }}</span>
 							<span>{{ __("Item") }}</span>
 							<span>{{ __("Qty") }}</span>
 							<span>{{ __("UOM") }}</span>
 							<span></span>
 						</div>
-						<div
-							v-for="(row, idx) in form.items"
-							:key="row.key"
-							class="grid grid-cols-2 gap-2 border-b border-gray-100 px-4 py-2.5 transition-colors hover:bg-gray-50 md:grid-cols-[2rem_minmax(0,1fr)_7rem_9rem_2rem] md:items-center md:gap-3 md:py-1.5"
-							:data-blank-row="row.item_code ? null : ''"
-						>
-							<span class="hidden text-xs tabular-nums text-gray-400 md:block">{{ idx + 1 }}</span>
-							<div class="col-span-2 flex min-w-0 items-center gap-2 md:col-span-1">
-								<div v-if="row.item_code" class="min-w-0 flex-1">
-									<p class="truncate text-sm font-medium text-gray-900">{{ row.item_name }}</p>
-									<p v-if="row.item_name !== row.item_code" class="truncate text-xs text-gray-400">
-										{{ row.item_code }}
-									</p>
-								</div>
-								<div v-else class="min-w-0 flex-1">
-									<AutocompleteSelect
-										model-value=""
-										:options="itemOptions"
-										:placeholder="__('Search item...')"
-										:loading="loadingItems || row.loading"
-										data-test="item-select"
-										@update:model-value="(code) => onItemPick(code, row)"
-										@search="onItemSearch"
-									/>
-								</div>
-								<button
-									type="button"
-									class="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 md:hidden"
-									:aria-label="__('Remove')"
-									@click="removeRow(idx)"
-								>
-									<FeatherIcon name="x" class="h-4 w-4" />
-								</button>
-							</div>
-							<template v-if="row.item_code">
-								<label class="block">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("Qty") }}</span>
-									<input
-										v-model.number="row.qty"
-										data-test="item-qty"
-										type="number"
-										min="0"
-										step="any"
-										inputmode="decimal"
-										:aria-label="`${row.item_name} — ${__('Qty')}`"
-										class="w-full rounded-md border px-2 py-1.5 text-sm tabular-nums focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-										:class="triedSave && !(Number(row.qty) > 0) ? 'border-red-400 bg-red-50' : 'border-gray-300'"
-										@keydown.enter.prevent="addItemRow"
-									/>
-								</label>
-								<label class="block">
-									<span class="mb-0.5 block text-xs text-gray-500 md:hidden">{{ __("UOM") }}</span>
-									<select
-										v-model="row.uom"
-										data-test="item-uom"
-										:aria-label="`${row.item_name} — ${__('UOM')}`"
-										class="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-										@change="onUomChange(row)"
-									>
-										<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">
-											{{ u }}
-										</option>
-									</select>
-								</label>
-							</template>
-							<template v-else>
-								<span class="hidden text-sm text-gray-300 md:block">—</span>
-								<span class="hidden text-sm text-gray-300 md:block">—</span>
-							</template>
-							<button
-								type="button"
-								class="hidden h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600 md:flex"
-								:aria-label="__('Remove')"
-								:title="__('Remove')"
-								@click="removeRow(idx)"
+						<div data-testid="grid-rows" class="p-2 xl:p-0">
+							<div
+								v-for="(row, idx) in form.items"
+								:key="row.key"
+								class="mb-3 grid grid-cols-2 items-center gap-x-3 gap-y-2.5 rounded-lg border border-gray-200 bg-white p-3.5 shadow-xs last:mb-0 xl:mb-0 xl:grid-cols-[2rem_1.75rem_minmax(0,3fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem] xl:gap-y-0 xl:rounded-none xl:border-0 xl:border-b xl:border-gray-100 xl:px-3 xl:py-1.5 xl:shadow-none xl:hover:bg-gray-50/50"
+								:data-blank-row="row.item_code ? null : ''"
 							>
-								<FeatherIcon name="x" class="h-4 w-4" />
-							</button>
+								<!-- mobile card header: checkbox + row #; desktop cols 1-2 -->
+								<div class="col-span-2 flex items-center gap-2 border-b border-gray-100 pb-2 xl:contents">
+									<div class="flex items-center xl:justify-center">
+										<input
+											v-model="row.selected"
+											type="checkbox"
+											data-testid="row-checkbox"
+											:aria-label="__('Select row {0}', [idx + 1])"
+											class="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 xl:h-4 xl:w-4"
+										/>
+									</div>
+									<span class="text-xs font-semibold text-gray-700 xl:hidden">{{ __("Row #{0}", [idx + 1]) }}</span>
+									<span class="hidden text-xs tabular-nums text-gray-400 xl:block">{{ idx + 1 }}</span>
+								</div>
+								<div class="col-span-2 min-w-0 xl:col-span-1">
+									<span class="mb-1 block text-xs font-medium text-gray-500 xl:hidden">{{ __("Item") }}</span>
+									<button
+										v-if="row.item_code && !row.editing"
+										type="button"
+										data-testid="row-item-edit"
+										class="group flex min-h-[40px] w-full items-center justify-between rounded border border-gray-200 bg-gray-50/70 px-2.5 py-1.5 text-start transition-colors hover:border-gray-300 hover:bg-gray-100/70 xl:min-h-0 xl:py-1"
+										:title="__('Click to change item')"
+										@click="editRowItem(row, idx)"
+									>
+										<span class="min-w-0 pr-1">
+											<span class="block truncate text-sm font-medium text-gray-900">{{ row.item_name || row.item_code }}</span>
+											<span v-if="row.item_code !== row.item_name" class="block truncate text-xs text-gray-400">
+												{{ row.item_code }}
+											</span>
+										</span>
+										<FeatherIcon
+											name="edit-2"
+											class="h-3.5 w-3.5 shrink-0 text-gray-400 opacity-60 transition-opacity xl:opacity-0 xl:group-hover:opacity-100 xl:group-focus-visible:opacity-100"
+										/>
+									</button>
+									<div
+										v-else
+										:data-cell="`${idx}-item`"
+										@focusout="onItemFocusOut($event, row)"
+										@keydown.escape="restoreItem(row)"
+									>
+										<AutocompleteSelect
+											class="[&_.select-input]:!min-h-[40px] [&_.select-input]:!rounded-md [&_.select-input]:!bg-gray-50 [&_.select-input]:!py-2 focus-within:[&_.select-input]:!bg-white xl:[&_.select-input]:!min-h-0 xl:[&_.select-input]:!py-1.5"
+											model-value=""
+											:options="itemOptions"
+											:placeholder="__('Search item...')"
+											:loading="loadingItems || row.loading"
+											data-test="item-select"
+											@update:model-value="(code) => onItemPick(code, row)"
+											@search="onItemSearch"
+										/>
+									</div>
+								</div>
+								<template v-if="row.item_code">
+									<label class="block min-w-0">
+										<span class="mb-1 block text-xs font-medium text-gray-500 xl:hidden">{{ __("Qty") }}</span>
+										<input
+											v-model.number="row.qty"
+											data-test="item-qty"
+											:data-cell="`${idx}-qty`"
+											type="number"
+											min="0"
+											step="any"
+											inputmode="decimal"
+											:aria-label="`${row.item_name} — ${__('Qty')}`"
+											class="h-10 min-h-[40px] w-full rounded-md border px-2 py-1 text-sm tabular-nums focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 xl:h-8 xl:min-h-0"
+											:class="triedSave && !(Number(row.qty) > 0) ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-gray-50'"
+											@keydown.enter.prevent="addItemRow"
+										/>
+									</label>
+									<label class="block min-w-0">
+										<span class="mb-1 block text-xs font-medium text-gray-500 xl:hidden">{{ __("UOM") }}</span>
+										<select
+											v-model="row.uom"
+											data-test="item-uom"
+											:aria-label="`${row.item_name} — ${__('UOM')}`"
+											class="h-10 min-h-[40px] w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-sm focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/30 xl:h-8 xl:min-h-0"
+											@change="onUomChange(row)"
+										>
+											<option v-for="u in uomOptionsOf(row)" :key="u" :value="u">
+												{{ u }}
+											</option>
+										</select>
+									</label>
+								</template>
+								<template v-else>
+									<span class="hidden text-xs text-gray-400 xl:block">—</span>
+									<span class="hidden text-xs text-gray-400 xl:block">—</span>
+								</template>
+								<!-- full-width tap target on mobile, compact icon from md -->
+								<div class="col-span-2 flex xl:col-span-1 xl:justify-center">
+									<button
+										type="button"
+										data-testid="remove-row"
+										class="flex h-10 min-h-[40px] w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 text-xs font-medium text-red-600 hover:border-red-200 hover:bg-red-50 xl:h-8 xl:min-h-0 xl:w-8 xl:border-0 xl:bg-transparent xl:text-gray-400 xl:hover:bg-red-50 xl:hover:text-red-600"
+										:aria-label="__('Remove')"
+										:title="__('Remove')"
+										@click="removeRow(idx)"
+									>
+										<FeatherIcon name="trash-2" class="h-4 w-4" />
+										<span class="xl:hidden">{{ __("Remove Item") }}</span>
+									</button>
+								</div>
+							</div>
 						</div>
-						<div v-if="!form.items.length" class="px-4 py-4 text-center">
+						<div v-if="!form.items.length" class="border-b border-gray-200 px-4 py-6 text-center">
 							<p class="text-sm text-gray-600">{{ __("No items added yet.") }}</p>
-							<p class="text-xs text-gray-400">{{ __("Click Add Item to start.") }}</p>
+							<p class="text-xs text-gray-400">{{ __("Click Add Row to start.") }}</p>
 						</div>
 					</div>
-					<div class="flex items-center justify-between gap-2 px-4 py-2.5">
-						<button
-							type="button"
-							data-test="add-item"
-							class="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-							@click="addItemRow"
-						>
-							<FeatherIcon name="plus" class="h-3.5 w-3.5" />
-							{{ __("Add Item") }}
-						</button>
+					<div class="flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-gray-200 bg-gray-50/40 px-4 py-2.5">
+						<div class="flex items-center gap-2">
+							<Button variant="subtle" size="sm" class="h-[44px] sm:h-10" data-test="add-item" @click="addItemRow">
+								<template #prefix>
+									<FeatherIcon name="plus" class="h-4 w-4" />
+								</template>
+								{{ __("Add Row") }}
+							</Button>
+							<Button
+								v-if="selectedCount > 0"
+								variant="subtle"
+								theme="red"
+								size="sm"
+								class="h-[44px] sm:h-10"
+								data-testid="delete-selected-rows"
+								@click="deleteSelectedRows"
+							>
+								<template #prefix>
+									<FeatherIcon name="trash-2" class="h-4 w-4" />
+								</template>
+								{{ __("Delete") }} ({{ selectedCount }})
+							</Button>
+						</div>
 						<p v-if="errors.items" class="text-xs text-red-600">{{ errors.items }}</p>
 					</div>
 				</section>
@@ -1401,6 +1462,7 @@ function itemRow(fields = {}) {
 		uom: "",
 		uoms: [],
 		rate: 0,
+		selected: false,
 		...fields,
 	}
 }
@@ -1661,7 +1723,7 @@ async function fetchItemDetails(code, uom, qty) {
 	})
 }
 
-// Add Item appends an empty row (ERPNext grid style) and focuses its search;
+// Add Row appends an empty row (ERPNext grid style) and focuses its search;
 // an existing empty row is reused instead of stacking blanks
 async function addItemRow() {
 	if (!form.value.items.some((row) => !row.item_code))
@@ -1674,8 +1736,48 @@ function removeRow(idx) {
 	form.value.items.splice(idx, 1)
 }
 
+const selectedCount = computed(
+	() => form.value.items.filter((r) => r.selected).length,
+)
+const isAllSelected = computed(
+	() => form.value.items.length > 0 && selectedCount.value === form.value.items.length,
+)
+const isPartiallySelected = computed(
+	() => selectedCount.value > 0 && !isAllSelected.value,
+)
+
+function toggleSelectAll(checked) {
+	for (const row of form.value.items) row.selected = checked
+}
+
+function deleteSelectedRows() {
+	form.value.items = form.value.items.filter((r) => !r.selected)
+}
+
+// click a picked item to change it in place (ERPNext grid style); the row
+// keeps its item until a replacement is fetched, so Save mid-edit never drops it
+async function editRowItem(row, idx) {
+	row.editing = true
+	await nextTick()
+	itemsRef.value?.querySelector(`[data-cell="${idx}-item"] input`)?.focus()
+}
+
+function restoreItem(row) {
+	row.editing = false
+}
+
+function onItemFocusOut(event, row) {
+	if (event.currentTarget.contains(event.relatedTarget)) return
+	// let a click on a dropdown option land before restoring
+	setTimeout(() => {
+		if (!row.loading) restoreItem(row)
+	}, 200)
+}
+
 async function onItemPick(code, row) {
 	if (!code || !row) return
+	// re-picking the item being changed keeps the row as it was
+	if (code === row.item_code) return restoreItem(row)
 	// picking an item already on the order bumps that row instead of adding
 	// a duplicate line
 	const existing = form.value.items.find(
@@ -1686,6 +1788,7 @@ async function onItemPick(code, row) {
 		showInfo(
 			__("{0} is already on this order — qty increased", [existing.item_name]),
 		)
+		restoreItem(row)
 		return
 	}
 	row.loading = true
@@ -1705,6 +1808,7 @@ async function onItemPick(code, row) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
 	} finally {
 		row.loading = false
+		restoreItem(row)
 	}
 }
 

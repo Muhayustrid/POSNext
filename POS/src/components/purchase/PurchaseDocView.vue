@@ -113,49 +113,55 @@
 					<table class="w-full text-start text-sm">
 						<thead class="border-y border-gray-200 bg-gray-50 text-xs text-gray-500">
 							<tr>
-								<th class="px-4 py-2 text-start font-medium">{{ __("Item") }}</th>
-								<th class="px-4 py-2 text-end font-medium">
+								<th class="w-12 px-3 py-2 text-start font-medium">{{ __("No.") }}</th>
+								<th class="px-3 py-2 text-start font-medium">{{ __("Item") }}</th>
+								<th class="px-3 py-2 text-start font-medium">
 									{{ hasReceivedQty ? __("Ordered") : __("Qty") }}
 								</th>
-								<th v-if="hasReceivedQty" class="px-4 py-2 text-end font-medium">
+								<th v-if="hasReceivedQty" class="px-3 py-2 text-start font-medium">
 									{{ __("Received") }}
 								</th>
-								<th class="px-4 py-2 text-start font-medium">{{ __("UOM") }}</th>
-								<th v-if="hasRate" class="px-4 py-2 text-end font-medium">{{ __("Rate") }}</th>
-								<th v-if="hasRate" class="px-4 py-2 text-end font-medium">{{ __("Amount") }}</th>
+								<th class="px-3 py-2 text-start font-medium">{{ __("UOM") }}</th>
+								<th v-if="hasRate" class="px-3 py-2 text-start font-medium">{{ __("Rate") }}</th>
+								<th v-if="hasRate" class="px-3 py-2 text-start font-medium">{{ __("Amount") }}</th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-gray-100">
-							<tr v-for="(row, idx) in doc?.items || []" :key="row.name || row.item_code || idx">
-								<td class="px-4 py-2.5">
+							<tr
+								v-for="(row, idx) in doc?.items || []"
+								:key="row.name || row.item_code || idx"
+								class="hover:bg-gray-50/50"
+							>
+								<td class="px-3 py-2 text-xs tabular-nums text-gray-400">{{ idx + 1 }}</td>
+								<td class="px-3 py-2">
 									<div class="truncate font-medium text-gray-900">
 										{{ row.item_name || row.item_code }}
 									</div>
-									<div v-if="row.item_name && row.item_code" class="truncate text-xs text-gray-500">
+									<div v-if="row.item_name && row.item_code" class="truncate text-xs text-gray-400">
 										{{ row.item_code }}
 									</div>
 									<div v-if="kind === 'pr' && row.purchase_order" class="truncate text-xs text-gray-400">
 										{{ __("PO: {0}", [row.purchase_order]) }}
 									</div>
 								</td>
-								<td class="px-4 py-2.5 text-end tabular-nums text-gray-900">
+								<td class="px-3 py-2 tabular-nums text-gray-900">
 									{{ formatQty(row.qty) }}
 								</td>
-								<td v-if="hasReceivedQty" class="px-4 py-2.5 text-end tabular-nums text-gray-900">
+								<td v-if="hasReceivedQty" class="px-3 py-2 tabular-nums text-gray-900">
 									{{ formatQty(row.received_qty) }}
 								</td>
-								<td class="px-4 py-2.5 text-gray-600">{{ row.uom }}</td>
-								<td v-if="hasRate" class="px-4 py-2.5 text-end tabular-nums text-gray-900">
+								<td class="px-3 py-2 text-gray-700">{{ row.uom }}</td>
+								<td v-if="hasRate" class="px-3 py-2 tabular-nums text-gray-900">
 									{{ formatMoney(row.rate) }}
 								</td>
-								<td v-if="hasRate" class="px-4 py-2.5 text-end tabular-nums text-gray-900 font-medium">
+								<td v-if="hasRate" class="px-3 py-2 font-medium tabular-nums text-gray-900">
 									{{ formatMoney(row.amount) }}
 								</td>
 							</tr>
 							<tr v-if="!(doc?.items?.length)">
 								<td
 									:colspan="itemColspan"
-									class="px-4 py-4 text-center text-xs text-gray-400"
+									class="px-4 py-6 text-center text-sm text-gray-400"
 								>
 									{{ __("No items") }}
 								</td>
@@ -285,7 +291,7 @@ const hasTotals = computed(() => {
 })
 
 const itemColspan = computed(() => {
-	let cols = 3 // item, qty, uom
+	let cols = 4 // no., item, qty, uom
 	if (hasReceivedQty.value) cols += 1
 	if (hasRate.value) cols += 2
 	return cols
