@@ -29,6 +29,7 @@
 import { isAllocationSnapshot } from "@/utils/packageQuote"
 import { formatQueueNumber } from "@/utils/queue/queueNumber"
 import { formatCurrencyNumber, getCurrencySymbol } from "@/utils/currency"
+import { __ } from "@/utils/translation"
 
 /** Same file both receipt templates point their <img> at. */
 export const RECEIPT_LOGO_URL = "/files/ropi-logo.png"
@@ -79,7 +80,9 @@ export function wrapText(text, width) {
 	const raw = String(text ?? "")
 	// A line that already fits keeps its spacing: padded labels and
 	// indented sub-lines are laid out with spaces on purpose.
-	if (raw.length <= w && !raw.includes("\n")) return [raw]
+	// A newline collapses to a space, as HTML renders it.
+	if (raw.includes("\n")) return wrapText(raw.replace(/\s+/g, " ").trim(), w)
+	if (raw.length <= w) return [raw]
 	const words = raw.replace(/\s+/g, " ").trim().split(" ").filter(Boolean)
 	const lines = []
 	let line = ""
@@ -274,7 +277,7 @@ export function buildReceiptTextJob(doc, { cols, logo = true } = {}) {
 			s.lines(
 				leftRight(
 					`  Discount${pct}`,
-					`-${money(item.discount_amount || 0)}`,
+					`-${money(Math.abs(item.discount_amount || 0))}`,
 					c,
 					2,
 				),

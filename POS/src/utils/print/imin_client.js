@@ -633,35 +633,44 @@ async function sendTextOps(p, ops, sizes, dots, logoPromise) {
 	let align = null
 	let size = null
 	let bold = null
+	// COR-FE-10: a sheet is many commands, so a failure midway (e.g. the logo
+	// upload) leaves paper out; the caller's flag only covers whole sheets.
+	let sent = false
 	p.setTextTypeface(TYPEFACE_MONOSPACE)
-	for (const o of ops) {
-		if (o.op === "text") {
-			if (o.align !== align) {
-				align = o.align
-				p.setAlignment(align)
+	try {
+		for (const o of ops) {
+			if (o.op === "text") {
+				if (o.align !== align) {
+					align = o.align
+					p.setAlignment(align)
+				}
+				const sz = sizes[o.size] || sizes.base
+				if (sz !== size) {
+					size = sz
+					p.setTextSize(size)
+				}
+				const b = o.bold ? 1 : 0
+				if (b !== bold) {
+					bold = b
+					p.setTextStyle(bold)
+				}
+				p.printText(o.text)
+			} else if (o.op === "logo") {
+				const logo = await logoPromise
+				if (logo) {
+					await p.printSingleBitmap(logo.dataURL, 1)
+					// Same settle the bitmap lane takes before its feed: a command
+					// sent right after a queued bitmap can overtake its raster.
+					await new Promise((res) => setTimeout(res, SETTLE_MS))
+				}
+			} else if (o.op === "feed") {
+				p.printAndFeedPaper(o.dots)
 			}
-			const sz = sizes[o.size] || sizes.base
-			if (sz !== size) {
-				size = sz
-				p.setTextSize(size)
-			}
-			const b = o.bold ? 1 : 0
-			if (b !== bold) {
-				bold = b
-				p.setTextStyle(bold)
-			}
-			p.printText(o.text)
-		} else if (o.op === "logo") {
-			const logo = await logoPromise
-			if (logo) {
-				await p.printSingleBitmap(logo.dataURL, 1)
-				// Same settle the bitmap lane takes before its feed: a command
-				// sent right after a queued bitmap can overtake its raster.
-				await new Promise((res) => setTimeout(res, SETTLE_MS))
-			}
-		} else if (o.op === "feed") {
-			p.printAndFeedPaper(o.dots)
+			sent = true
 		}
+	} catch (err) {
+		if (sent && err && typeof err === "object") err.postPrint = true
+		throw err
 	}
 	p.setTextStyle(0)
 	p.setAlignment(0)

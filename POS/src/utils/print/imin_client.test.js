@@ -904,6 +904,24 @@ describe("createIminDriver", () => {
 			expect(logoAt).toBeLessThan(companyAt)
 		})
 
+		it("tags a failure after text went out as postPrint (COR-FE-10)", async () => {
+			const { p, calls } = textPrinter()
+			p.printSingleBitmap = vi.fn(async () => {
+				throw new Error("upload failed")
+			})
+			const d = createIminDriver({
+				factory: () => p,
+				loadLogo: async () => ({ dataURL: "data:logo", height: 80 }),
+			})
+			await expect(
+				d.printHTML("<div/>", {
+					receiptDoc: doc,
+					config: { printMode: "text", copies: 1 },
+				}),
+			).rejects.toMatchObject({ postPrint: true })
+			expect(calls.some((c) => c[0] === "text")).toBe(true)
+		})
+
 		it("prints without a logo when it cannot be loaded", async () => {
 			const { p, calls } = textPrinter()
 			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })

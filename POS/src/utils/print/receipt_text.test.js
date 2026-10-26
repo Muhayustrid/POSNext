@@ -50,6 +50,8 @@ describe("layout helpers", () => {
 		expect(wrapText("abcdefgh", 3)).toEqual(["abc", "def", "gh"])
 		// A fitting line keeps its padding (label columns, indents).
 		expect(wrapText("TOTAL   :", 20)).toEqual(["TOTAL   :"])
+		// A newline collapses to a space, as the HTML receipt renders it.
+		expect(wrapText("Jl. A\nNo. 1", 20)).toEqual(["Jl. A No. 1"])
 	})
 
 	it("puts the right value flush right on the first line", () => {

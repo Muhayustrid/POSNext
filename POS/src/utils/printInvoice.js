@@ -320,7 +320,7 @@ export function buildReceiptHTML(invoiceData) {
 												? ` (${Number(item.discount_percentage).toFixed(1)}%)`
 												: ""
 										}</span><span>-${formatCurrency(
-											item.discount_amount || 0,
+											Math.abs(item.discount_amount || 0),
 										)}</span></div>`
 									: ""
 							}

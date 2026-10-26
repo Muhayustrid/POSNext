@@ -212,6 +212,11 @@ class TestSubmitInvoicePOSIMode(FrappeTestCase):
 		name = result.get("name")
 		self._created.append(name)
 		self.assertTrue(name)
+		print_doc = result.get("print_doc")
+		self.assertIsNotNone(print_doc)
+		self.assertTrue(print_doc.get("receipt_ready"))
+		for key in ("items", "payments", "cashier_name", "company_address_line", "pos_queue_number"):
+			self.assertIn(key, print_doc)
 		doc = frappe.get_doc("POS Invoice", name)
 		self.assertEqual(doc.doctype, "POS Invoice")
 		self.assertEqual(doc.docstatus, 1)

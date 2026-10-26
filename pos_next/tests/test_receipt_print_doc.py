@@ -41,6 +41,8 @@ class TestReceiptPrintDoc(FrappeTestCase):
 			doc = _receipt_print_doc(_fake_invoice())
 
 		self.assertTrue(doc["receipt_ready"])
+		for key in ("items", "payments", "cashier_name", "company_address_line", "pos_queue_number", "receipt_ready"):
+			self.assertIn(key, doc)
 		self.assertEqual(doc["cashier_name"], "Kasir Satu")
 		self.assertEqual(doc["company_address_line"], "Jl. Raya No.19")
 		self.assertEqual(doc["posting_date"], "2026-10-24")
