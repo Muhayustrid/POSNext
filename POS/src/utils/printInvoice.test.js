@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn() }))
 vi.mock("@/utils/logger", () => ({
@@ -653,6 +653,53 @@ describe("printWithSilentFallback (post-print failure stops the fallback, COR-FE
 
 		await expect(printWithSilentFallback(doc)).rejects.toThrow("cut failed")
 		expect(window.open).not.toHaveBeenCalled()
+	})
+})
+
+describe("printWithSilentFallback (submit print_doc, iMin text mode)", () => {
+	const readyDoc = { ...doc, receipt_ready: true }
+
+	beforeEach(() => {
+		call.mockReset()
+		transport.printHTML.mockClear()
+	})
+	afterEach(() => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ paper: "58mm" }),
+		})
+	})
+
+	it("prints straight from the submit doc without any server round trip", async () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", print_mode: "text", paper: "58mm" }),
+		})
+		const res = await printWithSilentFallback(readyDoc)
+		expect(res).toEqual({ method: "silent", success: true })
+		expect(call).not.toHaveBeenCalled()
+		expect(transport.printHTML).toHaveBeenCalledTimes(1)
+		expect(transport.printHTML.mock.calls[0][1].receiptDoc).toMatchObject({
+			name: "SINV-1",
+		})
+	})
+
+	it("keeps the server print format in bitmap mode", async () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({
+				driver: "imin",
+				print_mode: "bitmap",
+				paper: "58mm",
+			}),
+		})
+		call.mockImplementation(async (method) =>
+			method === "frappe.www.printview.get_html_and_style"
+				? { html: "<div>server</div>", style: "" }
+				: doc,
+		)
+		await printWithSilentFallback(readyDoc)
+		expect(call).toHaveBeenCalledWith(
+			"frappe.www.printview.get_html_and_style",
+			expect.anything(),
+		)
 	})
 })
 

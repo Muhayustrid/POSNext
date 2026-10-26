@@ -3126,6 +3126,10 @@ def submit_invoice(invoice=None, data=None):
 		if offline_id:
 			result["offline_id"] = offline_id
 
+		# Everything the client-side receipt needs, so the iMin text lane can
+		# print straight from this response instead of a get_invoice round trip.
+		result["print_doc"] = _receipt_print_doc(invoice_doc)
+
 		return result
 
 	except Exception:
@@ -3142,6 +3146,71 @@ def submit_invoice(invoice=None, data=None):
 # ==========================================
 # Invoice History Management
 # ==========================================
+
+
+_PRINT_DOC_FIELDS = (
+	"name",
+	"company",
+	"customer",
+	"customer_name",
+	"buyer_name",
+	"currency",
+	"pos_profile",
+	"pos_queue_number",
+	"status",
+	"grand_total",
+	"total_taxes_and_charges",
+	"discount_amount",
+	"additional_discount_percentage",
+	"paid_amount",
+	"change_amount",
+	"outstanding_amount",
+)
+_PRINT_ITEM_FIELDS = (
+	"item_code",
+	"item_name",
+	"qty",
+	"rate",
+	"price_list_rate",
+	"is_free_item",
+	"discount_percentage",
+	"discount_amount",
+	"serial_no",
+	"pos_package_instance",
+	"pos_package_role",
+	"pos_package_snapshot",
+)
+
+
+def _receipt_print_doc(invoice_doc):
+	"""Slim, receipt-shaped dict of a submitted invoice.
+
+	Same fields buildReceiptHTML / receipt_text read, plus the two the
+	"POS Next Receipt" format looks up (cashier full name, address line).
+	`receipt_ready` tells the client the doc is complete enough to print.
+	Best-effort: a failure here must never fail the submit it rides on.
+	"""
+	try:
+		doc = {field: invoice_doc.get(field) for field in _PRINT_DOC_FIELDS}
+		doc["doctype"] = invoice_doc.doctype
+		doc["posting_date"] = str(invoice_doc.get("posting_date") or "")
+		doc["posting_time"] = str(invoice_doc.get("posting_time") or "")
+		doc["cashier_name"] = frappe.db.get_value("User", invoice_doc.owner, "full_name") or invoice_doc.owner
+		doc["company_address_line"] = (
+			frappe.db.get_value("Address", invoice_doc.company_address, "address_line1")
+			if invoice_doc.get("company_address")
+			else ""
+		) or ""
+		doc["items"] = [{f: row.get(f) for f in _PRINT_ITEM_FIELDS} for row in invoice_doc.get("items") or []]
+		doc["payments"] = [
+			{"mode_of_payment": row.get("mode_of_payment"), "amount": row.get("amount")}
+			for row in invoice_doc.get("payments") or []
+		]
+		doc["receipt_ready"] = True
+		return doc
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "POS receipt print_doc failed")
+		return None
 
 
 @frappe.whitelist()

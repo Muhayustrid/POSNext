@@ -916,6 +916,24 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 		}
 	}
 
+	// The submit response already carried a receipt-shaped doc: in iMin text
+	// mode that is everything the printer needs — no server round trip.
+	if (invoiceData.receipt_ready && invoiceData.items?.length > 0) {
+		await ensureTransportInitialized(invoiceData.pos_profile || null)
+		if (isIminTextMode()) {
+			try {
+				await silentPrintInvoiceFromDoc(invoiceData)
+				return { method: "silent", success: true }
+			} catch (err) {
+				if (isPostPrintFailure(err)) throw err
+				log.warn(
+					"Text-mode print from submit doc failed, retrying via server:",
+					err?.message || err,
+				)
+			}
+		}
+	}
+
 	try {
 		await silentPrintInvoice(
 			invoiceName,

@@ -3555,3 +3555,4 @@ Shipping status,Status pengiriman
 "Dipakai untuk menunggu lembar sebelumnya selesai sebelum rangkap/slip crew berikutnya. Terlalu kecil = jeda lama; terlalu besar = jeda sobek hilang. Default 400. 100–2000.","Dipakai untuk menunggu lembar sebelumnya selesai sebelum rangkap/slip crew berikutnya. Terlalu kecil = jeda lama; terlalu besar = jeda sobek hilang. Default 400. 100–2000.",""
 "Teks (cepat)","Teks (cepat)",""
 "Gambar (persis format cetak)","Gambar (persis format cetak)",""
+"Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.","Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.",""
