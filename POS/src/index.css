@@ -19,6 +19,13 @@ body {
 	font-family: inherit;
 }
 
+/* frappe-ui popovers portal with an inline z-index:auto, so inside the
+   management shell (z-300) the calendar renders behind it and swallows every
+   click. !important beats that inline style. */
+[data-reka-popper-content-wrapper] {
+	z-index: var(--z-dropdown, 10000) !important;
+}
+
 /* Ensure frappe-ui dialogs render above sticky mobile navigation */
 .dialog-overlay {
 	z-index: 400 !important;
