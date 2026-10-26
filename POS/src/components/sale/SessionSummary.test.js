@@ -241,12 +241,13 @@ describe("SessionSummary", () => {
 			"Shift Pagi",
 			"Cashier",
 			"Sales Summary",
+			"Item Detail",
+			"Package Detail",
+			"Sales per Category",
+			"Charges &amp; Discounts",
+			"Refund",
 			"Cash Summary",
 			"Payment Methods",
-			"Charges & Discounts",
-			"Refund",
-			"Sales per Category",
-			"Package Detail", // "Item & Package Detail" (html-escaped in html())
 		]
 		let last = -1
 		for (const marker of markers) {
@@ -255,6 +256,25 @@ describe("SessionSummary", () => {
 			expect(at, `${marker} out of order`).toBeGreaterThan(last)
 			last = at
 		}
+	})
+
+	it("uses independent product and finance columns with compact empty packages", async () => {
+		const { wrapper } = await mountWithSummary({ packages: [] })
+		const products = wrapper.find('[data-test="recap-products"]')
+		const finances = wrapper.find('[data-test="recap-finances"]')
+		expect(products.exists()).toBe(true)
+		expect(products.find('[data-test="charges-section"]').exists()).toBe(true)
+		expect(products.find('[data-test="refund-section"]').exists()).toBe(true)
+		expect(finances.exists()).toBe(true)
+		expect(products.find('[data-test="items-details"]').exists()).toBe(true)
+		expect(products.find('[data-test="packages-section"]').exists()).toBe(true)
+		expect(finances.find('[data-test="cash-summary"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="recap-sheet"]').classes()).toContain(
+			"items-start",
+		)
+		expect(
+			products.find('[data-test="packages-section"]').classes(),
+		).not.toContain("p-6")
 	})
 
 	it("renders the shift info: name, cashier, opening, closing", async () => {

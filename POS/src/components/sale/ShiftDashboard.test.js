@@ -264,6 +264,10 @@ describe("ShiftDashboard", () => {
 		expect(negative.attributes("title")).toContain("-20000 IDR")
 		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("08:00")
 		expect(wrapper.find('[data-test="hourly-chart"]').text()).toContain("11:00")
+		// phones show a sparser label set so hour labels never collide: with
+		// 4 buckets the odd hours stay hidden on <sm viewports
+		const labels = wrapper.findAll('[data-test="hourly-chart"] .sm\\:hidden')
+		expect(labels.map((l) => l.text())).toEqual(["08:00", "10:00"])
 		expect(wrapper.find('[data-test="hourly-section"]').text()).toContain(
 			"Returns are netted into their hour.",
 		)

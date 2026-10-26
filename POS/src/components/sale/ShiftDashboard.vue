@@ -58,7 +58,7 @@
 						:aria-label="__('From Date')"
 						data-test="period-from"
 					/>
-					<span class="text-gray-400">→</span>
+					<span class="text-gray-400">–</span>
 					<input
 						v-model="customTo"
 						type="date"
@@ -131,12 +131,12 @@
 				class="flex flex-col gap-4"
 				data-test="dashboard-skeleton"
 			>
-				<div class="h-24 rounded-lg bg-gray-100 animate-pulse"></div>
-				<div class="h-44 rounded-lg bg-gray-100 animate-pulse"></div>
-				<div class="h-36 rounded-lg bg-gray-100 animate-pulse"></div>
+				<div class="h-24 rounded-2xl bg-gray-100 animate-pulse"></div>
+				<div class="h-44 rounded-2xl bg-gray-100 animate-pulse"></div>
+				<div class="h-36 rounded-2xl bg-gray-100 animate-pulse"></div>
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-					<div class="h-48 rounded-lg bg-gray-100 animate-pulse"></div>
-					<div class="h-48 rounded-lg bg-gray-100 animate-pulse"></div>
+					<div class="h-48 rounded-2xl bg-gray-100 animate-pulse"></div>
+					<div class="h-48 rounded-2xl bg-gray-100 animate-pulse"></div>
 				</div>
 			</div>
 
@@ -303,7 +303,7 @@
 						<div v-if="hourlyBuckets.length" class="mt-4" data-test="hourly-chart">
 							<div class="flex gap-2">
 								<div
-									class="flex w-12 flex-col justify-between text-end text-[10px] text-gray-400 tabular-nums"
+									class="flex w-12 flex-col justify-between text-end text-xs text-gray-400 tabular-nums"
 									aria-hidden="true"
 									data-test="hourly-y-axis"
 								>
@@ -318,7 +318,7 @@
 											:style="{ top: `${pos}%` }"
 										></div>
 									</div>
-									<div class="relative flex h-28 items-end gap-1 sm:gap-2">
+									<div class="relative flex h-28 items-stretch gap-1 sm:gap-2">
 										<div
 											v-for="b in hourlyBuckets"
 											:key="b.start"
@@ -338,9 +338,9 @@
 								</div>
 							</div>
 							<!-- zero baseline -->
-							<div class="ms-14 border-t border-gray-300"></div>
+							<div class="ms-12 border-t border-gray-300"></div>
 							<!-- returns hang below the baseline -->
-							<div class="ms-14 flex h-8 items-start gap-1 sm:gap-2" aria-hidden="true">
+							<div class="ms-12 flex h-8 items-stretch gap-1 sm:gap-2" aria-hidden="true">
 								<div
 									v-for="b in hourlyBuckets"
 									:key="`neg-${b.start}`"
@@ -355,13 +355,14 @@
 									></div>
 								</div>
 							</div>
-							<div class="ms-14 flex gap-1 sm:gap-2">
+							<div class="ms-12 flex gap-1 sm:gap-2">
 								<div
 									v-for="b in hourlyBuckets"
 									:key="`label-${b.start}`"
-									class="mt-1 min-w-0 flex-1 text-center text-[10px] text-gray-400 tabular-nums"
+									class="mt-1 min-w-0 flex-1 text-center text-xs text-gray-400 tabular-nums"
 								>
-									<span v-if="b.showLabel">{{ b.label }}</span>
+									<span v-if="b.showLabel" class="hidden sm:inline">{{ b.label }}</span>
+									<span v-if="b.showLabelMobile" class="sm:hidden">{{ b.label }}</span>
 								</div>
 							</div>
 						</div>
@@ -378,16 +379,16 @@
 							{{ __("Payment Methods") }}
 						</h3>
 						<p class="text-xs text-gray-500">{{ __("Payment distribution this session") }}</p>
-						<div v-if="paymentRows.length" class="mt-4" data-test="payments-list">
+						<div v-if="paymentDisplay.length" class="mt-4" data-test="payments-list">
 							<div
-								v-for="row in paymentRows"
-								:key="row.mode_of_payment"
+								v-for="row in paymentDisplay"
+								:key="row.mode"
 								class="border-b border-gray-100 py-2 last:border-b-0"
 								data-test="payment-row"
 							>
 								<div class="flex items-baseline justify-between gap-3">
 									<span class="min-w-0 text-sm text-gray-700">
-										{{ row.mode_of_payment }}
+										{{ row.mode }}
 									</span>
 									<span
 										class="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums"
@@ -395,16 +396,16 @@
 									>
 										{{ formatMoney(row.amount) }}
 										<span
-											v-if="paymentPct(row.amount) !== null"
+											v-if="row.pct !== null"
 											class="ms-1 text-xs font-normal text-gray-400"
 											data-test="payment-pct"
-										>{{ paymentPct(row.amount) }}%</span>
+										>{{ row.pct }}%</span>
 									</span>
 								</div>
 								<div class="mt-1.5 h-1.5 w-full rounded-full bg-gray-100" data-test="payment-bar">
 									<div
 										class="h-full rounded-full bg-blue-600"
-										:style="{ width: paymentBarWidth(row.amount) }"
+										:style="{ width: row.width }"
 									></div>
 								</div>
 							</div>
@@ -443,20 +444,21 @@
 							</h3>
 							<button
 								type="button"
-								class="text-sm font-medium text-blue-600 hover:text-blue-700"
+								class="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
 								data-test="view-all-items"
 								@click="$emit('navigate', 'sales-recap')"
 							>
-								{{ __("View all →") }}
+								{{ __("View all") }}
+								<FeatherIcon name="chevron-right" class="h-4 w-4" aria-hidden="true" />
 							</button>
 						</div>
-						<table v-if="topItems.length" class="mt-3 w-full text-sm" data-test="top-items-list">
+						<table v-if="topItems.length" class="mt-3 w-full table-fixed text-sm" data-test="top-items-list">
 							<thead>
-								<tr class="text-xs uppercase tracking-widest text-gray-500">
+								<tr class="bg-gray-50 text-xs font-medium text-gray-500 border-b border-gray-200">
 									<th class="w-8 py-1.5 text-start font-medium">#</th>
 									<th class="py-1.5 text-start font-medium">{{ __("Item Name") }}</th>
-									<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-									<th class="py-1.5 text-end font-medium">{{ __("Revenue") }}</th>
+									<th class="w-10 py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+									<th class="w-28 py-1.5 text-end font-medium sm:w-32">{{ __("Revenue") }}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -470,8 +472,7 @@
 									<td class="py-2">
 										<div class="flex items-center gap-2.5">
 											<div
-												class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
-												:class="ITEM_TILES[i % ITEM_TILES.length]"
+												class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-500"
 											>
 												<FeatherIcon name="shopping-bag" class="h-4 w-4" :aria-hidden="true" />
 											</div>
@@ -479,7 +480,7 @@
 										</div>
 									</td>
 									<td class="py-2 text-end text-gray-500 tabular-nums">{{ formatQty(item.qty) }}</td>
-									<td class="py-2 text-end font-bold text-gray-900 tabular-nums">
+									<td class="py-2 text-end font-bold text-gray-900 tabular-nums whitespace-nowrap">
 										{{ formatMoney(item.base_net_amount) }}
 									</td>
 								</tr>
@@ -499,20 +500,21 @@
 							</h3>
 							<button
 								type="button"
-								class="text-sm font-medium text-blue-600 hover:text-blue-700"
+								class="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
 								data-test="view-all-recent"
 								@click="$emit('navigate', 'invoices')"
 							>
-								{{ __("View all →") }}
+								{{ __("View all") }}
+								<FeatherIcon name="chevron-right" class="h-4 w-4" aria-hidden="true" />
 							</button>
 						</div>
-						<table v-if="recentRows.length" class="mt-3 w-full text-sm" data-test="recent-list">
+						<table v-if="recentRows.length" class="mt-3 w-full table-fixed text-sm" data-test="recent-list">
 							<thead>
-								<tr class="text-xs uppercase tracking-widest text-gray-500">
-									<th class="py-1.5 text-start font-medium">{{ __("Time") }}</th>
+								<tr class="bg-gray-50 text-xs font-medium text-gray-500 border-b border-gray-200">
+									<th class="w-14 py-1.5 text-start font-medium sm:w-auto">{{ __("Time") }}</th>
 									<th class="py-1.5 text-start font-medium">{{ __("Invoice No.") }}</th>
-									<th class="py-1.5 text-start font-medium">{{ __("Method") }}</th>
-									<th class="py-1.5 text-end font-medium">{{ __("Total") }}</th>
+									<th class="hidden w-24 py-1.5 text-start font-medium sm:table-cell">{{ __("Method") }}</th>
+									<th class="w-28 py-1.5 text-end font-medium sm:w-32">{{ __("Total") }}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -523,11 +525,11 @@
 									data-test="recent-row"
 									@click="$emit('view-invoice', { name: row.name })"
 								>
-									<td class="py-2 text-xs text-gray-500 tabular-nums">
+									<td class="py-2 text-xs text-gray-500 tabular-nums whitespace-nowrap">
 										{{ formatTime(row.posting_dt) }}
 									</td>
 									<td class="py-2 font-mono text-sm text-gray-900">
-										{{ row.name }}
+										<span class="block max-w-28 truncate sm:max-w-none">{{ row.name }}</span>
 										<StatusBadge
 											v-if="row.is_return"
 											variant="orange"
@@ -543,16 +545,16 @@
 											data-test="credit-badge"
 										/>
 									</td>
-									<td class="py-2 text-xs text-gray-500">
+									<td class="hidden w-24 py-2 text-xs text-gray-500 sm:table-cell">
 										<span v-if="row.payment_mode" class="flex items-center gap-1.5">
-											<span v-if="isCashMode(row.payment_mode)" class="text-[10px] font-bold text-gray-400" aria-hidden="true">Rp</span>
+											<span v-if="isCashMode(row.payment_mode)" class="text-xs font-bold text-gray-400" aria-hidden="true">Rp</span>
 											<FeatherIcon v-else name="credit-card" class="h-3.5 w-3.5 text-gray-400" :aria-hidden="true" />
 											{{ row.payment_mode }}
 										</span>
 										<template v-else>—</template>
 									</td>
 									<td
-										class="py-2 text-end font-bold tabular-nums"
+										class="py-2 text-end font-bold tabular-nums whitespace-nowrap"
 										:class="row.amount < 0 ? 'text-red-600' : 'text-gray-900'"
 										data-test="recent-amount"
 									>
@@ -568,6 +570,16 @@
 		</template>
 	</div>
 </template>
+
+<script>
+const compactFormatter = new Intl.NumberFormat("en", {
+	notation: "compact",
+	maximumFractionDigits: 1,
+})
+const qtyFormatter = new Intl.NumberFormat(undefined, {
+	maximumFractionDigits: 3,
+})
+</script>
 
 <script setup>
 import BottomSheet from "@/components/common/BottomSheet.vue"
@@ -764,15 +776,6 @@ const kpiStats = computed(() => [
 	},
 ])
 
-// Pastel icon tiles for the Top Items rows, cycled by rank.
-const ITEM_TILES = [
-	"bg-amber-100 text-amber-600",
-	"bg-orange-100 text-orange-600",
-	"bg-yellow-100 text-yellow-600",
-	"bg-pink-100 text-pink-600",
-	"bg-blue-100 text-blue-600",
-]
-
 // Bucket type follows the window, same rule as the backend: hours on a
 // single day, days up to 62, calendar months beyond.
 const bucketGranularity = computed(() => {
@@ -808,10 +811,7 @@ const currencySymbol = computed(() =>
 )
 
 function formatCompact(value) {
-	const compact = new Intl.NumberFormat("en", {
-		notation: "compact",
-		maximumFractionDigits: 1,
-	}).format(value)
+	const compact = compactFormatter.format(value)
 	return `${currencySymbol.value} ${compact}`
 }
 
@@ -837,7 +837,9 @@ const hourlyBuckets = computed(() => {
 	const maxPos = Math.max(0, ...values)
 	const maxNeg = Math.max(0, ...values.map((v) => -v))
 	const niceMax = chartScale.value.niceMax || maxPos
-	// Thin the x labels on wide shifts so they never collide
+	// Thin the x labels on wide shifts so they never collide. Phones get a
+	// sparser set: an hour label needs ~2 columns at 390px, so every other
+	// label still collides there even when the desktop set fits.
 	const thin = buckets.length > 12
 	return buckets.map((b, i) => {
 		const value = values[i]
@@ -845,6 +847,7 @@ const hourlyBuckets = computed(() => {
 			...b,
 			label: bucketLabel(b.start),
 			showLabel: !thin || i % 2 === 0,
+			showLabelMobile: thin ? i % 4 === 0 : i % 2 === 0,
 			posHeight:
 				value > 0 && niceMax > 0
 					? `${Math.max(3, Math.round((value / niceMax) * 100))}%`
@@ -880,17 +883,23 @@ const totalPayments = computed(() =>
 	),
 )
 
-function paymentPct(amount) {
-	if (positivePaymentTotal.value <= 0) return null
-	return Math.round(
-		((Number.parseFloat(amount) || 0) / positivePaymentTotal.value) * 100,
-	)
-}
-
-function paymentBarWidth(amount) {
-	const pct = paymentPct(amount)
-	return pct == null ? "0" : `${Math.max(0, Math.min(100, pct))}%`
-}
+const paymentDisplay = computed(() => {
+	const posTotal = positivePaymentTotal.value
+	return paymentRows.value.map((row) => {
+		const amount = row.amount
+		const numAmount = Number.parseFloat(amount) || 0
+		const pct =
+			posTotal <= 0 ? null : Math.round((numAmount / posTotal) * 100)
+		const width = pct == null ? "0" : `${Math.max(0, Math.min(100, pct))}%`
+		return {
+			mode: row.mode_of_payment,
+			amount,
+			is_cash: Boolean(row.is_cash),
+			pct,
+			width,
+		}
+	})
+})
 
 function isCashMode(modeOfPayment) {
 	return Boolean(
@@ -910,10 +919,7 @@ const formatMoney = (amount) =>
 		dashboard.value?.company_currency || props.currency || DEFAULT_CURRENCY,
 	)
 
-const formatQty = (qty) =>
-	new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(
-		Number.parseFloat(qty || 0),
-	)
+const formatQty = (qty) => qtyFormatter.format(Number.parseFloat(qty || 0))
 
 function formatDateTime(date) {
 	const dateStr = formatDate(date)

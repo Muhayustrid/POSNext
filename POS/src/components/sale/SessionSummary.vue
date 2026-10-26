@@ -1,5 +1,5 @@
 <template>
-	<div class="flex flex-col gap-5">
+	<div class="mx-auto flex w-full max-w-7xl flex-col gap-4">
 		<!-- Period selector: chips for every profile member. Mobile folds them
 		     into one pill that opens a period sheet; desktop keeps the chip row. -->
 		<div
@@ -54,7 +54,7 @@
 					:aria-label="__('From Date')"
 					data-test="period-from"
 				/>
-				<span class="text-gray-400">→</span>
+				<span class="text-gray-400">–</span>
 				<input
 					v-model="customTo"
 					type="date"
@@ -206,9 +206,7 @@
 							:title="__('Print')"
 							:aria-label="__('Print')"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
-							</svg>
+							<FeatherIcon name="printer" class="w-4 h-4" />
 						</Button>
 						<Button
 							variant="subtle"
@@ -241,31 +239,27 @@
 				{{ emptyText }}
 			</p>
 
-			<!-- Top row: the hero the shift is judged on, gross beside it. -->
-			<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+			<!-- Sales totals stay compact above the detailed report. -->
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 				<section
 					aria-labelledby="ss-sales-h"
 					data-test="sales-summary"
-					class="relative overflow-hidden rounded-2xl bg-blue-600 p-6 text-white shadow-sm"
-					:class="summary.gross_sales || summary.credit_outstanding ? '' : 'lg:col-span-2'"
+					class="min-w-0 rounded-xl border border-blue-200 bg-blue-50 p-4"
+					:class="summary.gross_sales || summary.credit_outstanding ? '' : 'sm:col-span-2'"
 				>
 					<h3 id="ss-sales-h" class="sr-only">{{ __("Sales Summary") }}</h3>
-					<div
-						class="pointer-events-none absolute -bottom-12 -right-12 h-36 w-36 rounded-full border-[14px] border-white/10"
-						aria-hidden="true"
-					></div>
 					<div data-test="kpi-total-sales" class="relative">
-						<div class="text-xs font-medium text-blue-100">{{ __("Total Sales") }}</div>
-						<div class="mt-1 text-3xl font-bold text-white tabular-nums">
+						<div class="text-xs font-medium text-blue-700">{{ __("Total Sales") }}</div>
+						<div class="mt-1 text-2xl font-bold text-blue-700 tabular-nums">
 							{{ formatMoney(summary.net_sales) }}
 						</div>
-						<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-blue-100 tabular-nums">
+						<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-blue-700 tabular-nums">
 							<span>{{ __("{0} orders", [summary.sales_count]) }}</span>
 							<span>{{ __("Avg {0} / order", [formatMoney(summary.average_sale)]) }}</span>
 						</div>
-						<div class="mt-1 text-xs text-blue-100/80">{{ __("After returns, tax included") }}</div>
+						<div class="mt-1 text-xs text-blue-700">{{ __("After returns, tax included") }}</div>
 						<div v-if="multiCurrency.length" class="mt-2 flex flex-wrap gap-x-5 gap-y-1">
-							<p v-for="row in multiCurrency" :key="row.currency" class="text-xs text-blue-100 tabular-nums">
+							<p v-for="row in multiCurrency" :key="row.currency" class="text-xs text-blue-700 tabular-nums">
 								{{ __("Total Sales ({0})", [row.currency]) }}: {{ formatCurrencyUtil(row.amount, row.currency) }}
 							</p>
 						</div>
@@ -276,11 +270,11 @@
 					v-if="summary.gross_sales || summary.credit_outstanding"
 					aria-labelledby="ss-gross-h"
 					data-test="gross-sales"
-					class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
+					class="min-w-0 rounded-xl border border-gray-200 bg-white p-4"
 				>
 					<h3 id="ss-gross-h" class="sr-only">{{ __("Gross Sales") }}</h3>
 					<div class="text-xs font-medium text-gray-500">{{ __("Gross Sales") }}</div>
-					<div class="mt-1 text-3xl font-bold text-gray-900 tabular-nums">
+					<div class="mt-1 text-2xl font-bold text-gray-900 tabular-nums">
 						{{ formatMoney(summary.gross_sales) }}
 					</div>
 					<div class="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
@@ -294,340 +288,290 @@
 				</section>
 			</div>
 
-			<!-- Report body: white cards on the page background. -->
-			<div class="grid grid-cols-1 gap-4 lg:grid-cols-2" data-test="recap-sheet">
-				<!-- Cash Summary -->
-				<section aria-labelledby="ss-cash-h" data-test="cash-summary" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<span class="text-sm font-bold text-gray-600" aria-hidden="true">Rp</span>
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Cash in & out") }}</p>
-							<h3 id="ss-cash-h" class="text-base font-semibold text-gray-900">{{ __("Cash Summary") }}</h3>
-						</div>
-					</div>
-					<dl class="mt-4 flex flex-col">
-						<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
-							<dt class="text-sm text-gray-600">{{ __("Modal Awal") }}</dt>
-							<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.opening_cash) }}</dd>
-						</div>
-						<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
-							<dt class="text-sm text-gray-600">{{ __("Cash Receipts") }}</dt>
-							<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.cash_collected) }}</dd>
-						</div>
-						<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
-							<dt class="text-sm text-gray-600">{{ __("Cash Expense") }}</dt>
-							<dd
-								class="text-sm font-semibold tabular-nums"
-								:class="summary.expense == null ? 'text-gray-400 font-medium' : 'text-gray-900'"
-							>
-								{{ expenseDisplay }}
-							</dd>
-						</div>
-						<div class="mt-3 rounded-xl bg-blue-50 px-4 py-3">
-							<div class="flex items-baseline justify-between gap-3">
-								<dt class="text-sm font-semibold text-gray-900">{{ __("Cash in Hand") }}</dt>
-								<dd class="text-base font-bold text-blue-700 tabular-nums">{{ formatMoney(summary.cash_in_hand) }}</dd>
-							</div>
-							<p class="mt-1 text-xs text-blue-700/80">{{ __("Cash in Hand is the balance before any expenses") }}</p>
-						</div>
-					</dl>
-				</section>
-
-				<!-- Payment Methods -->
-				<section aria-labelledby="ss-pay-h" data-test="payments-section" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<FeatherIcon name="credit-card" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">
-								{{ __("{0} transactions", [summary.sales_count ?? 0]) }}
-							</p>
-							<h3 id="ss-pay-h" class="text-base font-semibold text-gray-900">{{ __("Payment Methods") }}</h3>
-						</div>
-					</div>
-					<table v-if="summary.payments.length" class="mt-4 w-full text-sm" data-test="payments-table">
-						<tbody>
-							<tr
-								v-for="row in summary.payments"
-								:key="row.mode_of_payment"
-								class="border-b border-gray-100"
-							>
-								<td class="py-2 min-w-0">
-									<div class="flex items-center gap-2.5">
-										<div class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100">
-											<span v-if="row.is_cash" class="text-[10px] font-bold text-gray-500" aria-hidden="true">Rp</span>
-											<FeatherIcon v-else name="credit-card" class="h-3.5 w-3.5 text-gray-500" :aria-hidden="true" />
-										</div>
-										<span class="min-w-0 break-words text-gray-700">
-											{{ row.mode_of_payment }}
+			<!-- Independent columns keep short report sections content-sized. -->
+			<div class="grid items-start gap-4 xl:grid-cols-2" data-test="recap-sheet">
+				<div class="min-w-0 rounded-xl border border-gray-200 bg-white p-4 divide-y divide-gray-200" data-test="recap-products">
+					<section aria-labelledby="ss-items-h" data-test="items-details" class="min-w-0">
+						<h3 id="ss-items-h" class="text-base font-semibold text-gray-900">{{ __("Item Detail") }}</h3>
+						<div v-if="summary.items.length" class="mt-2 overflow-x-auto max-h-64 overflow-y-auto" data-test="items-section">
+							<table class="w-full text-sm" data-test="items-table">
+								<thead class="sticky top-0 bg-white">
+									<tr class="bg-gray-50 text-xs font-medium text-gray-500 border-b border-gray-200">
+										<th class="py-1.5 text-start font-medium">{{ __("Item") }}</th>
+										<th class="px-2 py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+										<th class="px-2 py-1.5 text-end font-medium">{{ __("Price") }}</th>
+										<th v-if="hasItemDiscounts" class="px-2 py-1.5 text-end font-medium">{{ __("Discount") }}</th>
+										<th class="px-2 py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-for="item in summary.items" :key="item.item_code" class="border-t border-gray-100">
+										<td class="py-1.5 text-gray-900 min-w-0 break-words">
 											<span
-												v-if="!row.amount"
-												class="text-xs text-gray-400"
-												:title="__('Unused')"
-											>{{ __("Unused") }}</span>
-											<span
-												v-if="row.configured === false"
-												class="text-xs text-amber-700"
-												:title="__('Not on the POS Profile')"
-											>{{ __("Not on the POS Profile") }}</span>
-										</span>
-									</div>
-								</td>
-								<td
-									class="py-2 text-end font-semibold tabular-nums whitespace-nowrap"
-									:class="row.amount ? 'text-gray-900' : 'text-gray-400'"
-								>
-									{{ formatMoney(row.amount) }}
-								</td>
-							</tr>
-						</tbody>
-					</table>
-					<p v-else class="mt-4 text-xs text-gray-500">{{ __("No payment methods are configured on this POS Profile.") }}</p>
-					<div class="mt-3 grid grid-cols-2 gap-4">
-						<div>
-							<p class="text-xs text-gray-500">{{ __("Total Cash") }}</p>
-							<p class="font-bold text-gray-900 tabular-nums">{{ formatMoney(summary.total_cash) }}</p>
+												v-if="item.qty < 0"
+												class="me-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-400 align-middle"
+												:title="__('Returned')"
+												></span>{{ item.item_name }}
+											<span class="block text-xs text-gray-500">{{ item.item_code }}</span>
+										</td>
+										<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(item.qty) }}</td>
+										<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+											{{ formatMoney(item.price_list_rate || 0) }}
+										</td>
+										<td v-if="hasItemDiscounts" class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+											{{ formatMoney(item.discount_amount || 0) }}
+										</td>
+										<td class="px-2 py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
+											{{ formatMoney(item.base_net_amount) }}
+										</td>
+									</tr>
+								</tbody>
+							</table>
 						</div>
-						<div>
-							<p class="text-xs text-gray-500">{{ __("Total Non-Cash") }}</p>
-							<p class="font-bold text-gray-900 tabular-nums">{{ formatMoney(summary.total_non_cash) }}</p>
-						</div>
-					</div>
-					<div class="mt-3 flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-4 py-3">
-						<p class="text-sm font-semibold text-gray-900">{{ __("Grand Total") }}</p>
-						<p class="font-bold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(summary.methods_grand_total) }}</p>
-					</div>
-				</section>
-
-				<!-- Charges & Discounts -->
-				<section aria-labelledby="ss-charges-h" data-test="charges-section" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<FeatherIcon name="file-text" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Transaction adjustments") }}</p>
-							<h3 id="ss-charges-h" class="text-base font-semibold text-gray-900">{{ __("Charges & Discounts") }}</h3>
-						</div>
-					</div>
-					<dl class="mt-4 flex flex-col">
-						<div
-							v-for="charge in summary.other_charges"
-							:key="charge.account_head"
-							class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
-						>
-							<dt class="text-sm text-gray-600 min-w-0 break-words">
-								{{ charge.label }}
-								<span class="text-xs text-gray-400">{{ __("posted as its own account") }}</span>
-							</dt>
-							<dd class="text-sm font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(charge.amount) }}</dd>
-						</div>
-						<div
-							v-if="summary.other_charges.length > 1"
-							class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
-						>
-							<dt class="text-sm text-gray-600">{{ __("Other Charges") }}</dt>
-							<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.other_charges_total) }}</dd>
-						</div>
-						<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
-							<dt class="text-sm text-gray-600">{{ __("Tax / PPN") }}</dt>
-							<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.tax_total) }}</dd>
-						</div>
-						<div class="flex items-baseline justify-between gap-3 py-2">
-							<dt class="text-sm text-gray-600">{{ __("Discount") }}</dt>
-							<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.total_discount) }}</dd>
-						</div>
-					</dl>
-					<p class="text-xs text-gray-500">{{ __("Charges are classified by each account's type on the invoice.") }}</p>
-				</section>
-
-				<!-- Refunds -->
-				<section aria-labelledby="ss-refund-h" data-test="refund-section" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<FeatherIcon name="alert-circle" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Return status") }}</p>
-							<h3 id="ss-refund-h" class="text-base font-semibold text-gray-900">{{ __("Refunds") }}</h3>
-						</div>
-					</div>
-					<div class="mt-4 flex items-start justify-between gap-3">
-						<div>
-							<p class="text-sm text-gray-500">{{ __("Total Refunds") }}</p>
-							<p
-								class="mt-1 text-3xl font-bold tabular-nums whitespace-nowrap"
-								:class="summary.returns_total ? 'text-red-700' : 'text-gray-900'"
-							>
-								{{ returnsDisplay }}
-							</p>
-						</div>
-						<span
-							class="rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap"
-							:class="summary.returns_count ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'"
-						>
-							{{ summary.returns_count ? __("{0} return invoices", [summary.returns_count]) : __("No refunds") }}
-						</span>
-					</div>
-				</section>
-
-				<!-- Sales per Category -->
-				<section aria-labelledby="ss-categories-h" data-test="categories-section" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<FeatherIcon name="shopping-bag" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Product performance") }}</p>
-							<h3 id="ss-categories-h" class="text-base font-semibold text-gray-900">{{ __("Sales per Category") }}</h3>
-						</div>
-					</div>
-					<table class="mt-4 w-full text-sm" data-test="categories-table">
-						<thead>
-							<tr class="text-xs uppercase text-gray-500">
-								<th class="py-1.5 text-start font-medium">{{ __("Category") }}</th>
-								<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-								<th class="py-1.5 text-end font-medium">{{ __("Net Revenue") }}</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr v-if="!summary.categories.length">
-								<td colspan="3" class="py-3 text-center text-xs text-gray-500">
-									{{ emptyText }}
-								</td>
-							</tr>
-							<tr v-for="cat in summary.categories" :key="cat.category ?? 'none'" class="border-t border-gray-100">
-								<td class="py-1.5 text-gray-900 break-words">{{ cat.category || __("No category") }}</td>
-								<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(cat.qty) }}</td>
-								<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
-									{{ formatMoney(cat.base_net_amount) }}
-								</td>
-							</tr>
-						</tbody>
-					</table>
-					<p class="mt-2 text-xs text-gray-500">{{ __("Net revenue is pre-tax; returns are subtracted.") }}</p>
-					<p v-if="summary.categories_truncated" class="text-xs text-gray-500">
-						{{
+						<p v-else class="mt-2 text-xs text-gray-500">{{ emptyText }}</p>
+						<p v-if="summary.items_truncated" class="mt-2 text-xs text-gray-500">
+							{{
 							__(
+							"Showing top {0} of {1} items; the totals above cover the whole session.",
+							[summary.items_shown, summary.items_total_groups],
+							)
+							}}
+						</p>
+						<p v-if="summary.items.length" class="mt-2 text-xs text-gray-500">
+							{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
+						</p>
+					</section>
+					<div class="mt-4 pt-4">
+						<section aria-labelledby="ss-pkg-h" data-test="packages-section" class="min-w-0">
+							<h3 id="ss-pkg-h" class="text-base font-semibold text-gray-900">{{ __("Package Detail") }}</h3>
+							<div v-if="summary.packages.length" class="overflow-x-auto">
+								<table class="mt-2 w-full text-sm" data-test="packages-table">
+									<thead>
+										<tr class="bg-gray-50 text-xs font-medium text-gray-500 border-b border-gray-200">
+											<th class="py-1.5 text-start font-medium">{{ __("Package") }}</th>
+											<th class="px-2 py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+											<th class="px-2 py-1.5 text-end font-medium">{{ __("Price") }}</th>
+											<th v-if="hasItemDiscounts" class="px-2 py-1.5 text-end font-medium">{{ __("Discount") }}</th>
+											<th class="px-2 py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
+										</tr>
+									</thead>
+									<tbody>
+										<tr v-for="pkg in summary.packages" :key="pkg.item_code" class="border-t border-gray-100">
+											<td class="py-1.5 text-gray-900 min-w-0 break-words">
+												{{ pkg.item_name }}
+												<span class="block text-xs text-gray-500">{{ pkg.item_code }}</span>
+											</td>
+											<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(pkg.qty) }}</td>
+											<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+												{{ formatMoney(pkg.price_list_rate || 0) }}
+											</td>
+											<td v-if="hasItemDiscounts" class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
+												{{ formatMoney(pkg.discount_amount || 0) }}
+											</td>
+											<td class="px-2 py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
+												{{ formatMoney(pkg.base_net_amount) }}
+											</td>
+										</tr>
+									</tbody>
+								</table>
+							</div>
+							<p v-else class="mt-2 text-xs text-gray-500">{{ emptyText }}</p>
+							<p v-if="summary.packages.length" class="mt-2 text-xs text-gray-500">
+								{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
+							</p>
+						</section>
+					</div>
+				<div class="mt-4 border-t border-gray-200 pt-4"><section aria-labelledby="ss-categories-h" data-test="categories-section" class="min-w-0">
+							<h3 id="ss-categories-h" class="text-base font-semibold text-gray-900">{{ __("Sales per Category") }}</h3>
+							<table class="mt-2 w-full table-fixed text-sm" data-test="categories-table">
+								<thead>
+									<tr class="bg-gray-50 text-xs font-medium text-gray-500 border-b border-gray-200">
+										<th class="py-1.5 text-start font-medium">{{ __("Category") }}</th>
+										<th class="px-2 py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+										<th class="px-2 py-1.5 text-end font-medium">{{ __("Net Revenue") }}</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-if="!summary.categories.length">
+										<td colspan="3" class="py-3 text-center text-xs text-gray-500">
+											{{ emptyText }}
+										</td>
+									</tr>
+									<tr v-for="cat in summary.categories" :key="cat.category ?? 'none'" class="border-t border-gray-100">
+										<td class="py-1.5 text-gray-900 break-words [overflow-wrap:anywhere]">{{ cat.category || __("No category") }}</td>
+										<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(cat.qty) }}</td>
+										<td class="px-2 py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
+											{{ formatMoney(cat.base_net_amount) }}
+										</td>
+									</tr>
+								</tbody>
+							</table>
+							<p class="mt-2 text-xs text-gray-500">{{ __("Net revenue is pre-tax; returns are subtracted.") }}</p>
+							<p v-if="summary.categories_truncated" class="text-xs text-gray-500">
+								{{
+								__(
 								"Showing top {0} of {1} categories; session totals above cover everything.",
 								[summary.categories_shown, summary.categories_total_groups],
-							)
-						}}
-					</p>
-				</section>
+								)
+								}}
+							</p>
+						</section></div>
+<div class="mt-4 border-t border-gray-200 pt-4"><section aria-labelledby="ss-charges-h" data-test="charges-section" class="min-w-0">
+								<h3 id="ss-charges-h" class="text-base font-semibold text-gray-900">{{ __("Charges & Discounts") }}</h3>
+								<dl class="mt-2 flex flex-col">
+									<div
+										v-for="charge in summary.other_charges"
+										:key="charge.account_head"
+										class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
+										>
+										<dt class="text-sm text-gray-600 min-w-0 break-words">
+											{{ charge.label }}
+											<span class="text-xs text-gray-400">{{ __("posted as its own account") }}</span>
+										</dt>
+										<dd class="text-sm font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(charge.amount) }}</dd>
+									</div>
+									<div
+										v-if="summary.other_charges.length > 1"
+										class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
+										>
+										<dt class="text-sm text-gray-600">{{ __("Other Charges") }}</dt>
+										<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.other_charges_total) }}</dd>
+									</div>
+									<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
+										<dt class="text-sm text-gray-600">{{ __("Tax / PPN") }}</dt>
+										<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.tax_total) }}</dd>
+									</div>
+									<div class="flex items-baseline justify-between gap-3 py-2">
+										<dt class="text-sm text-gray-600">{{ __("Discount") }}</dt>
+										<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.total_discount) }}</dd>
+									</div>
+								</dl>
+								<p class="text-xs text-gray-500">{{ __("Charges are classified by each account's type on the invoice.") }}</p>
+							</section></div>
+<div class="mt-4 border-t border-gray-200 pt-4"><section aria-labelledby="ss-refund-h" data-test="refund-section" class="min-w-0">
+								<h3 id="ss-refund-h" class="text-base font-semibold text-gray-900">{{ __("Refunds") }}</h3>
+								<div class="mt-2 flex flex-wrap items-start justify-between gap-3">
+									<div>
+										<p class="text-sm text-gray-500">{{ __("Total Refunds") }}</p>
+										<p
+											class="mt-1 text-lg font-bold tabular-nums whitespace-nowrap"
+											:class="summary.returns_total ? 'text-red-700' : 'text-gray-900'"
+											>
+											{{ returnsDisplay }}
+										</p>
+									</div>
+									<span
+										class="rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap"
+										:class="summary.returns_count ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'"
+										>
+										{{ summary.returns_count ? __("{0} return invoices", [summary.returns_count]) : __("No refunds") }}
+									</span>
+								</div>
+							</section></div>
+</div>
+				<div class="flex min-w-0 flex-col gap-4" data-test="recap-finances">
+					<div class="rounded-xl border border-gray-200 bg-white p-4 space-y-4 divide-y divide-gray-200">
+						<section aria-labelledby="ss-cash-h" data-test="cash-summary" class="min-w-0">
+							<h3 id="ss-cash-h" class="text-base font-semibold text-gray-900">{{ __("Cash Summary") }}</h3>
+							<dl class="mt-2 flex flex-col">
+								<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
+									<dt class="text-sm text-gray-600">{{ __("Modal Awal") }}</dt>
+									<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.opening_cash) }}</dd>
+								</div>
+								<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
+									<dt class="text-sm text-gray-600">{{ __("Cash Receipts") }}</dt>
+									<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.cash_collected) }}</dd>
+								</div>
+								<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
+									<dt class="text-sm text-gray-600">{{ __("Cash Expense") }}</dt>
+									<dd
+										class="text-sm font-semibold tabular-nums"
+										:class="summary.expense == null ? 'text-gray-400 font-medium' : 'text-gray-900'"
+										>
+										{{ expenseDisplay }}
+									</dd>
+								</div>
+								<div class="mt-3 rounded-xl bg-blue-50 px-4 py-3">
+									<div class="flex items-baseline justify-between gap-3">
+										<dt class="text-sm font-semibold text-gray-900">{{ __("Cash in Hand") }}</dt>
+										<dd class="text-base font-bold text-blue-700 tabular-nums">{{ formatMoney(summary.cash_in_hand) }}</dd>
+									</div>
+									<p class="mt-1 text-xs text-blue-700/80">{{ __("Cash in Hand is the balance before any expenses") }}</p>
+								</div>
+							</dl>
+						</section>
+						<div class="pt-4">
+							<section aria-labelledby="ss-pay-h" data-test="payments-section" class="min-w-0">
+								<h3 id="ss-pay-h" class="text-base font-semibold text-gray-900">{{ __("Payment Methods") }}</h3>
+								<table v-if="summary.payments.length" class="mt-2 w-full text-sm" data-test="payments-table">
+									<tbody>
+										<tr
+											v-for="row in summary.payments"
+											:key="row.mode_of_payment"
+											class="border-b border-gray-100"
+											>
+											<td class="py-2 min-w-0">
+												<div class="flex items-center gap-2.5">
+													<div class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100">
+														<span v-if="row.is_cash" class="text-xs font-bold text-gray-500" aria-hidden="true">Rp</span>
+														<FeatherIcon v-else name="credit-card" class="h-3.5 w-3.5 text-gray-500" :aria-hidden="true" />
+													</div>
+													<span class="min-w-0 break-words text-gray-700">
+														{{ row.mode_of_payment }}
+														<span
+															v-if="!row.amount"
+															class="text-xs text-gray-400"
+															:title="__('Unused')"
+															>{{ __("Unused") }}</span>
+														<span
+															v-if="row.configured === false"
+															class="text-xs text-amber-700"
+															:title="__('Not on the POS Profile')"
+															>{{ __("Not on the POS Profile") }}</span>
+													</span>
+												</div>
+											</td>
+											<td
+												class="py-2 text-end font-semibold tabular-nums whitespace-nowrap"
+												:class="row.amount ? 'text-gray-900' : 'text-gray-400'"
+												>
+												{{ formatMoney(row.amount) }}
+											</td>
+										</tr>
+									</tbody>
+								</table>
+								<p v-else class="mt-2 text-xs text-gray-500">{{ __("No payment methods are configured on this POS Profile.") }}</p>
+								<div class="mt-3 grid grid-cols-2 gap-4">
+									<div>
+										<p class="text-xs text-gray-500">{{ __("Total Cash") }}</p>
+										<p class="font-bold text-gray-900 tabular-nums">{{ formatMoney(summary.total_cash) }}</p>
+									</div>
+									<div>
+										<p class="text-xs text-gray-500">{{ __("Total Non-Cash") }}</p>
+										<p class="font-bold text-gray-900 tabular-nums">{{ formatMoney(summary.total_non_cash) }}</p>
+									</div>
+								</div>
+								<div class="mt-3 flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-4 py-3">
+									<p class="text-sm font-semibold text-gray-900">{{ __("Grand Total") }}</p>
+									<p class="font-bold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(summary.methods_grand_total) }}</p>
+								</div>
+							</section>
+						</div>
 
-				<!-- Package and item breakdowns: separate cards so a bundle never
-				     reads as a loose item -->
-				<section aria-labelledby="ss-pkg-h" data-test="packages-section" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<FeatherIcon name="gift" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Transaction breakdown") }}</p>
-							<h3 id="ss-pkg-h" class="text-base font-semibold text-gray-900">{{ __("Package Detail") }}</h3>
-						</div>
-					</div>
-					<table v-if="summary.packages.length" class="mt-4 w-full text-sm" data-test="packages-table">
-						<thead>
-							<tr class="text-xs uppercase text-gray-500">
-								<th class="py-1.5 text-start font-medium">{{ __("Package") }}</th>
-								<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-								<th class="py-1.5 text-end font-medium">{{ __("Price") }}</th>
-								<th v-if="hasItemDiscounts" class="py-1.5 text-end font-medium">{{ __("Discount") }}</th>
-								<th class="py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr v-for="pkg in summary.packages" :key="pkg.item_code" class="border-t border-gray-100">
-								<td class="py-1.5 text-gray-900 min-w-0 break-words">
-									{{ pkg.item_name }}
-									<span class="block text-xs text-gray-500">{{ pkg.item_code }}</span>
-								</td>
-								<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(pkg.qty) }}</td>
-								<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-									{{ formatMoney(pkg.price_list_rate || 0) }}
-								</td>
-								<td v-if="hasItemDiscounts" class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-									{{ formatMoney(pkg.discount_amount || 0) }}
-								</td>
-								<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
-									{{ formatMoney(pkg.base_net_amount) }}
-								</td>
-							</tr>
-						</tbody>
-					</table>
-					<p v-else class="mt-4 text-xs text-gray-500">{{ emptyText }}</p>
-					<p class="mt-2 text-xs text-gray-500">
-						{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
-					</p>
-				</section>
 
-				<section aria-labelledby="ss-items-h" data-test="items-details" class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
-					<div class="flex items-center gap-3">
-						<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-							<FeatherIcon name="list" class="h-5 w-5 text-gray-600" :aria-hidden="true" />
-						</div>
-						<div class="min-w-0">
-							<p class="text-xs uppercase tracking-widest text-gray-500">{{ __("Transaction breakdown") }}</p>
-							<h3 id="ss-items-h" class="text-base font-semibold text-gray-900">{{ __("Item Detail") }}</h3>
-						</div>
 					</div>
-					<div v-if="summary.items.length" class="mt-4 overflow-x-auto max-h-64 overflow-y-auto" data-test="items-section">
-						<table class="w-full text-sm" data-test="items-table">
-							<thead class="sticky top-0 bg-white">
-								<tr class="text-xs uppercase text-gray-500">
-									<th class="py-1.5 text-start font-medium">{{ __("Item") }}</th>
-									<th class="py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-									<th class="py-1.5 text-end font-medium">{{ __("Price") }}</th>
-									<th v-if="hasItemDiscounts" class="py-1.5 text-end font-medium">{{ __("Discount") }}</th>
-									<th class="py-1.5 text-end font-medium">{{ __("Subtotal") }}</th>
-								</tr>
-							</thead>
-							<tbody>
-								<tr v-for="item in summary.items" :key="item.item_code" class="border-t border-gray-100">
-									<td class="py-1.5 text-gray-900 min-w-0 break-words">
-										<span
-											v-if="item.qty < 0"
-											class="me-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-400 align-middle"
-											:title="__('Returned')"
-										></span>{{ item.item_name }}
-										<span class="block text-xs text-gray-500">{{ item.item_code }}</span>
-									</td>
-									<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(item.qty) }}</td>
-									<td class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-										{{ formatMoney(item.price_list_rate || 0) }}
-									</td>
-									<td v-if="hasItemDiscounts" class="py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">
-										{{ formatMoney(item.discount_amount || 0) }}
-									</td>
-									<td class="py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
-										{{ formatMoney(item.base_net_amount) }}
-									</td>
-								</tr>
-							</tbody>
-						</table>
-					</div>
-					<p v-else class="mt-4 text-xs text-gray-500">{{ emptyText }}</p>
-					<p v-if="summary.items_truncated" class="mt-2 text-xs text-gray-500">
-						{{
-							__(
-								"Showing top {0} of {1} items; the totals above cover the whole session.",
-								[summary.items_shown, summary.items_total_groups],
-							)
-						}}
-					</p>
-					<p class="mt-2 text-xs text-gray-500">
-						{{ __("Subtotal is net of item and invoice discounts, excluding tax.") }}
-					</p>
-				</section>
+
+				</div>
 			</div>
 		</template>
 	</div>
 </template>
+
+<script>
+const qtyFormatter = new Intl.NumberFormat(undefined, {
+	maximumFractionDigits: 3,
+})
+</script>
 
 <script setup>
 import RefreshButton from "@/components/common/RefreshButton.vue"
@@ -886,10 +830,7 @@ const hasItemDiscounts = computed(() =>
 	),
 )
 
-const formatQty = (qty) =>
-	new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(
-		Number.parseFloat(qty || 0),
-	)
+const formatQty = (qty) => qtyFormatter.format(Number.parseFloat(qty || 0))
 
 function formatDateTime(date) {
 	const dateStr = formatDate(date)

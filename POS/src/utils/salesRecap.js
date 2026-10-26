@@ -116,10 +116,11 @@ function fmtDate(value) {
 	return m ? `${m[3]}/${m[2]}/${m[1]}` : String(value ?? "-")
 }
 
-const fmtQty = (qty) =>
-	new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(
-		Number.parseFloat(qty || 0),
-	)
+const qtyFormatter = new Intl.NumberFormat(undefined, {
+	maximumFractionDigits: 3,
+})
+
+const fmtQty = (qty) => qtyFormatter.format(Number.parseFloat(qty || 0))
 
 const row = (label, value, bold = false) =>
 	`<div class="row${bold ? " bold" : ""}"><span>${esc(label)}</span><span>${esc(value)}</span></div>`
