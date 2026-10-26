@@ -443,4 +443,119 @@ describe("Complete Payment relayout (native amount input and quick amounts)", ()
 		wrapper.vm.clearAll()
 		expect(wrapper.vm.amountInput).toBe("")
 	})
+
+	describe("tap-to-pay and added payments list", () => {
+		const defaultCardMethod = {
+			mode_of_payment: "Card",
+			type: "Card",
+			account_type: "Bank",
+		}
+
+		it("tenders exact remainder when method is tapped without typed amount", async () => {
+			const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+			wrapper.vm.paymentMethods = [defaultCashMethod]
+			await flushPromises()
+
+			wrapper.vm.handleMethodTap(defaultCashMethod)
+			await flushPromises()
+
+			expect(wrapper.vm.paymentEntries).toHaveLength(1)
+			expect(wrapper.vm.paymentEntries[0].amount).toBe(50000)
+			expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Cash")
+			expect(wrapper.vm.remainingAmount).toBe(0)
+			wrapper.unmount()
+		})
+
+		it("tenders typed amount when method is tapped with amount input", async () => {
+			const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+			wrapper.vm.paymentMethods = [defaultCashMethod]
+			await flushPromises()
+
+			wrapper.vm.amountInput = "20000"
+			wrapper.vm.handleMethodTap(defaultCashMethod)
+			await flushPromises()
+
+			expect(wrapper.vm.paymentEntries).toHaveLength(1)
+			expect(wrapper.vm.paymentEntries[0].amount).toBe(20000)
+			expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Cash")
+			expect(wrapper.vm.remainingAmount).toBe(30000)
+			expect(wrapper.vm.amountInput).toBe("")
+			wrapper.unmount()
+		})
+
+		it("replaces a fully-paid single tender when another method is tapped", async () => {
+			const debitMethod = {
+				mode_of_payment: "Debit Card",
+				type: "Bank",
+				account_type: "Bank",
+			}
+			const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+			wrapper.vm.paymentMethods = [debitMethod, defaultCashMethod]
+			await flushPromises()
+
+			wrapper.vm.handleMethodTap(debitMethod)
+			await flushPromises()
+			expect(wrapper.vm.paymentEntries).toHaveLength(1)
+			expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Debit Card")
+
+			wrapper.vm.handleMethodTap(defaultCashMethod)
+			await flushPromises()
+
+			expect(wrapper.vm.paymentEntries).toHaveLength(1)
+			expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Cash")
+			expect(wrapper.vm.paymentEntries[0].amount).toBe(50000)
+			expect(wrapper.vm.remainingAmount).toBe(0)
+			expect(wrapper.vm.lastSelectedMethod.mode_of_payment).toBe("Cash")
+			wrapper.unmount()
+		})
+
+		it("replaces a fully-paid single tender on quick add (long-press path)", async () => {
+			const debitMethod = {
+				mode_of_payment: "Debit Card",
+				type: "Bank",
+				account_type: "Bank",
+			}
+			const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+			wrapper.vm.paymentMethods = [debitMethod, defaultCashMethod]
+			await flushPromises()
+
+			wrapper.vm.handleMethodTap(debitMethod)
+			await flushPromises()
+
+			wrapper.vm.quickAddPayment(defaultCashMethod)
+			await flushPromises()
+
+			expect(wrapper.vm.paymentEntries).toHaveLength(1)
+			expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Cash")
+			expect(wrapper.vm.paymentEntries[0].amount).toBe(50000)
+			expect(wrapper.vm.remainingAmount).toBe(0)
+			wrapper.unmount()
+		})
+
+		it("renders added payments list and undo button removes one entry via removeEntry", async () => {
+			const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+			wrapper.vm.paymentMethods = [defaultCashMethod, defaultCardMethod]
+			await flushPromises()
+
+			wrapper.vm.addCustomPayment(defaultCashMethod, 20000)
+			wrapper.vm.addCustomPayment(defaultCardMethod, 30000)
+			await flushPromises()
+
+			expect(wrapper.vm.paymentEntries).toHaveLength(2)
+			const addedPaymentsContainer = wrapper.find("[data-added-payments]")
+			expect(addedPaymentsContainer.exists()).toBe(true)
+
+			const removeButtons = wrapper.findAll("button[data-remove-payment]")
+			expect(removeButtons).toHaveLength(2)
+
+			await removeButtons[0].trigger("click")
+			await flushPromises()
+
+			expect(wrapper.vm.paymentEntries).toHaveLength(1)
+			expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Card")
+			expect(wrapper.vm.paymentEntries[0].amount).toBe(30000)
+			expect(wrapper.vm.remainingAmount).toBe(20000)
+			wrapper.unmount()
+		})
+	})
 })
