@@ -80,11 +80,7 @@ export function wrapText(text, width) {
 	// A line that already fits keeps its spacing: padded labels and
 	// indented sub-lines are laid out with spaces on purpose.
 	if (raw.length <= w && !raw.includes("\n")) return [raw]
-	const words = raw
-		.replace(/\s+/g, " ")
-		.trim()
-		.split(" ")
-		.filter(Boolean)
+	const words = raw.replace(/\s+/g, " ").trim().split(" ").filter(Boolean)
 	const lines = []
 	let line = ""
 	for (let word of words) {
