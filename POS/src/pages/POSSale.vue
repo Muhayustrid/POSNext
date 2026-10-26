@@ -1318,8 +1318,11 @@ const probeImin = async () => {
 	let ok = false;
 	try {
 		await ensureIminSdk();
-		const status = await getTransport().getDriver("imin").getStatus();
+		const imin = getTransport().getDriver("imin");
+		const status = await imin.getStatus();
 		ok = Boolean(status?.ok);
+		// Off the print path: the first receipt should not pay for the logo.
+		if (ok) imin.warmup?.();
 	} catch (err) {
 		log.warn("iMin warm-up failed:", err?.message || err);
 	}
@@ -2564,6 +2567,24 @@ async function handlePaymentCompleted(paymentData) {
 				const invoiceTotal = result.grand_total ?? result.total ?? 0;
 				const paidAmount = paymentData.paid_amount ?? invoiceTotal;
 
+				// Auto-print FIRST: the paper should start moving while the stock
+				// refresh and the rest of the bookkeeping below run, not after.
+				// print_doc (receipt-shaped doc from the submit response) lets the
+				// iMin text lane print without another server round trip.
+				if (posSettingsStore.isPrintAuto) {
+					const printDoc = result.print_doc?.receipt_ready
+						? {
+								...result.print_doc,
+								pos_queue_number:
+									result.print_doc.pos_queue_number ?? result.pos_queue_number ?? null,
+							}
+						: { name: invoiceName };
+					handlePrintInvoice(printDoc).catch((error) => {
+						log.error("Auto-print error:", error);
+						showWarning(__("Invoice {0} created but print failed", [invoiceName]));
+					});
+				}
+
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();
 				// Reset cart hash after successful payment
@@ -2593,13 +2614,6 @@ async function handlePaymentCompleted(paymentData) {
 					result?.pos_queue_number ?? null,
 				);
 				showSuccess(__("Invoice {0} created successfully", [invoiceName]));
-
-				if (posSettingsStore.isPrintAuto) {
-					handlePrintInvoice({ name: invoiceName }).catch((error) => {
-						log.error("Auto-print error:", error);
-						showWarning(__("Invoice {0} created but print failed", [invoiceName]));
-					});
-				}
 			}
 		}
 	} catch (error) {

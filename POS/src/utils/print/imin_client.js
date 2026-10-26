@@ -97,6 +97,9 @@ function printMs(heightDots, dotsPerSecond = PRINT_DOTS_PER_SECOND) {
 	return Math.round((h / dotsPerSecond) * 1000)
 }
 
+/** Logo width on paper in dots (the templates size it 14mm). */
+const LOGO_WIDTH_DOTS = RECEIPT_LOGO_MM * DOTS_PER_MM
+
 // iMin setTextTypeface: 0 DEFAULT, 1 MONOSPACE. Text mode lays receipts out
 // in fixed columns, so it needs the monospace face. (VERIFY ON DEVICE.)
 const TYPEFACE_DEFAULT = 0
@@ -364,6 +367,19 @@ export function createIminDriver(deps = {}) {
 			}
 		},
 
+		/**
+		 * Prepare what the first text-mode receipt would otherwise build on
+		 * the critical path (today: the logo bitmap). Safe to call repeatedly;
+		 * never throws.
+		 */
+		async warmup() {
+			try {
+				await loadLogo(LOGO_WIDTH_DOTS)
+			} catch {
+				// Guarded: the print path loads it again if needed.
+			}
+		},
+
 		describe() {
 			return {
 				id: "imin",
@@ -567,7 +583,7 @@ export function createIminDriver(deps = {}) {
 			big: colsFor(dots, sz.big),
 			queue: colsFor(dots, sz.queue),
 		})
-		const logoWidth = Math.min(dots, RECEIPT_LOGO_MM * DOTS_PER_MM)
+		const logoWidth = Math.min(dots, LOGO_WIDTH_DOTS)
 		// Started now, awaited by the first sheet that needs it: a cached logo
 		// costs nothing, a first-ever load overlaps the connect.
 		const logo = loadLogo(logoWidth)

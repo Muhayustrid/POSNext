@@ -1381,11 +1381,11 @@
 												:max="5"
 											/>
 											<NumberField
-												v-if="(settings.imin_print_copies || 1) > 1"
+												v-if="(settings.imin_print_copies || 1) > 1 || settings.imin_crew_slip_enabled"
 												v-model="settings.imin_copy_delay_ms"
 												:label="__('Jeda Antar Rangkap (ms)')"
 												:description="
-													__('Jeda antar rangkap agar rangkap pertama bisa disobek. Default 800.')
+													__('Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.')
 												"
 												:min="0"
 												:max="10000"

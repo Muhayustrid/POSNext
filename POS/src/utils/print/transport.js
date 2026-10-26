@@ -137,7 +137,10 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 				errors.push(`${id}: ${err?.message || err}`)
 			}
 			if (ok) {
-				await logAttempt({
+				// Not awaited: the paper is out, and a slow server must not hold
+				// the job (or the next reprint queued behind it) open. logAttempt
+				// swallows its own failures.
+				void logAttempt({
 					...opts.logContext,
 					driver: id,
 					status: idx === 0 ? "Success" : "Fallback",
