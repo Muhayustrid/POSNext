@@ -405,8 +405,12 @@
 						@touchmove.passive="getOptimizedClickHandler(item).touchmove"
 						@touchend.passive="getOptimizedClickHandler(item).touchend"
 						@click="getOptimizedClickHandler(item).click"
+						:aria-disabled="isItemBlocked(item) ? 'true' : undefined"
 						:class="[
-							'group relative bg-white border border-gray-200 rounded-lg p-1.5 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100 cursor-pointer hover:border-blue-400 hover:shadow-md',
+							'group relative bg-white border border-gray-200 rounded-lg p-1.5 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100',
+							isItemBlocked(item)
+								? 'cursor-not-allowed'
+								: 'cursor-pointer hover:border-blue-400 hover:shadow-md',
 						]"
 					>
 						<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
@@ -439,10 +443,12 @@
 							<div
 								:class="[
 									'w-full h-full transition-all duration-300',
-									(item.is_stock_item || item.is_bundle) &&
-									(item.actual_qty ?? item.stock_qty ?? 0) <= 0
-										? 'group-hover:blur-sm group-hover:brightness-75'
-										: '',
+									isItemBlocked(item)
+										? 'opacity-60 grayscale'
+										: (item.is_stock_item || item.is_bundle) &&
+										  (item.actual_qty ?? item.stock_qty ?? 0) <= 0
+											? 'group-hover:blur-sm group-hover:brightness-75'
+											: '',
 								]"
 							>
 								<LazyImage
@@ -520,24 +526,36 @@
 						<!-- Item Details -->
 						<div class="min-w-0">
 							<span
+								v-if="isItemBlocked(item)"
+								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20 mb-0.5"
+							>
+								{{ __("Out of stock") }}
+							</span>
+							<span
 								v-if="isPackageItem(item.item_code)"
 								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20 mb-0.5"
 							>
 								{{ __("Package") }}
 							</span>
 							<h3
-								class="text-xs sm:text-sm font-semibold text-gray-900 line-clamp-2 mb-1 leading-snug"
+								:class="[
+									'text-xs sm:text-sm font-semibold text-gray-900 line-clamp-2 mb-1 leading-snug',
+									isItemBlocked(item) ? 'opacity-60' : '',
+								]"
 								:title="item.item_name"
 							>
 								{{ item.item_name }}
 							</h3>
 							<p
 								v-if="item.attributes"
-								class="text-xs text-gray-400 truncate leading-tight"
+								:class="[
+									'text-xs text-gray-400 truncate leading-tight',
+									isItemBlocked(item) ? 'opacity-60' : '',
+								]"
 							>
 								{{ Object.values(item.attributes).join(" / ") }}
 							</p>
-							<p class="leading-tight">
+							<p :class="['leading-tight', isItemBlocked(item) ? 'opacity-60' : '']">
 								<span class="text-sm sm:text-base font-bold text-blue-700 tabular-nums">{{
 									formatCurrency(getDisplayRate(item))
 								}}</span>
@@ -737,11 +755,20 @@
 							@touchmove.passive="getOptimizedClickHandler(item).touchmove"
 							@touchend.passive="getOptimizedClickHandler(item).touchend"
 							@click="getOptimizedClickHandler(item).click"
-							class="group cursor-pointer hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100"
+							:aria-disabled="isItemBlocked(item) ? 'true' : undefined"
+							:class="[
+								'group transition-[background-color,box-shadow] duration-100 touch-manipulation',
+								isItemBlocked(item)
+									? 'cursor-not-allowed'
+									: 'cursor-pointer hover:bg-blue-50 hover:shadow-md active:bg-blue-100',
+							]"
 						>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[50px] sm:w-[60px]">
 								<div
-									class="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded flex items-center justify-center overflow-hidden"
+									:class="[
+										'w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded flex items-center justify-center overflow-hidden',
+										isItemBlocked(item) ? 'opacity-60 grayscale' : '',
+									]"
 								>
 									<LazyImage
 										v-if="item.image"
@@ -791,16 +818,27 @@
 									:title="item.item_name"
 								>
 									<span
+										v-if="isItemBlocked(item)"
+										class="me-1 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20"
+									>
+										{{ __("Out of stock") }}
+									</span>
+									<span
 										v-if="isPackageItem(item.item_code)"
 										class="me-1 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-600/20"
 									>
 										{{ __("Package") }}
 									</span>
-									{{ item.item_name }}
+									<span :class="isItemBlocked(item) ? 'opacity-60' : ''">
+										{{ item.item_name }}
+									</span>
 								</div>
 								<div
 									v-if="item.attributes"
-									class="text-xs text-gray-400 truncate leading-tight"
+									:class="[
+										'text-xs text-gray-400 truncate leading-tight',
+										isItemBlocked(item) ? 'opacity-60' : '',
+									]"
 								>
 									{{ Object.values(item.attributes).join(" / ") }}
 								</div>
@@ -809,14 +847,22 @@
 								class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]"
 							>
 								<div
-									class="text-xs sm:text-sm text-gray-500 truncate"
+									:class="[
+										'text-xs sm:text-sm text-gray-500 truncate',
+										isItemBlocked(item) ? 'opacity-60' : '',
+									]"
 									:title="item.item_code"
 								>
 									{{ item.item_code }}
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
-								<div class="text-sm sm:text-base font-bold text-blue-700 tabular-nums">
+								<div
+									:class="[
+										'text-sm sm:text-base font-bold text-blue-700 tabular-nums',
+										isItemBlocked(item) ? 'opacity-60' : '',
+									]"
+								>
 									{{ formatCurrency(getDisplayRate(item)) }}
 								</div>
 							</td>
@@ -1425,6 +1471,15 @@ function clearLongPress() {
 	longPressTriggered = false;
 }
 
+function isItemBlocked(item) {
+	if (!item) return false;
+	if (isPackageItem(item.item_code)) return false;
+	if (item.has_variants) return false;
+	if (!settingsStore.shouldEnforceStockValidation()) return false;
+	if (!shouldValidateItemStock(item)) return false;
+	return (item.actual_qty ?? item.stock_qty ?? 0) <= 0;
+}
+
 /**
  * Validates stock and emits item-selected if valid
  * @param {Object} item - Item to select
@@ -1434,23 +1489,14 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false;
 
-	// Packages are non-stock parents; their component stock is checked on add.
-	if (
-		!isPackageItem(item.item_code) &&
-		!item.has_variants &&
-		settingsStore.shouldEnforceStockValidation() &&
-		shouldValidateItemStock(item)
-	) {
-		const qty = item.actual_qty ?? item.stock_qty ?? 0;
-		if (qty <= 0) {
-			showError(
-				__('"{0}" is out of stock in warehouse "{1}".', [
-					item.item_name,
-					item.warehouse || "",
-				])
-			);
-			return false;
-		}
+	if (isItemBlocked(item)) {
+		showError(
+			__('"{0}" is out of stock in warehouse "{1}".', [
+				item.item_name,
+				item.warehouse || "",
+			])
+		);
+		return false;
 	}
 
 	emit("item-selected", item, autoAdd);

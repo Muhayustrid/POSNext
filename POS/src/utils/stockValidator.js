@@ -15,8 +15,8 @@ import { call } from "frappe-ui";
 export function shouldValidateItemStock(item) {
 	if (!item) return false;
 
-	// Non-stock items are never validated
-	if (item.is_stock_item === 0 || item.is_stock_item === false) return false;
+	// Non-stock items that are not bundles are never validated
+	if ((item.is_stock_item === 0 || item.is_stock_item === false) && !item.is_bundle) return false;
 
 	// Item-level allow_negative_stock bypasses validation
 	if (item.allow_negative_stock === 1 || item.allow_negative_stock === true) return false;

@@ -78,6 +78,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Miscellaneous
 		input_qty: 0,
 		allow_negative_stock: 0,
+		block_out_of_stock_items: 1,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
 		// Security
@@ -208,6 +209,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Computed - Miscellaneous
 	const inputQty = computed(() => Boolean(settings.value.input_qty));
 	const allowNegativeStock = computed(() => Boolean(settings.value.allow_negative_stock));
+	const blockOutOfStockItems = computed(() =>
+		Boolean(settings.value.block_out_of_stock_items)
+	);
 
 	// Computed - Sales Persons
 	const enableSalesPersons = computed(() => settings.value.enable_sales_persons !== "Disabled");
@@ -339,6 +343,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_change_posting_date: 0,
 			input_qty: 0,
 			allow_negative_stock: 0,
+			block_out_of_stock_items: 1,
 			enable_sales_persons: "Disabled",
 			// Security
 			enable_session_lock: 0,
@@ -375,7 +380,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 * @returns {boolean} - True if stock validation should prevent negative stock
 	 */
 	function shouldEnforceStockValidation() {
-		return isEnabled.value && !Boolean(settings.value.allow_negative_stock);
+		return isEnabled.value && Boolean(settings.value.block_out_of_stock_items);
 	}
 
 	/**
@@ -482,6 +487,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Miscellaneous
 		inputQty,
 		allowNegativeStock,
+		blockOutOfStockItems,
 
 		// Computed - Sales Persons
 		enableSalesPersons,

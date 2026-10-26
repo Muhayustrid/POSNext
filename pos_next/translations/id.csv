@@ -3542,3 +3542,5 @@ Shipping status,Status pengiriman
 "Payment Amount","Jumlah Pembayaran",""
 "Use a physical keyboard or the device keyboard","Gunakan keyboard fisik atau keyboard perangkat",""
 "Uang Pas","Uang Pas",""
+"Block Out-of-Stock Items","Blokir Item Stok Habis",""
+"Items with zero or negative stock (including product bundles) are greyed out and cannot be selected on the POS screen. Overrides Allow Negative Stock on the POS screen.","Item dengan stok nol atau negatif (termasuk product bundle) digelapkan dan tidak dapat dipilih pada layar POS. Mengesampingkan Izinkan Stok Negatif pada layar POS.",""

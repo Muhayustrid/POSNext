@@ -98,6 +98,9 @@ def get_pos_settings(pos_profile):
 	settings["enable_automatic_stock_sync"] = cint(
 		frappe.db.get_single_value("POS Next Global Settings", "enable_automatic_stock_sync")
 	)
+	settings["block_out_of_stock_items"] = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "block_out_of_stock_items")
+	)
 
 	# Legacy global columns: the DB columns survive the doctype migration
 	# (inert), so drop them instead of leaking stale per-row copies.

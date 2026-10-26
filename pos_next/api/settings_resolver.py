@@ -20,6 +20,7 @@ GLOBAL_FIELDS = (
 	"pos_invoice_naming_series",
 	"pos_opening_shift_naming_series",
 	"pos_closing_shift_naming_series",
+	"block_out_of_stock_items",
 )
 
 _NON_DATA_TYPES = frozenset(

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 // vitest; only `call` is used and is irrelevant to the helpers under test.
 vi.mock("frappe-ui", () => ({ call: vi.fn() }))
 
-import { checkStockAvailability, validationStockQty } from "./stockValidator"
+import { checkStockAvailability, shouldValidateItemStock, validationStockQty } from "./stockValidator"
 
 describe("validationStockQty", () => {
 	it("prefers the stock store's un-reserved qty over the item's display stock", () => {
@@ -66,5 +66,65 @@ describe("checkStockAvailability with explicit availableQty", () => {
 		const item = { item_code: "X", item_name: "X", actual_qty: 5 }
 		expect(checkStockAvailability(item, 4).available).toBe(true)
 		expect(checkStockAvailability(item, 6).available).toBe(false)
+	})
+})
+
+describe("shouldValidateItemStock", () => {
+	it("validates regular stock items", () => {
+		expect(shouldValidateItemStock({ item_code: "X", is_stock_item: 1, actual_qty: 5 })).toBe(true)
+	})
+
+	it("validates product bundles even when is_stock_item is 0", () => {
+		expect(
+			shouldValidateItemStock({
+				item_code: "BUNDLE-1",
+				is_stock_item: 0,
+				is_bundle: true,
+				actual_qty: 0,
+			}),
+		).toBe(true)
+	})
+
+	it("skips non-stock items that are not bundles", () => {
+		expect(
+			shouldValidateItemStock({
+				item_code: "SVC-1",
+				is_stock_item: 0,
+				is_bundle: false,
+				actual_qty: 0,
+			}),
+		).toBe(false)
+	})
+
+	it("skips items when item-level allow_negative_stock is set", () => {
+		expect(
+			shouldValidateItemStock({
+				item_code: "NEG-1",
+				is_stock_item: 1,
+				allow_negative_stock: 1,
+			}),
+		).toBe(false)
+	})
+
+	it("skips batch and serial items (validated at dialog level)", () => {
+		expect(
+			shouldValidateItemStock({
+				item_code: "BATCH-1",
+				is_stock_item: 1,
+				has_batch_no: 1,
+			}),
+		).toBe(false)
+		expect(
+			shouldValidateItemStock({
+				item_code: "SERIAL-1",
+				is_stock_item: 1,
+				has_serial_no: 1,
+			}),
+		).toBe(false)
+	})
+
+	it("returns false for falsy or empty items", () => {
+		expect(shouldValidateItemStock(null)).toBe(false)
+		expect(shouldValidateItemStock(undefined)).toBe(false)
 	})
 })

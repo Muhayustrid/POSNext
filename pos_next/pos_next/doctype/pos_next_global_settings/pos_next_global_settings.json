@@ -20,6 +20,7 @@
   "opname_max_backdate_days",
   "column_break_negative_stock",
   "enable_automatic_stock_sync",
+  "block_out_of_stock_items",
   "section_break_shift",
   "modal_awal_modes",
   "section_break_localization",
@@ -238,6 +239,13 @@
    "fieldname": "enable_automatic_stock_sync",
    "fieldtype": "Check",
    "label": "Enable Automatic Stock Sync"
+  },
+  {
+   "default": "1",
+   "description": "Items with zero or negative stock (including product bundles) are greyed out and cannot be selected on the POS screen. Overrides Allow Negative Stock on the POS screen.",
+   "fieldname": "block_out_of_stock_items",
+   "fieldtype": "Check",
+   "label": "Block Out-of-Stock Items"
   },
   {
    "fieldname": "section_break_shift",
@@ -1035,7 +1043,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-24 15:30:00.000000",
+ "modified": "2026-10-26 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",

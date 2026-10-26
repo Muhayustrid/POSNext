@@ -135,9 +135,13 @@ def get_pos_settings(pos_profile):
 	allow_negative_stock = cint(
 		frappe.db.get_single_value("POS Next Global Settings", "allow_negative_stock") or 0
 	)
+	block_out_of_stock = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "block_out_of_stock_items")
+	)
 
 	def _payload(settings):
 		settings["allow_negative_stock"] = allow_negative_stock
+		settings["block_out_of_stock_items"] = block_out_of_stock
 		return settings
 
 	def _resolved_defaults():

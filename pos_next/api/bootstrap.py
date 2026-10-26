@@ -227,6 +227,9 @@ def _get_pos_settings(pos_profile_doc):
 	stock_sync = cint(
 		frappe.db.get_single_value("POS Next Global Settings", "enable_automatic_stock_sync")
 	)
+	block_out_of_stock = cint(
+		frappe.db.get_single_value("POS Next Global Settings", "block_out_of_stock_items")
+	)
 
 	def _resolved_defaults():
 		base = DEFAULT_POS_SETTINGS.copy()
@@ -259,6 +262,7 @@ def _get_pos_settings(pos_profile_doc):
 		settings["allow_negative_stock"] = allow_negative_stock
 		settings["enable_pos_package_allocation"] = package_allocation
 		settings["enable_automatic_stock_sync"] = stock_sync
+		settings["block_out_of_stock_items"] = block_out_of_stock
 
 		return settings
 	except Exception:
@@ -268,6 +272,7 @@ def _get_pos_settings(pos_profile_doc):
 		settings["allow_negative_stock"] = allow_negative_stock
 		settings["enable_pos_package_allocation"] = package_allocation
 		settings["enable_automatic_stock_sync"] = stock_sync
+		settings["block_out_of_stock_items"] = block_out_of_stock
 		return settings
 
 
