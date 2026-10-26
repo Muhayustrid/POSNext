@@ -80,6 +80,7 @@ vi.mock("frappe-ui", async () => {
 })
 
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 
 import PaymentDialog from "./PaymentDialog.vue"
 
@@ -258,5 +259,188 @@ describe("fullscreen overlay layout and accessibility", () => {
 		await flushPromises()
 
 		expect(wrapper.emitted("update:modelValue")).toBeFalsy()
+	})
+})
+
+describe("Complete Payment relayout (native amount input and quick amounts)", () => {
+	const defaultCashMethod = {
+		mode_of_payment: "Cash",
+		type: "Cash",
+		account_type: "Cash",
+		default: true,
+	}
+
+	it("renders native number input and no custom numeric keypad", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		const input = wrapper.find('input[type="number"]')
+		expect(input.exists()).toBe(true)
+		expect(input.attributes("inputmode")).toBe("decimal")
+
+		const buttons = wrapper.findAll("button")
+		const hasDoubleZeroBtn = buttons.some((b) => b.text().trim() === "00")
+		expect(hasDoubleZeroBtn).toBe(false)
+
+		expect(wrapper.find(".numpad-display").exists()).toBe(false)
+		expect(wrapper.find(".numpadDisplay").exists()).toBe(false)
+		expect(wrapper.vm.numpadDisplay).toBeUndefined()
+		expect(wrapper.vm.numpadInput).toBeUndefined()
+	})
+
+	it("types an amount and clicking Add appends a payment entry and clears input", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		const input = wrapper.find('input[type="number"]')
+		await input.setValue("20000")
+
+		const addBtn = wrapper.findAll("button").find((b) => b.text().trim() === "Add")
+		expect(addBtn).toBeDefined()
+		await addBtn.trigger("click")
+		await flushPromises()
+
+		expect(wrapper.vm.paymentEntries).toHaveLength(1)
+		expect(wrapper.vm.paymentEntries[0].amount).toBe(20000)
+		expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("Cash")
+		expect(wrapper.vm.amountInput).toBe("")
+		expect(input.element.value).toBe("")
+	})
+
+	it("displays Cash Received for cash and switches to Payment Amount for non-cash method", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		const label = wrapper.findAll("label").find((l) => l.text().includes("Cash Received"))
+		expect(label).toBeDefined()
+
+		const qrisMethod = { mode_of_payment: "QRIS", type: "Phone", account_type: "Bank" }
+		wrapper.vm.paymentMethods.push(qrisMethod)
+		wrapper.vm.selectPaymentMethod(qrisMethod)
+		await flushPromises()
+
+		const updatedLabel = wrapper.findAll("label").find((l) => l.text().includes("Payment Amount"))
+		expect(updatedLabel).toBeDefined()
+		expect(wrapper.findAll("label").some((l) => l.text().includes("Cash Received"))).toBe(false)
+	})
+
+	it("pays remaining amount with Uang Pas button for IDR cash", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		const uangPasBtn = wrapper.findAll("button").find((b) => b.text().trim() === "Uang Pas")
+		expect(uangPasBtn).toBeDefined()
+
+		await uangPasBtn.trigger("click")
+		await flushPromises()
+
+		expect(wrapper.vm.paymentEntries).toHaveLength(1)
+		expect(wrapper.vm.paymentEntries[0].amount).toBe(50000)
+		expect(wrapper.vm.remainingAmount).toBe(0)
+	})
+
+	it("uses a 2-column grid for quick amounts", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		const uangPasBtn = wrapper.findAll("button").find((b) => b.text().trim() === "Uang Pas")
+		expect(uangPasBtn).toBeDefined()
+		expect(uangPasBtn.element.parentElement.classList.contains("grid-cols-2")).toBe(true)
+	})
+
+	it("disables input with Exact amount only placeholder for non-cash in exact-amount mode", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		const settingsStore = usePOSSettingsStore(wrapper.vm.$pinia)
+		settingsStore.settings.use_exact_amount = 1
+
+		const cardMethod = { mode_of_payment: "Card", type: "Card", account_type: "Bank" }
+		wrapper.vm.paymentMethods = [cardMethod]
+		wrapper.vm.lastSelectedMethod = cardMethod
+		await flushPromises()
+
+		const input = wrapper.find('input[type="number"]')
+		expect(input.attributes("disabled")).toBeDefined()
+		expect(input.attributes("placeholder")).toBe("Exact amount only")
+	})
+
+	it.each([false, true])("hides non-cash shortcuts and can pay the balance (exact mode: %s)", async (exact) => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000 })
+		usePOSSettingsStore(wrapper.vm.$pinia).settings.use_exact_amount = Number(exact)
+		const method = { mode_of_payment: "QRIS", type: "Bank", account_type: "Bank" }
+		wrapper.vm.paymentMethods = [method]
+		wrapper.vm.lastSelectedMethod = method
+		await flushPromises()
+
+		expect(wrapper.findAll("button").some((b) => b.text().includes("55.000"))).toBe(false)
+		const pay = wrapper.find('button[data-payment-balance]')
+		expect(pay.exists()).toBe(true)
+		await pay.trigger("click")
+		await flushPromises()
+		expect(wrapper.vm.paymentEntries[0].amount).toBe(50000)
+		expect(wrapper.vm.paymentEntries[0].mode_of_payment).toBe("QRIS")
+		wrapper.unmount()
+	})
+
+	it("adds a typed amount once when Enter is pressed", async () => {
+		const wrapper = mountDialog({ modelValue: true })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		const input = wrapper.find('#payment-amount')
+		await input.setValue("20000")
+		await input.trigger("keyup", { key: "Enter" })
+		await flushPromises()
+
+		expect(wrapper.vm.paymentEntries).toHaveLength(1)
+		expect(wrapper.vm.paymentEntries[0].amount).toBe(20000)
+		expect(wrapper.vm.amountInput).toBe("")
+		wrapper.unmount()
+	})
+
+	it.each(["Debit Card", "E-Wallet"])("hides denominations for %s even with a legacy Cash type", async (name) => {
+		const wrapper = mountDialog({ modelValue: true })
+		const method = { mode_of_payment: name, type: "Cash", account_type: "Cash" }
+		wrapper.vm.paymentMethods = [method]
+		wrapper.vm.lastSelectedMethod = method
+		await flushPromises()
+		expect(wrapper.vm.isCashTenderSelected).toBe(false)
+		expect(wrapper.findAll("button").some((b) => b.text() === "Uang Pas")).toBe(false)
+		expect(wrapper.find('button[data-payment-balance]').exists()).toBe(true)
+		wrapper.unmount()
+	})
+
+	it.each([
+		["Cash", "Cash", "banknote"],
+		["QRIS", "Bank", "grid"],
+		["Debit Card", "Cash", "credit-card"],
+		["Credit Card", "Bank", "credit-card"],
+		["E-Wallet", "Cash", "smartphone"],
+		["Transfer", "Bank", "briefcase"],
+	])("uses an SVG icon name for %s", (mode_of_payment, type, icon) => {
+		const wrapper = mountDialog()
+		expect(wrapper.vm.paymentMethodIcon({ mode_of_payment, type })).toBe(icon)
+		wrapper.unmount()
+	})
+
+	it("clears amountInput when clearAll is called", async () => {
+		const wrapper = mountDialog({ modelValue: true, grandTotal: 50000, currency: "IDR" })
+		wrapper.vm.paymentMethods = [defaultCashMethod]
+		wrapper.vm.lastSelectedMethod = defaultCashMethod
+		await flushPromises()
+
+		wrapper.vm.amountInput = "25000"
+		wrapper.vm.clearAll()
+		expect(wrapper.vm.amountInput).toBe("")
 	})
 })
