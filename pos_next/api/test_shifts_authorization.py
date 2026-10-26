@@ -32,10 +32,8 @@ from pos_next.api.shifts import (
 	check_opening_shift,
 	create_opening_shift,
 	get_closing_shift_data,
-	get_period_dashboard,
 	get_period_summary,
 	get_session_summary,
-	get_shift_dashboard,
 )
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
@@ -391,14 +389,16 @@ class TestShiftsAuthorization(FrappeTestCase):
 class TestShiftManagerGates(FrappeTestCase):
 	"""Management-only gates added after the doctype-permission fallbacks.
 
-	- get_closing_shift_data / get_session_summary / get_shift_dashboard:
-	  owner-or-management. A same-profile colleague (holding the cashier's
-	  POS Opening/Closing Shift read) used to pass the removed
-	  `frappe.has_permission(..., doc=...)` fallback; now only the owner and
-	  management do.
-	- get_period_summary / get_period_dashboard: profile members or
-	  management. The manager fixture is deliberately NOT a POS Profile User:
-	  `shifts._check_profile_access` carries its own management bypass.
+	- get_closing_shift_data / get_session_summary: owner-or-management. A
+	  same-profile colleague (holding the cashier's POS Opening/Closing Shift
+	  read) used to pass the removed `frappe.has_permission(..., doc=...)`
+	  fallback; now only the owner and management do.
+	- get_period_summary: profile members or management. The manager fixture is
+	  deliberately NOT a POS Profile User: `shifts._check_profile_access`
+	  carries its own management bypass.
+
+	Both recap endpoints also carry the trend chart (`hourly`), so these gates
+	cover that data too.
 
 	Each test opens its own shift through create_opening_shift (the real API
 	path) and registers a per-test cleanup — only one open shift may hold a
@@ -548,16 +548,6 @@ class TestShiftManagerGates(FrappeTestCase):
 			frappe.set_user(ADMIN)
 		self.assertEqual(data["pos_profile"], self.profile.name)
 
-	def test_period_dashboard_allows_profile_cashier(self):
-		# profile membership alone is enough: cashiers filter their own
-		# outlet's recap/dashboard by date range like managers do
-		frappe.set_user(self.cashier_a)
-		try:
-			data = get_period_dashboard(self.profile.name, nowdate(), nowdate())
-		finally:
-			frappe.set_user(ADMIN)
-		self.assertEqual(data["pos_profile"], self.profile.name)
-
 	def test_non_member_manager_passes_period_reports(self):
 		# dedicated probe for the shifts._check_profile_access management
 		# bypass: a manager with no POS Profile User row at all
@@ -570,11 +560,9 @@ class TestShiftManagerGates(FrappeTestCase):
 		frappe.set_user(self.manager)
 		try:
 			summary = get_period_summary(self.profile.name, nowdate(), nowdate())
-			dashboard = get_period_dashboard(self.profile.name, nowdate(), nowdate())
 		finally:
 			frappe.set_user(ADMIN)
 		self.assertEqual(summary["pos_profile"], self.profile.name)
-		self.assertEqual(dashboard["pos_profile"], self.profile.name)
 
 	# ── owner-or-management read gates ───────────────────────────────────────
 
@@ -618,34 +606,13 @@ class TestShiftManagerGates(FrappeTestCase):
 			frappe.set_user(ADMIN)
 		self.assertEqual(summary["opening_shift"], name)
 
-	def test_shift_dashboard_rejects_non_owner_allows_manager(self):
-		shift = self._open_shift_as(self.cashier_a)
-		name = shift.get("name")
-
-		frappe.set_user(self.cashier_b)
-		try:
-			self.assertTrue(frappe.has_permission("POS Opening Shift", "read"))
-			with self.assertRaises(frappe.PermissionError):
-				get_shift_dashboard(name)
-		finally:
-			frappe.set_user(ADMIN)
-
-		frappe.set_user(self.manager)
-		try:
-			dashboard = get_shift_dashboard(name)
-		finally:
-			frappe.set_user(ADMIN)
-		self.assertEqual(dashboard["opening_shift"], name)
-
-	def test_owner_can_view_own_session_summary_and_dashboard(self):
+	def test_owner_can_view_own_session_summary(self):
 		shift = self._open_shift_as(self.cashier_a)
 		name = shift.get("name")
 
 		frappe.set_user(self.cashier_a)
 		try:
 			summary = get_session_summary(name)
-			dashboard = get_shift_dashboard(name)
 		finally:
 			frappe.set_user(ADMIN)
 		self.assertEqual(summary["opening_shift"], name)
-		self.assertEqual(dashboard["opening_shift"], name)

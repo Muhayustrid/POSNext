@@ -9,10 +9,8 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from pos_next.api.shifts import (
-	get_period_dashboard,
 	get_period_summary,
 	get_session_summary,
-	get_shift_dashboard,
 )
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
@@ -897,28 +895,10 @@ class TestSessionSummary(IntegrationTestCase):
 		with self.assertRaises(frappe.DoesNotExistError):
 			get_session_summary("_SESSUM_NO_SUCH_SHIFT")
 
-	# ── Shift dashboard (same gate and dataset, dashboard-only sections) ──────
-
-	def test_dashboard_missing_shift_throws(self):
-		with self.assertRaises(frappe.ValidationError):  # empty param
-			get_shift_dashboard(None)
-		with self.assertRaises(frappe.DoesNotExistError):
-			get_shift_dashboard("_SESSUM_NO_SUCH_SHIFT")
-
-	def test_dashboard_nonowner_denied(self):
-		frappe.set_user(self.other_user)
-		with self.assertRaises(frappe.PermissionError):
-			get_shift_dashboard(self.opening_shift)
-
-	def test_dashboard_contract_on_shared_fixture(self):
-		data = get_shift_dashboard(self.opening_shift)
-
-		# totals agree with the session summary on the same fixture
-		self.assertEqual(data["opening_shift"], self.opening_shift)
-		self.assertEqual(data["net_sales"], self.NET)
-		self.assertEqual(data["sales_count"], 3)
-		self.assertEqual(data["returns_total"], self.RETURN)
-		self.assertEqual(data["average_sale"], self.GROSS / 3)
+	def test_summary_carries_the_hourly_trend(self):
+		"""The recap owns the trend chart: one bucket per elapsed shift hour,
+		chronological, the last one flagged as the current hour."""
+		data = get_session_summary(self.opening_shift)
 
 		hourly = data["hourly"]
 		self.assertTrue(hourly)
@@ -929,19 +909,6 @@ class TestSessionSummary(IntegrationTestCase):
 			[h["is_current"] for h in hourly],
 			[False] * (len(hourly) - 1) + [True],
 		)
-
-		recent = data["recent"]
-		self.assertTrue(recent)
-		for row in recent:
-			for key in (
-				"name",
-				"posting_dt",
-				"is_return",
-				"outstanding_amount",
-				"amount",
-				"payment_mode",
-			):
-				self.assertIn(key, row)
 
 	def test_empty_shift_reports_zeros(self):
 		shift = self._make_opening_shift(opening_cash=25000)
@@ -1311,44 +1278,19 @@ class TestSessionSummary(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			self._today_period()
 
-	def test_period_dashboard_gate_and_contract(self):
-		"""The dashboard variant of the period recap: same gate, same totals,
-		plus hourly buckets and the recent feed."""
+	def test_period_summary_carries_the_trend_buckets(self):
+		"""The recap owns the trend chart: a single-day window buckets per hour,
+		chronological, exactly one bucket flagged as the current hour."""
 		today = frappe.utils.nowdate()
-		frappe.set_user(self.other_user)
-		with self.assertRaises(frappe.PermissionError):
-			get_period_dashboard(self.pos_profile, today, today)
-		frappe.set_user(self.user)
+		data = get_period_summary(self.pos_profile, today, today)
 
-		data = get_period_dashboard(self.pos_profile, today, today)
-
-		# period header, never shift-scoped fields
-		self.assertNotIn("opening_shift", data)
-		self.assertNotIn("cashier", data)
-		self.assertEqual(data["pos_profile"], self.pos_profile)
-		self.assertEqual(data["period"]["from_date"], str(today))
-		self.assertEqual(data["period"]["to_date"], str(today))
-		self.assertIn("company_currency", data)
-		self.assertIn("generated_at", data)
-
-		# totals agree with get_period_summary on the same window
-		summary = get_period_summary(self.pos_profile, today, today)
-		self.assertEqual(data["net_sales"], summary["net_sales"])
-		self.assertEqual(data["sales_count"], summary["sales_count"])
-
-		# single-day window: 24 hourly buckets, chronological, one current
 		hourly = data["hourly"]
 		self.assertEqual(len(hourly), 24)
 		starts = [h["start"] for h in hourly]
 		self.assertEqual(starts, sorted(starts))
 		self.assertEqual([h["is_current"] for h in hourly].count(True), 1)
 
-		# recent feed works with any scope
-		for row in data["recent"]:
-			for key in ("name", "posting_dt", "is_return", "amount", "payment_mode"):
-				self.assertIn(key, row)
-
-	def test_period_dashboard_day_buckets(self):
+	def test_period_summary_day_buckets(self):
 		"""Multi-day windows bucket per day and land each invoice's money on
 		its own day (locks the SQL date-key ↔ python bucket-date merge)."""
 		today = frappe.utils.nowdate()
@@ -1365,7 +1307,7 @@ class TestSessionSummary(IntegrationTestCase):
 			posting_date=day2,
 		)
 
-		data = get_period_dashboard(self.pos_profile, day1, today)
+		data = get_period_summary(self.pos_profile, day1, today)
 		hourly = data["hourly"]
 		self.assertEqual(len(hourly), 3)
 		starts = [h["start"] for h in hourly]
@@ -1376,10 +1318,10 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(by_day[str(day1)]["net_sales"], 1100)
 		self.assertEqual(by_day[str(day2)]["net_sales"], 2400)
 
-	def test_period_dashboard_month_buckets(self):
+	def test_period_summary_month_buckets(self):
 		"""Windows over 62 days bucket per calendar month, anchored on the 1st."""
 		today = frappe.utils.nowdate()
-		data = get_period_dashboard(
+		data = get_period_summary(
 			self.pos_profile, frappe.utils.add_days(today, -100), today
 		)
 		hourly = data["hourly"]

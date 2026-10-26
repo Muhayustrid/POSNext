@@ -74,7 +74,9 @@ const offlineWorkerMock = vi.hoisted(() => {
 	}))
 	const worker = {
 		saveOfflineInvoice,
-		getOfflineInvoiceCount: vi.fn(async () => saveOfflineInvoice.mock.calls.length),
+		getOfflineInvoiceCount: vi.fn(
+			async () => saveOfflineInvoice.mock.calls.length,
+		),
 	}
 	return {
 		saveOfflineInvoice,
@@ -91,14 +93,20 @@ vi.mock("@/utils/offline/workerClient", () => ({
 vi.mock("@/utils/draftManager", () => draftManagerMock)
 
 // Only the print entry point is faked; hydrateLocalOnlyInvoice etc. stay real.
-const printMock = vi.hoisted(() => ({ printWithSilentFallback: vi.fn(async () => ({ method: "silent" })) }))
+const printMock = vi.hoisted(() => ({
+	printWithSilentFallback: vi.fn(async () => ({ method: "silent" })),
+}))
 vi.mock("@/utils/printInvoice", async (importOriginal) => ({
 	...(await importOriginal()),
 	printWithSilentFallback: printMock.printWithSilentFallback,
 }))
 
 const printEodMock = vi.hoisted(() => ({
-	printEODReport: vi.fn(async () => ({ method: "silent", success: true, printed: true })),
+	printEODReport: vi.fn(async () => ({
+		method: "silent",
+		success: true,
+		printed: true,
+	})),
 }))
 vi.mock("@/utils/printEod", () => ({
 	printEODReport: printEodMock.printEODReport,
@@ -124,12 +132,17 @@ vi.mock("@/composables/useShiftSchedule", () => ({
 }))
 
 vi.mock("@/utils/queue/queueNumber", () => ({
-	acquireQueueNumber: vi.fn(async () => ({ queue_number: 1, date: "2026-09-22" })),
+	acquireQueueNumber: vi.fn(async () => ({
+		queue_number: 1,
+		date: "2026-09-22",
+	})),
 }))
 
 vi.mock("@/data/session", () => ({
 	sessionUser: () => "user",
-	session: reactive({ logout: { loading: false, submit: vi.fn(async () => {}) } }),
+	session: reactive({
+		logout: { loading: false, submit: vi.fn(async () => {}) },
+	}),
 }))
 
 vi.mock("@/data/user", () => ({
@@ -438,8 +451,12 @@ describe("offline checkout double-tap guard (COR-FE-01)", () => {
 		await mountPOS()
 
 		// Double-tap: both clicks dispatch before any async work settles.
-		const first = wrapper.find('[data-test="complete-payment"]').trigger("click")
-		const second = wrapper.find('[data-test="complete-payment"]').trigger("click")
+		const first = wrapper
+			.find('[data-test="complete-payment"]')
+			.trigger("click")
+		const second = wrapper
+			.find('[data-test="complete-payment"]')
+			.trigger("click")
 		await Promise.all([first, second])
 		await flushPromises()
 
@@ -451,13 +468,15 @@ describe("offline checkout double-tap guard (COR-FE-01)", () => {
 		const gate = new Promise((resolve) => {
 			release = resolve
 		})
-		offlineWorkerMock.saveOfflineInvoice.mockImplementationOnce(
-			() => gate.then(() => ({ success: true, offline_id: "pos_offline_gated" })),
+		offlineWorkerMock.saveOfflineInvoice.mockImplementationOnce(() =>
+			gate.then(() => ({ success: true, offline_id: "pos_offline_gated" })),
 		)
 
 		await mountPOS()
 
-		const click = wrapper.find('[data-test="complete-payment"]').trigger("click")
+		const click = wrapper
+			.find('[data-test="complete-payment"]')
+			.trigger("click")
 		await flushPromises()
 		// The enqueue is parked on the gated save: the dialog lock must be held.
 		expect(cartStore.isSubmitting).toBe(true)
@@ -557,7 +576,12 @@ describe("draft load discount isolation (COR-FE-02)", () => {
 
 		// CouponDialog clamps only at apply time; restoring the draft reruns
 		// the raw percentage (10% of 25000 = 2500), which must stay capped.
-		const capped = { name: "PCT10MAX", code: "PCT10MAX", percentage: 10, max_amount: 2000 }
+		const capped = {
+			name: "PCT10MAX",
+			code: "PCT10MAX",
+			percentage: 10,
+			max_amount: 2000,
+		}
 		draftEmits.loadDraft = {
 			draft_id: "DRAFT-CAP",
 			items: [{ ...CART_ITEM, item_code: "ITEM-CAP" }],
@@ -651,7 +675,7 @@ describe("mobile tab switch (webview regression)", () => {
 })
 
 describe("View Shift with active shift", () => {
-	it("opens the shift dashboard from the header menu instead of the resume dialog", async () => {
+	it("opens the sales recap from the header menu instead of the resume dialog", async () => {
 		await mountPOS({
 			POSHeader: POSHeaderSlotStub,
 			POSMenuDialog: POSMenuDialogProbe,
@@ -666,12 +690,12 @@ describe("View Shift with active shift", () => {
 
 		const menu = wrapper.find('[data-test="pos-menu"]')
 		expect(menu.attributes("data-open")).toBe("true")
-		expect(menu.attributes("data-view")).toBe("dashboard")
+		expect(menu.attributes("data-view")).toBe("sales-recap")
 		// "Existing Shift Found" (resume/close-and-open-new) must stay closed.
 		expect(uiStore.showOpenShiftDialog).toBe(false)
 	})
 
-	it("opens the shift dashboard from the cart quick action too", async () => {
+	it("opens the sales recap from the cart quick action too", async () => {
 		await mountPOS({
 			InvoiceCart: InvoiceCartViewShiftStub,
 			POSMenuDialog: POSMenuDialogProbe,
@@ -682,7 +706,7 @@ describe("View Shift with active shift", () => {
 
 		const menu = wrapper.find('[data-test="pos-menu"]')
 		expect(menu.attributes("data-open")).toBe("true")
-		expect(menu.attributes("data-view")).toBe("dashboard")
+		expect(menu.attributes("data-view")).toBe("sales-recap")
 		expect(uiStore.showOpenShiftDialog).toBe(false)
 	})
 })
@@ -763,7 +787,9 @@ describe("offline-edit package requote (Fase 3)", () => {
 		parent_item: "PKG-PARENT",
 		base_price: 100_000,
 		items: [{ item_code: "LAPTOP", qty: 1, uom: "Nos", is_stock_item: 1 }],
-		groups: [{ group_key: "aksesori", label: "Aksesori", min_qty: 1, max_qty: 1 }],
+		groups: [
+			{ group_key: "aksesori", label: "Aksesori", min_qty: 1, max_qty: 1 },
+		],
 		options: [
 			{
 				option_id: "backpack",
@@ -840,7 +866,9 @@ describe("offline-edit package requote (Fase 3)", () => {
 			],
 			snapshot: SNAPSHOT,
 		}
-		const quoteSpy = vi.spyOn(packagesStore, "quote").mockResolvedValue(quoteResult)
+		const quoteSpy = vi
+			.spyOn(packagesStore, "quote")
+			.mockResolvedValue(quoteResult)
 
 		offlineEditEmits.invoice = queuedInvoice(QUEUED_ITEMS)
 		await clickEdit()
@@ -848,7 +876,9 @@ describe("offline-edit package requote (Fase 3)", () => {
 		expect(quoteSpy).toHaveBeenCalledTimes(1)
 		const rows = cartStore.invoiceItems
 		expect(rows).toHaveLength(3)
-		expect(rows.every((row) => row.package_instance === rows[0].package_instance)).toBe(true)
+		expect(
+			rows.every((row) => row.package_instance === rows[0].package_instance),
+		).toBe(true)
 		expect(rows[0].package_role).toBe("Package")
 		expect(rows[0].package_snapshot).toEqual(SNAPSHOT)
 		expect(uiStore.showErrorDialog).toBe(false)
@@ -911,7 +941,13 @@ describe("offline-edit package requote (Fase 3)", () => {
 		await mountPOS({ OfflineInvoicesDialog: OfflineInvoicesDialogStub })
 
 		offlineEditEmits.invoice = queuedInvoice([
-			{ item_code: "KOPI", item_name: "Kopi", qty: 2, rate: 25_000, uom: "Nos" },
+			{
+				item_code: "KOPI",
+				item_name: "Kopi",
+				qty: 2,
+				rate: 25_000,
+				uom: "Nos",
+			},
 		])
 		await clickEdit()
 
@@ -944,8 +980,12 @@ describe("return invoice auto-print", () => {
 		await createReturn("Auto")
 
 		// runPrintInvoice awaits hydration before printing, so poll instead of one flush
-		await vi.waitFor(() => expect(printMock.printWithSilentFallback).toHaveBeenCalledTimes(1))
-		expect(printMock.printWithSilentFallback.mock.calls[0][0].name).toBe("ACC-SINV-RET-1")
+		await vi.waitFor(() =>
+			expect(printMock.printWithSilentFallback).toHaveBeenCalledTimes(1),
+		)
+		expect(printMock.printWithSilentFallback.mock.calls[0][0].name).toBe(
+			"ACC-SINV-RET-1",
+		)
 	})
 
 	it("does not print the return receipt when print mode is Manual", async () => {
@@ -1040,8 +1080,12 @@ describe("shift schedule auto-closing and reprint (Task B)", () => {
 		})
 		await flushPromises()
 
-		expect(printEodMock.printEODReport).toHaveBeenCalledWith("POS-CLOSING-AUTO-1")
-		expect(localStorage.getItem("pos_auto_closed_printed_POS-CLOSING-AUTO-1")).toBe("1")
+		expect(printEodMock.printEODReport).toHaveBeenCalledWith(
+			"POS-CLOSING-AUTO-1",
+		)
+		expect(
+			localStorage.getItem("pos_auto_closed_printed_POS-CLOSING-AUTO-1"),
+		).toBe("1")
 		expect(toastMock.showInfo).toHaveBeenCalledTimes(1)
 	})
 })

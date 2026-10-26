@@ -11,11 +11,31 @@ const resources = vi.hoisted(() => ({ instances: [] }))
 const frappeCall = vi.hoisted(() => vi.fn())
 
 vi.mock("frappe-ui", async () => {
-	const { defineComponent, reactive } = await import("vue")
+	const { defineComponent, h, reactive } = await import("vue")
 	const Button = defineComponent({
 		name: "Button",
 		emits: ["click"],
 		template: `<button v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
+	})
+	// The real picker is a popover calendar; the double is a text field that
+	// emits the same "from,to" string so tests can drive the range directly.
+	const DateRangePicker = defineComponent({
+		name: "DateRangePicker",
+		inheritAttrs: false,
+		props: {
+			modelValue: { type: String, default: "" },
+			allowCustom: { type: Boolean, default: true },
+			placement: { type: String, default: "" },
+		},
+		emits: ["update:modelValue"],
+		setup(props, { emit, attrs }) {
+			return () =>
+				h("input", {
+					value: props.modelValue,
+					"data-test": attrs["data-test"],
+					onInput: (event) => emit("update:modelValue", event.target.value),
+				})
+		},
 	})
 	// renders the body so dialog-internal content (tabs, summary) mounts
 	const Dialog = defineComponent({
@@ -34,6 +54,7 @@ vi.mock("frappe-ui", async () => {
 	const stub = defineComponent({ name: "FrappeUIStub", render: () => null })
 	return {
 		Button,
+		DateRangePicker,
 		Dialog,
 		FeatherIcon,
 		Input: stub,
@@ -60,6 +81,7 @@ vi.mock("@/composables/useFormatters", () => ({
 vi.mock("@/utils/currency", () => ({
 	DEFAULT_CURRENCY: "IDR",
 	formatCurrency: (amount, currency) => `${amount} ${currency}`,
+	getCurrencySymbol: (currency) => currency,
 }))
 
 // DialogTitle needs a reka-ui DialogRoot context the stubbed Dialog lacks.
@@ -170,6 +192,27 @@ const SUMMARY = {
 	categories_truncated: false,
 	item_discount: 0,
 	total_discount: 1250,
+	// The trend chart rides on the recap payload now that the Dashboard is gone
+	hourly: [
+		{
+			start: "2026-09-08 06:00:00",
+			net_sales: 20000,
+			sales_count: 1,
+			is_current: false,
+		},
+		{
+			start: "2026-09-08 07:00:00",
+			net_sales: 30500,
+			sales_count: 2,
+			is_current: false,
+		},
+		{
+			start: "2026-09-08 08:00:00",
+			net_sales: -2000,
+			sales_count: 0,
+			is_current: true,
+		},
+	],
 }
 
 function summaryResource() {
@@ -258,16 +301,29 @@ describe("SessionSummary", () => {
 		}
 	})
 
-	it("uses independent product and finance columns with compact empty packages", async () => {
+	it("splits the report into independent product, breakdown and finance cards", async () => {
 		const { wrapper } = await mountWithSummary({ packages: [] })
 		const products = wrapper.find('[data-test="recap-products"]')
+		const breakdown = wrapper.find('[data-test="recap-breakdown"]')
 		const finances = wrapper.find('[data-test="recap-finances"]')
-		expect(products.exists()).toBe(true)
-		expect(products.find('[data-test="charges-section"]').exists()).toBe(true)
-		expect(products.find('[data-test="refund-section"]').exists()).toBe(true)
-		expect(finances.exists()).toBe(true)
+		// Each block is its own card, so the left column cannot grow into one
+		// tall surface the way the old mega-card did. recap-finances is the
+		// column wrapper; its single child is the card.
+		for (const card of [
+			products,
+			breakdown,
+			finances.find('div[class*="rounded-2xl"]'),
+		]) {
+			expect(card.classes()).toContain("rounded-2xl")
+			expect(card.classes()).toContain("shadow-sm")
+		}
 		expect(products.find('[data-test="items-details"]').exists()).toBe(true)
 		expect(products.find('[data-test="packages-section"]').exists()).toBe(true)
+		expect(breakdown.find('[data-test="categories-section"]').exists()).toBe(
+			true,
+		)
+		expect(breakdown.find('[data-test="charges-section"]').exists()).toBe(true)
+		expect(breakdown.find('[data-test="refund-section"]').exists()).toBe(true)
 		expect(finances.find('[data-test="cash-summary"]').exists()).toBe(true)
 		expect(wrapper.find('[data-test="recap-sheet"]').classes()).toContain(
 			"items-start",
@@ -275,6 +331,86 @@ describe("SessionSummary", () => {
 		expect(
 			products.find('[data-test="packages-section"]').classes(),
 		).not.toContain("p-6")
+	})
+
+	it("draws the trend chart on the recap itself", async () => {
+		const { wrapper } = await mountWithSummary()
+		const section = wrapper.find('[data-test="trend-section"]')
+		expect(section.exists()).toBe(true)
+		expect(section.text()).toContain("Sales by Hour")
+		// one column per bucket, a bar for each non-zero bucket, the return
+		// hanging below the baseline as a negative bar
+		expect(section.findAll('[data-test="hour-column"]')).toHaveLength(3)
+		expect(section.findAll('[data-test="hour-bar"]')).toHaveLength(3)
+		expect(section.find('[data-test="hourly-y-axis"]').text()).toContain("0")
+	})
+
+	it("follows the window when labelling the trend", async () => {
+		// period lens: the bucket type comes from the window the server used
+		async function mountPeriodWith(period) {
+			resources.instances.length = 0
+			const wrapper = mountSummary({ posProfile: "Kasir 1" })
+			const shift = summaryResource()
+			shift.resource.data = { ...SUMMARY }
+			shift.resource.loading = false
+			await flushPromises()
+			await wrapper.find('[data-test="period-chip-last7"]').trigger("click")
+			const entry = resources.instances.find(
+				(i) => i.url === "pos_next.api.shifts.get_period_summary",
+			)
+			entry.resource.data = { ...SUMMARY, ...period }
+			entry.resource.loading = false
+			await flushPromises()
+			return wrapper.find('[data-test="trend-section"]')
+		}
+
+		// multi-day window: day buckets, a heading that names them
+		const days = await mountPeriodWith({
+			period_from: "2026-09-01",
+			period_to: "2026-09-03",
+			hourly: [
+				{
+					start: "2026-09-01 00:00:00",
+					net_sales: 1000,
+					sales_count: 1,
+					is_current: false,
+				},
+				{
+					start: "2026-09-02 00:00:00",
+					net_sales: 2000,
+					sales_count: 1,
+					is_current: false,
+				},
+			],
+		})
+		expect(days.text()).toContain("Sales by Day")
+		expect(days.text()).not.toContain("Returns are netted into their hour.")
+
+		// > 62 days: month buckets
+		const months = await mountPeriodWith({
+			period_from: "2026-01-15",
+			period_to: "2026-06-30",
+			hourly: [
+				{
+					start: "2026-01-01 00:00:00",
+					net_sales: 1000,
+					sales_count: 1,
+					is_current: false,
+				},
+				{
+					start: "2026-02-01 00:00:00",
+					net_sales: 2000,
+					sales_count: 1,
+					is_current: false,
+				},
+			],
+		})
+		expect(months.text()).toContain("Sales by Month")
+	})
+
+	it("hides the trend card when the payload has no buckets", async () => {
+		const { wrapper } = await mountWithSummary({ hourly: [] })
+		expect(wrapper.find('[data-test="trend-section"]').exists()).toBe(false)
 	})
 
 	it("renders the shift info: name, cashier, opening, closing", async () => {
@@ -313,20 +449,34 @@ describe("SessionSummary", () => {
 		)
 	})
 
-	it("shows the sales hero card with the order stats and honest caption", async () => {
+	it("lays the sales totals out in one divided KPI strip", async () => {
 		const { wrapper } = await mountWithSummary()
-		const sales = wrapper.find('[data-test="sales-summary"]').text()
+		const strip = wrapper.find('[data-test="kpi-grid"]')
+		// same surface as the Dashboard: one divided card, not separate boxes
+		expect(strip.classes()).toEqual(
+			expect.arrayContaining(["divide-y", "rounded-2xl", "overflow-hidden"]),
+		)
 
+		const sales = wrapper.find('[data-test="sales-summary"]').text()
 		expect(sales).toContain("50500 IDR") // total sales (after returns)
-		expect(sales).toContain("3 orders") // orders inline with the hero
-		expect(sales).toContain("Avg 16833.333 IDR / order")
 		expect(sales).toContain("After returns, tax included")
 		// jargon captions are gone — the values carry the meaning
-		expect(sales).not.toContain("Submitted sales invoices (returns not counted)")
+		expect(sales).not.toContain(
+			"Submitted sales invoices (returns not counted)",
+		)
 		expect(sales).not.toContain("Gross Sales ÷ Total Orders")
+
+		// orders and average are their own cells, not crammed into the hero
+		expect(wrapper.find('[data-test="kpi-orders"]').text()).toContain("3")
+		expect(wrapper.find('[data-test="kpi-average"]').text()).toContain(
+			"16833.333 IDR",
+		)
+		expect(wrapper.find('[data-test="kpi-average"]').text()).toContain(
+			"Per order",
+		)
 	})
 
-	it("shows gross sales as its own card with the honest caption", async () => {
+	it("shows gross sales as its own cell with the honest caption", async () => {
 		const { wrapper } = await mountWithSummary()
 		const gross = wrapper.find('[data-test="gross-sales"]').text()
 
@@ -334,6 +484,29 @@ describe("SessionSummary", () => {
 		expect(gross).toContain("52500 IDR")
 		expect(gross).toContain("Before returns, incl. tax")
 		expect(gross).not.toContain("before tax")
+	})
+
+	it("keeps returns in the strip instead of a lone card below", async () => {
+		const { wrapper } = await mountWithSummary()
+		const returns = wrapper.find('[data-test="kpi-returns"]').text()
+
+		expect(returns).toContain("Returns")
+		expect(returns).toContain("-2000 IDR")
+		expect(returns).toContain("1 return invoices")
+		expect(
+			wrapper
+				.find('[data-test="kpi-grid"]')
+				.find('[data-test="kpi-returns"]')
+				.exists(),
+		).toBe(true)
+	})
+
+	it("drops the returns cell when there is nothing to show", async () => {
+		const { wrapper } = await mountWithSummary({
+			returns_total: 0,
+			returns_count: 0,
+		})
+		expect(wrapper.find('[data-test="kpi-returns"]').exists()).toBe(false)
 	})
 
 	it("hides the gross sales card when there is nothing to show", async () => {
@@ -368,10 +541,11 @@ describe("SessionSummary", () => {
 	it("lists all configured payment methods (zero included) plus unconfigured ones", async () => {
 		const { wrapper } = await mountWithSummary()
 		const section = wrapper.find('[data-test="payments-section"]')
-		const table = wrapper.find('[data-test="payments-table"]')
-		const text = table.text()
+		const rows = wrapper.findAll('[data-test="payment-row"]')
+		const text = section.text()
 
 		// every method appears, zero included
+		expect(rows.length).toBe(4)
 		expect(text).toContain("Cash")
 		expect(text).toContain("QRIS")
 		expect(text).toContain("Debit")
@@ -381,12 +555,30 @@ describe("SessionSummary", () => {
 		expect(text).toContain("40500 IDR")
 		expect(text).toContain("500 IDR")
 		// totals sit below the method rows, side by side + grand total
-		expect(section.text()).toContain("Total Cash")
-		expect(section.text()).toContain("40500 IDR")
-		expect(section.text()).toContain("Total Non-Cash")
-		expect(section.text()).toContain("10500 IDR")
-		expect(section.text()).toContain("Grand Total")
-		expect(section.text()).toContain("51000 IDR")
+		expect(text).toContain("Total Cash")
+		expect(text).toContain("Total Non-Cash")
+		expect(text).toContain("10500 IDR")
+		expect(text).toContain("Grand Total")
+		expect(text).toContain("51000 IDR")
+	})
+
+	it("draws the payment share as Dashboard-style bars", async () => {
+		const { wrapper } = await mountWithSummary()
+		const rows = wrapper.findAll('[data-test="payment-row"]')
+		// share of the 51000 positive total: cash 40500 -> 79%, QRIS 10000 -> 20%
+		const pcts = rows.map((r) =>
+			r.find('[data-test="payment-pct"]').exists()
+				? r.find('[data-test="payment-pct"]').text()
+				: "",
+		)
+		expect(pcts.slice(0, 2)).toEqual(["79%", "20%"])
+		// zero amounts get no share label and a flat bar, like the Dashboard
+		expect(rows[2].find('[data-test="payment-pct"]').exists()).toBe(false)
+		expect(
+			rows[2].find('[data-test="payment-bar"] > div').attributes("style"),
+		).toContain("width: 0")
+		const bar = rows[0].find('[data-test="payment-bar"] > div')
+		expect(bar.attributes("style")).toContain("width: 79%")
 	})
 
 	it("shows charges and discounts without fabricating a split", async () => {
@@ -554,19 +746,23 @@ describe("SessionSummary", () => {
 		expect(wrapper.find('[data-test="cash-summary"]').exists()).toBe(true)
 	})
 
-	it("stacks the sales metrics on mobile and keeps tabular numbers", async () => {
+	it("stacks the KPI cells on mobile and keeps tabular numbers", async () => {
 		const { wrapper } = await mountWithSummary()
-		const sales = wrapper.find('[data-test="sales-summary"]')
-		// hero values wrap under each other on mobile (flex-wrap), no fixed grid
-		const hero = sales.find('[data-test="kpi-total-sales"]')
-		expect(hero.exists()).toBe(true)
-		expect(sales.html()).toContain("flex-wrap")
+		const strip = wrapper.find('[data-test="kpi-grid"]')
+		// divided rows on phones, columns only from xl (the shell sidebar
+		// leaves ~880px at a 1280 window)
+		expect(strip.classes()).toEqual(
+			expect.arrayContaining(["divide-y", "xl:grid"]),
+		)
+		expect(wrapper.find('[data-test="sales-summary"]').text()).toContain(
+			"Total Sales",
+		)
 		// shift info is one quiet meta line under the title
 		const info = wrapper.find('[data-test="shift-info"]')
 		expect(info.exists()).toBe(true)
 		expect(info.classes()).toContain("truncate")
 		// numeric values use tabular numerals
-		expect(sales.html()).toContain("tabular-nums")
+		expect(strip.html()).toContain("tabular-nums")
 	})
 
 	it("keeps the last snapshot visible and flags it stale on refresh errors", async () => {
@@ -667,7 +863,14 @@ describe("InvoiceHistoryDialog", () => {
 		resources.instances
 			.find((i) => i.url === "pos_next.api.invoices.get_invoices")
 			.opts.onSuccess([
-				{ name: "INV-0001", posting_date: "2026-10-01", status: "Paid", docstatus: 1, grand_total: 25000, payments: [] },
+				{
+					name: "INV-0001",
+					posting_date: "2026-10-01",
+					status: "Paid",
+					docstatus: 1,
+					grand_total: 25000,
+					payments: [],
+				},
 			])
 		await flushPromises()
 
@@ -675,9 +878,12 @@ describe("InvoiceHistoryDialog", () => {
 		await view.trigger("click")
 		await flushPromises()
 
-		expect(frappeCall).toHaveBeenCalledWith("pos_next.api.invoices.get_invoice", {
-			invoice_name: "INV-0001",
-		})
+		expect(frappeCall).toHaveBeenCalledWith(
+			"pos_next.api.invoices.get_invoice",
+			{
+				invoice_name: "INV-0001",
+			},
+		)
 		expect(wrapper.text()).toContain("Kopi")
 		expect(wrapper.text()).not.toContain("Failed to load invoice details")
 
@@ -744,7 +950,9 @@ describe("SessionSummary period lens", () => {
 
 	it("offers the open shift first, then the profile-wide windows", () => {
 		const wrapper = mountPeriod()
-		const chips = wrapper.findAll('[data-test^="period-chip-"]').map((c) => c.text())
+		const chips = wrapper
+			.findAll('[data-test^="period-chip-"]')
+			.map((c) => c.text())
 		expect(chips).toEqual([
 			"This Shift",
 			"Today",
@@ -792,7 +1000,7 @@ describe("SessionSummary period lens", () => {
 		expect(wrapper.find("h3").text()).toBe("Kasir 1")
 		// every money section is still on screen
 		expect(wrapper.find('[data-test="sales-summary"]').exists()).toBe(true)
-		expect(wrapper.find('[data-test="payments-table"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="payment-row"]').exists()).toBe(true)
 		expect(wrapper.find('[data-test="categories-table"]').exists()).toBe(true)
 	})
 
@@ -806,8 +1014,9 @@ describe("SessionSummary period lens", () => {
 			"Pick a from and to date to load the recap.",
 		)
 
-		await wrapper.find('[data-test="period-from"]').setValue("2026-08-01")
-		await wrapper.find('[data-test="period-to"]').setValue("2026-08-31")
+		await wrapper
+			.find('[data-test="period-range"]')
+			.setValue("2026-08-01,2026-08-31")
 		await flushPromises()
 		expect(period.resource.reload).toHaveBeenCalledTimes(1)
 		expect(period.opts.makeParams()).toEqual({
@@ -821,7 +1030,9 @@ describe("SessionSummary period lens", () => {
 		const wrapper = mountPeriod({ openingShift: "" })
 		await flushPromises()
 
-		const options = wrapper.findAll('[data-test^="period-chip-"]').map((o) => o.text())
+		const options = wrapper
+			.findAll('[data-test^="period-chip-"]')
+			.map((o) => o.text())
 		expect(options).not.toContain("This Shift")
 		const period = periodResource()
 		expect(period.resource.reload).toHaveBeenCalledTimes(1)
@@ -856,8 +1067,12 @@ describe("SessionSummary period lens", () => {
 
 	it("shows the period selector to cashiers too", () => {
 		const asCashier = mountPeriod()
-		expect(asCashier.find('[data-test="period-chip-shift"]').exists()).toBe(true)
-		expect(asCashier.find('[data-test="period-chip-today"]').exists()).toBe(true)
+		expect(asCashier.find('[data-test="period-chip-shift"]').exists()).toBe(
+			true,
+		)
+		expect(asCashier.find('[data-test="period-chip-today"]').exists()).toBe(
+			true,
+		)
 		asCashier.unmount()
 	})
 })
@@ -887,12 +1102,16 @@ describe("SessionSummary mobile period sheet", () => {
 		expect(pill.text()).toContain("This Shift")
 
 		await pill.trigger("click")
-		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(
+			true,
+		)
 
 		await wrapper.find('[data-test="period-option-yesterday"]').trigger("click")
 		await flushPromises()
 		expect(periodResource().resource.reload).toHaveBeenCalledTimes(1)
-		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(false)
+		expect(wrapper.find('[data-test="period-option-today"]').exists()).toBe(
+			false,
+		)
 		wrapper.unmount()
 	})
 
@@ -901,25 +1120,30 @@ describe("SessionSummary mobile period sheet", () => {
 		await wrapper.find('[data-test="period-filter-button"]').trigger("click")
 		await wrapper.find('[data-test="period-option-custom"]').trigger("click")
 		await flushPromises()
-		expect(wrapper.find('[data-test="sheet-period-from"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="sheet-period-range"]').exists()).toBe(true)
 
-		await wrapper.find('[data-test="sheet-period-from"]').setValue("2026-08-01")
-		await wrapper.find('[data-test="sheet-period-to"]').setValue("2026-08-31")
+		await wrapper
+			.find('[data-test="sheet-period-range"]')
+			.setValue("2026-08-01,2026-08-31")
 		await flushPromises()
 		expect(periodResource().resource.reload).toHaveBeenCalledTimes(1)
 		expect(wrapper.find('[data-test="period-filter-button"]').text()).toContain(
-			"2026-08-01",
+			"D:2026-08-01",
 		)
 
 		const apply = wrapper.findAll("button").find((b) => b.text() === "Apply")
 		await apply.trigger("click")
-		expect(wrapper.find('[data-test="sheet-period-from"]').exists()).toBe(false)
+		expect(wrapper.find('[data-test="sheet-period-range"]').exists()).toBe(
+			false,
+		)
 		wrapper.unmount()
 	})
 
 	it("shows the filter pill to cashiers too", () => {
 		const wrapper = mountSheet()
-		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(true)
+		expect(wrapper.find('[data-test="period-filter-button"]').exists()).toBe(
+			true,
+		)
 		wrapper.unmount()
 	})
 })

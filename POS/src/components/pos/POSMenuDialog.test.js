@@ -35,10 +35,6 @@ const viewStubs = {
 	POSSettings: { template: `<div data-testid="view-settings" />` },
 	InvoiceManagement: { template: `<div data-testid="view-invoices" />` },
 	SessionSummary: { template: `<div data-testid="view-sales-recap" />` },
-	ShiftDashboard: {
-		name: "ShiftDashboard",
-		template: `<div data-testid="view-dashboard" />`,
-	},
 	ProductsView: { template: `<div data-testid="view-products" />` },
 	ProductionDialog: {
 		name: "ProductionDialog",
@@ -49,7 +45,9 @@ const viewStubs = {
 		props: ["posProfile", "initialRequest"],
 		template: `<div data-testid="view-reject-request" />`,
 	},
-	PurchaseOrderDialog: { template: `<div data-testid="view-purchase-order" />` },
+	PurchaseOrderDialog: {
+		template: `<div data-testid="view-purchase-order" />`,
+	},
 	StockOpnameDialog: { template: `<div data-testid="view-stock-opname" />` },
 }
 
@@ -140,7 +138,9 @@ describe("POSMenuDialog menu", () => {
 
 		wrapper = mountShell({ open: true, canStockOpname: true })
 		expect(sidebarLabels(wrapper)).toContain("Stock Opname")
-		expect(sidebarLabels(wrapper)).toEqual(availableLabels(false, false, false, true))
+		expect(sidebarLabels(wrapper)).toEqual(
+			availableLabels(false, false, false, true),
+		)
 		wrapper.unmount()
 
 		wrapper = mountShell({ open: true, canStockOpname: true, isOffline: true })
@@ -148,76 +148,34 @@ describe("POSMenuDialog menu", () => {
 		wrapper.unmount()
 	})
 
-	it("shows the dashboard online without an open shift", () => {
-		const wrapper = mountShell({ open: true })
-		const labels = sidebarLabels(wrapper)
-		expect(labels).toContain("Dashboard")
-		expect(labels).toEqual(availableLabels(false, false))
-		// the burger landing still prefers Invoice Management
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
-
-	it("hides the dashboard while offline, with or without an open shift", () => {
-		const wrapper = mountShell({
-			open: true,
-			openingShift: "OS-1",
-			isOffline: true,
-		})
-		expect(sidebarLabels(wrapper)).not.toContain("Dashboard")
-		expect(sidebarLabels(wrapper)).toEqual(availableLabels(false, false, true))
-		wrapper.unmount()
-	})
-
-	it("lists the dashboard first with an open shift but lands on invoices", async () => {
+	it("leads with invoice management and the sales recap, with no dashboard", async () => {
 		const wrapper = mountShell({ open: true, openingShift: "OS-1" })
 		const labels = sidebarLabels(wrapper)
-		expect(labels[0]).toBe("Dashboard")
+		// the dashboard is gone: invoices is the first entry, the recap follows
+		expect(labels[0]).toBe("Invoice Management")
+		expect(labels[1]).toBe("Sales Recap")
+		expect(labels).not.toContain("Dashboard")
 		expect(labels).toEqual(availableLabels(false, false))
-		// sidebar order keeps Dashboard first, the burger landing stays Invoice Management
 		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
-		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(false)
 
 		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]')
-		const buttons = sidebar.findAll("button")
-		await buttons.find((b) => b.text() === "Sales Recap").trigger("click")
+		await sidebar
+			.findAll("button")
+			.find((b) => b.text() === "Sales Recap")
+			.trigger("click")
 		await nextTick()
 		expect(wrapper.find('[data-testid="view-sales-recap"]').exists()).toBe(true)
 		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(false)
-
-		await sidebar
-			.findAll("button")
-			.find((b) => b.text() === "Dashboard")
-			.trigger("click")
-		await nextTick()
-		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(true)
 		wrapper.unmount()
 	})
 
-	it("mounts the dashboard when initialView is explicitly dashboard", async () => {
+	it("mounts the recap when initialView is explicitly sales-recap", async () => {
 		const wrapper = mountShell({
 			open: true,
 			openingShift: "OS-1",
-			initialView: "dashboard",
+			initialView: "sales-recap",
 		})
-		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
-
-	it("switches to the invoices view when the dashboard emits navigate", async () => {
-		const wrapper = mountShell({
-			open: true,
-			openingShift: "OS-1",
-			initialView: "dashboard",
-		})
-		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(true)
-
-		// "View all" on Recent Transactions navigates to the invoices view
-		const dashboard = wrapper.findComponent({ name: "ShiftDashboard" })
-		await dashboard.vm.$emit("navigate", "invoices")
-		await nextTick()
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
-		expect(wrapper.find('[data-testid="view-dashboard"]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="view-sales-recap"]').exists()).toBe(true)
 		wrapper.unmount()
 	})
 
@@ -233,7 +191,9 @@ describe("POSMenuDialog menu", () => {
 		await production.vm.$emit("open-reject-request", "PRJ-2601-0001")
 		await nextTick()
 		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(false)
-		expect(wrapper.find('[data-testid="view-reject-request"]').exists()).toBe(true)
+		expect(wrapper.find('[data-testid="view-reject-request"]').exists()).toBe(
+			true,
+		)
 		const reject = wrapper.findComponent({ name: "RejectRequestDialog" })
 		expect(reject.props("initialRequest")).toBe("PRJ-2601-0001")
 

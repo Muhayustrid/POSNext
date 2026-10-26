@@ -4,14 +4,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // Controllable createResource double: the handler opts are kept so tests
-// fire onSuccess/onError directly (same pattern as ShiftDashboard.test.js).
+// fire onSuccess/onError directly (same pattern as SessionSummary.test.js).
 const resources = vi.hoisted(() => ({ instances: [] }))
 
 vi.mock("frappe-ui", async () => {
 	const { reactive } = await import("vue")
 	return {
 		createResource: (opts) => {
-			const r = reactive({ loading: false, data: null, error: null, reload: vi.fn() })
+			const r = reactive({
+				loading: false,
+				data: null,
+				error: null,
+				reload: vi.fn(),
+			})
 			resources.instances.push({ url: opts.url, opts, resource: r })
 			return r
 		},
@@ -23,7 +28,10 @@ import { shiftState, useShift } from "./useShift"
 const CHECK_URL = "pos_next.api.shifts.check_opening_shift"
 
 const setOnline = (online) => {
-	Object.defineProperty(navigator, "onLine", { configurable: true, value: online })
+	Object.defineProperty(navigator, "onLine", {
+		configurable: true,
+		value: online,
+	})
 }
 
 describe("useShift checkOpeningShift error fallback", () => {
@@ -50,7 +58,7 @@ describe("useShift checkOpeningShift error fallback", () => {
 	it("online error clears the cache and leaves the shift closed", () => {
 		localStorage.setItem(
 			"pos_shift_data",
-			JSON.stringify({ pos_opening_shift: { name: "STALE-SHIFT" } })
+			JSON.stringify({ pos_opening_shift: { name: "STALE-SHIFT" } }),
 		)
 		setOnline(true)
 
@@ -70,7 +78,7 @@ describe("useShift checkOpeningShift error fallback", () => {
 				pos_opening_shift: { name: "CACHED-SHIFT" },
 				pos_profile: { name: "P1" },
 				company: { name: "C1" },
-			})
+			}),
 		)
 		setOnline(false)
 

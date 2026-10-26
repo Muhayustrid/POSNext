@@ -35,7 +35,7 @@
 				<template #menu-items>
 					<button
 						v-if="shiftStore.hasOpenShift"
-						@click="openPOSMenu('dashboard')"
+						@click="openPOSMenu('sales-recap')"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
 					>
 						<svg
@@ -407,7 +407,7 @@
 								"
 								@update-uom="cartStore.changeItemUOM"
 								@edit-item="handleEditItem"
-								@view-shift="openPOSMenu('dashboard')"
+								@view-shift="openPOSMenu('sales-recap')"
 								@show-drafts="uiStore.showDraftDialog = true"
 								@show-history="uiStore.showHistoryDialog = true"
 								@show-return="uiStore.showReturnDialog = true"

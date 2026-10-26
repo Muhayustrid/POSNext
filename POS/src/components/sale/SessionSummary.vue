@@ -8,15 +8,15 @@
 		>
 			<button
 				type="button"
-				class="flex min-w-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700"
+				class="flex min-h-[44px] min-w-0 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700"
 				data-test="period-filter-button"
 				@click="sheetOpen = true"
 			>
 				<FeatherIcon name="calendar" class="h-4 w-4 shrink-0 text-gray-500" :aria-hidden="true" />
 				<span class="min-w-0 truncate">{{ sheetPeriodLabel }}</span>
-				<FeatherIcon name="chevron-down" class="h-4 w-4 shrink-0 text-gray-400" :aria-hidden="true" />
+				<FeatherIcon name="chevron-down" class="h-4 w-4 shrink-0 text-gray-500" :aria-hidden="true" />
 			</button>
-			<RefreshButton :loading="loading" @click="refresh" />
+			<RefreshButton class="pos-touch-target" :loading="loading" @click="refresh" />
 		</div>
 		<div
 			v-if="openingShift || posProfile"
@@ -41,29 +41,29 @@
 					{{ opt.label }}
 				</button>
 			</div>
-			<div
+			<!-- One from–to field, the ERPNext date-range shape: the calendar
+			     popover owns ordering, so there is no second input to read. -->
+			<DateRangePicker
 				v-if="period === 'custom'"
-				class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 focus-within:border-blue-400"
+				v-model="customRange"
+				:allow-custom="false"
+				placement="bottom-start"
+				data-test="period-range"
 			>
-				<FeatherIcon name="calendar" class="h-4 w-4 shrink-0 text-gray-400" :aria-hidden="true" />
-				<input
-					v-model="customFrom"
-					type="date"
-					:max="customTo || undefined"
-					class="border-0 bg-transparent p-0 text-sm text-gray-900 focus:ring-0"
-					:aria-label="__('From Date')"
-					data-test="period-from"
-				/>
-				<span class="text-gray-400">–</span>
-				<input
-					v-model="customTo"
-					type="date"
-					:min="customFrom || undefined"
-					class="border-0 bg-transparent p-0 text-sm text-gray-900 focus:ring-0"
-					:aria-label="__('To Date')"
-					data-test="period-to"
-				/>
-			</div>
+				<template #target="{ togglePopover, isOpen }">
+					<button
+						type="button"
+						class="inline-flex min-h-9 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-900 hover:border-gray-300"
+						:aria-label="__('Custom Range')"
+						:aria-expanded="isOpen"
+						@click="togglePopover"
+					>
+						<FeatherIcon name="calendar" class="h-4 w-4 shrink-0 text-gray-500" :aria-hidden="true" />
+						<span class="tabular-nums">{{ customRangeLabel }}</span>
+						<FeatherIcon name="chevron-down" class="h-4 w-4 shrink-0 text-gray-500" :aria-hidden="true" />
+					</button>
+				</template>
+			</DateRangePicker>
 		</div>
 
 		<!-- Mobile period sheet: presets as full-width rows; custom keeps the
@@ -95,25 +95,25 @@
 					v-if="period === 'custom'"
 					class="mt-2 flex flex-col gap-2 border-t border-gray-100 px-1 pt-3"
 				>
-					<div class="flex items-center gap-2">
-						<input
-							v-model="customFrom"
-							type="date"
-							:max="customTo || undefined"
-							class="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
-							:aria-label="__('From Date')"
-							data-test="sheet-period-from"
-						/>
-						<span class="text-xs text-gray-500">–</span>
-						<input
-							v-model="customTo"
-							type="date"
-							:min="customFrom || undefined"
-							class="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
-							:aria-label="__('To Date')"
-							data-test="sheet-period-to"
-						/>
-					</div>
+					<DateRangePicker
+						v-model="customRange"
+						:allow-custom="false"
+						placement="top-start"
+						data-test="sheet-period-range"
+					>
+						<template #target="{ togglePopover, isOpen }">
+							<button
+								type="button"
+								class="inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+								:aria-label="__('Custom Range')"
+								:aria-expanded="isOpen"
+								@click="togglePopover"
+							>
+								<span class="tabular-nums">{{ customRangeLabel }}</span>
+								<FeatherIcon name="calendar" class="h-4 w-4 shrink-0 text-gray-500" :aria-hidden="true" />
+							</button>
+						</template>
+					</DateRangePicker>
 					<Button variant="solid" class="w-full" data-test="period-apply" @click="close">
 						{{ __("Apply") }}
 					</Button>
@@ -146,15 +146,16 @@
 		</div>
 
 		<template v-else>
-			<!-- Header: clean band — bold title over one quiet meta line. -->
+			<!-- Header: shift context as one quiet meta line, like the Dashboard
+			     toolbar — the KPI strip below is the only blue surface. -->
 			<div class="flex items-start justify-between gap-3">
-				<div class="min-w-0">
-					<h3 class="text-lg font-bold text-gray-900 truncate">
+				<div class="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+					<h3 class="truncate text-xs font-medium text-gray-700">
 						{{ isShiftMode ? summary.shift_name || summary.pos_profile : summary.pos_profile }}
 					</h3>
 					<p
 						v-if="isShiftMode"
-						class="truncate text-xs text-gray-500 tabular-nums"
+						class="min-w-0 truncate text-xs text-gray-700 tabular-nums"
 						data-test="shift-info"
 					>
 						{{ summary.opening_shift }} · {{ __("Cashier") }}: {{ summary.cashier }}
@@ -201,6 +202,7 @@
 						<Button
 							v-else
 							variant="subtle"
+							class="pos-touch-target"
 							:loading="printing"
 							@click="print"
 							:title="__('Print')"
@@ -210,6 +212,7 @@
 						</Button>
 						<Button
 							variant="subtle"
+							class="pos-touch-target"
 							:loading="exporting"
 							data-test="recap-export"
 							:title="__('Export to Excel')"
@@ -218,7 +221,7 @@
 						>
 							<FeatherIcon name="download" class="w-4 h-4" />
 						</Button>
-						<RefreshButton :loading="loading" @click="refresh" />
+						<RefreshButton class="pos-touch-target" :loading="loading" @click="refresh" />
 					</div>
 					<p class="text-xs text-gray-500">
 						{{ __("Updated {0}", [formatDateTime(summary.generated_at)]) }}
@@ -239,58 +242,183 @@
 				{{ emptyText }}
 			</p>
 
-			<!-- Sales totals stay compact above the detailed report. -->
-			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+			<!-- One KPI strip, same surface as the Dashboard: every figure shares
+			     one card so the optional cells can never hang alone. Divided rows
+			     on phones; columns only from xl, where the shell sidebar still
+			     leaves room for money at 2xl. -->
+			<div
+				class="divide-y divide-gray-200 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm xl:grid xl:divide-x xl:divide-y-0"
+				:class="kpiColumnsClass"
+				data-test="kpi-grid"
+			>
 				<section
 					aria-labelledby="ss-sales-h"
 					data-test="sales-summary"
-					class="min-w-0 rounded-xl border border-blue-200 bg-blue-50 p-4"
-					:class="summary.gross_sales || summary.credit_outstanding ? '' : 'sm:col-span-2'"
+					class="flex min-w-0 items-baseline justify-between gap-3 bg-blue-50 px-4 py-2.5 xl:flex-col-reverse xl:items-start xl:gap-0 xl:py-3.5"
 				>
 					<h3 id="ss-sales-h" class="sr-only">{{ __("Sales Summary") }}</h3>
-					<div data-test="kpi-total-sales" class="relative">
-						<div class="text-xs font-medium text-blue-700">{{ __("Total Sales") }}</div>
-						<div class="mt-1 text-2xl font-bold text-blue-700 tabular-nums">
-							{{ formatMoney(summary.net_sales) }}
-						</div>
-						<div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-blue-700 tabular-nums">
-							<span>{{ __("{0} orders", [summary.sales_count]) }}</span>
-							<span>{{ __("Avg {0} / order", [formatMoney(summary.average_sale)]) }}</span>
-						</div>
-						<div class="mt-1 text-xs text-blue-700">{{ __("After returns, tax included") }}</div>
-						<div v-if="multiCurrency.length" class="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+					<div class="min-w-0">
+						<p class="text-xs font-medium text-blue-700">{{ __("Total Sales") }}</p>
+						<p class="mt-0.5 text-xs text-blue-700">{{ __("After returns, tax included") }}</p>
+						<div v-if="multiCurrency.length" class="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
 							<p v-for="row in multiCurrency" :key="row.currency" class="text-xs text-blue-700 tabular-nums">
 								{{ __("Total Sales ({0})", [row.currency]) }}: {{ formatCurrencyUtil(row.amount, row.currency) }}
 							</p>
 						</div>
 					</div>
+					<p data-test="kpi-total-sales" class="shrink-0 text-lg font-bold text-blue-700 tabular-nums xl:text-2xl">
+						{{ formatMoney(summary.net_sales) }}
+					</p>
 				</section>
 
 				<section
-					v-if="summary.gross_sales || summary.credit_outstanding"
+					v-if="hasGross"
 					aria-labelledby="ss-gross-h"
 					data-test="gross-sales"
-					class="min-w-0 rounded-xl border border-gray-200 bg-white p-4"
+					class="flex min-w-0 items-baseline justify-between gap-3 px-4 py-2.5 xl:flex-col-reverse xl:items-start xl:gap-0 xl:py-3.5"
 				>
 					<h3 id="ss-gross-h" class="sr-only">{{ __("Gross Sales") }}</h3>
-					<div class="text-xs font-medium text-gray-500">{{ __("Gross Sales") }}</div>
-					<div class="mt-1 text-2xl font-bold text-gray-900 tabular-nums">
+					<div class="min-w-0">
+						<p class="text-xs font-medium text-gray-700">{{ __("Gross Sales") }}</p>
+						<p class="mt-0.5 text-xs text-gray-700">{{ __("Before returns, incl. tax") }}</p>
+						<p v-if="summary.credit_outstanding" class="mt-0.5 text-xs text-gray-700 tabular-nums">
+							{{ __("Credit Sales (Outstanding)") }}: {{ formatMoney(summary.credit_outstanding) }}
+						</p>
+					</div>
+					<p class="shrink-0 text-lg font-bold text-gray-900 tabular-nums xl:text-2xl">
 						{{ formatMoney(summary.gross_sales) }}
-					</div>
-					<div class="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
-						<span class="h-1.5 w-1.5 rounded-full bg-blue-500" aria-hidden="true"></span>
-						{{ __("Before returns, incl. tax") }}
-					</div>
-					<p v-if="summary.credit_outstanding" class="mt-2 text-xs text-gray-500">
-						{{ __("Credit Sales (Outstanding)") }}:
-						<span class="font-semibold text-gray-700 tabular-nums">{{ formatMoney(summary.credit_outstanding) }}</span>
 					</p>
 				</section>
+
+				<div
+					data-test="kpi-orders"
+					class="flex items-baseline justify-between gap-3 px-4 py-2.5 xl:flex-col-reverse xl:items-start xl:gap-0 xl:py-3.5"
+				>
+					<div class="min-w-0">
+						<p class="text-xs font-medium text-gray-700">{{ __("Orders") }}</p>
+						<p class="mt-0.5 text-xs text-gray-700">{{ __("Sales invoices") }}</p>
+					</div>
+					<p class="shrink-0 text-lg font-bold text-gray-900 tabular-nums xl:text-2xl">
+						{{ summary.sales_count || 0 }}
+					</p>
+				</div>
+
+				<div
+					data-test="kpi-average"
+					class="flex items-baseline justify-between gap-3 px-4 py-2.5 xl:flex-col-reverse xl:items-start xl:gap-0 xl:py-3.5"
+				>
+					<div class="min-w-0">
+						<p class="text-xs font-medium text-gray-700">{{ __("Average Sale") }}</p>
+						<p class="mt-0.5 text-xs text-gray-700">{{ __("Per order") }}</p>
+					</div>
+					<p class="shrink-0 text-lg font-bold text-gray-900 tabular-nums xl:text-2xl">
+						{{ formatMoney(summary.average_sale) }}
+					</p>
+				</div>
+
+				<div
+					v-if="hasReturns"
+					data-test="kpi-returns"
+					class="flex items-baseline justify-between gap-3 bg-red-50 px-4 py-2.5 xl:flex-col-reverse xl:items-start xl:gap-0 xl:py-3.5"
+				>
+					<div class="min-w-0">
+						<p class="text-xs font-medium text-red-700">{{ __("Returns") }}</p>
+						<p class="mt-0.5 text-xs text-red-700 tabular-nums">
+							{{ __("{0} return invoices", [summary.returns_count]) }}
+						</p>
+					</div>
+					<p class="shrink-0 text-lg font-bold text-red-600 tabular-nums xl:text-2xl">
+						{{ returnsDisplay }}
+					</p>
+				</div>
 			</div>
+
+			<!-- Trend: the Dashboard's chart, now owned by the recap. Bars sit
+			     against a dashed scale; returns hang below the zero baseline. -->
+			<section
+				v-if="hourlyBuckets.length"
+				class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"
+				aria-labelledby="ss-trend-h"
+				data-test="trend-section"
+			>
+				<h3 id="ss-trend-h" class="text-base font-semibold text-gray-900">
+					{{ __(trendHeading) }}
+				</h3>
+				<p v-if="bucketGranularity === 'hour'" class="text-xs text-gray-500">
+					{{ __("Returns are netted into their hour.") }}
+				</p>
+				<div class="mt-4 flex flex-col" data-test="hourly-chart">
+					<div class="flex gap-2">
+						<div
+							class="flex w-14 flex-col justify-between whitespace-nowrap text-end text-xs text-gray-600 tabular-nums"
+							aria-hidden="true"
+							data-test="hourly-y-axis"
+						>
+							<span v-for="label in chartScale.labels" :key="label">{{ label }}</span>
+						</div>
+						<div class="relative flex min-w-0 flex-1 flex-col">
+							<div class="pointer-events-none absolute inset-0" aria-hidden="true">
+								<div
+									v-for="pos in [0, 25, 50, 75]"
+									:key="pos"
+									class="absolute inset-x-0 border-t border-dashed border-gray-200"
+									:style="{ top: `${pos}%` }"
+								></div>
+							</div>
+							<div class="relative flex h-40 items-stretch gap-1 sm:h-48 sm:gap-2">
+								<div
+									v-for="b in hourlyBuckets"
+									:key="b.start"
+									class="flex min-w-0 flex-1 items-end justify-center"
+									data-test="hour-column"
+								>
+									<div
+										v-if="b.net_sales > 0"
+										data-test="hour-bar"
+										class="w-full max-w-6 rounded-t"
+										:class="b.is_current ? 'bg-blue-300' : 'bg-blue-500'"
+										:style="{ height: b.posHeight }"
+										:title="barTitle(b)"
+									></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<!-- zero baseline -->
+					<div class="ms-16 border-t border-gray-300"></div>
+					<!-- returns hang below the baseline -->
+					<div class="ms-16 flex h-8 items-stretch gap-1 sm:gap-2" aria-hidden="true">
+						<div
+							v-for="b in hourlyBuckets"
+							:key="`neg-${b.start}`"
+							class="flex min-w-0 flex-1 items-start justify-center"
+						>
+							<div
+								v-if="b.net_sales < 0"
+								data-test="hour-bar"
+								class="w-full max-w-6 rounded-b bg-red-400"
+								:style="{ height: b.negHeight }"
+								:title="barTitle(b)"
+							></div>
+						</div>
+					</div>
+					<div class="ms-16 flex gap-1 sm:gap-2">
+						<div
+							v-for="b in hourlyBuckets"
+							:key="`label-${b.start}`"
+							class="mt-1 min-w-0 flex-1 text-center text-xs text-gray-600 tabular-nums"
+						>
+							<span v-if="b.showLabel" class="hidden sm:inline">{{ b.label }}</span>
+							<span v-if="b.showLabelMobile" class="sm:hidden">{{ b.label }}</span>
+						</div>
+					</div>
+				</div>
+			</section>
 
 			<!-- Independent columns keep short report sections content-sized. -->
 			<div class="grid items-start gap-4 xl:grid-cols-2" data-test="recap-sheet">
-				<div class="min-w-0 rounded-xl border border-gray-200 bg-white p-4 divide-y divide-gray-200" data-test="recap-products">
+				<div class="flex min-w-0 flex-col gap-4">
+				<div class="min-w-0 divide-y divide-gray-200 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" data-test="recap-products">
 					<section aria-labelledby="ss-items-h" data-test="items-details" class="min-w-0">
 						<h3 id="ss-items-h" class="text-base font-semibold text-gray-900">{{ __("Item Detail") }}</h3>
 						<div v-if="summary.items.length" class="mt-2 overflow-x-auto max-h-64 overflow-y-auto" data-test="items-section">
@@ -381,96 +509,100 @@
 							</p>
 						</section>
 					</div>
-				<div class="mt-4 border-t border-gray-200 pt-4"><section aria-labelledby="ss-categories-h" data-test="categories-section" class="min-w-0">
-							<h3 id="ss-categories-h" class="text-base font-semibold text-gray-900">{{ __("Sales per Category") }}</h3>
-							<table class="mt-2 w-full table-fixed text-sm" data-test="categories-table">
-								<thead>
-									<tr class="bg-gray-50 text-xs font-medium text-gray-500 border-b border-gray-200">
-										<th class="py-1.5 text-start font-medium">{{ __("Category") }}</th>
-										<th class="px-2 py-1.5 text-end font-medium">{{ __("Qty") }}</th>
-										<th class="px-2 py-1.5 text-end font-medium">{{ __("Net Revenue") }}</th>
-									</tr>
-								</thead>
-								<tbody>
-									<tr v-if="!summary.categories.length">
-										<td colspan="3" class="py-3 text-center text-xs text-gray-500">
-											{{ emptyText }}
-										</td>
-									</tr>
-									<tr v-for="cat in summary.categories" :key="cat.category ?? 'none'" class="border-t border-gray-100">
-										<td class="py-1.5 text-gray-900 break-words [overflow-wrap:anywhere]">{{ cat.category || __("No category") }}</td>
-										<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(cat.qty) }}</td>
-										<td class="px-2 py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
-											{{ formatMoney(cat.base_net_amount) }}
-										</td>
-									</tr>
-								</tbody>
-							</table>
-							<p class="mt-2 text-xs text-gray-500">{{ __("Net revenue is pre-tax; returns are subtracted.") }}</p>
-							<p v-if="summary.categories_truncated" class="text-xs text-gray-500">
-								{{
-								__(
-								"Showing top {0} of {1} categories; session totals above cover everything.",
-								[summary.categories_shown, summary.categories_total_groups],
-								)
-								}}
-							</p>
-						</section></div>
-<div class="mt-4 border-t border-gray-200 pt-4"><section aria-labelledby="ss-charges-h" data-test="charges-section" class="min-w-0">
-								<h3 id="ss-charges-h" class="text-base font-semibold text-gray-900">{{ __("Charges & Discounts") }}</h3>
-								<dl class="mt-2 flex flex-col">
-									<div
-										v-for="charge in summary.other_charges"
-										:key="charge.account_head"
-										class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
-										>
-										<dt class="text-sm text-gray-600 min-w-0 break-words">
-											{{ charge.label }}
-											<span class="text-xs text-gray-400">{{ __("posted as its own account") }}</span>
-										</dt>
-										<dd class="text-sm font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(charge.amount) }}</dd>
-									</div>
-									<div
-										v-if="summary.other_charges.length > 1"
-										class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
-										>
-										<dt class="text-sm text-gray-600">{{ __("Other Charges") }}</dt>
-										<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.other_charges_total) }}</dd>
-									</div>
-									<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
-										<dt class="text-sm text-gray-600">{{ __("Tax / PPN") }}</dt>
-										<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.tax_total) }}</dd>
-									</div>
-									<div class="flex items-baseline justify-between gap-3 py-2">
-										<dt class="text-sm text-gray-600">{{ __("Discount") }}</dt>
-										<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.total_discount) }}</dd>
-									</div>
-								</dl>
-								<p class="text-xs text-gray-500">{{ __("Charges are classified by each account's type on the invoice.") }}</p>
-							</section></div>
-<div class="mt-4 border-t border-gray-200 pt-4"><section aria-labelledby="ss-refund-h" data-test="refund-section" class="min-w-0">
-								<h3 id="ss-refund-h" class="text-base font-semibold text-gray-900">{{ __("Refunds") }}</h3>
-								<div class="mt-2 flex flex-wrap items-start justify-between gap-3">
-									<div>
-										<p class="text-sm text-gray-500">{{ __("Total Refunds") }}</p>
-										<p
-											class="mt-1 text-lg font-bold tabular-nums whitespace-nowrap"
-											:class="summary.returns_total ? 'text-red-700' : 'text-gray-900'"
-											>
-											{{ returnsDisplay }}
-										</p>
-									</div>
-									<span
-										class="rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap"
-										:class="summary.returns_count ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'"
-										>
-										{{ summary.returns_count ? __("{0} return invoices", [summary.returns_count]) : __("No refunds") }}
-									</span>
-								</div>
-							</section></div>
-</div>
+				</div>
+				<div class="min-w-0 divide-y divide-gray-200 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" data-test="recap-breakdown">
+					<section aria-labelledby="ss-categories-h" data-test="categories-section" class="min-w-0">
+						<h3 id="ss-categories-h" class="text-base font-semibold text-gray-900">{{ __("Sales per Category") }}</h3>
+						<table class="mt-2 w-full table-fixed text-sm" data-test="categories-table">
+							<thead>
+								<tr class="bg-gray-50 text-xs font-medium text-gray-600 border-b border-gray-200">
+									<th class="py-1.5 text-start font-medium">{{ __("Category") }}</th>
+									<th class="px-2 py-1.5 text-end font-medium">{{ __("Qty") }}</th>
+									<th class="px-2 py-1.5 text-end font-medium">{{ __("Net Revenue") }}</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr v-if="!summary.categories.length">
+									<td colspan="3" class="py-3 text-center text-xs text-gray-500">
+										{{ emptyText }}
+									</td>
+								</tr>
+								<tr v-for="cat in summary.categories" :key="cat.category ?? 'none'" class="border-t border-gray-100">
+									<td class="py-1.5 text-gray-900 break-words [overflow-wrap:anywhere]">{{ cat.category || __("No category") }}</td>
+									<td class="px-2 py-1.5 text-end text-gray-700 tabular-nums whitespace-nowrap">{{ formatQty(cat.qty) }}</td>
+									<td class="px-2 py-1.5 text-end font-medium text-gray-900 tabular-nums whitespace-nowrap">
+										{{ formatMoney(cat.base_net_amount) }}
+									</td>
+								</tr>
+							</tbody>
+						</table>
+						<p class="mt-2 text-xs text-gray-500">{{ __("Net revenue is pre-tax; returns are subtracted.") }}</p>
+						<p v-if="summary.categories_truncated" class="text-xs text-gray-500">
+							{{
+							__(
+							"Showing top {0} of {1} categories; session totals above cover everything.",
+							[summary.categories_shown, summary.categories_total_groups],
+							)
+							}}
+						</p>
+					</section>
+					<section aria-labelledby="ss-charges-h" data-test="charges-section" class="min-w-0 pt-4">
+						<h3 id="ss-charges-h" class="text-base font-semibold text-gray-900">{{ __("Charges & Discounts") }}</h3>
+						<dl class="mt-2 flex flex-col">
+							<div
+								v-for="charge in summary.other_charges"
+								:key="charge.account_head"
+								class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
+								>
+								<dt class="text-sm text-gray-600 min-w-0 break-words">
+									{{ charge.label }}
+									<span class="text-xs text-gray-500">{{ __("posted as its own account") }}</span>
+								</dt>
+								<dd class="text-sm font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(charge.amount) }}</dd>
+							</div>
+							<div
+								v-if="summary.other_charges.length > 1"
+								class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100"
+								>
+								<dt class="text-sm text-gray-600">{{ __("Other Charges") }}</dt>
+								<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.other_charges_total) }}</dd>
+							</div>
+							<div class="flex items-baseline justify-between gap-3 py-2 border-b border-gray-100">
+								<dt class="text-sm text-gray-600">{{ __("Tax / PPN") }}</dt>
+								<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.tax_total) }}</dd>
+							</div>
+							<div class="flex items-baseline justify-between gap-3 py-2">
+								<dt class="text-sm text-gray-600">{{ __("Discount") }}</dt>
+								<dd class="text-sm font-semibold text-gray-900 tabular-nums">{{ formatMoney(summary.total_discount) }}</dd>
+							</div>
+						</dl>
+						<p class="text-xs text-gray-500">{{ __("Charges are classified by each account's type on the invoice.") }}</p>
+					</section>
+					<section aria-labelledby="ss-refund-h" data-test="refund-section" class="min-w-0 pt-4">
+						<h3 id="ss-refund-h" class="text-base font-semibold text-gray-900">{{ __("Refunds") }}</h3>
+						<div class="mt-2 flex flex-wrap items-start justify-between gap-3">
+							<div>
+								<p class="text-sm text-gray-600">{{ __("Total Refunds") }}</p>
+								<p
+									class="mt-1 text-lg font-bold tabular-nums whitespace-nowrap"
+									:class="summary.returns_total ? 'text-red-700' : 'text-gray-900'"
+									>
+									{{ returnsDisplay }}
+								</p>
+							</div>
+							<span
+								class="rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap"
+								:class="summary.returns_count ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'"
+								>
+								{{ summary.returns_count ? __("{0} return invoices", [summary.returns_count]) : __("No refunds") }}
+							</span>
+						</div>
+					</section>
+				</div>
+				</div>
+
 				<div class="flex min-w-0 flex-col gap-4" data-test="recap-finances">
-					<div class="rounded-xl border border-gray-200 bg-white p-4 space-y-4 divide-y divide-gray-200">
+					<div class="space-y-4 divide-y divide-gray-200 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
 						<section aria-labelledby="ss-cash-h" data-test="cash-summary" class="min-w-0">
 							<h3 id="ss-cash-h" class="text-base font-semibold text-gray-900">{{ __("Cash Summary") }}</h3>
 							<dl class="mt-2 flex flex-col">
@@ -491,55 +623,53 @@
 										{{ expenseDisplay }}
 									</dd>
 								</div>
-								<div class="mt-3 rounded-xl bg-blue-50 px-4 py-3">
+								<!-- Neutral surface: the KPI strip above owns the only blue. -->
+								<div class="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
 									<div class="flex items-baseline justify-between gap-3">
 										<dt class="text-sm font-semibold text-gray-900">{{ __("Cash in Hand") }}</dt>
-										<dd class="text-base font-bold text-blue-700 tabular-nums">{{ formatMoney(summary.cash_in_hand) }}</dd>
+										<dd class="text-base font-bold text-gray-900 tabular-nums">{{ formatMoney(summary.cash_in_hand) }}</dd>
 									</div>
-									<p class="mt-1 text-xs text-blue-700/80">{{ __("Cash in Hand is the balance before any expenses") }}</p>
+									<p class="mt-1 text-xs text-gray-600">{{ __("Cash in Hand is the balance before any expenses") }}</p>
 								</div>
 							</dl>
 						</section>
 						<div class="pt-4">
 							<section aria-labelledby="ss-pay-h" data-test="payments-section" class="min-w-0">
 								<h3 id="ss-pay-h" class="text-base font-semibold text-gray-900">{{ __("Payment Methods") }}</h3>
-								<table v-if="summary.payments.length" class="mt-2 w-full text-sm" data-test="payments-table">
-									<tbody>
-										<tr
-											v-for="row in summary.payments"
-											:key="row.mode_of_payment"
-											class="border-b border-gray-100"
-											>
-											<td class="py-2 min-w-0">
-												<div class="flex items-center gap-2.5">
-													<div class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100">
-														<span v-if="row.is_cash" class="text-xs font-bold text-gray-500" aria-hidden="true">Rp</span>
-														<FeatherIcon v-else name="credit-card" class="h-3.5 w-3.5 text-gray-500" :aria-hidden="true" />
-													</div>
-													<span class="min-w-0 break-words text-gray-700">
-														{{ row.mode_of_payment }}
-														<span
-															v-if="!row.amount"
-															class="text-xs text-gray-400"
-															:title="__('Unused')"
-															>{{ __("Unused") }}</span>
-														<span
-															v-if="row.configured === false"
-															class="text-xs text-amber-700"
-															:title="__('Not on the POS Profile')"
-															>{{ __("Not on the POS Profile") }}</span>
-													</span>
-												</div>
-											</td>
-											<td
-												class="py-2 text-end font-semibold tabular-nums whitespace-nowrap"
+								<div v-if="paymentDisplay.length" class="mt-2">
+									<div
+										v-for="row in paymentDisplay"
+										:key="row.mode"
+										class="border-b border-gray-100 py-2 last:border-b-0"
+										data-test="payment-row"
+									>
+										<div class="flex items-baseline justify-between gap-3">
+											<span class="min-w-0 break-words text-sm text-gray-700">
+												{{ row.mode }}
+												<span
+													v-if="!row.amount"
+													class="text-xs text-gray-400"
+													:title="__('Unused')"
+													>{{ __("Unused") }}</span>
+												<span
+													v-if="row.configured === false"
+													class="text-xs text-amber-700"
+													:title="__('Not on the POS Profile')"
+													>{{ __("Not on the POS Profile") }}</span>
+											</span>
+											<span
+												class="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums"
 												:class="row.amount ? 'text-gray-900' : 'text-gray-400'"
-												>
+											>
 												{{ formatMoney(row.amount) }}
-											</td>
-										</tr>
-									</tbody>
-								</table>
+												<span v-if="row.pct !== null" class="ms-1 text-xs font-normal text-gray-400" data-test="payment-pct">{{ row.pct }}%</span>
+											</span>
+										</div>
+										<div class="mt-1.5 h-1.5 w-full rounded-full bg-gray-100" data-test="payment-bar">
+											<div class="h-full rounded-full bg-blue-600" :style="{ width: row.width }"></div>
+										</div>
+									</div>
+								</div>
 								<p v-else class="mt-2 text-xs text-gray-500">{{ __("No payment methods are configured on this POS Profile.") }}</p>
 								<div class="mt-3 grid grid-cols-2 gap-4">
 									<div>
@@ -551,7 +681,7 @@
 										<p class="font-bold text-gray-900 tabular-nums">{{ formatMoney(summary.total_non_cash) }}</p>
 									</div>
 								</div>
-								<div class="mt-3 flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-4 py-3">
+								<div class="mt-2 flex items-baseline justify-between gap-3 border-t border-gray-200 pt-3">
 									<p class="text-sm font-semibold text-gray-900">{{ __("Grand Total") }}</p>
 									<p class="font-bold text-gray-900 tabular-nums whitespace-nowrap">{{ formatMoney(summary.methods_grand_total) }}</p>
 								</div>
@@ -568,6 +698,10 @@
 </template>
 
 <script>
+const compactFormatter = new Intl.NumberFormat("en", {
+	notation: "compact",
+	maximumFractionDigits: 1,
+})
 const qtyFormatter = new Intl.NumberFormat(undefined, {
 	maximumFractionDigits: 3,
 })
@@ -581,6 +715,7 @@ import BottomSheet from "@/components/common/BottomSheet.vue"
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
+	getCurrencySymbol,
 } from "@/utils/currency"
 import {
 	periodRange,
@@ -590,7 +725,7 @@ import {
 	recapPDFFilename,
 } from "@/utils/salesRecap"
 import { downloadXlsx } from "@/utils/downloadXlsx"
-import { Button, createResource, FeatherIcon } from "frappe-ui"
+import { Button, createResource, DateRangePicker, FeatherIcon } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
 const { formatDate, formatTime } = useFormatters()
@@ -607,12 +742,28 @@ const props = defineProps({
 const period = ref(props.openingShift ? "shift" : "today")
 const customFrom = ref("")
 const customTo = ref("")
+// DateRangePicker emits the pair as "from,to"; keep the two refs as the single
+// source of truth so range -> makeParams and the canLoad gate stay unchanged.
+const customRange = computed({
+	// Keep a half-picked range so closing and reopening the calendar resumes it.
+	get: () =>
+		customFrom.value || customTo.value ? `${customFrom.value},${customTo.value}` : "",
+	set: (value) => {
+		const [from = "", to = ""] = String(value || "").split(",")
+		customFrom.value = from
+		customTo.value = to
+	},
+})
+const customRangeLabel = computed(() =>
+	customFrom.value && customTo.value
+		? `${formatDate(customFrom.value)} – ${formatDate(customTo.value)}`
+		: __("Select dates"),
+)
 const isShiftMode = computed(() => period.value === "shift")
 // Mobile period sheet (filter pill)
 const sheetOpen = ref(false)
 const sheetPeriodLabel = computed(() => {
-	if (period.value === "custom" && range.value)
-		return `${customFrom.value} – ${customTo.value}`
+	if (period.value === "custom" && range.value) return customRangeLabel.value
 	return periodOptions.value.find((o) => o.value === period.value)?.label || ""
 })
 function selectPeriod(value) {
@@ -815,6 +966,40 @@ const returnsDisplay = computed(() => {
 	return value < 0 ? formatMoney(value) : `-${formatMoney(value)}`
 })
 
+// Optional cells join the strip only when they carry information; the
+// column count follows so no cell stretches across a half-empty row.
+const hasGross = computed(() => Boolean(summary.value?.gross_sales || summary.value?.credit_outstanding))
+const hasReturns = computed(() => Boolean(summary.value?.returns_count || summary.value?.returns_total))
+const kpiColumnsClass = computed(() => {
+	const columns = 1 + (hasGross.value ? 1 : 0) + 2 + (hasReturns.value ? 1 : 0)
+	// literal class names so Tailwind keeps them in the build
+	if (columns >= 5) return "xl:grid-cols-5"
+	if (columns === 4) return "xl:grid-cols-4"
+	return "xl:grid-cols-3"
+})
+
+// Payment rows mirror the Dashboard: amount plus its share of the positive
+// total, drawn as a progress bar. Zero and negative rows carry no bar.
+const paymentDisplay = computed(() => {
+	const rows = summary.value?.payments || []
+	const positiveTotal = rows.reduce(
+		(sum, row) => sum + Math.max(0, Number.parseFloat(row.amount) || 0),
+		0,
+	)
+	return rows.map((row) => {
+		const amount = Number.parseFloat(row.amount) || 0
+		const pct = amount > 0 && positiveTotal > 0 ? Math.round((amount / positiveTotal) * 100) : null
+		const width = pct == null ? "0" : `${Math.max(0, Math.min(100, pct))}%`
+		return {
+			mode: row.mode_of_payment,
+			amount: row.amount,
+			configured: row.configured,
+			pct,
+			width,
+		}
+	})
+})
+
 // Only meaningful when a session mixes currencies; single-currency sessions
 // would just repeat the hero number.
 const multiCurrency = computed(() => {
@@ -831,6 +1016,90 @@ const hasItemDiscounts = computed(() =>
 )
 
 const formatQty = (qty) => qtyFormatter.format(Number.parseFloat(qty || 0))
+
+// Bucket type follows the window, same rule as the backend: hours on a single
+// day, days up to 62, calendar months beyond.
+const bucketGranularity = computed(() => {
+	const s = summary.value
+	if (!s?.hourly?.length) return "hour"
+	const span =
+		isShiftMode.value || !s.period_from
+			? 0
+			: Math.round((new Date(s.period_to) - new Date(s.period_from)) / 86400000)
+	return span === 0 ? "hour" : span <= 62 ? "day" : "month"
+})
+
+const trendHeading = computed(() => {
+	if (bucketGranularity.value === "day") return "Sales by Day"
+	if (bucketGranularity.value === "month") return "Sales by Month"
+	return "Sales by Hour"
+})
+
+function bucketLabel(start) {
+	const s = String(start || "")
+	if (bucketGranularity.value === "day") return `${s.slice(8, 10)}/${s.slice(5, 7)}`
+	if (bucketGranularity.value === "month") return `${s.slice(5, 7)}/${s.slice(2, 4)}`
+	return `${s.slice(11, 13)}:00`
+}
+
+const currencySymbol = computed(() =>
+	getCurrencySymbol(summary.value?.company_currency || DEFAULT_CURRENCY),
+)
+
+function formatCompact(value) {
+	return `${currencySymbol.value} ${compactFormatter.format(value)}`
+}
+
+// Y-axis scale: four steps up to a "nice" maximum (1/2/2.5/5 × 10^n) so the
+// dashed gridlines land on round figures.
+const chartScale = computed(() => {
+	const values = (summary.value?.hourly || []).map(
+		(b) => Number.parseFloat(b.net_sales) || 0,
+	)
+	const max = Math.max(0, ...values)
+	if (max <= 0) return { niceMax: 0, labels: ["0"] }
+	const raw = max / 4
+	const mag = 10 ** Math.floor(Math.log10(raw))
+	const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((n) => n >= raw) || 10 * mag
+	return {
+		niceMax: step * 4,
+		labels: [4, 3, 2, 1, 0].map((i) => (i === 0 ? "0" : formatCompact(step * i))),
+	}
+})
+
+const hourlyBuckets = computed(() => {
+	const buckets = summary.value?.hourly || []
+	const values = buckets.map((b) => Number.parseFloat(b.net_sales) || 0)
+	const maxPos = Math.max(0, ...values)
+	const maxNeg = Math.max(0, ...values.map((v) => -v))
+	const niceMax = chartScale.value.niceMax || maxPos
+	// Thin the x labels on wide windows so they never collide. Phones get a
+	// sparser set: an hour label needs ~2 columns at 390px, so every other
+	// label still collides there even when the desktop set fits.
+	const thin = buckets.length > 12
+	return buckets.map((b, i) => {
+		const value = values[i]
+		return {
+			...b,
+			label: bucketLabel(b.start),
+			showLabel: !thin || i % 2 === 0,
+			showLabelMobile: thin ? i % 4 === 0 : i % 2 === 0,
+			posHeight:
+				value > 0 && niceMax > 0
+					? `${Math.max(3, Math.round((value / niceMax) * 100))}%`
+					: "0",
+			negHeight:
+				value < 0 && maxNeg > 0
+					? `${Math.max(4, Math.round((-value / maxNeg) * 100))}%`
+					: "0",
+		}
+	})
+})
+
+function barTitle(bucket) {
+	const count = Number.parseFloat(bucket.sales_count) || 0
+	return `${bucket.label} · ${formatMoney(bucket.net_sales)} · ${count}`
+}
 
 function formatDateTime(date) {
 	const dateStr = formatDate(date)

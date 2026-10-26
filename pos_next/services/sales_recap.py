@@ -138,7 +138,7 @@ def build_recap(scope, cash_mode, pos_profile):
 
 
 def shift_hourly(scope, period_start):
-	"""Net sales per elapsed shift hour for the shift dashboard.
+	"""Net sales per elapsed shift hour for the shift recap's trend chart.
 
 	Same invoice universe as the money aggregates (drawer filter applied), so
 	a no-drawer credit return doesn't print negative sales in an hour whose
@@ -226,7 +226,7 @@ def period_buckets(from_date, to_date, now=None):
 
 
 def period_hourly(scope, from_date, to_date):
-	"""Net sales per bucket for the period dashboard.
+	"""Net sales per bucket for the recap's trend chart.
 
 	Same invoice universe as the money aggregates (drawer filter applied), so
 	a no-drawer credit return doesn't print negative sales in a bucket whose
@@ -290,59 +290,6 @@ def period_hourly(scope, from_date, to_date):
 	return out
 
 
-def shift_recent(scope, limit=10):
-	"""Most recent invoices of the shift for the dashboard feed.
-
-	Deliberately without the drawer filter: a no-drawer credit return moved no
-	money (every aggregate skips it) but the cashier still sees it listed.
-	payment_mode is the invoice's first payment row (smallest idx) or None —
-	fetched for all rows in one query, never per invoice.
-	"""
-	invoices = frappe.db.sql(
-		f"""
-		SELECT
-			si.name,
-			TIMESTAMP(si.posting_date, si.posting_time) AS posting_dt,
-			si.is_return,
-			si.outstanding_amount,
-			si.base_grand_total
-		FROM {sales_invoice_union(_RECENT_COLUMNS, where=scope.where)}
-		WHERE {scope.where}
-		ORDER BY si.posting_date DESC, si.posting_time DESC, si.creation DESC
-		LIMIT {cint(limit)}
-		""",
-		scope.values,
-		as_dict=True,
-	)
-	if not invoices:
-		return []
-
-	first_mode = {}
-	for row in frappe.db.sql(
-		"""
-		SELECT parent, mode_of_payment
-		FROM `tabSales Invoice Payment`
-		WHERE parent IN %(names)s AND parenttype IN ('POS Invoice', 'Sales Invoice')
-		ORDER BY idx ASC
-		""",
-		{"names": [invoice.name for invoice in invoices]},
-		as_dict=True,
-	):
-		first_mode.setdefault(row.parent, row.mode_of_payment)
-
-	return [
-		{
-			"name": invoice.name,
-			"posting_dt": str(invoice.posting_dt),
-			"is_return": bool(invoice.is_return),
-			"outstanding_amount": flt(invoice.outstanding_amount),
-			"amount": flt(invoice.base_grand_total),
-			"payment_mode": first_mode.get(invoice.name),
-		}
-		for invoice in invoices
-	]
-
-
 # Columns the recap queries read off the invoice union / item union.
 _INVOICE_COLUMNS = (
 	"si.name, si.docstatus, si.is_return, si.currency, si.grand_total,"
@@ -356,10 +303,9 @@ _ITEM_COLUMNS = (
 	" sii.pos_package_role, sii.pos_package_instance"
 )
 
-# Dashboard rollups read the posting timestamp the shared projection doesn't
-# carry; local column lists keep _INVOICE_COLUMNS (and its consumers) stable.
+# The hourly rollup reads the posting timestamp the shared projection doesn't
+# carry; a local column list keeps _INVOICE_COLUMNS (and its consumers) stable.
 _HOURLY_COLUMNS = _INVOICE_COLUMNS + ", si.posting_date, si.posting_time"
-_RECENT_COLUMNS = _INVOICE_COLUMNS + ", si.posting_date, si.posting_time, si.creation"
 
 
 def _invoice_from(scope):

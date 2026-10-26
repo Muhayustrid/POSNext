@@ -143,18 +143,6 @@
 							</div>
 						</div>
 					</template>
-					<template v-else-if="activeView === 'dashboard'">
-						<div class="h-full flex flex-col text-start">
-							<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
-								<ShiftDashboard
-									v-bind="$attrs"
-									:opening-shift="openingShift"
-									:pos-profile="posProfile"
-									@navigate="selectItem"
-								/>
-							</div>
-						</div>
-					</template>
 					<ProductsView
 						v-else-if="activeView === 'products'"
 						:pos-profile="posProfile"
@@ -227,7 +215,6 @@ import PromotionManagement from "@/components/sale/PromotionManagement.vue"
 import POSSettings from "@/components/settings/POSSettings.vue"
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue"
 import SessionSummary from "@/components/sale/SessionSummary.vue"
-import ShiftDashboard from "@/components/sale/ShiftDashboard.vue"
 import ProductsView from "@/components/sale/ProductsView.vue"
 import ProductionDialog from "@/components/pos/ProductionDialog.vue"
 import RejectRequestDialog from "@/components/pos/RejectRequestDialog.vue"
@@ -293,9 +280,8 @@ const activeLabel = computed(() =>
 )
 
 // initialView is one-shot per open: every false -> true transition re-reads it.
-// Without (or with an unavailable) initialView, the burger keeps its
-// pre-dashboard landing: Invoice Management when visible, else the first
-// available item. Dashboard stays first in the sidebar order itself.
+// Without (or with an unavailable) initialView, the burger lands on Invoice
+// Management when visible, else the first available item.
 watch(
 	() => props.open,
 	(open) => {

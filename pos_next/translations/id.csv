@@ -3545,3 +3545,7 @@ Shipping status,Status pengiriman
 "Block Out-of-Stock Items","Blokir Item Stok Habis",""
 "Items with zero or negative stock (including product bundles) are greyed out and cannot be selected on the POS screen. Overrides Allow Negative Stock on the POS screen.","Item dengan stok nol atau negatif (termasuk product bundle) digelapkan dan tidak dapat dipilih pada layar POS. Mengesampingkan Izinkan Stok Negatif pada layar POS.",""
 "View all","Lihat semua",""
+"Orders","Pesanan",""
+"Per order","Per pesanan",""
+"Sales invoices","Nota penjualan",""
+"Select dates","Pilih tanggal",""

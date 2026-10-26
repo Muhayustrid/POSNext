@@ -20,7 +20,6 @@ from pos_next.services.sales_recap import (
 	period_hourly,
 	period_scope,
 	shift_hourly,
-	shift_recent,
 	shift_scope,
 )
 from pos_next.shift_schedule import get_profile_slots, open_slots_now
@@ -498,62 +497,11 @@ def get_session_summary(opening_shift):
 		"generated_at": get_datetime(),
 	}
 	summary.update(_closing_time_info(shift))
-	summary.update(build_recap(shift_scope(opening_shift), cash_mode, shift.pos_profile))
-	return summary
-
-
-@frappe.whitelist()
-def get_shift_dashboard(opening_shift):
-	"""Shift-scoped sales dashboard for an active POS session.
-
-	Same dataset and money semantics as get_session_summary (see
-	pos_next.services.sales_recap), extended with two dashboard-only
-	sections: ``hourly`` (net sales per elapsed shift hour, current hour
-	flagged) and ``recent`` (latest invoices, credit returns included).
-
-	Security: only the shift owner (or a manager) may view it; the shift
-	itself pins company/profile, so no cross-company access via arbitrary IDs.
-	"""
-	if not opening_shift:
-		frappe.throw(_("Opening shift is required"))
-
-	shift = frappe.db.get_value(
-		"POS Opening Shift",
-		opening_shift,
-		["name", "user", "pos_profile", "company", "period_start_date", "status", "pos_schedule_deadline"],
-		as_dict=True,
-	)
-	if not shift:
-		frappe.throw(_("Opening shift not found"), frappe.DoesNotExistError)
-
-	if shift.user != frappe.session.user and not is_management_user():
-		# only the owner or a manager may view a session summary
-		frappe.throw(_("You can only view your own session summary"), frappe.PermissionError)
-
-	company_currency = frappe.get_cached_value("Company", shift.company, "default_currency")
-	profile_row = frappe.db.get_value(
-		"POS Profile",
-		shift.pos_profile,
-		("pos_profile_group",),
-		as_dict=True,
-	)
-	cash_mode = get_cash_mode_of_payment(shift.pos_profile)
-
 	scope = shift_scope(opening_shift)
-	dashboard = {
-		"opening_shift": opening_shift,
-		"pos_profile": shift.pos_profile,
-		"cashier": _cashier_full_name(shift.user),
-		"company": shift.company,
-		"company_currency": company_currency,
-		"cash_mode_of_payment": cash_mode,
-		"period_start_date": str(shift.period_start_date),
-		"generated_at": str(get_datetime()),
-	}
-	dashboard.update(build_recap(scope, cash_mode, shift.pos_profile))
-	dashboard["hourly"] = shift_hourly(scope, shift.period_start_date)
-	dashboard["recent"] = shift_recent(scope)
-	return dashboard
+	summary.update(build_recap(scope, cash_mode, shift.pos_profile))
+	# Sales-by-hour trend: the recap's chart, bucketed from shift start to now.
+	summary["hourly"] = shift_hourly(scope, shift.period_start_date)
+	return summary
 
 
 # Longest posting-date window one recap may cover: a full (leap) year.
@@ -604,52 +552,9 @@ def get_period_summary(pos_profile, from_date, to_date):
 		"generated_at": get_datetime(),
 	}
 	summary.update(build_recap(scope, cash_mode, pos_profile))
+	# Trend chart: hours on a single day, days up to 62, months beyond.
+	summary["hourly"] = period_hourly(scope, from_date, to_date)
 	return summary
-
-
-@frappe.whitelist()
-@rate_limit(limit=30, seconds=60)
-def get_period_dashboard(pos_profile, from_date, to_date):
-	"""Period sales dashboard for one POS Profile, every cashier.
-
-	Same gate and dataset as get_period_summary (see
-	pos_next.services.sales_recap), extended with the dashboard-only
-	sections of get_shift_dashboard: ``hourly`` (net sales per hour / day /
-	month bucket, the one holding now flagged) and ``recent``. Shift-specific
-	fields (opening cash, cashier) are absent in this mode — the drawer is a
-	shift concept, payments here are takings only.
-
-	Security: same gate as get_period_summary (profile members and
-	management). Rate limited: free-range scans.
-	"""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
-
-	profile = frappe.db.get_value(
-		"POS Profile",
-		pos_profile,
-		("name", "company"),
-		as_dict=True,
-	)
-	if not profile:
-		frappe.throw(_("POS Profile not found"), frappe.DoesNotExistError)
-	_check_profile_access(pos_profile)
-	from_date, to_date = _validate_period(from_date, to_date)
-
-	cash_mode = get_cash_mode_of_payment(pos_profile)
-	scope = period_scope(pos_profile, from_date, to_date)
-	dashboard = {
-		"pos_profile": pos_profile,
-		"company": profile.company,
-		"company_currency": frappe.get_cached_value("Company", profile.company, "default_currency"),
-		"cash_mode_of_payment": cash_mode,
-		"generated_at": str(get_datetime()),
-		"period": {"from_date": str(from_date), "to_date": str(to_date)},
-	}
-	dashboard.update(build_recap(scope, cash_mode, pos_profile))
-	dashboard["hourly"] = period_hourly(scope, from_date, to_date)
-	dashboard["recent"] = shift_recent(scope, 10)
-	return dashboard
 
 
 @frappe.whitelist()
