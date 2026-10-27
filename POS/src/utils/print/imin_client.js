@@ -813,7 +813,8 @@ async function sendTextOps(
 		p.setTextLineSpacing(lineSpacing / 100)
 	}
 	try {
-		for (const o of ops) {
+		for (let i = 0; i < ops.length; i++) {
+			const o = ops[i]
 			if (o.op === "text") {
 				if (o.align !== align) {
 					align = o.align
@@ -829,11 +830,26 @@ async function sendTextOps(
 					bold = b
 					p.setTextStyle(bold)
 				}
+				// One printText per run of same-styled lines: a command per line
+				// let the head outrun the socket and stutter on device.
+				const lines = []
+				for (; i < ops.length; i++) {
+					const t = ops[i]
+					if (
+						t.op !== "text" ||
+						t.align !== o.align ||
+						(sizes[t.size] || sizes.base) !== sz ||
+						(t.bold ? 1 : 0) !== b
+					) {
+						break
+					}
+					lines.push(t.align === 0 && pad ? pad + t.text : t.text)
+				}
+				i--
 				// On device a single typeface call at the start did not hold
-				// (proportional glyphs, columns drifted): restate it per line.
+				// (proportional glyphs, columns drifted): restate it per run.
 				p.setTextTypeface(TYPEFACE_MONOSPACE)
-				const textToPrint = o.align === 0 && pad ? pad + o.text : o.text
-				p.printText(textToPrint)
+				p.printText(lines.join("\n"))
 			} else if (o.op === "logo") {
 				const logo = await logoPromise
 				if (logo) {

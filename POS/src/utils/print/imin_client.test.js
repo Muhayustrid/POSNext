@@ -958,7 +958,9 @@ describe("createIminDriver", () => {
 			expect(res.copies).toBe(1)
 			const bitmaps = calls.filter((c) => c[0] === "bitmap")
 			expect(bitmaps).toEqual([["bitmap", "data:logo"]])
-			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
+			const texts = calls
+				.filter((c) => c[0] === "text")
+				.flatMap((c) => c[1].split("\n"))
 			expect(texts).toContain("007")
 			expect(texts.some((t) => t.trim().startsWith("1x Americano Ice"))).toBe(true)
 			// Monospace on, default restored at the end; feed + cut after the text.
@@ -969,7 +971,21 @@ describe("createIminDriver", () => {
 			expect(calls.filter((c) => c[0] === "typeface").at(-1)).toEqual(["typeface", 0])
 		})
 
-		it("restates monospace right before every text line", async () => {
+		it("sends a run of same-styled lines as one printText", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: { printMode: "text", copies: 1 },
+			})
+			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
+			const lines = texts.flatMap((t) => t.split("\n"))
+			// The rule, info rows and items share one style: far fewer commands.
+			expect(texts.length).toBeLessThan(lines.length / 2)
+			expect(texts.some((t) => t.includes("Invoice") && t.includes("\n"))).toBe(true)
+		})
+
+		it("restates monospace right before every text run", async () => {
 			const { p, calls } = textPrinter()
 			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
 			await d.printHTML("<div/>", {
