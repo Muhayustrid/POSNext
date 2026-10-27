@@ -437,7 +437,7 @@
 						     cards compact (a max-h cap on a square shrank the width and
 						     left a gap beside the image) -->
 						<div
-							class="relative w-full aspect-[4/3] lg:aspect-square bg-gray-100 rounded-md mb-1.5 sm:mb-2 overflow-hidden"
+							class="relative w-full aspect-square bg-gray-100 rounded-md mb-1.5 sm:mb-2 overflow-hidden"
 						>
 							<!-- Image with conditional blur on hover -->
 							<div

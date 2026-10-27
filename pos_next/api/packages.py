@@ -151,6 +151,12 @@ def _serialize_package(doc, pos_profile=None, on_date=None):
 	component_codes = {row.item_code for row in doc.items or []}
 	component_codes |= {row.item_code for row in doc.options or []}
 	stock_flags = _stock_flags_map(component_codes)
+	option_codes = list({row.item_code for row in doc.options or []})
+	images = (
+		dict(frappe.get_all("Item", filters={"name": ["in", option_codes]}, fields=["name", "image"], as_list=True))
+		if option_codes
+		else {}
+	)
 
 	return {
 		"name": doc.name,
@@ -194,6 +200,7 @@ def _serialize_package(doc, pos_profile=None, on_date=None):
 				"price_adjustment": flt(row.price_adjustment),
 				"max_qty": cint(row.max_qty),
 				"is_stock_item": stock_flags.get(row.item_code, 1),
+				"image": images.get(row.item_code),
 			}
 			for row in doc.options or []
 		],

@@ -305,6 +305,16 @@ class TestPackageQuote(unittest.TestCase):
 			)
 		return out
 
+	def test_options_carry_the_item_image(self):
+		old = frappe.db.get_value("Item", BACKPACK, "image")
+		frappe.db.set_value("Item", BACKPACK, "image", "/files/pnxt-backpack.png")
+		try:
+			pkg = next(p for p in get_packages(PROFILE) if p["name"] == PACKAGE)
+			option = next(o for o in pkg["options"] if o["item_code"] == BACKPACK)
+			self.assertEqual(option.get("image"), "/files/pnxt-backpack.png")
+		finally:
+			frappe.db.set_value("Item", BACKPACK, "image", old)
+
 	def test_mandatory_item_is_always_included(self):
 		result = quote(PACKAGE, self.choices(accessory=BACKPACK), PROFILE)
 
