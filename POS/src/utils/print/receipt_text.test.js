@@ -2,8 +2,11 @@ import { beforeAll, describe, expect, it } from "vitest"
 
 import {
 	buildCrewSlipTextJob,
+	buildEodTextJob,
 	buildReceiptTextJob,
 	colsFor,
+	formatQty,
+	formatRupiah,
 	leftRight,
 	textSizes,
 	wrapText,
@@ -75,6 +78,21 @@ describe("layout helpers", () => {
 			expect(l.length).toBeLessThanOrEqual(24 - "Rp12.000".length - 1)
 		}
 	})
+
+	it("formats rupiah exactly like Python format_rupiah", () => {
+		expect(formatRupiah(12000)).toBe("Rp12.000")
+		expect(formatRupiah(-1000)).toBe("-Rp1.000")
+		expect(formatRupiah(0)).toBe("Rp0")
+		expect(formatRupiah(12000.5)).toBe("Rp12.001")
+		expect(formatRupiah(-1000.5)).toBe("-Rp1.001")
+	})
+
+	it("formats quantities like jinja %g", () => {
+		expect(formatQty(1)).toBe("1")
+		expect(formatQty(1.5)).toBe("1.5")
+		expect(formatQty(0)).toBe("0")
+		expect(formatQty(2.0)).toBe("2")
+	})
 })
 
 describe("buildReceiptTextJob", () => {
@@ -132,6 +150,16 @@ describe("buildReceiptTextJob", () => {
 		)
 		expect(t).not.toContain("NO. ANTRIAN")
 	})
+
+	it("uses feed op for queueGapDots when provided", () => {
+		const opsWithGap = buildReceiptTextJob(DOC, { cols, queueGapDots: 40 })
+		expect(opsWithGap).toContainEqual({ op: "feed", dots: 40 })
+
+		const opsZeroGap = buildReceiptTextJob(DOC, { cols, queueGapDots: 0 })
+		expect(opsZeroGap.some((o) => o.op === "feed")).toBe(false)
+		const queueIdx = opsZeroGap.findIndex((o) => o.text === "001")
+		expect(opsZeroGap[queueIdx + 1].op).toBe("logo")
+	})
 })
 
 describe("buildCrewSlipTextJob", () => {
@@ -143,5 +171,144 @@ describe("buildCrewSlipTextJob", () => {
 		expect(item).toMatchObject({ size: "big", bold: true })
 		expect(texts(ops).join("\n")).not.toMatch(/12\.000/)
 		expect(texts(ops)).toContain("ORDER")
+	})
+})
+
+describe("buildEodTextJob", () => {
+	const cols = { base: 31, big: 23, queue: 12 }
+	const EOD_DATA = {
+		company: "PT. JUARA ROTI INDONESIA",
+		cashier: "Kasir Satu",
+		shift: "POS-CLS-2026-00001",
+		start: "24/10/2026 08:00",
+		closing: "24/10/2026 16:00",
+		print: "24/10/2026 16:05",
+		recap: {
+			total_sales: 150000,
+			total_order: 10,
+			average_per_order: 15000,
+			cash: {
+				opening_balance: 50000,
+				cash_payment: 100000,
+				total_expense: 20000,
+				cash_in_hand: 130000,
+			},
+			payment_methods: [
+				{ mode_of_payment: "Cash", amount: 100000 },
+				{ mode_of_payment: "BCA QRIS", amount: 50000 },
+			],
+			total_cash: 100000,
+			total_non_cash: 50000,
+			methods_grand_total: 150000,
+			service_charge: 0,
+			tax_total: 15000,
+			product_discount: 5000,
+			payment_discount: 0,
+			refund_total: 10000,
+			categories: [
+				{
+					category: "Bread",
+					items: [
+						{
+							qty: 2,
+							item_name: "Roti Coklat",
+							amount: 24000,
+							is_return: false,
+							components: [{ qty: 2, item_name: "Plastik Roti" }],
+						},
+						{
+							qty: 1,
+							item_name: "Roti Keju",
+							amount: -12000,
+							is_return: true,
+						},
+					],
+				},
+			],
+		},
+	}
+
+	it("prints sections in the exact order of pos_next_eod_report", () => {
+		const ops = buildEodTextJob(EOD_DATA, { cols })
+		const t = texts(ops)
+		const order = [
+			"SALES RECAP",
+			"PT. JUARA ROTI INDONESIA",
+			"Cashier",
+			"Shift",
+			"Start",
+			"Closing",
+			"Print Date",
+			"SALES SUMMARY",
+			"Total Sales",
+			"Total Order",
+			"Average / Order",
+			"CASH SUMMARY",
+			"Modal Awal",
+			"Cash Payment",
+			"Total Expense",
+			"Cash in Hand",
+			"PAYMENT METHOD",
+			"Cash",
+			"BCA QRIS",
+			"Total Cash",
+			"Total Non Cash",
+			"GRAND TOTAL",
+			"CHARGE",
+			"Service Charge",
+			"Tax / PPN",
+			"DISCOUNT",
+			"Product Discount",
+			"Payment Discount",
+			"REFUND",
+			"Total Refund",
+			"SALES PER CATEGORY",
+			"Bread",
+			"2x Roti Coklat",
+			"  2x Plastik Roti",
+			"1x Roti Keju (Return)",
+			"-- Akhir Laporan --",
+		]
+		let at = -1
+		for (const want of order) {
+			const idx = t.findIndex((x, i) => i > at && x.includes(want))
+			expect(idx, want).toBeGreaterThan(at)
+			at = idx
+		}
+		expect(t.some((x) => x.includes("Cashier") && x.includes("Kasir Satu"))).toBe(true)
+		expect(t.some((x) => x.includes("Shift") && x.includes("POS-CLS-2026-00001"))).toBe(true)
+	})
+
+	it("never prints a line wider than the paper columns", () => {
+		const ops = buildEodTextJob(EOD_DATA, { cols })
+		for (const o of ops) {
+			if (o.op === "text") {
+				expect(o.text.length, o.text).toBeLessThanOrEqual(cols.base)
+			}
+		}
+	})
+
+	it("prints '-' when there are no categories", () => {
+		const ops = buildEodTextJob(
+			{ ...EOD_DATA, recap: { ...EOD_DATA.recap, categories: [] } },
+			{ cols },
+		)
+		const t = texts(ops)
+		const catIdx = t.indexOf("SALES PER CATEGORY")
+		expect(catIdx).toBeGreaterThan(-1)
+		expect(t[catIdx + 1]).toBe("-")
+	})
+})
+
+describe("buildEodTextJob header rows", () => {
+	it("drops a long cashier name under its label instead of overflowing", () => {
+		const ops = buildEodTextJob(
+			{ cashier: "PT. JUARA ROTI INDONESIA CABANG DELANGGU" },
+			{ cols: 31 },
+		)
+		for (const o of ops) {
+			if (o.op === "text") expect(o.text.length, o.text).toBeLessThanOrEqual(31)
+		}
+		expect(texts(ops)).toContain("Cashier")
 	})
 })

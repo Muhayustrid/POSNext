@@ -1329,183 +1329,220 @@
 												{{ __('Struk Penjualan — iMin') }}
 											</h4>
 										</div>
-										<div class="flex flex-col gap-3">
-											<SelectField
-												v-model="settings.imin_paper_width"
-												:label="__('Lebar Kertas')"
-												:options="paperWidthOptions"
-												:description="
-													__('58mm = 384 dots, 80mm = 576 dots, custom = isi jumlah dots di bawah.')
-												"
-											/>
-											<SelectField
-												v-model="settings.imin_print_mode"
-												:label="__('Mode Cetak iMin')"
-												:options="iminPrintModeOptions"
-												:description="
-													__('Teks = jauh lebih cepat, struk dikirim sebagai teks printer (font bawaan printer), logo tetap gambar. Gambar = tampilan persis format cetak, lebih lambat.')
-												"
-											/>
-											<NumberField
-												v-model="settings.imin_print_speed"
-												:label="__('Kecepatan Printer (dots/detik)')"
-												:description="
-													__('Dipakai untuk menunggu lembar sebelumnya selesai sebelum rangkap/slip crew berikutnya. Terlalu kecil = jeda lama; terlalu besar = jeda sobek hilang. Default 400. 100–2000.')
-												"
-												:min="100"
-												:max="2000"
-												:step="50"
-											/>
-											<NumberField
-												v-if="settings.imin_paper_width === 'custom'"
-												v-model="settings.imin_custom_dots"
-												:label="__('Jumlah Dots Custom')"
-												:description="
-													__('Lebar cetak dalam dots (kelipatan 8, maks 576).')
-												"
-												:min="8"
-												:max="576"
-												:step="8"
-											/>
-											<CheckboxField
-												v-model="settings.imin_cut_paper"
-												:label="__('Gunting Kertas Setelah Cetak')"
-												:description="__('Gunting kertas setelah struk selesai dicetak.')"
-											/>
-											<NumberField
-												v-model="settings.imin_print_copies"
-												:label="__('Jumlah Rangkap')"
-												:description="
-													__(
-														'Jumlah rangkap per transaksi (rangkap customer dulu, lalu crew/outlet).'
-													)
-												"
-												:min="1"
-												:max="5"
-											/>
-											<NumberField
-												v-if="(settings.imin_print_copies || 1) > 1 || settings.imin_crew_slip_enabled"
-												v-model="settings.imin_copy_delay_ms"
-												:label="__('Jeda Antar Rangkap (ms)')"
-												:description="
-													__('Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.')
-												"
-												:min="0"
-												:max="10000"
-												:step="100"
-											/>
-											<CheckboxField
-												v-model="settings.imin_crew_slip_enabled"
-												:label="__('Cetak Slip Crew')"
-												:description="
-													__(
-														'Satu slip order pendek untuk outlet, dicetak setelah rangkap customer — terpisah dari jumlah rangkap.'
-													)
-												"
-											/>
-											<NumberField
-												v-if="settings.imin_crew_slip_enabled"
-												v-model="settings.imin_crew_delay_ms"
-												:label="__('Jeda Sebelum Slip Crew (ms)')"
-												:description="
-													__('Jeda setelah struk selesai sebelum slip crew dicetak, agar struk bisa disobek. Naikkan bila slip keluar tanpa jeda. Default 2000. 0–10000.')
-												"
-												:min="0"
-												:max="10000"
-												:step="100"
-											/>
-											<NumberField
-												v-model="settings.imin_font_scale"
-												:label="__('Skala Font Struk (%)')"
-												:description="
-													__(
-														'Ukuran teks struk (%). 100 = normal; naikkan bila cetakan terlalu kecil. 60–250.'
-													)
-												"
-												:min="60"
-												:max="250"
-												:step="5"
-											/>
-											<NumberField
-												v-model="settings.imin_crew_font_scale"
-												:label="__('Skala Font Slip Crew (%)')"
-												:description="
-													__(
-														'Ukuran teks khusus slip crew (%). 60–250.'
-													)
-												"
-												:min="60"
-												:max="250"
-												:step="5"
-											/>
-											<NumberField
-												v-model="settings.imin_line_spacing"
-												:label="__('Jarak Baris (%)')"
-												:description="
-													__(
-														'Kerapatan baris (%). Lebih kecil = lebih rapat, ukuran teks tetap. 50–150.'
-													)
-												"
-												:min="50"
-												:max="150"
-												:step="5"
-											/>
-											<NumberField
-												v-model="settings.imin_side_margin"
-												:label="__('Margin Kiri-Kanan (dots)')"
-												:description="
-													__(
-														'Margin kiri-kanan dalam dots (8 dots ≈ 1 mm). 0–64.'
-													)
-												"
-												:min="0"
-												:max="64"
-											/>
-											<NumberField
-												v-model="settings.imin_top_margin"
-												:label="__('Margin Atas (dots)')"
-												:description="
-													__(
-														'Ruang kosong di atas isi struk (dots). 0 = pakai padding bawaan format. 0–128.'
-													)
-												"
-												:min="0"
-												:max="128"
-											/>
-											<NumberField
-												v-model="settings.imin_queue_gap"
-												:label="__('Jarak Nomor Antrian (dots)')"
-												:description="
-													__(
-														'Jarak nomor antrian ke isi struk di bawahnya (dots, 40 ≈ 5 mm). 0–128.'
-													)
-												"
-												:min="0"
-												:max="128"
-											/>
-											<NumberField
-												v-model="settings.imin_feed_dots"
-												:label="__('Majukan Kertas (dots)')"
-												:description="
-													__(
-														'Majukan kertas tiap rangkap selesai agar lewat bibir sobek. 160 ≈ 20 mm.'
-													)
-												"
-												:min="0"
-												:max="500"
-												:step="8"
-											/>
-											<NumberField
-												v-model="settings.imin_tail_dots"
-												:label="__('Ruang Ekor (dots)')"
-												:description="
-													__(
-														'Ruang kosong di dalam bitmap agar baris terakhir lewat bibir sobek. 24 ≈ 3 mm.'
-													)
-												"
-												:min="0"
-												:max="255"
-											/>
+										<div class="space-y-5">
+											<!-- Kertas & Mode -->
+											<div>
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Kertas & Mode') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<SelectField
+														v-model="settings.imin_paper_width"
+														:label="__('Lebar Kertas')"
+														:options="paperWidthOptions"
+														:description="
+															__('58mm = 384 dots, 80mm = 576 dots, custom = isi jumlah dots di bawah.')
+														"
+													/>
+													<SelectField
+														v-model="settings.imin_print_mode"
+														:label="__('Mode Cetak iMin')"
+														:options="iminPrintModeOptions"
+														:description="
+															__('Teks = jauh lebih cepat, struk dikirim sebagai teks printer (font bawaan printer), logo tetap gambar. Gambar = tampilan persis format cetak, lebih lambat.')
+														"
+													/>
+													<NumberField
+														v-model="settings.imin_print_speed"
+														:label="__('Kecepatan Printer (dots/detik)')"
+														:description="
+															__('Dipakai untuk menunggu lembar sebelumnya selesai sebelum rangkap/slip crew berikutnya. Terlalu kecil = jeda lama; terlalu besar = jeda sobek hilang. Default 400. 100–2000.')
+														"
+														:min="100"
+														:max="2000"
+														:step="50"
+													/>
+													<NumberField
+														v-if="settings.imin_paper_width === 'custom'"
+														v-model="settings.imin_custom_dots"
+														:label="__('Jumlah Dots Custom')"
+														:description="
+															__('Lebar cetak dalam dots (kelipatan 8, maks 576).')
+														"
+														:min="8"
+														:max="576"
+														:step="8"
+													/>
+													<CheckboxField
+														v-model="settings.imin_cut_paper"
+														:label="__('Gunting Kertas Setelah Cetak')"
+														:description="__('Gunting kertas setelah struk selesai dicetak.')"
+														class="col-span-1 md:col-span-2 xl:col-span-3"
+													/>
+												</div>
+											</div>
+
+											<!-- Rangkap & Jeda -->
+											<div class="pt-4 border-t border-gray-100">
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Rangkap & Jeda') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<NumberField
+														v-model="settings.imin_print_copies"
+														:label="__('Jumlah Rangkap')"
+														:description="
+															__(
+																'Jumlah rangkap per transaksi (rangkap customer dulu, lalu crew/outlet).'
+															)
+														"
+														:min="1"
+														:max="5"
+													/>
+													<NumberField
+														v-if="(settings.imin_print_copies || 1) > 1 || settings.imin_crew_slip_enabled"
+														v-model="settings.imin_copy_delay_ms"
+														:label="__('Jeda Antar Rangkap (ms)')"
+														:description="
+															__('Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.')
+														"
+														:min="0"
+														:max="10000"
+														:step="100"
+													/>
+													<CheckboxField
+														v-model="settings.imin_crew_slip_enabled"
+														:label="__('Cetak Slip Crew')"
+														:description="
+															__(
+																'Satu slip order pendek untuk outlet, dicetak setelah rangkap customer — terpisah dari jumlah rangkap.'
+															)
+														"
+														class="col-span-1 md:col-span-2 xl:col-span-3"
+													/>
+													<NumberField
+														v-if="settings.imin_crew_slip_enabled"
+														v-model="settings.imin_crew_delay_ms"
+														:label="__('Jeda Sebelum Slip Crew (ms)')"
+														:description="
+															__('Jeda setelah struk selesai sebelum slip crew dicetak, agar struk bisa disobek. Naikkan bila slip keluar tanpa jeda. Default 2000. 0–10000.')
+														"
+														:min="0"
+														:max="10000"
+														:step="100"
+													/>
+												</div>
+											</div>
+
+											<!-- Ukuran Teks -->
+											<div class="pt-4 border-t border-gray-100">
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Ukuran Teks') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<NumberField
+														v-model="settings.imin_font_scale"
+														:label="__('Skala Font Struk (%)')"
+														:description="
+															__(
+																'Ukuran teks struk (%). 100 = normal; naikkan bila cetakan terlalu kecil. 60–250.'
+															)
+														"
+														:min="60"
+														:max="250"
+														:step="5"
+													/>
+													<NumberField
+														v-model="settings.imin_crew_font_scale"
+														:label="__('Skala Font Slip Crew (%)')"
+														:description="
+															__(
+																'Ukuran teks khusus slip crew (%). 60–250.'
+															)
+														"
+														:min="60"
+														:max="250"
+														:step="5"
+													/>
+													<NumberField
+														v-model="settings.imin_line_spacing"
+														:label="__('Jarak Baris (%)')"
+														:description="
+															__(
+																'Kerapatan baris (%). Lebih kecil = lebih rapat, ukuran teks tetap. 50–150.'
+															)
+														"
+														:min="50"
+														:max="150"
+														:step="5"
+													/>
+												</div>
+											</div>
+
+											<!-- Margin & Kertas -->
+											<div class="pt-4 border-t border-gray-100">
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Margin & Kertas') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<NumberField
+														v-model="settings.imin_side_margin"
+														:label="__('Margin Kiri-Kanan (dots)')"
+														:description="
+															__(
+																'Margin kiri-kanan dalam dots (8 dots ≈ 1 mm). 0–64.'
+															)
+														"
+														:min="0"
+														:max="64"
+													/>
+													<NumberField
+														v-model="settings.imin_top_margin"
+														:label="__('Margin Atas (dots)')"
+														:description="
+															__(
+																'Ruang kosong di atas isi struk (dots). 0 = pakai padding bawaan format. 0–128.'
+															)
+														"
+														:min="0"
+														:max="128"
+													/>
+													<NumberField
+														v-model="settings.imin_queue_gap"
+														:label="__('Jarak Nomor Antrian (dots)')"
+														:description="
+															__(
+																'Jarak nomor antrian ke isi struk di bawahnya (dots, 40 ≈ 5 mm). 0–128.'
+															)
+														"
+														:min="0"
+														:max="128"
+													/>
+													<NumberField
+														v-model="settings.imin_feed_dots"
+														:label="__('Majukan Kertas (dots)')"
+														:description="
+															__(
+																'Majukan kertas tiap rangkap selesai agar lewat bibir sobek. 160 ≈ 20 mm.'
+															)
+														"
+														:min="0"
+														:max="500"
+														:step="8"
+													/>
+													<NumberField
+														v-model="settings.imin_tail_dots"
+														:label="__('Ruang Ekor (dots)')"
+														:description="
+															__(
+																'Ruang kosong di bawah baris terakhir agar lewat bibir sobek. 24 ≈ 3 mm.'
+															)
+														"
+														:min="0"
+														:max="255"
+													/>
+												</div>
+											</div>
 										</div>
 									</div>
 									<!-- iMin Closing / EOD -->
@@ -1531,90 +1568,124 @@
 												{{ __('Tutup Kasir / EOD — iMin') }}
 											</h4>
 										</div>
-										<div class="flex flex-col gap-3">
-											<NumberField
-												v-model="settings.imin_eod_print_copies"
-												:label="__('Jumlah Rangkap EOD')"
-												:description="
-													__(
-														'Jumlah rangkap struk tutup kasir (EOD) — jalur cetak terpisah. 1–5.'
-													)
-												"
-												:min="1"
-												:max="5"
-											/>
-											<NumberField
-												v-if="(settings.imin_eod_print_copies || 1) > 1"
-												v-model="settings.imin_eod_copy_delay_ms"
-												:label="__('Jeda Antar Rangkap EOD (ms)')"
-												:description="
-													__('Jeda antar rangkap struk EOD. Default 800.')
-												"
-												:min="0"
-												:max="10000"
-												:step="100"
-											/>
-											<NumberField
-												v-model="settings.imin_eod_feed_dots"
-												:label="__('Majukan Kertas EOD (dots)')"
-												:description="
-													__('Majukan kertas setelah struk EOD. 160 ≈ 20 mm.')
-												"
-												:min="8"
-												:max="500"
-												:step="8"
-											/>
-											<NumberField
-												v-model="settings.imin_eod_tail_dots"
-												:label="__('Ruang Ekor EOD (dots)')"
-												:description="
-													__('Ruang kosong di bawah baris terakhir struk EOD. 24 ≈ 3 mm.')
-												"
-												:min="0"
-												:max="255"
-											/>
-											<NumberField
-												v-model="settings.imin_eod_font_scale"
-												:label="__('Skala Font EOD (%)')"
-												:description="
-													__(
-														'Ukuran teks laporan EOD (%). Lebih kecil = lebih banyak baris muat. 60–250.'
-													)
-												"
-												:min="60"
-												:max="250"
-												:step="5"
-											/>
-											<NumberField
-												v-model="settings.imin_eod_line_spacing"
-												:label="__('Jarak Baris EOD (%)')"
-												:description="
-													__('Kerapatan baris laporan EOD (%). 50–150.')
-												"
-												:min="50"
-												:max="150"
-												:step="5"
-											/>
-											<NumberField
-												v-model="settings.imin_eod_side_margin"
-												:label="__('Margin Kiri-Kanan EOD (dots)')"
-												:description="
-													__('Margin kiri-kanan struk EOD. 0 = sampai tepi. 0–64.')
-												"
-												:min="0"
-												:max="64"
-											/>
-											<NumberField
-												v-model="settings.imin_eod_top_margin"
-												:label="__('Margin Atas EOD (dots)')"
-												:description="
-													__(
-														'Ruang kosong di atas isi laporan EOD (dots). 0 = pakai padding bawaan format.'
-													)
-												"
-												:min="0"
-												:max="128"
-											/>
+										<div class="space-y-5">
+											<!-- Mode & Rangkap -->
+											<div>
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Mode & Rangkap') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<SelectField
+														v-model="settings.imin_eod_print_mode"
+														:label="__('Mode Cetak EOD')"
+														:options="iminPrintModeOptions"
+														:description="
+															__('Teks = jauh lebih cepat, laporan dikirim sebagai teks printer (font bawaan printer). Gambar = tampilan persis format cetak, lebih lambat.')
+														"
+													/>
+													<NumberField
+														v-model="settings.imin_eod_print_copies"
+														:label="__('Jumlah Rangkap EOD')"
+														:description="
+															__(
+																'Jumlah rangkap struk tutup kasir (EOD) — jalur cetak terpisah. 1–5.'
+															)
+														"
+														:min="1"
+														:max="5"
+													/>
+													<NumberField
+														v-if="(settings.imin_eod_print_copies || 1) > 1"
+														v-model="settings.imin_eod_copy_delay_ms"
+														:label="__('Jeda Antar Rangkap EOD (ms)')"
+														:description="
+															__('Jeda antar rangkap struk EOD. Default 800.')
+														"
+														:min="0"
+														:max="10000"
+														:step="100"
+													/>
+												</div>
+											</div>
+
+											<!-- Ukuran Teks -->
+											<div class="pt-4 border-t border-gray-100">
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Ukuran Teks') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<NumberField
+														v-model="settings.imin_eod_font_scale"
+														:label="__('Skala Font EOD (%)')"
+														:description="
+															__(
+																'Ukuran teks laporan EOD (%). Lebih kecil = lebih banyak baris muat. 60–250.'
+															)
+														"
+														:min="60"
+														:max="250"
+														:step="5"
+													/>
+													<NumberField
+														v-model="settings.imin_eod_line_spacing"
+														:label="__('Jarak Baris EOD (%)')"
+														:description="
+															__('Kerapatan baris laporan EOD (%). 50–150.')
+														"
+														:min="50"
+														:max="150"
+														:step="5"
+													/>
+												</div>
+											</div>
+
+											<!-- Margin & Kertas -->
+											<div class="pt-4 border-t border-gray-100">
+												<h5 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+													{{ __('Margin & Kertas') }}
+												</h5>
+												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
+													<NumberField
+														v-model="settings.imin_eod_side_margin"
+														:label="__('Margin Kiri-Kanan EOD (dots)')"
+														:description="
+															__('Margin kiri-kanan struk EOD. 0 = sampai tepi. 0–64.')
+														"
+														:min="0"
+														:max="64"
+													/>
+													<NumberField
+														v-model="settings.imin_eod_top_margin"
+														:label="__('Margin Atas EOD (dots)')"
+														:description="
+															__(
+																'Ruang kosong di atas isi laporan EOD (dots). 0 = pakai padding bawaan format.'
+															)
+														"
+														:min="0"
+														:max="128"
+													/>
+													<NumberField
+														v-model="settings.imin_eod_feed_dots"
+														:label="__('Majukan Kertas EOD (dots)')"
+														:description="
+															__('Majukan kertas setelah struk EOD. 160 ≈ 20 mm.')
+														"
+														:min="8"
+														:max="500"
+														:step="8"
+													/>
+													<NumberField
+														v-model="settings.imin_eod_tail_dots"
+														:label="__('Ruang Ekor EOD (dots)')"
+														:description="
+															__('Ruang kosong di bawah baris terakhir struk EOD. 24 ≈ 3 mm.')
+														"
+														:min="0"
+														:max="255"
+													/>
+												</div>
+											</div>
 										</div>
 									</div>
 									<!-- Per-device overrides note -->
@@ -1778,6 +1849,7 @@ const settings = ref({
 	imin_top_margin: 0,
 	imin_queue_gap: 40,
 	imin_print_mode: "bitmap",
+	imin_eod_print_mode: "bitmap",
 	imin_print_speed: 400,
 	imin_eod_print_copies: 1,
 	imin_eod_copy_delay_ms: 800,

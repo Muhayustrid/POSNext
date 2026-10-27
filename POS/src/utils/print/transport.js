@@ -103,6 +103,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						queueGapDots: current.queue_gap,
 						// Closing/EOD lane: the driver resolves these against the eod*
 						// device keys instead of the receipt ones.
+						eodPrintMode: current.eod_print_mode,
 						eodCopies: current.eod_copies,
 						eodCopyDelayMs: current.eod_copy_delay_ms,
 						eodFeedDots: current.eod_feed_dots,
@@ -215,6 +216,11 @@ export function ensureIminSdk() {
 		s.onload = () => resolve(true)
 		s.onerror = () => resolve(false)
 		document.head.appendChild(s)
+	}).then((ok) => {
+		// A transient load failure must not brick silent printing until a page
+		// reload: forget the promise so the next call retries.
+		if (!ok) _sdkPromise = null
+		return ok
 	})
 	return _sdkPromise
 }
@@ -265,6 +271,7 @@ function applyConfig(cfg) {
 		queue_gap: cfg.queue_gap,
 		// Stored verbatim (snake_case, exactly as the API returns); printHTML
 		// maps them camelCase per print.
+		eod_print_mode: cfg.eod_print_mode,
 		eod_copies: cfg.eod_copies,
 		eod_copy_delay_ms: cfg.eod_copy_delay_ms,
 		eod_feed_dots: cfg.eod_feed_dots,

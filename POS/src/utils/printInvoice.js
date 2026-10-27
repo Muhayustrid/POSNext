@@ -719,6 +719,62 @@ export async function silentPrintDoc(
 ) {
 	await ensureTransportInitialized(posProfile)
 
+	if (kind === "eod" && doctype === "POS Closing Shift" && isIminEodTextMode()) {
+		// The text job needs the payload; the QZ/browser fallback the transport
+		// may reach needs the HTML. Both are fetched together so the text lane
+		// pays no second round trip for a fallback it usually never uses.
+		const [dataRes, htmlRes] = await Promise.allSettled([
+			call("pos_next.api.printing.get_eod_print_data", {
+				closing_shift: name,
+			}),
+			fetchServerPrintHTML(doctype, name, printFormat),
+		])
+		const eodData = dataRes.status === "fulfilled" ? dataRes.value : null
+		if (eodData) {
+			// A failed HTML fetch must not cost the text report: iMin still
+			// prints it, while handing a driver a blank page helps nobody.
+			if (htmlRes.status === "rejected") {
+				log.warn(
+					"EOD fallback HTML unavailable, iMin text only:",
+					htmlRes.reason?.message || htmlRes.reason,
+				)
+			}
+			await transportPrint(
+				htmlRes.status === "fulfilled" ? htmlRes.value : "",
+				{
+					kind: "eod",
+					doc: eodData,
+					eodDoc: eodData,
+					logContext: {
+						reference_doctype: doctype,
+						reference_name: name,
+						pos_profile: posProfile,
+					},
+				},
+			)
+			return true
+		}
+		if (dataRes.status === "rejected") {
+			log.warn(
+				"EOD text-mode data fetch failed, using server HTML:",
+				dataRes.reason?.message || dataRes.reason,
+			)
+		}
+		// A permission failure lands here with the HTML fetch's own refusal
+		// (the print view checks the same read permission): surface it rather
+		// than printing an empty recap.
+		if (htmlRes.status === "rejected") throw htmlRes.reason
+		await transportPrint(htmlRes.value, {
+			kind,
+			logContext: {
+				reference_doctype: doctype,
+				reference_name: name,
+				pos_profile: posProfile,
+			},
+		})
+		return true
+	}
+
 	const fullHTML = await fetchServerPrintHTML(doctype, name, printFormat)
 
 	await transportPrint(fullHTML, {
@@ -834,10 +890,20 @@ export async function silentPrintInvoice(
 }
 
 /** True when the current transport config prints iMin receipts as text. */
-function isIminTextMode() {
+export function isIminTextMode() {
 	try {
 		const c = getTransport().getConfig() || {}
 		return c.driver === "imin" && c.print_mode === "text"
+	} catch {
+		return false
+	}
+}
+
+/** True when the current transport config prints iMin EOD closing reports as text. */
+export function isIminEodTextMode() {
+	try {
+		const c = getTransport().getConfig() || {}
+		return c.driver === "imin" && c.eod_print_mode === "text"
 	} catch {
 		return false
 	}

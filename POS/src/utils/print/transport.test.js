@@ -325,7 +325,9 @@ it("stops the chain for PostPrintError instances even without the flag", async (
 	const { PostPrintError } = await import("./transport")
 	const imin = okDriver("imin")
 	// A PostPrintError instance is treated as post-print even without the flag.
-	imin.printHTML = vi.fn().mockRejectedValue(new PostPrintError("status poll failed"))
+	imin.printHTML = vi
+		.fn()
+		.mockRejectedValue(new PostPrintError("status poll failed"))
 	const browser = okDriver("browser")
 	const t = createTransport({
 		drivers: { imin, browser },
@@ -382,4 +384,32 @@ it("treats a corrupted cache as nothing cached", async () => {
 	await expect(initTransportFromServer("POS Profile corrupt")).rejects.toThrow(
 		"offline",
 	)
+})
+
+it("retries the SDK load after a failed script load", async () => {
+	// A transient failure (offline reload, cached 404) must not brick silent
+	// printing until the operator refreshes the page.
+	vi.resetModules()
+	window.IminPrinter = undefined
+	const { ensureIminSdk } = await import("./transport")
+	const append = vi
+		.spyOn(document.head, "appendChild")
+		.mockImplementationOnce((script) => {
+			script.onerror()
+			return script
+		})
+		.mockImplementation((script) => {
+			window.IminPrinter = function IminPrinter() {}
+			script.onload()
+			return script
+		})
+	try {
+		expect(await ensureIminSdk()).toBe(false)
+		expect(await ensureIminSdk()).toBe(true)
+		expect(append).toHaveBeenCalledTimes(2)
+	} finally {
+		append.mockRestore()
+		window.IminPrinter = undefined
+		vi.resetModules()
+	}
 })

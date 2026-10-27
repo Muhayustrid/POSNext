@@ -113,6 +113,36 @@ describe("resolvePrintConfig", () => {
 			resolvePrintConfig({ crewSlipEnabled: true }, {}, { kind: "eod" }),
 		).toMatchObject({ crewSlipEnabled: false })
 	})
+
+	it("resolves printMode independently per lane", () => {
+		expect(
+			resolvePrintConfig(
+				{},
+				{ printMode: "text", eodPrintMode: "bitmap" },
+				{ kind: "eod" },
+			).printMode,
+		).toBe("bitmap")
+		expect(
+			resolvePrintConfig(
+				{},
+				{ printMode: "bitmap", eodPrintMode: "text" },
+				{ kind: "eod" },
+			).printMode,
+		).toBe("text")
+		expect(
+			resolvePrintConfig(
+				{},
+				{ printMode: "text", eodPrintMode: "bitmap" },
+			).printMode,
+		).toBe("text")
+		expect(
+			resolvePrintConfig(
+				{ eodPrintMode: "text" },
+				{ eodPrintMode: "bitmap" },
+				{ kind: "eod" },
+			).printMode,
+		).toBe("text")
+	})
 })
 
 describe("scaleCssLengths (96 DPI -> 205 DPI dots)", () => {

@@ -39,8 +39,10 @@ import {
 import { DOTS_PER_MM, PAPER_PROFILES } from "./paper"
 import {
 	buildCrewSlipTextJob,
+	buildEodTextJob,
 	buildReceiptTextJob,
 	colsFor,
+	MONO_CHAR_EM,
 	RECEIPT_LOGO_MM,
 	RECEIPT_LOGO_URL,
 	textSizes,
@@ -51,6 +53,11 @@ const log = logger.create("IminClient")
 const STATUS_POLL_MS = 500
 const STATUS_TIMEOUT_MS = 15000
 const STATUS_REPLY_TIMEOUT_MS = 5000
+// Bound on ONE command handed to the SDK. Its bitmap upload is a bare fetch
+// with no timeout, so a wedged print service leaves the promise pending
+// forever — and with it `printing > 0`, which disables every self-heal below.
+// Kept at the status budget: a genuinely slow upload must not be cut short.
+const SEND_TIMEOUT_MS = 15000
 // The bitmap command resolves once queued; give the head a moment to commit it
 // to the print buffer before feeding, or the feed can overtake the raster.
 const SETTLE_MS = 200
@@ -171,6 +178,7 @@ function defaultLoadLogo(widthDots, paperDots = widthDots) {
  * @param {number} [deps.statusTimeoutMs] - injectable timeout for tests (default 15000)
  * @param {number} [deps.statusPollMs] - injectable poll interval for tests (default 500)
  * @param {number} [deps.statusReplyMs] - injectable reply timeout for tests (default 5000)
+ * @param {number} [deps.sendTimeoutMs] - injectable per-command timeout (default 15000)
  * @param {(widthDots:number, paperDots:number) => Promise<{dataURL:string, height:number}|null>} [deps.loadLogo]
  *   - text-mode logo source; injected by tests.
  */
@@ -179,6 +187,7 @@ export function createIminDriver(deps = {}) {
 	const statusTimeoutMs = deps.statusTimeoutMs ?? STATUS_TIMEOUT_MS
 	const statusPollMs = deps.statusPollMs ?? STATUS_POLL_MS
 	const statusReplyMs = deps.statusReplyMs ?? STATUS_REPLY_TIMEOUT_MS
+	const sendTimeoutMs = deps.sendTimeoutMs ?? SEND_TIMEOUT_MS
 	const loadLogo = deps.loadLogo || defaultLoadLogo
 	let printer = null
 	let connecting = null
@@ -246,6 +255,45 @@ export function createIminDriver(deps = {}) {
 		return connecting
 	}
 
+	// Drop a printer the driver can no longer trust (dead socket, hung command)
+	// so the next call connects fresh instead of retrying the same failure.
+	function dropPrinter(p) {
+		if (p && printer === p) {
+			try {
+				p.close?.()
+			} catch {
+				// Guarded
+			}
+			printer = null
+		}
+	}
+
+	/**
+	 * Run one SDK command under `sendTimeoutMs`. A command that never settles
+	 * (bitmap upload against a wedged service) would otherwise hold `printing`
+	 * open forever and survive until a page reload.
+	 */
+	function withSendTimeout(run) {
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(
+				() => reject(new Error(__("Printer did not respond"))),
+				sendTimeoutMs,
+			)
+			Promise.resolve()
+				.then(run)
+				.then(
+					(v) => {
+						clearTimeout(timer)
+						resolve(v)
+					},
+					(err) => {
+						clearTimeout(timer)
+						reject(err)
+					},
+				)
+		})
+	}
+
 	// The SDK's getPrinterStatus() only resolves when a type===2 reply
 	// arrives; there is no internal timeout. If the service drops the query
 	// under load (seen on-device: a reply arrives ~2 s later or not at all
@@ -262,20 +310,20 @@ export function createIminDriver(deps = {}) {
 					settled = true
 					resolve({ value: -1, timedOut: true })
 				}, statusReplyMs)
-				p.getPrinterStatus().then(
-					(s) => {
-						if (settled) return
-						settled = true
-						clearTimeout(timer)
-						resolve(s)
-					},
-					() => {
-						if (settled) return
-						settled = true
-						clearTimeout(timer)
-						resolve({ value: -1, timedOut: true })
-					},
-				)
+				const finish = (s) => {
+					if (settled) return
+					settled = true
+					clearTimeout(timer)
+					resolve(s)
+				}
+				const timedOut = () => finish({ value: -1, timedOut: true })
+				try {
+					// A dead socket makes the SDK's send() throw synchronously;
+					// treat that as a timeout so the caller still drops the socket.
+					p.getPrinterStatus().then(finish, timedOut)
+				} catch {
+					timedOut()
+				}
 			})
 
 		const run = statusChain.then(doCall, doCall)
@@ -322,14 +370,7 @@ export function createIminDriver(deps = {}) {
 					// operator allowed this origin) is dead weight: drop it so the
 					// next probe reconnects. Never mid-print — the busy device
 					// answering late is normal there.
-					if (!printing && printer === p) {
-						try {
-							p.close?.()
-						} catch {
-							// Guarded
-						}
-						printer = null
-					}
+					if (!printing) dropPrinter(p)
 				}
 				return out
 			} catch (err) {
@@ -427,23 +468,43 @@ export function createIminDriver(deps = {}) {
 		// copies — even for a single-copy job.
 		// Text mode needs the invoice doc (it lays the receipt out itself);
 		// a print without one (Closing report, test page) stays bitmap.
-		const textMode = printMode === "text" && Boolean(opts.receiptDoc)
+		const isEod = opts.kind === "eod"
+		const eodDoc = opts.eodDoc || (isEod ? opts.doc : null)
+		const receiptDoc = opts.receiptDoc || (!isEod ? opts.doc : null)
+		const textMode =
+			printMode === "text" && (isEod ? Boolean(eodDoc) : Boolean(receiptDoc))
 		const crewApplies =
-			crewSlipEnabled && (textMode ? true : Boolean(opts.crewHTML))
+			!isEod &&
+			crewSlipEnabled &&
+			(textMode ? true : Boolean(opts.crewHTML))
 
 		const p = await ensurePrinter()
 		const tConnected = Date.now()
 		p.setPageFormat(pageFormatFor(paper, dots))
 
 		const sheets = textMode
-			? await buildTextSheets(opts.receiptDoc, {
-					copies,
-					crewApplies,
-					dots,
-					tailDots,
-					fontScale,
-					crewFontScale,
-				})
+			? (isEod
+				? await buildEodTextSheets(eodDoc, {
+						copies,
+						dots,
+						tailDots,
+						topMarginDots,
+						sideMarginDots,
+						fontScale,
+						lineSpacing,
+					})
+				: await buildTextSheets(receiptDoc, {
+						copies,
+						crewApplies,
+						dots,
+						tailDots,
+						topMarginDots,
+						sideMarginDots,
+						queueGapDots,
+						fontScale,
+						crewFontScale,
+						lineSpacing,
+					}))
 			: await buildBitmapSheets(html, opts, {
 					copies,
 					crewApplies,
@@ -474,10 +535,14 @@ export function createIminDriver(deps = {}) {
 		let firstSheetQueued = false
 		let tFirstQueued = 0
 		for (let i = 0; i < sheets.length; i++) {
+			// A text sheet is many commands, so a timeout can fire after paper
+			// has already moved while the sheet itself never resolved. Track
+			// whether any command reached the socket to decide the tag below.
+			const progress = { sent: false }
 			try {
 				const sheet = sheets[i]
 				const tQueued = Date.now()
-				await sheet.send(p)
+				await withSendTimeout(() => sheet.send(p, progress))
 				firstSheetQueued = true
 				if (!tFirstQueued) tFirstQueued = Date.now()
 
@@ -533,9 +598,11 @@ export function createIminDriver(deps = {}) {
 					await new Promise((res) => setTimeout(res, pauseMs))
 				}
 			} catch (err) {
-				if (firstSheetQueued && err && typeof err === "object") {
+				if ((firstSheetQueued || progress.sent) && err && typeof err === "object") {
 					err.postPrint = true
 				}
+				// The failure may be the socket, not the job: never reuse it.
+				dropPrinter(p)
 				throw err
 			}
 		}
@@ -584,48 +651,134 @@ export function createIminDriver(deps = {}) {
 
 	async function buildTextSheets(
 		doc,
-		{ copies, crewApplies, dots, tailDots, fontScale, crewFontScale },
+		{
+			copies,
+			crewApplies,
+			dots,
+			tailDots,
+			topMarginDots,
+			sideMarginDots,
+			queueGapDots,
+			fontScale,
+			crewFontScale,
+			lineSpacing,
+		},
 	) {
 		const sizes = textSizes(fontScale)
 		const crewSizes = textSizes(crewFontScale)
-		const colsOf = (sz) => ({
-			base: colsFor(dots, sz.base),
-			big: colsFor(dots, sz.big),
-			queue: colsFor(dots, sz.queue),
+		const side = Math.max(0, sideMarginDots || 0)
+		const usableDots = Math.max(120, dots - 2 * side)
+		const charWidth = sizes.base * MONO_CHAR_EM
+		const crewCharWidth = crewSizes.base * MONO_CHAR_EM
+		const padSpaces = charWidth > 0 ? Math.round(side / charWidth) : 0
+		const crewPadSpaces =
+			crewCharWidth > 0 ? Math.round(side / crewCharWidth) : 0
+
+		const colsOf = (sz, uDots) => ({
+			base: colsFor(uDots, sz.base),
+			big: colsFor(uDots, sz.big),
+			queue: colsFor(uDots, sz.queue),
 		})
 		const logoWidth = Math.min(dots, LOGO_WIDTH_DOTS)
 		// Started now, awaited by the first sheet that needs it: a cached logo
 		// costs nothing, a first-ever load overlaps the connect.
 		const logo = loadLogo(logoWidth, dots)
-		const receiptOps = buildReceiptTextJob(doc, { cols: colsOf(sizes) })
-		const crewOps = crewApplies
-			? buildCrewSlipTextJob(doc, { cols: colsOf(crewSizes) })
+		let receiptOps = buildReceiptTextJob(doc, {
+			cols: colsOf(sizes, usableDots),
+			queueGapDots,
+		})
+		let crewOps = crewApplies
+			? buildCrewSlipTextJob(doc, {
+					cols: colsOf(crewSizes, usableDots),
+					queueGapDots,
+				})
 			: null
+
+		if (topMarginDots > 0) {
+			receiptOps = [{ op: "feed", dots: topMarginDots }, ...receiptOps]
+			if (crewOps) {
+				crewOps = [{ op: "feed", dots: topMarginDots }, ...crewOps]
+			}
+		}
 		// The tail is white space INSIDE a bitmap; text has no raster, so it
 		// becomes a feed at the end of the sheet instead.
-		const tail = (ops) =>
-			tailDots > 0 ? [...ops, { op: "feed", dots: tailDots }] : ops
+		if (tailDots > 0) {
+			receiptOps = [...receiptOps, { op: "feed", dots: tailDots }]
+			if (crewOps) {
+				crewOps = [...crewOps, { op: "feed", dots: tailDots }]
+			}
+		}
+
 		const logoHeight = (await logo)?.height || 0
-		const sheet = (ops, sz, kind) => ({
+		const sheet = (ops, sz, kind, pad, logoJob) => ({
 			kind,
-			heightDots: estimateTextHeight(ops, sz, logoHeight),
+			heightDots: estimateTextHeight(ops, sz, logoHeight, lineSpacing),
 			settleMs: 0,
-			send: (p) => sendTextOps(p, ops, sz, dots, logo),
+			send: (p, progress) =>
+				sendTextOps(p, ops, sz, dots, logoJob, {
+					lineSpacing,
+					padSpaces: pad,
+					progress,
+				}),
 		})
 		const sheets = Array.from({ length: copies }, () =>
-			sheet(tail(receiptOps), sizes, "receipt"),
+			sheet(receiptOps, sizes, "receipt", padSpaces, logo),
 		)
-		if (crewOps) sheets.push(sheet(tail(crewOps), crewSizes, "crew"))
+		if (crewOps) {
+			sheets.push(sheet(crewOps, crewSizes, "crew", crewPadSpaces, null))
+		}
 		return sheets
+	}
+
+	async function buildEodTextSheets(
+		eodDoc,
+		{
+			copies,
+			dots,
+			tailDots,
+			topMarginDots,
+			sideMarginDots,
+			fontScale,
+			lineSpacing,
+		},
+	) {
+		const sizes = textSizes(fontScale)
+		const side = Math.max(0, sideMarginDots || 0)
+		const usableDots = Math.max(120, dots - 2 * side)
+		const charWidth = sizes.base * MONO_CHAR_EM
+		const padSpaces = charWidth > 0 ? Math.round(side / charWidth) : 0
+		const cols = colsFor(usableDots, sizes.base)
+
+		let eodOps = buildEodTextJob(eodDoc, { cols })
+		if (topMarginDots > 0) {
+			eodOps = [{ op: "feed", dots: topMarginDots }, ...eodOps]
+		}
+		if (tailDots > 0) {
+			eodOps = [...eodOps, { op: "feed", dots: tailDots }]
+		}
+
+		const sheet = (ops, sz, kind) => ({
+			kind,
+			heightDots: estimateTextHeight(ops, sz, 0, lineSpacing),
+			settleMs: 0,
+			send: (p, progress) =>
+				sendTextOps(p, ops, sz, dots, null, {
+					lineSpacing,
+					padSpaces,
+					progress,
+				}),
+		})
+		return Array.from({ length: copies }, () => sheet(eodOps, sizes, "eod"))
 	}
 }
 
 /** Paper a text sheet will use, for the reservation estimate only. */
-function estimateTextHeight(ops, sizes, logoHeight) {
+function estimateTextHeight(ops, sizes, logoHeight, lineSpacing = 100) {
+	const pitch = TEXT_LINE_PITCH * (lineSpacing / 100)
 	let h = 0
 	for (const o of ops) {
 		if (o.op === "text")
-			h += Math.round((sizes[o.size] || sizes.base) * TEXT_LINE_PITCH)
+			h += Math.round((sizes[o.size] || sizes.base) * pitch)
 		else if (o.op === "feed") h += o.dots
 		else if (o.op === "logo") h += logoHeight
 	}
@@ -639,14 +792,26 @@ function estimateTextHeight(ops, sizes, logoHeight) {
  * sent after it cannot overtake it. Styles are reset at the end so a later bitmap job or
  * another app starts from the printer defaults.
  */
-async function sendTextOps(p, ops, sizes, dots, logoPromise) {
+async function sendTextOps(
+	p,
+	ops,
+	sizes,
+	dots,
+	logoPromise,
+	{ lineSpacing, padSpaces = 0, progress = null } = {},
+) {
 	let align = null
 	let size = null
 	let bold = null
 	// COR-FE-10: a sheet is many commands, so a failure midway (e.g. the logo
 	// upload) leaves paper out; the caller's flag only covers whole sheets.
+	// `progress` lets the caller see a mid-sheet timeout too.
 	let sent = false
+	const pad = padSpaces > 0 ? " ".repeat(padSpaces) : ""
 	p.setTextTypeface(TYPEFACE_MONOSPACE)
+	if (lineSpacing && typeof p.setTextLineSpacing === "function") {
+		p.setTextLineSpacing(lineSpacing / 100)
+	}
 	try {
 		for (const o of ops) {
 			if (o.op === "text") {
@@ -667,7 +832,8 @@ async function sendTextOps(p, ops, sizes, dots, logoPromise) {
 				// On device a single typeface call at the start did not hold
 				// (proportional glyphs, columns drifted): restate it per line.
 				p.setTextTypeface(TYPEFACE_MONOSPACE)
-				p.printText(o.text)
+				const textToPrint = o.align === 0 && pad ? pad + o.text : o.text
+				p.printText(textToPrint)
 			} else if (o.op === "logo") {
 				const logo = await logoPromise
 				if (logo) {
@@ -680,12 +846,21 @@ async function sendTextOps(p, ops, sizes, dots, logoPromise) {
 				p.printAndFeedPaper(o.dots)
 			}
 			sent = true
+			if (progress) progress.sent = true
 		}
 	} catch (err) {
 		if (sent && err && typeof err === "object") err.postPrint = true
-		throw err
+			throw err
+	} finally {
+		try {
+			p.setTextStyle(0)
+			p.setAlignment(0)
+			p.setTextTypeface(TYPEFACE_DEFAULT)
+			if (typeof p.setTextLineSpacing === "function") {
+				p.setTextLineSpacing(1.0)
+			}
+		} catch {
+			// cleanup
+		}
 	}
-	p.setTextStyle(0)
-	p.setAlignment(0)
-	p.setTextTypeface(TYPEFACE_DEFAULT)
 }

@@ -2889,7 +2889,10 @@ async function handlePrinterClick() {
 	}
 
 	const isImin = posSettingsStore.printDriver === "imin";
-	const connected = isImin ? iminReady.value : qzConnected.value;
+	// iMin: never trust the cached state. The keepalive only re-probes every
+	// 30 s, so a device that died in between leaves the icon green and a tap
+	// would echo "connected" without ever testing the socket.
+	const connected = !isImin && qzConnected.value;
 
 	if (connected) {
 		showSuccess(__("Printer connected"));

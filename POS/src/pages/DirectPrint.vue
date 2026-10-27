@@ -1007,7 +1007,10 @@ import {
 	parseNumericField,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
-import { fetchSampleClosingBundle } from "@/utils/print/sample_closing"
+import {
+	EOD_PRINT_FORMAT,
+	fetchSampleClosingBundle,
+} from "@/utils/print/sample_closing"
 import { fetchSampleReceiptBundle } from "@/utils/print/sample_receipt"
 import { useBootstrapStore } from "@/stores/bootstrap"
 import {
@@ -1688,14 +1691,15 @@ async function onTestPrintClosing() {
 			showInfo(__("No closing shift available to print yet."))
 			return
 		}
-		await transportPrint(bundle.serverHTML, {
-			// Separate lane from the sales receipt: the EOD knobs apply here.
-			kind: "eod",
-			logContext: {
-				reference_doctype: "POS Closing Shift",
-				reference_name: bundle.name,
-			},
-		})
+		// Same path a real closing print takes, so the test honours the EOD
+		// print mode: text mode needs the report payload, not just the HTML.
+		await silentPrintDoc(
+			"POS Closing Shift",
+			bundle.name,
+			EOD_PRINT_FORMAT,
+			contextPosProfile(),
+			"eod",
+		)
 		showSuccess(__("Test print sent."))
 		await fetchLogs()
 		await pollStatus()
@@ -1744,7 +1748,10 @@ function serverConfigFromTransport() {
 			lineSpacing: c.line_spacing,
 			sideMarginDots: c.side_margin,
 			topMarginDots: c.top_margin,
+			printMode: c.print_mode,
+			printSpeed: c.print_speed,
 			queueGapDots: c.queue_gap,
+			eodPrintMode: c.eod_print_mode,
 			eodCopies: c.eod_copies,
 			eodCopyDelayMs: c.eod_copy_delay_ms,
 			eodFeedDots: c.eod_feed_dots,

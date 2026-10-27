@@ -37,6 +37,7 @@ PRINT_CONFIG_FIELDS = (
 	"imin_queue_gap",
 	"imin_print_mode",
 	"imin_print_speed",
+	"imin_eod_print_mode",
 	"imin_eod_print_copies",
 	"imin_eod_copy_delay_ms",
 	"imin_eod_feed_dots",
@@ -103,6 +104,7 @@ _SELECT_KNOBS = {
 	"print_driver": ("browser", "qz", "imin"),
 	"imin_paper_width": ("58mm", "80mm", "custom"),
 	"imin_print_mode": ("bitmap", "text"),
+	"imin_eod_print_mode": ("bitmap", "text"),
 }
 _CHECK_KNOBS = ("imin_cut_paper", "imin_crew_slip_enabled", "print_fallback_enabled")
 
@@ -143,6 +145,7 @@ def _normalized_print_config(settings):
 		"paper": _get_setting(settings, "imin_paper_width") or "58mm",
 		"custom_dots": _get_setting(settings, "imin_custom_dots") or 384,
 		"print_mode": "text" if _get_setting(settings, "imin_print_mode") == "text" else "bitmap",
+		"eod_print_mode": "text" if _get_setting(settings, "imin_eod_print_mode") == "text" else "bitmap",
 		"cut": bool(_get_setting(settings, "imin_cut_paper")),
 		"crew_slip_enabled": bool(_get_setting(settings, "imin_crew_slip_enabled")),
 		# Check defaulting to 1 means "unset is enabled": when the row is
@@ -288,6 +291,51 @@ def get_latest_closing_shift():
 		pluck="name",
 	)
 	return names[0] if names else None
+
+
+@frappe.whitelist()
+def get_eod_print_data(closing_shift):
+	"""Data payload for text-mode EOD report printing.
+
+	Returns the same data the EOD print format shows:
+	company, cashier, shift, start, closing, print timestamps,
+	and the get_sales_recap dict.
+	Permission: throws frappe.PermissionError unless _can_read_closing.
+	"""
+	from pos_next.pos_next.utils.pos_closing_print import _can_read_closing, get_sales_recap
+
+	if not closing_shift:
+		frappe.throw(_("Closing shift is required"))
+
+	doc = frappe.get_doc("POS Closing Shift", closing_shift)
+	if not _can_read_closing(doc):
+		raise frappe.PermissionError(_("You do not have permission to access this closing shift"))
+
+	dt_fmt = "%d/%m/%Y %H:%M"
+	start_txt = (
+		frappe.utils.get_datetime(doc.period_start_date).strftime(dt_fmt)
+		if doc.period_start_date
+		else "-"
+	)
+	close_txt = (
+		frappe.utils.get_datetime(doc.period_end_date).strftime(dt_fmt)
+		if doc.period_end_date
+		else "-"
+	)
+	print_txt = frappe.utils.now_datetime().strftime(dt_fmt)
+	cashier_name = (
+		frappe.db.get_value("User", doc.user, "full_name") or doc.user or "-"
+	)
+
+	return {
+		"company": doc.company or "",
+		"cashier": cashier_name,
+		"shift": doc.name or "-",
+		"start": start_txt,
+		"closing": close_txt,
+		"print": print_txt,
+		"recap": get_sales_recap(doc),
+	}
 
 
 @frappe.whitelist()

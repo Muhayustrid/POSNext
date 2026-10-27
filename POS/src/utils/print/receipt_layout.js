@@ -258,11 +258,6 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 	const paper = device.paper ?? server.paper ?? "58mm"
 	const customDots = device.customDots ?? server.customDots ?? undefined
 	const cut = device.cut ?? server.cut ?? false
-	// Paper-level like `cut`: one head, one speed, one mode for every lane.
-	// Text mode only ever applies to receipt/crew prints that carry a doc;
-	// the driver falls back to bitmap on its own when there is none.
-	const printMode =
-		(device.printMode ?? server.printMode) === "text" ? "text" : "bitmap"
 	const printSpeed = clampInt(
 		device.printSpeed ?? server.printSpeed,
 		MIN_PRINT_SPEED,
@@ -277,6 +272,8 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		const key = eod ? `eod${name[0].toUpperCase()}${name.slice(1)}` : name
 		return device[key] ?? server[key]
 	}
+
+	const printMode = pick("printMode") === "text" ? "text" : "bitmap"
 
 	const copies = clampInt(
 		pick("copies"),

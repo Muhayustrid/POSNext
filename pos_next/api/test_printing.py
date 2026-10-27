@@ -10,6 +10,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from pos_next.api.printing import (
 	PRINT_CONFIG_FIELDS,
+	get_eod_print_data,
 	get_latest_closing_shift,
 	get_print_config,
 	get_print_logs,
@@ -305,6 +306,17 @@ class TestPrintingAPI(FrappeTestCase):
 		with _settings_row(imin_print_mode="garbage"):
 			self.assertEqual(get_print_config(self.profile)["print_mode"], "bitmap")
 
+	def test_eod_print_mode_defaults_to_bitmap(self):
+		with _settings_row():
+			cfg = get_print_config(self.profile)
+		self.assertEqual(cfg["eod_print_mode"], "bitmap")
+
+	def test_eod_print_mode_text_only_when_explicit(self):
+		with _settings_row(imin_eod_print_mode="text"):
+			self.assertEqual(get_print_config(self.profile)["eod_print_mode"], "text")
+		with _settings_row(imin_eod_print_mode="garbage"):
+			self.assertEqual(get_print_config(self.profile)["eod_print_mode"], "bitmap")
+
 	def test_crew_delay_defaults_and_clamps(self):
 		with _settings_row():
 			self.assertEqual(get_print_config(self.profile)["crew_delay_ms"], 2000)
@@ -448,6 +460,32 @@ class TestPrintingAPI(FrappeTestCase):
 	def test_get_latest_closing_shift_returns_none_when_empty(self):
 		with patch("pos_next.api.printing.frappe.get_all", return_value=[]):
 			self.assertIsNone(get_latest_closing_shift())
+
+	def test_get_eod_print_data_returns_expected_shape(self):
+		closing_name = frappe.db.get_value("POS Closing Shift", {}, "name")
+		if not closing_name:
+			self.skipTest("No POS Closing Shift on this site")
+		data = get_eod_print_data(closing_name)
+		self.assertIn("company", data)
+		self.assertIn("cashier", data)
+		self.assertIn("shift", data)
+		self.assertEqual(data["shift"], closing_name)
+		self.assertIn("start", data)
+		self.assertIn("closing", data)
+		self.assertIn("print", data)
+		self.assertIn("recap", data)
+		self.assertIsInstance(data["recap"], dict)
+		self.assertIn("total_sales", data["recap"])
+		self.assertIn("cash", data["recap"])
+		self.assertIn("payment_methods", data["recap"])
+
+	def test_get_eod_print_data_denies_permission(self):
+		closing_name = frappe.db.get_value("POS Closing Shift", {}, "name")
+		if not closing_name:
+			self.skipTest("No POS Closing Shift on this site")
+		with patch("pos_next.pos_next.utils.pos_closing_print._can_read_closing", return_value=False):
+			with self.assertRaises(frappe.PermissionError):
+				get_eod_print_data(closing_name)
 
 	def _has_column(self, fieldname):
 		meta = frappe.get_meta("POS Settings")

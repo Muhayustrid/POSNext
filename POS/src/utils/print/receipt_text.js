@@ -45,8 +45,8 @@ export const MONO_CHAR_EM = 0.6
  */
 export const TEXT_BASE_SIZE = 20
 
-const ALIGN_LEFT = 0
-const ALIGN_CENTER = 1
+export const ALIGN_LEFT = 0
+export const ALIGN_CENTER = 1
 
 /** Label column of the info rows: the longest label ("Customer") fits. */
 const LABEL_WIDTH = 8
@@ -170,8 +170,12 @@ function sheet() {
  * @param {object} layout
  * @param {{base:number, big:number, queue:number}} layout.cols - columns per size key
  * @param {boolean} [layout.logo=true]
+ * @param {number} [layout.queueGapDots]
  */
-export function buildReceiptTextJob(doc, { cols, logo = true } = {}) {
+export function buildReceiptTextJob(
+	doc,
+	{ cols, logo = true, queueGapDots } = {},
+) {
 	const d = doc || {}
 	const c = cols?.base || 32
 	const money = moneyFormatter(d.currency)
@@ -185,7 +189,11 @@ export function buildReceiptTextJob(doc, { cols, logo = true } = {}) {
 			size: "queue",
 			bold: true,
 		})
-		s.blank()
+		if (queueGapDots != null) {
+			if (queueGapDots > 0) s.ops.push({ op: "feed", dots: queueGapDots })
+		} else {
+			s.blank()
+		}
 	}
 	if (logo) s.ops.push({ op: "logo" })
 	s.lines(wrapText(d.company || "POS Next", c), {
@@ -350,7 +358,7 @@ export function buildReceiptTextJob(doc, { cols, logo = true } = {}) {
  * The crew slip as text ops — what was ordered, by whom; nothing
  * money-shaped. Item lines bold and a size up, like buildCrewSlipHTML.
  */
-export function buildCrewSlipTextJob(doc, { cols } = {}) {
+export function buildCrewSlipTextJob(doc, { cols, queueGapDots } = {}) {
 	const d = doc || {}
 	const c = cols?.base || 32
 	const cBig = cols?.big || c
@@ -364,7 +372,11 @@ export function buildCrewSlipTextJob(doc, { cols } = {}) {
 			size: "queue",
 			bold: true,
 		})
-		s.blank()
+		if (queueGapDots != null) {
+			if (queueGapDots > 0) s.ops.push({ op: "feed", dots: queueGapDots })
+		} else {
+			s.blank()
+		}
 	}
 	s.text(__("ORDER"), { align: ALIGN_CENTER, bold: true })
 
@@ -398,5 +410,126 @@ export function buildCrewSlipTextJob(doc, { cols } = {}) {
 		s.rule(c)
 		s.lines(itemLines, { size: "big", bold: true })
 	}
+	return s.ops
+}
+
+/**
+ * Format a number like Python's format_rupiah:
+ * Rp12.000, -Rp1.000, half-up rounding to whole.
+ */
+export function formatRupiah(value) {
+	const n = Number(value) || 0
+	const whole = Math.round(Math.abs(n))
+	const sign = n < 0 && whole !== 0 ? "-" : ""
+	const formatted = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+	return `${sign}Rp${formatted}`
+}
+
+/** Format quantity like Jinja's %g */
+export function formatQty(qty) {
+	const n = Number(qty) || 0
+	return String(Number(n.toFixed(6)))
+}
+
+/**
+ * The EOD / Tutup Kasir report as text ops.
+ * Mirrors pos_next_eod_report line for line.
+ *
+ * @param {object} data - output of printing.get_eod_print_data
+ * @param {object} [layout]
+ * @param {number|{base:number}} [layout.cols]
+ */
+export function buildEodTextJob(data, { cols } = {}) {
+	const d = data || {}
+	const r = d.recap || d
+	const c = typeof cols === "number" ? cols : (cols?.base || 32)
+	const s = sheet()
+
+	s.text("SALES RECAP", { align: ALIGN_CENTER, bold: true })
+	if (d.company) {
+		s.lines(wrapText(d.company, c), { align: ALIGN_CENTER, bold: true })
+	}
+	s.rule(c)
+
+	// leftRight never wraps the right side: a long cashier name would run
+	// past the paper, so it drops under its label, flush right.
+	const head = (label, value) => {
+		const v = String(value || "-")
+		if (label.length + 1 + v.length <= c) return leftRight(label, v, c)
+		return [label, ...wrapText(v, c).map((l) => l.padStart(c))]
+	}
+	s.lines(head("Cashier", d.cashier))
+	s.lines(head("Shift", d.shift))
+	s.lines(head("Start", d.start))
+	s.lines(head("Closing", d.closing))
+	s.lines(head("Print Date", d.print || d.print_date))
+	s.rule(c)
+
+	s.text("SALES SUMMARY", { align: ALIGN_CENTER, bold: true })
+	s.lines(leftRight("Total Sales", formatRupiah(r.total_sales || 0), c))
+	s.lines(leftRight("Total Order", String(r.total_order || 0), c))
+	s.lines(leftRight("Average / Order", formatRupiah(r.average_per_order || 0), c))
+	s.rule(c)
+
+	const cash = r.cash || {}
+	s.text("CASH SUMMARY", { align: ALIGN_CENTER, bold: true })
+	s.lines(leftRight("Modal Awal", formatRupiah(cash.opening_balance || 0), c))
+	s.lines(leftRight("Cash Payment", formatRupiah(cash.cash_payment || 0), c))
+	s.lines(leftRight("Total Expense", formatRupiah(cash.total_expense || 0), c))
+	s.lines(leftRight("Cash in Hand", formatRupiah(cash.cash_in_hand || 0), c))
+	s.rule(c)
+
+	s.text("PAYMENT METHOD", { align: ALIGN_CENTER, bold: true })
+	for (const pm of r.payment_methods || []) {
+		s.lines(leftRight(pm.mode_of_payment, formatRupiah(pm.amount || 0), c))
+	}
+	s.rule(c)
+	s.lines(leftRight("Total Cash", formatRupiah(r.total_cash || 0), c))
+	s.lines(leftRight("Total Non Cash", formatRupiah(r.total_non_cash || 0), c))
+	s.lines(
+		leftRight("GRAND TOTAL", formatRupiah(r.methods_grand_total || 0), c),
+		{ bold: true },
+	)
+	s.rule(c)
+
+	s.text("CHARGE", { align: ALIGN_CENTER, bold: true })
+	s.lines(leftRight("Service Charge", formatRupiah(r.service_charge || 0), c))
+	s.lines(leftRight("Tax / PPN", formatRupiah(r.tax_total || 0), c))
+	s.rule(c)
+
+	s.text("DISCOUNT", { align: ALIGN_CENTER, bold: true })
+	s.lines(leftRight("Product Discount", formatRupiah(r.product_discount || 0), c))
+	s.lines(leftRight("Payment Discount", formatRupiah(r.payment_discount || 0), c))
+	s.rule(c)
+
+	s.text("REFUND", { align: ALIGN_CENTER, bold: true })
+	s.lines(leftRight("Total Refund", formatRupiah(r.refund_total || 0), c))
+	s.rule(c)
+
+	s.text("SALES PER CATEGORY", { align: ALIGN_CENTER, bold: true })
+	const categories = r.categories || []
+	if (categories.length > 0) {
+		for (const cat of categories) {
+			s.lines(wrapText(cat.category || "", c), { bold: true })
+			for (const item of cat.items || []) {
+				const lead = `${formatQty(item.qty || 0)}x `
+				const ret = item.is_return ? " (Return)" : ""
+				const itemName = `${lead}${item.item_name || item.item_code || ""}${ret}`
+				s.lines(
+					leftRight(itemName, formatRupiah(item.amount || 0), c, lead.length),
+				)
+				for (const comp of item.components || []) {
+					const compLead = `  ${formatQty(comp.qty || 0)}x `
+					const compName = `${compLead}${comp.item_name || comp.item_code || ""}`
+					s.lines(wrapText(compName, c))
+				}
+			}
+		}
+	} else {
+		s.text("-", { align: ALIGN_CENTER })
+	}
+	s.rule(c)
+
+	s.text("-- Akhir Laporan --", { align: ALIGN_CENTER })
 	return s.ops
 }

@@ -101,6 +101,7 @@
   "imin_side_margin",
   "imin_top_margin",
   "section_break_imin_eod",
+  "imin_eod_print_mode",
   "imin_eod_print_copies",
   "imin_eod_copy_delay_ms",
   "imin_eod_font_scale",
@@ -782,6 +783,15 @@
    "depends_on": "eval:doc.print_driver==='imin'"
   },
   {
+   "default": "bitmap",
+   "depends_on": "eval:doc.print_driver==='imin'",
+   "description": "bitmap = closing report is drawn as an image. text = closing report is sent as printer text commands (faster, monospace).",
+   "fieldname": "imin_eod_print_mode",
+   "fieldtype": "Select",
+   "label": "EOD Print Mode",
+   "options": "bitmap\ntext"
+  },
+  {
    "default": "1",
    "depends_on": "eval:doc.print_driver==='imin'",
    "description": "Copies printed for the Closing/EOD receipt — a separate print lane from the per-transaction copies. 1 = the report goes to the manager only. 1–5.",
@@ -994,7 +1004,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-27 09:00:00.000000",
+ "modified": "2026-10-27 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

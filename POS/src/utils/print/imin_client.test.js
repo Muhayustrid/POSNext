@@ -791,6 +791,87 @@ describe("createIminDriver", () => {
 			await printing
 		})
 
+		it("recovers from a hung bitmap upload: rejects untagged, drops the socket, next print reconnects", async () => {
+			// The SDK uploads the bitmap with a bare fetch that never settles when
+			// the service is wedged; the driver must not wait forever (the whole
+			// session then stays "printing" and every probe fails until reload).
+			const hung = makeFakePrinter({
+				printSingleBitmap: vi.fn(() => new Promise(() => {})),
+			})
+			const healthy = makeFakePrinter()
+			const factory = vi
+				.fn()
+				.mockReturnValueOnce(hung)
+				.mockReturnValueOnce(healthy)
+			const d = createIminDriver({
+				factory,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+				sendTimeoutMs: 20,
+			})
+			let caught
+			await d
+				.printHTML("<div/>", {
+					render: async () => ({ dataURL: "x", width: 384 }),
+				})
+				.catch((err) => {
+					caught = err
+				})
+			// Nothing left the printer, so the transport may fall back safely.
+			expect(caught).toBeTruthy()
+			expect(caught).not.toHaveProperty("postPrint")
+			expect(hung.close).toHaveBeenCalled()
+			// The next print starts on a fresh socket instead of the wedged one.
+			await d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "y", width: 384 }),
+			})
+			expect(factory).toHaveBeenCalledTimes(2)
+			expect(healthy.printSingleBitmap).toHaveBeenCalled()
+		})
+
+		it("tags postPrint when a later sheet hangs after the first one was queued", async () => {
+			const p = makeFakePrinter({
+				printSingleBitmap: vi
+					.fn()
+					.mockResolvedValueOnce(1)
+					.mockImplementationOnce(() => new Promise(() => {})),
+			})
+			const d = createIminDriver({
+				factory: () => p,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+				sendTimeoutMs: 20,
+			})
+			await expect(
+				d.printHTML("<div/>", {
+					render: async () => ({ dataURL: "x", width: 384 }),
+					config: { copies: 2, copyDelayMs: 0 },
+				}),
+			).rejects.toMatchObject({ postPrint: true })
+			expect(p.close).toHaveBeenCalled()
+		})
+
+		it("treats a synchronously throwing getPrinterStatus as a timeout and drops the socket", async () => {
+			// A dead socket makes the SDK's send() throw before it ever returns a
+			// promise. That must ride the timeout path, not escape as a raw error:
+			// only the timeout path drops the socket so the next probe reconnects.
+			const dead = makeFakePrinter({
+				getPrinterStatus: vi.fn(() => {
+					throw new Error("ws is null")
+				}),
+			})
+			const healthy = makeFakePrinter()
+			const factory = vi
+				.fn()
+				.mockReturnValueOnce(dead)
+				.mockReturnValueOnce(healthy)
+			const d = createIminDriver({ factory, statusReplyMs: 20 })
+			const first = await d.getStatus()
+			expect(first.ok).toBe(false)
+			expect(first.message).toBe("no status reply (device busy?)")
+			expect(dead.close).toHaveBeenCalled()
+			expect((await d.getStatus()).ok).toBe(true)
+			expect(factory).toHaveBeenCalledTimes(2)
+		})
+
 		it("concurrent getStatus both resolve", async () => {
 			let currentCallback = null
 			const p = makeFakePrinter({
@@ -879,7 +960,7 @@ describe("createIminDriver", () => {
 			expect(bitmaps).toEqual([["bitmap", "data:logo"]])
 			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
 			expect(texts).toContain("007")
-			expect(texts.some((t) => t.startsWith("1x Americano Ice"))).toBe(true)
+			expect(texts.some((t) => t.trim().startsWith("1x Americano Ice"))).toBe(true)
 			// Monospace on, default restored at the end; feed + cut after the text.
 			expect(calls[0]).toEqual(["typeface", 1])
 			const lastText = calls.map((c) => c[0]).lastIndexOf("text")
@@ -932,6 +1013,48 @@ describe("createIminDriver", () => {
 				}),
 			).rejects.toMatchObject({ postPrint: true })
 			expect(calls.some((c) => c[0] === "text")).toBe(true)
+		})
+
+		it("tags a timed-out logo upload after text went out as postPrint (COR-FE-10)", async () => {
+			// The queue number is sent before the logo bitmap: a hang on that
+			// upload leaves paper partially out, so the timeout must stop the
+			// chain instead of letting another driver print the receipt again.
+			const { p } = textPrinter()
+			p.printSingleBitmap = vi.fn(() => new Promise(() => {}))
+			const d = createIminDriver({
+				factory: () => p,
+				loadLogo: async () => ({ dataURL: "data:logo", height: 80 }),
+				sendTimeoutMs: 20,
+			})
+			await expect(
+				d.printHTML("<div/>", {
+					receiptDoc: doc,
+					config: { printMode: "text", copies: 1 },
+				}),
+			).rejects.toMatchObject({ postPrint: true })
+		})
+
+		it("leaves a timed-out first-command logo untagged so the fallback can print", async () => {
+			// No queue number: the logo is the first command, so nothing has
+			// reached the paper and another driver may still print safely.
+			const { p } = textPrinter()
+			p.printSingleBitmap = vi.fn(() => new Promise(() => {}))
+			const d = createIminDriver({
+				factory: () => p,
+				loadLogo: async () => ({ dataURL: "data:logo", height: 80 }),
+				sendTimeoutMs: 20,
+			})
+			let caught
+			await d
+				.printHTML("<div/>", {
+					receiptDoc: { ...doc, pos_queue_number: null },
+					config: { printMode: "text", copies: 1 },
+				})
+				.catch((err) => {
+					caught = err
+				})
+			expect(caught).toBeTruthy()
+			expect(caught).not.toHaveProperty("postPrint")
 		})
 
 		it("prints without a logo when it cannot be loaded", async () => {
@@ -993,7 +1116,7 @@ describe("createIminDriver", () => {
 				})
 				const waits = spy.mock.calls.map((c) => c[1] || 0)
 				expect(waits.some((ms) => ms >= 300 && ms < 7000)).toBe(true)
-				expect(waits.some((ms) => ms >= 7000)).toBe(false)
+				expect(waits).not.toContain(7000)
 			} finally {
 				spy.mockRestore()
 			}
@@ -1007,7 +1130,61 @@ describe("createIminDriver", () => {
 				config: { printMode: "text", copies: 1 },
 			})
 			expect(render).toHaveBeenCalledTimes(1)
-			expect(printer.printSingleBitmap).toHaveBeenCalledWith("data:x", 1)
+					expect(printer.printSingleBitmap).toHaveBeenCalledWith("data:x", 1)
+		})
+
+		it("prints EOD closing report in text mode when kind === 'eod' and doc is passed", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			const eodDoc = {
+				company: "ROPI",
+				cashier: "Kasir 1",
+				shift: "POS-CLS-001",
+				recap: {
+					total_sales: 100000,
+				total_order: 5,
+					average_per_order: 20000,
+					cash: { opening_balance: 50000, cash_payment: 100000, total_expense: 0, cash_in_hand: 150000 },
+					payment_methods: [{ mode_of_payment: "Cash", amount: 100000 }],
+					total_cash: 100000,
+					total_non_cash: 0,
+					methods_grand_total: 100000,
+					categories: [],
+				},
+			}
+			const res = await d.printHTML("<div/>", {
+				kind: "eod",
+				eodDoc,
+				config: { eodPrintMode: "text", copies: 1, cut: true },
+			})
+			expect(res.copies).toBe(1)
+			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
+			expect(texts.some((t) => t.includes("SALES RECAP"))).toBe(true)
+			expect(texts.some((t) => t.includes("ROPI"))).toBe(true)
+			expect(texts.some((t) => t.includes("Total Sales"))).toBe(true)
+			expect(calls.some((c) => c[0] === "feed")).toBe(true)
+			expect(calls.some((c) => c[0] === "cut")).toBe(true)
+		})
+
+		it("applies sideMarginDots, topMarginDots, and lineSpacing in text mode", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			p.setTextLineSpacing = vi.fn()
+			await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: {
+					printMode: "text",
+					sideMarginDots: 24,
+					topMarginDots: 30,
+					lineSpacing: 120,
+					copies: 1,
+				},
+			})
+			expect(p.setTextLineSpacing).toHaveBeenCalledWith(1.2)
+			const feeds = calls.filter((c) => c[0] === "feed")
+			expect(feeds.some((f) => f[1] === 30)).toBe(true)
+			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
+			expect(texts.some((t) => t.startsWith("  "))).toBe(true)
 		})
 	})
 })

@@ -184,6 +184,23 @@ vi.mock("@/utils/qzTray", () => ({
 	printHTML: vi.fn(async () => {}),
 }))
 
+// The iMin driver is stubbed so the header-icon test can make the cached
+// "connected" state go stale without a real socket.
+const iminDriverMock = vi.hoisted(() => ({
+	getStatus: vi.fn(async () => ({ ok: true, code: 0 })),
+	warmup: vi.fn(),
+}))
+vi.mock("@/utils/print/transport", () => {
+	class PostPrintError extends Error {}
+	return {
+		ensureIminSdk: vi.fn(async () => true),
+		getTransport: () => ({ getDriver: () => iminDriverMock }),
+		initTransportFromServer: vi.fn(async () => {}),
+		printHTML: vi.fn(async () => ({})),
+		PostPrintError,
+	}
+})
+
 vi.mock("frappe-ui", async () => {
 	const { reactive } = await import("vue")
 	const Button = defineComponent({
@@ -727,6 +744,35 @@ describe("header printer icon", () => {
 
 		const menu = wrapper.find('[data-test="pos-menu"]')
 		expect(menu.attributes("data-open")).not.toBe("true")
+	})
+
+	it("re-probes instead of trusting a stale connected state", async () => {
+		// The keepalive only re-probes every 30 s, so a device that dies in
+		// between leaves the icon green: a tap must test the socket, not echo
+		// the cached state back as "Printer connected".
+		await mountPOS({
+			POSHeader: defineComponent({
+				name: "POSHeader",
+				emits: ["printer-click"],
+				template: `<button data-test="printer" @click="$emit('printer-click')"></button>`,
+			}),
+		})
+		const settings = usePOSSettingsStore(wrapper.vm.$pinia)
+		settings.settings.print_driver = "imin"
+		await vi.waitFor(() =>
+			expect(iminDriverMock.getStatus).toHaveBeenCalled(),
+		)
+
+		// The device is now dead, but the page still believes it is connected.
+		iminDriverMock.getStatus.mockResolvedValue({ ok: false, code: -1 })
+		toastMock.showError.mockClear()
+		toastMock.showSuccess.mockClear()
+		await wrapper.find('[data-test="printer"]').trigger("click")
+		await flushPromises()
+
+		expect(iminDriverMock.getStatus).toHaveBeenCalledTimes(2)
+		expect(toastMock.showSuccess).not.toHaveBeenCalled()
+		expect(toastMock.showError).toHaveBeenCalledTimes(1)
 	})
 
 	it("passes the connecting state to the header while reconnecting", async () => {

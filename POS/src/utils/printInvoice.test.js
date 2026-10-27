@@ -61,6 +61,7 @@ import {
 	printWithSilentFallback,
 	hydrateLocalOnlyInvoice,
 	ensureTransportInitialized,
+	isIminEodTextMode,
 } from "./printInvoice"
 import * as transport from "@/utils/print/transport"
 
@@ -798,5 +799,102 @@ describe("ensureTransportInitialized retry on failure", () => {
 		// Third attempt after success should be cached (not call again)
 		await ensureInit("POS Profile 1")
 		expect(transportMod.initTransportFromServer).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("silentPrintDoc (EOD text lane)", () => {
+	it("fetches eod print data directly when eod_print_mode is text", async () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", eod_print_mode: "text", paper: "58mm" }),
+		})
+		call.mockImplementation((method) => {
+			if (method === "pos_next.api.printing.get_eod_print_data") {
+				return Promise.resolve({ company: "ROPI", shift: "CLS-1" })
+			}
+			return Promise.resolve({ html: "<div>server</div>", style: "" })
+		})
+
+		await silentPrintDoc("POS Closing Shift", "CLS-1", "POS Next EOD Report", "POS Profile juri1", "eod")
+		expect(call).toHaveBeenCalledWith("pos_next.api.printing.get_eod_print_data", {
+			closing_shift: "CLS-1",
+		})
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			expect.stringContaining("server"),
+			expect.objectContaining({
+				kind: "eod",
+				eodDoc: { company: "ROPI", shift: "CLS-1" },
+			}),
+		)
+	})
+
+	it("still prints the text report when the fallback HTML fetch fails", async () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", eod_print_mode: "text", paper: "58mm" }),
+		})
+		call.mockImplementation((method) => {
+			if (method === "pos_next.api.printing.get_eod_print_data") {
+				return Promise.resolve({ company: "ROPI", shift: "CLS-1" })
+			}
+			return Promise.reject(new Error("printview down"))
+		})
+
+		await expect(
+			silentPrintDoc("POS Closing Shift", "CLS-1", "POS Next EOD Report", null, "eod"),
+		).resolves.toBe(true)
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			"",
+			expect.objectContaining({ eodDoc: { company: "ROPI", shift: "CLS-1" } }),
+		)
+	})
+
+	it("falls back to server HTML if eod print data fetch fails", async () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", eod_print_mode: "text", paper: "58mm" }),
+		})
+		call.mockImplementation((method) => {
+			if (method === "pos_next.api.printing.get_eod_print_data") {
+				return Promise.reject(new Error("API failure"))
+			}
+			return Promise.resolve({ html: "<div>server fallback</div>", style: "" })
+		})
+
+		await silentPrintDoc("POS Closing Shift", "CLS-1", "POS Next EOD Report", "POS Profile juri1", "eod")
+		expect(call).toHaveBeenCalledWith("frappe.www.printview.get_html_and_style", expect.anything())
+		expect(transport.printHTML).toHaveBeenCalledWith(
+			expect.stringContaining("server fallback"),
+			expect.objectContaining({ kind: "eod" }),
+		)
+	})
+
+	it("rejects a permission failure instead of printing an empty recap", async () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", eod_print_mode: "text", paper: "58mm" }),
+		})
+		const denied = Object.assign(new Error("Not permitted"), {
+			exc_type: "PermissionError",
+		})
+		call.mockImplementation((method) => {
+			if (method === "pos_next.api.printing.get_eod_print_data") {
+				return Promise.reject(denied)
+			}
+			return Promise.reject(denied)
+		})
+
+		await expect(
+			silentPrintDoc("POS Closing Shift", "CLS-1", "POS Next EOD Report", null, "eod"),
+		).rejects.toBe(denied)
+		expect(transport.printHTML).not.toHaveBeenCalled()
+	})
+
+	it("identifies eod text mode correctly", () => {
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", eod_print_mode: "text" }),
+		})
+		expect(isIminEodTextMode()).toBe(true)
+
+		transport.getTransport.mockReturnValue({
+			getConfig: () => ({ driver: "imin", eod_print_mode: "bitmap" }),
+		})
+		expect(isIminEodTextMode()).toBe(false)
 	})
 })
