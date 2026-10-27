@@ -3556,3 +3556,5 @@ Shipping status,Status pengiriman
 "Teks (cepat)","Teks (cepat)",""
 "Gambar (persis format cetak)","Gambar (persis format cetak)",""
 "Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.","Jeda antar lembar (rangkap atau slip crew) agar lembar sebelumnya bisa disobek. Isi 0 bila kertas terpotong otomatis. Default 800.",""
+"Jeda Sebelum Slip Crew (ms)","Jeda Sebelum Slip Crew (ms)",""
+"Jeda setelah struk selesai sebelum slip crew dicetak, agar struk bisa disobek. Naikkan bila slip keluar tanpa jeda. Default 2000. 0–10000.","Jeda setelah struk selesai sebelum slip crew dicetak, agar struk bisa disobek. Naikkan bila slip keluar tanpa jeda. Default 2000. 0–10000.",""

@@ -305,6 +305,12 @@ class TestPrintingAPI(FrappeTestCase):
 		with _settings_row(imin_print_mode="garbage"):
 			self.assertEqual(get_print_config(self.profile)["print_mode"], "bitmap")
 
+	def test_crew_delay_defaults_and_clamps(self):
+		with _settings_row():
+			self.assertEqual(get_print_config(self.profile)["crew_delay_ms"], 2000)
+		with _settings_row(imin_crew_delay_ms=99999):
+			self.assertEqual(get_print_config(self.profile)["crew_delay_ms"], 10000)
+
 	def test_print_speed_defaults_and_clamps(self):
 		with _settings_row():
 			self.assertEqual(get_print_config(self.profile)["print_speed"], 400)

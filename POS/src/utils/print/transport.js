@@ -96,6 +96,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 						// Crew slip lane: the driver decides whether to print the
 						// extra crew slip, independent of `copies`.
 						crewSlipEnabled: current.crew_slip_enabled,
+						crewDelayMs: current.crew_delay_ms,
 						lineSpacing: current.line_spacing,
 						sideMarginDots: current.side_margin,
 						topMarginDots: current.top_margin,
@@ -257,6 +258,7 @@ function applyConfig(cfg) {
 		font_scale: cfg.font_scale,
 		crew_font_scale: cfg.crew_font_scale,
 		crew_slip_enabled: cfg.crew_slip_enabled,
+		crew_delay_ms: cfg.crew_delay_ms,
 		line_spacing: cfg.line_spacing,
 		side_margin: cfg.side_margin,
 		top_margin: cfg.top_margin,

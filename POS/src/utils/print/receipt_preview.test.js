@@ -178,7 +178,7 @@ describe("buildReceiptPreviewSet (crew slip as the last sheet)", () => {
 	it("appends the crew slip after all N copies, with the summed delay", async () => {
 		const r = render()
 		const set = await buildReceiptPreviewSet("<body>receipt</body>", {
-			device: { crewSlipEnabled: true, copyDelayMs: 800 },
+			device: { crewSlipEnabled: true, copyDelayMs: 800, crewDelayMs: 1500 },
 			copies: 2,
 			crewHTML,
 			render: r,
@@ -192,7 +192,7 @@ describe("buildReceiptPreviewSet (crew slip as the last sheet)", () => {
 		expect(set.copies[0].bitmap).toBe(set.copies[1].bitmap)
 		expect(set.copies[2].bitmap).not.toBe(set.copies[0].bitmap)
 		// The slip leaves the printer after both copies' tear-off pauses.
-		expect(set.copies.map((c) => c.delayMs)).toEqual([0, 800, 1600])
+		expect(set.copies.map((c) => c.delayMs)).toEqual([0, 800, 2300])
 	})
 
 	it("previews the crew slip at the crew font scale, the receipt at its own", async () => {

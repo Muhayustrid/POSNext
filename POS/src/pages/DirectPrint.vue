@@ -1736,6 +1736,7 @@ function serverConfigFromTransport() {
 			cut: c.cut,
 			copies: c.copies,
 			copyDelayMs: c.copy_delay_ms,
+			crewDelayMs: c.crew_delay_ms,
 			feedDots: c.feed_dots,
 			tailDots: c.tail_dots,
 			fontScale: c.font_scale,

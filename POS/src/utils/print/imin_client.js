@@ -410,6 +410,7 @@ export function createIminDriver(deps = {}) {
 			copies,
 			crewSlipEnabled,
 			copyDelayMs,
+			crewDelayMs,
 			dots,
 			tailDots,
 			feedDots,
@@ -512,7 +513,9 @@ export function createIminDriver(deps = {}) {
 						elapsed,
 				)
 				const isLastSheet = i === sheets.length - 1
-				const pauseMs = isLastSheet ? 0 : reserveMs + copyDelayMs
+				const nextDelayMs =
+					sheets[i + 1]?.kind === "crew" ? crewDelayMs : copyDelayMs
+				const pauseMs = isLastSheet ? 0 : reserveMs + nextDelayMs
 				// The reservation is invisible to POS Print Log (it only sees the
 				// whole print), so say per sheet how the wall clock was spent —
 				// this is what makes a swallowed pause on site diagnosable after

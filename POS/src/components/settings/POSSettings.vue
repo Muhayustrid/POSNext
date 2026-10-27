@@ -1404,6 +1404,17 @@
 												"
 											/>
 											<NumberField
+												v-if="settings.imin_crew_slip_enabled"
+												v-model="settings.imin_crew_delay_ms"
+												:label="__('Jeda Sebelum Slip Crew (ms)')"
+												:description="
+													__('Jeda setelah struk selesai sebelum slip crew dicetak, agar struk bisa disobek. Naikkan bila slip keluar tanpa jeda. Default 2000. 0–10000.')
+												"
+												:min="0"
+												:max="10000"
+												:step="100"
+											/>
+											<NumberField
 												v-model="settings.imin_font_scale"
 												:label="__('Skala Font Struk (%)')"
 												:description="
@@ -1761,6 +1772,7 @@ const settings = ref({
 	imin_font_scale: 100,
 	imin_crew_font_scale: 100,
 	imin_crew_slip_enabled: 0,
+	imin_crew_delay_ms: 2000,
 	imin_line_spacing: 100,
 	imin_side_margin: 16,
 	imin_top_margin: 0,

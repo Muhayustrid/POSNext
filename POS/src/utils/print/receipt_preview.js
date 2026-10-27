@@ -87,9 +87,12 @@ export async function buildReceiptPreviewSet(html, opts = {}) {
 			// Copy 1 shows now; later sheets are revealed after their delay by
 			// the caller, so the tear-off pause between copies is visible.
 			visible: index === 0,
-			// The crew row sits at index N, so this is naturally N * copyDelayMs
-			// — the same wait the driver inserts before the slip prints.
-			delayMs: index * r.copyDelayMs,
+			// Copies are copyDelayMs apart; the crew row waits crewDelayMs after
+			// the last copy — the same waits the driver inserts.
+			delayMs:
+				index < r.copies
+					? index * r.copyDelayMs
+					: (r.copies - 1) * r.copyDelayMs + r.crewDelayMs,
 			bitmap,
 		})),
 	}

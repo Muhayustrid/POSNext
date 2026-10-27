@@ -204,6 +204,7 @@ const MAX_COPIES = 5
 const MAX_COPY_DELAY_MS = 10000
 const DEFAULT_COPIES = 1
 const DEFAULT_COPY_DELAY_MS = 800
+const DEFAULT_CREW_DELAY_MS = 2000
 /**
  * Head throughput in dots/s, used only to reserve wall-clock time for the
  * sheet still printing before the next one starts (see imin_client). Mirrors
@@ -314,6 +315,14 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 	const crewSlipEnabled = eod
 		? false
 		: Boolean(device.crewSlipEnabled ?? server.crewSlipEnabled)
+	// Tear-off pause before the crew slip, separate from the copy delay: the
+	// receipt in front of it is longer than the slip, so it needs its own knob.
+	const crewDelayMs = clampInt(
+		device.crewDelayMs ?? server.crewDelayMs,
+		0,
+		MAX_COPY_DELAY_MS,
+		DEFAULT_CREW_DELAY_MS,
+	)
 	// One vertical-density knob for everything direct printed — the receipt AND
 	// the crew slip tighten together, so the two copies stay comparable.
 	const lineSpacing = clampInt(
@@ -362,6 +371,7 @@ export function resolvePrintConfig(device = {}, server = {}, opts = {}) {
 		fontScale,
 		crewFontScale,
 		crewSlipEnabled,
+		crewDelayMs,
 		lineSpacing,
 		sideMarginDots,
 		topMarginDots,

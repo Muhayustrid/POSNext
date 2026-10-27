@@ -104,6 +104,7 @@
   "imin_print_copies",
   "imin_copy_delay_ms",
   "imin_crew_slip_enabled",
+  "imin_crew_delay_ms",
   "imin_queue_gap",
   "imin_print_mode",
   "imin_print_speed",
@@ -788,6 +789,14 @@
    "label": "Print Crew Slip"
   },
   {
+   "default": "2000",
+   "depends_on": "eval:doc.print_driver==='imin' && doc.imin_crew_slip_enabled",
+   "description": "Pause before the crew slip so the receipt can be torn off (ms), added on top of the estimated time the receipt needs to print. Raise it if the slip comes out with no gap. 0-10000.",
+   "fieldname": "imin_crew_delay_ms",
+   "fieldtype": "Int",
+   "label": "Delay Before Crew Slip (ms)"
+  },
+  {
    "default": "40",
    "depends_on": "eval:doc.print_driver==='imin'",
    "description": "Gap between the queue number and the content below it, in dots (dots = mm x 8, e.g. 40 = 5 mm). Applies to the customer receipt and the crew slip alike. 0-128.",
@@ -1062,7 +1071,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-26 20:00:00.000000",
+ "modified": "2026-10-27 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",

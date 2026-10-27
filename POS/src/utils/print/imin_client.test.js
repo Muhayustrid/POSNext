@@ -966,12 +966,37 @@ describe("createIminDriver", () => {
 					crewSlipEnabled: true,
 					copies: 1,
 					copyDelayMs: 0,
+					crewDelayMs: 0,
 					printSpeed: 2000,
 				},
 			})
 			expect(res.copies).toBe(2)
 			const texts = calls.filter((c) => c[0] === "text").map((c) => c[1])
 			expect(texts.indexOf("ORDER")).toBeGreaterThan(texts.indexOf("Thank you"))
+		}, SLOW_TEST_TIMEOUT_MS)
+
+		it("pauses crewDelayMs, not copyDelayMs, before the crew slip", async () => {
+			const { p } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			const spy = vi.spyOn(globalThis, "setTimeout")
+			try {
+				await d.printHTML("<div/>", {
+					receiptDoc: doc,
+					config: {
+						printMode: "text",
+						crewSlipEnabled: true,
+						copies: 1,
+						copyDelayMs: 7000,
+						crewDelayMs: 300,
+						printSpeed: 2000,
+					},
+				})
+				const waits = spy.mock.calls.map((c) => c[1] || 0)
+				expect(waits.some((ms) => ms >= 300 && ms < 7000)).toBe(true)
+				expect(waits.some((ms) => ms >= 7000)).toBe(false)
+			} finally {
+				spy.mockRestore()
+			}
 		}, SLOW_TEST_TIMEOUT_MS)
 
 		it("stays bitmap when no doc is passed (closing report, test page)", async () => {
