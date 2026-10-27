@@ -36,7 +36,7 @@ import {
 	stripDeviceLayoutKeys,
 } from "./receipt_layout"
 
-import { DOTS_PER_MM } from "./paper"
+import { DOTS_PER_MM, PAPER_PROFILES } from "./paper"
 import {
 	buildCrewSlipTextJob,
 	buildReceiptTextJob,
@@ -109,15 +109,18 @@ const TYPEFACE_MONOSPACE = 1
 const TEXT_LINE_PITCH = 1.25
 
 /**
- * Text-mode logo: the receipt logo drawn once at its paper width, forced to
- * pure black/white, kept as a data URL. Cached per width for the session (and
+ * Text-mode logo: the receipt logo drawn once at its paper width, centred on
+ * a full head-width canvas (on device printSingleBitmap's alignment argument
+ * did not centre it), forced to pure black/white, kept as a data URL. Cached
+ * per width for the session (and
  * in localStorage so an offline reload still prints it). null when the image
  * cannot be loaded — the receipt then simply prints without it.
  */
 const _logoCache = new Map()
-function defaultLoadLogo(widthDots) {
-	if (_logoCache.has(widthDots)) return _logoCache.get(widthDots)
-	const key = `pos_next_imin_logo:v1:${widthDots}`
+function defaultLoadLogo(widthDots, paperDots = widthDots) {
+	const id = `${widthDots}:${paperDots}`
+	if (_logoCache.has(id)) return _logoCache.get(id)
+	const key = `pos_next_imin_logo:v2:${id}`
 	const job = (async () => {
 		try {
 			const cached = localStorage.getItem(key)
@@ -134,13 +137,13 @@ function defaultLoadLogo(widthDots) {
 			Math.round((img.naturalHeight / img.naturalWidth) * width),
 		)
 		const canvas = document.createElement("canvas")
-		canvas.width = width
+		canvas.width = Math.max(width, paperDots)
 		canvas.height = height
 		const ctx = canvas.getContext("2d")
 		ctx.fillStyle = "#ffffff"
-		ctx.fillRect(0, 0, width, height)
-		ctx.drawImage(img, 0, 0, width, height)
-		const data = ctx.getImageData(0, 0, width, height)
+		ctx.fillRect(0, 0, canvas.width, height)
+		ctx.drawImage(img, Math.floor((canvas.width - width) / 2), 0, width, height)
+		const data = ctx.getImageData(0, 0, canvas.width, height)
 		binarize(data)
 		ctx.putImageData(data, 0, 0)
 		const logo = { dataURL: canvas.toDataURL("image/png"), height }
@@ -152,10 +155,10 @@ function defaultLoadLogo(widthDots) {
 		return logo
 	})().catch((err) => {
 		log.warn("receipt logo unavailable, printing without it:", err?.message)
-		_logoCache.delete(widthDots)
+		_logoCache.delete(id)
 		return null
 	})
-	_logoCache.set(widthDots, job)
+	_logoCache.set(id, job)
 	return job
 }
 
@@ -168,7 +171,7 @@ function defaultLoadLogo(widthDots) {
  * @param {number} [deps.statusTimeoutMs] - injectable timeout for tests (default 15000)
  * @param {number} [deps.statusPollMs] - injectable poll interval for tests (default 500)
  * @param {number} [deps.statusReplyMs] - injectable reply timeout for tests (default 5000)
- * @param {(widthDots:number) => Promise<{dataURL:string, height:number}|null>} [deps.loadLogo]
+ * @param {(widthDots:number, paperDots:number) => Promise<{dataURL:string, height:number}|null>} [deps.loadLogo]
  *   - text-mode logo source; injected by tests.
  */
 export function createIminDriver(deps = {}) {
@@ -374,7 +377,11 @@ export function createIminDriver(deps = {}) {
 		 */
 		async warmup() {
 			try {
-				await loadLogo(LOGO_WIDTH_DOTS)
+				// Both standard heads; a custom width pays once on its first print.
+				await Promise.all([
+					loadLogo(LOGO_WIDTH_DOTS, PAPER_PROFILES["58mm"].dots),
+					loadLogo(LOGO_WIDTH_DOTS, PAPER_PROFILES["80mm"].dots),
+				])
 			} catch {
 				// Guarded: the print path loads it again if needed.
 			}
@@ -586,7 +593,7 @@ export function createIminDriver(deps = {}) {
 		const logoWidth = Math.min(dots, LOGO_WIDTH_DOTS)
 		// Started now, awaited by the first sheet that needs it: a cached logo
 		// costs nothing, a first-ever load overlaps the connect.
-		const logo = loadLogo(logoWidth)
+		const logo = loadLogo(logoWidth, dots)
 		const receiptOps = buildReceiptTextJob(doc, { cols: colsOf(sizes) })
 		const crewOps = crewApplies
 			? buildCrewSlipTextJob(doc, { cols: colsOf(crewSizes) })
@@ -654,6 +661,9 @@ async function sendTextOps(p, ops, sizes, dots, logoPromise) {
 					bold = b
 					p.setTextStyle(bold)
 				}
+				// On device a single typeface call at the start did not hold
+				// (proportional glyphs, columns drifted): restate it per line.
+				p.setTextTypeface(TYPEFACE_MONOSPACE)
 				p.printText(o.text)
 			} else if (o.op === "logo") {
 				const logo = await logoPromise

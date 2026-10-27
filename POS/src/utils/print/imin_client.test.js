@@ -888,6 +888,18 @@ describe("createIminDriver", () => {
 			expect(calls.filter((c) => c[0] === "typeface").at(-1)).toEqual(["typeface", 0])
 		})
 
+		it("restates monospace right before every text line", async () => {
+			const { p, calls } = textPrinter()
+			const d = createIminDriver({ factory: () => p, loadLogo: async () => null })
+			await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: { printMode: "text", copies: 1 },
+			})
+			calls.forEach((c, i) => {
+				if (c[0] === "text") expect(calls[i - 1]).toEqual(["typeface", 1])
+			})
+		})
+
 		it("prints the logo before the company line", async () => {
 			const { p, calls } = textPrinter()
 			const d = createIminDriver({
@@ -931,6 +943,17 @@ describe("createIminDriver", () => {
 			})
 			expect(calls.some((c) => c[0] === "bitmap")).toBe(false)
 			expect(calls.some((c) => c[0] === "text" && c[1] === "ROPI")).toBe(true)
+		})
+
+		it("asks for the logo padded to the full head width so it prints centred", async () => {
+			const { p } = textPrinter()
+			const loadLogo = vi.fn(async () => null)
+			const d = createIminDriver({ factory: () => p, loadLogo })
+			await d.printHTML("<div/>", {
+				receiptDoc: doc,
+				config: { printMode: "text", paper: "58mm", copies: 1 },
+			})
+			expect(loadLogo).toHaveBeenCalledWith(112, 384)
 		})
 
 		it("adds the crew slip as a second text sheet without needing crewHTML", async () => {
