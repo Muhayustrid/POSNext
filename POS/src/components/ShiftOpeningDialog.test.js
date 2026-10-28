@@ -354,14 +354,11 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 		await wrapper.vm.nextStep()
 		await flushPromises()
 
-		// Slot picker select exists
-		const select = wrapper.find("select")
-		expect(select.exists()).toBe(true)
-
-		const options = select.findAll("option")
+		// Slot picker radios exist
+		const options = wrapper.findAll('input[type="radio"]')
 		expect(options).toHaveLength(2)
-		expect(options[0].text()).toContain("Shift 2")
-		expect(options[1].text()).toContain("Shift 1")
+		expect(options[0].element.value).toBe("Shift 2")
+		expect(options[1].element.value).toBe("Shift 1")
 
 		// Default selection is first open slot
 		expect(wrapper.vm.selectedSlot).toBe("Shift 2")
@@ -377,7 +374,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 		)
 
 		// Picking the second slot sends that slot
-		await select.setValue("Shift 1")
+		await options[1].setValue(true)
 		await wrapper.vm.openShift()
 		await flushPromises()
 
@@ -421,7 +418,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 		await flushPromises()
 
 		// No select picker
-		expect(wrapper.find("select").exists()).toBe(false)
+		expect(wrapper.find('input[type="radio"]').exists()).toBe(false)
 
 		// Name of the slot shows
 		expect(wrapper.text()).toContain("Morning")
@@ -570,7 +567,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 			expect(wrapper.vm.step).toBe(2)
 			expect(wrapper.text()).toContain("Cash Received from Previous Shift")
 			expect(wrapper.text()).not.toContain("Modal Awal")
-			expect(wrapper.text()).toContain("System Amount")
+			expect(wrapper.text()).toContain("Cash (System)")
 			expect(wrapper.text()).toContain("1000000")
 			expect(wrapper.text()).toContain("Kasir A")
 
@@ -579,10 +576,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 				.find((b) => b.text().includes("Open Shift"))
 			expect(openButton.attributes("disabled")).toBeDefined()
 
-			const input = wrapper.find("input")
-			expect(input.attributes("placeholder")).toBe(
-				"Count the cash and enter the amount received",
-			)
+			expect(wrapper.text()).toContain("Count the cash and enter the amount received")
 		})
 
 		it("typing 0 enables Open Shift and submits opening_amount 0", async () => {
