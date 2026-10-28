@@ -235,6 +235,7 @@ def get_recipes(pos_profile):
 				"production_item": r.production_item,
 				"production_item_name": fg.item_name or r.production_item,
 				"output_qty": flt(r.output_qty),
+				"output_uom": fg.stock_uom or "",
 				"fg_stock": _stock_qty(r.production_item, warehouse),
 				"fg_has_batch_no": bool(fg.has_batch_no),
 				"items": items,

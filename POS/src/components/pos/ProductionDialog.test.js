@@ -72,6 +72,7 @@ const RECIPES = [
 		production_item: "ICED-LATTE",
 		production_item_name: "Iced Latte",
 		output_qty: 2,
+		output_uom: "Cup",
 		fg_stock: 10,
 		fg_has_batch_no: false,
 		items: [
@@ -258,30 +259,69 @@ describe("ProductionDialog", () => {
 		expect(wrapper.text()).toContain("Loading recipes")
 	})
 
-	it("lists recipes with material availability after load", async () => {
+	it("lists recipes with what the material stock can still make", async () => {
 		const wrapper = await mountOpenDialog()
 		expect(wrapper.text()).toContain("Iced Latte")
-		expect(wrapper.text()).toContain("makes 2 × Iced Latte")
-		expect(wrapper.text()).toContain("Materials available")
+		expect(wrapper.text()).not.toContain("makes 2 × Iced Latte")
+		// SYRUP limits: 4 / 0.5 = 8 batches × 2 = 16 cups (MILK allows 50)
+		expect(wrapper.text()).toContain("Stock is enough for 8 batches (16 Cup)")
 	})
 
-	it("selects a recipe and rescales material rows when output qty changes", async () => {
+	it("names the short material when stock cannot make a single batch", async () => {
+		const short = structuredClone(RECIPES)
+		short[0].items[0].available_qty = 0.5 // MILK needs 1 per batch
+		respond(RECIPES_URL, (_params, opts) =>
+			opts.onSuccess({ pos_profile: "POS-1", company: "Co", warehouse: "WH", recipes: short }),
+		)
+		const wrapper = await mountOpenDialog()
+		expect(wrapper.text()).toContain("Not enough Milk")
+	})
+
+	it("selects a recipe and rescales material rows by batch count", async () => {
 		const wrapper = await mountOpenDialog()
 		await selectFirstRecipe(wrapper)
 
-		expect(wrapper.text()).toContain("Output per run: 2 × Iced Latte")
-		// only the output qty is editable; materials render as readonly text
+		expect(wrapper.text()).not.toContain("Output per run")
+		expect(wrapper.text()).toContain("Stock is enough for 8 batches (16 Cup)")
+		expect(wrapper.text()).toContain("Limited by Syrup")
+		// starts at one batch, not at the recipe's output qty
 		const qtyInputs = wrapper.findAll('input[type="number"]')
 		expect(qtyInputs).toHaveLength(1)
-		expect(wrapper.text()).toContain("1 Litre") // MILK: 1 × (2/2)
-		expect(wrapper.text()).toContain("0.5 Litre") // SYRUP: 0.5 × (2/2)
+		expect(qtyInputs[0].element.value).toBe("1")
+		expect(wrapper.text()).toContain("= 2 Cup")
+		expect(wrapper.text()).toContain("1 Litre") // MILK: 1 × 1 batch
+		expect(wrapper.text()).toContain("0.5 Litre") // SYRUP: 0.5 × 1 batch
 		// FIFO pick: first batch with enough stock for the base run
 		expect(wrapper.text()).toContain("B-OLD (1)")
 
 		await qtyInputs[0].setValue("4")
 		await flushPromises()
-		expect(wrapper.text()).toContain("2 Litre") // MILK: 1 × (4/2)
-		expect(wrapper.text()).toContain("1 Litre") // SYRUP: 0.5 × (4/2)
+		expect(wrapper.text()).toContain("= 8 Cup")
+		expect(wrapper.text()).toContain("4 Litre") // MILK: 1 × 4
+		expect(wrapper.text()).toContain("2 Litre") // SYRUP: 0.5 × 4
+
+		await findButton(wrapper, "Max (8)").trigger("click")
+		await flushPromises()
+		expect(qtyInputs[0].element.value).toBe("8")
+		expect(wrapper.text()).toContain("= 16 Cup")
+	})
+
+	it("sends batches × output qty to start_production", async () => {
+		const startCall = mockCall(START_URL, () =>
+			Promise.resolve({ work_order: "WO-1", qty: 6 }),
+		)
+		respond(ACTIVE_URL, (_params, opts) => opts.onSuccess(ACTIVE_ZERO))
+		const wrapper = await mountOpenDialog()
+		await selectFirstRecipe(wrapper)
+		await wrapper.find('button[aria-label="Increase"]').trigger("click")
+		await wrapper.find('button[aria-label="Increase"]').trigger("click")
+		await findButton(wrapper, "Start Production").trigger("click")
+		await flushPromises()
+		expect(startCall).toHaveBeenCalledWith({
+			recipe: "RECIPE-0001",
+			qty: 6,
+			pos_profile: "POS-1",
+		})
 	})
 
 	it("locks the detail view: no change-recipe, no add material, no editable material qty", async () => {
@@ -373,7 +413,7 @@ describe("ProductionDialog", () => {
 		expect(wrapper.emitted("production-created")).toBeUndefined()
 	})
 
-	it("finish form prefills remaining qty and auto-suggests loss = planned - good", async () => {
+	it("finish form prefills remaining qty and has no loss input", async () => {
 		respond(ACTIVE_URL, (_params, opts) => opts.onSuccess(ACTIVE))
 		mockCall(CONTEXT_URL, () => ({ materials: [] }))
 		const wrapper = await mountOpenDialog()
@@ -382,19 +422,16 @@ describe("ProductionDialog", () => {
 		await findButton(wrapper, "Finish").trigger("click")
 		await flushPromises()
 
-		// good prefill = planned - produced = 10 - 2 = 8; loss empty until touched
+		// good prefill = planned - produced = 10 - 2 = 8; only good + notes
 		const textInputs = wrapper.findAll('input[type="text"]')
+		expect(textInputs).toHaveLength(2)
+		expect(wrapper.text()).not.toContain("Loss Qty")
 		const goodInput = textInputs[0]
-		const lossInput = textInputs[1]
 		expect(goodInput.element.value).toBe("8")
+		expect(wrapper.text()).not.toContain("recorded as loss")
 
-		await goodInput.setValue("7")
-		expect(lossInput.element.value).toBe("3") // auto-suggest 10 - 7
-
-		// manual loss edit sticks (not overwritten by the next good change)
-		await lossInput.setValue("1")
 		await goodInput.setValue("6")
-		expect(lossInput.element.value).toBe("1")
+		expect(wrapper.text()).toContain("2 short of plan, recorded as loss")
 	})
 
 	it("submits good, loss and notes to finish_production, then reloads the list", async () => {
@@ -412,7 +449,7 @@ describe("ProductionDialog", () => {
 
 		const textInputs = wrapper.findAll('input[type="text"]')
 		await textInputs[0].setValue("7")
-		const notes = wrapper.findAll('input[type="text"]')[2]
+		const notes = wrapper.findAll('input[type="text"]')[1]
 		await notes.setValue("menit ke-12")
 
 		await findButton(wrapper, "Finish").trigger("click") // form's Finish button
@@ -421,7 +458,7 @@ describe("ProductionDialog", () => {
 		expect(finishCall).toHaveBeenCalledWith({
 			work_order: "WO-0001",
 			good_qty: 7,
-			loss_qty: 3,
+			loss_qty: 1, // remaining 8 - good 7
 			notes: "menit ke-12",
 		})
 		// stock just moved — the parent refreshes its item catalog
@@ -478,7 +515,7 @@ describe("ProductionDialog", () => {
 		expect(finishCall).toHaveBeenCalledWith({
 			work_order: "WO-0001",
 			good_qty: 7,
-			loss_qty: 3,
+			loss_qty: 1, // remaining 8 - good 7
 			batch_picks: { SYRUP: "B-NEW" },
 		})
 	})
