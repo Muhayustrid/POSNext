@@ -585,6 +585,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 					user_full_name: "Kasir A",
 					period_end_date: "2026-10-28 14:02:00",
 					auto_closed: 0,
+					shift_slot: "SHIFT 1",
 				})
 			const wrapper = await mountOpenDialog()
 			wrapper.vm.selectedProfile = PROFILES[0]
@@ -594,7 +595,8 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 			expect(wrapper.vm.step).toBe(2)
 			expect(wrapper.text()).toContain("Cash Received from Previous Shift")
 			expect(wrapper.text()).not.toContain("Modal Awal")
-			expect(wrapper.text()).toContain("Cash (System)")
+			expect(wrapper.text()).toContain("Cash (SHIFT 1)")
+			expect(wrapper.text()).not.toContain("(System)")
 			expect(wrapper.text()).toContain("1000000")
 			expect(wrapper.text()).toContain("Kasir A")
 

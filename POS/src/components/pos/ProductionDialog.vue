@@ -90,7 +90,7 @@
 							v-for="r in filteredRecipes"
 							:key="r.name"
 							class="w-full text-start px-4 py-3.5 border rounded-xl bg-white touch-manipulation transition-colors duration-150 hover:border-blue-300 hover:bg-blue-50/40 active:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-							:class="maxBatches(r) ? 'border-gray-200' : 'border-red-200 bg-red-50/40'"
+							:class="maxUnits(r) ? 'border-gray-200' : 'border-red-200 bg-red-50/40'"
 							@click="selectRecipe(r)"
 						>
 							<div class="flex items-start justify-between gap-3">
@@ -106,9 +106,9 @@
 								<div class="shrink-0 text-end">
 									<div
 										class="text-[28px] font-bold leading-none tabular-nums"
-										:class="maxBatches(r) ? 'text-gray-900' : 'text-red-600'"
+										:class="maxUnits(r) ? 'text-gray-900' : 'text-red-600'"
 									>
-										{{ fmtQty(maxBatches(r) * r.output_qty) }}
+										{{ fmtQty(maxUnits(r)) }}
 									</div>
 									<div class="text-xs text-gray-500 mt-1">
 										{{ outputUom(r) }}
@@ -117,14 +117,14 @@
 							</div>
 							<div
 								class="mt-3 flex items-center gap-1.5 border-t border-gray-100 pt-2.5 text-xs font-medium"
-								:class="maxBatches(r) ? 'text-green-700' : 'text-red-600'"
+								:class="maxUnits(r) ? 'text-green-700' : 'text-red-600'"
 							>
 								<span
 									class="w-2 h-2 rounded-full"
-									:class="maxBatches(r) ? 'bg-green-500' : 'bg-red-500'"
+									:class="maxUnits(r) ? 'bg-green-500' : 'bg-red-500'"
 									aria-hidden="true"
 								/>
-								<template v-if="maxBatches(r)">
+								<template v-if="maxUnits(r)">
 									{{ capacityLabel(r) }}
 								</template>
 								<template v-else>
@@ -594,9 +594,9 @@
 					</div>
 				</div>
 
-				<!-- Quantity: counted in recipe batches, so a 24-piece recipe steps 24, 48, 72… -->
-				<label for="production-batches" class="block text-sm font-semibold text-gray-900 mb-2">
-					{{ isBatchRecipe ? __("Number of batches") : __("Quantity to produce") }}
+				<!-- Quantity: counted in output units; materials scale pro rata from the recipe -->
+				<label for="production-qty" class="block text-sm font-semibold text-gray-900 mb-2">
+					{{ __("Quantity to produce") }}
 				</label>
 				<div class="flex flex-wrap items-center gap-3 mb-5">
 					<div class="inline-flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/15">
@@ -604,44 +604,38 @@
 							type="button"
 							class="w-14 h-14 flex items-center justify-center text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 touch-manipulation"
 							:aria-label="__('Decrease')"
-							:disabled="batches <= 1"
-							@click="stepBatches(-1)"
+							:disabled="produceQty <= minQty"
+							@click="stepQty(-1)"
 						>
 							<FeatherIcon name="minus" class="w-4 h-4" />
 						</button>
 						<input
-							id="production-batches"
-							v-model.number="batches"
+							id="production-qty"
+							v-model.number="produceQty"
 							type="number"
 							min="1"
-							step="1"
-							inputmode="numeric"
+							:step="wholeOutput ? 1 : 'any'"
+							:inputmode="wholeOutput ? 'numeric' : 'decimal'"
 							class="w-24 h-14 border-0 border-x border-gray-200 text-center text-2xl font-semibold tabular-nums caret-blue-600 focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
 						/>
 						<button
 							type="button"
 							class="w-14 h-14 flex items-center justify-center text-gray-700 hover:bg-gray-50 active:bg-gray-100 touch-manipulation"
 							:aria-label="__('Increase')"
-							@click="stepBatches(1)"
+							@click="stepQty(1)"
 						>
 							<FeatherIcon name="plus" class="w-4 h-4" />
 						</button>
 					</div>
 					<Button
-						v-if="selectedMax > 1"
+						v-if="selectedMax > minQty"
 						variant="subtle"
 						class="min-h-11 px-4 touch-manipulation"
-						@click="batches = selectedMax"
+						@click="produceQty = selectedMax"
 					>
 						{{ __("Max ({0})", [selectedMax]) }}
 					</Button>
-					<div v-if="isBatchRecipe" class="text-sm text-gray-600">
-						=
-						<span class="text-2xl font-bold text-gray-900 tabular-nums">{{
-							fmtQty(outputQty)
-						}}</span>
-						{{ outputUom(selectedRecipe) }}
-					</div>
+					<div class="text-sm text-gray-600">{{ outputUom(selectedRecipe) }}</div>
 				</div>
 
 				<div class="overflow-x-auto rounded-xl border border-gray-200">
@@ -816,8 +810,8 @@ const loadingRecipes = ref(false)
 const recipes = ref([])
 const search = ref("")
 const selectedRecipe = ref(null)
-// Quantity is entered in recipe batches; outputQty is what that yields
-const batches = ref(1)
+// Quantity to produce, in output units (not recipe batches)
+const produceQty = ref(1)
 const materialRows = ref([])
 const errorMessage = ref("")
 
@@ -942,22 +936,27 @@ function finishNeeded(m) {
 	return +((m.required_qty * gross) / woQty).toFixed(3)
 }
 
-// Whole batches the material stock covers; the material with the fewest
-// is the limit. A recipe without materials is never limited by stock.
-function batchesOf(item) {
-	return item.qty > 0
-		? Math.floor((item.available_qty || 0) / item.qty + 1e-9)
-		: Number.POSITIVE_INFINITY
+// Output (in the item's stock UOM) the material stock covers; the material
+// with the least is the limit. Whole-number UOMs (Pcs) round down to units,
+// fractional ones (Kg, Litre) to 3 decimals. No materials = never limited.
+function unitsOf(item, recipe) {
+	if (!(item.qty > 0)) return Number.POSITIVE_INFINITY
+	const raw = ((item.available_qty || 0) * (recipe.output_qty || 1)) / item.qty
+	return recipe.output_whole === false
+		? Math.floor(raw * 1000 + 1e-6) / 1000
+		: Math.floor(raw + 1e-9)
 }
 
-function maxBatches(recipe) {
-	const n = Math.min(...recipe.items.map(batchesOf))
+function maxUnits(recipe) {
+	const n = Math.min(...recipe.items.map((i) => unitsOf(i, recipe)))
 	return Number.isFinite(n) ? Math.max(0, n) : 0
 }
 
 function limitingMaterial(recipe) {
 	if (!recipe?.items.length) return null
-	return recipe.items.reduce((min, i) => (batchesOf(i) < batchesOf(min) ? i : min))
+	return recipe.items.reduce((min, i) =>
+		unitsOf(i, recipe) < unitsOf(min, recipe) ? i : min,
+	)
 }
 
 function outputUom(recipe) {
@@ -965,23 +964,22 @@ function outputUom(recipe) {
 }
 
 function capacityLabel(recipe) {
-	const n = maxBatches(recipe)
-	const units = `${fmtQty(n * recipe.output_qty)} ${outputUom(recipe)}`
-	return recipe.output_qty === 1
-		? __("Stock is enough for {0}", [units])
-		: __("Stock is enough for {0} batches ({1})", [n, units])
+	return __("Stock is enough for {0}", [`${fmtQty(maxUnits(recipe))} ${outputUom(recipe)}`])
 }
 
-const isBatchRecipe = computed(() => (selectedRecipe.value?.output_qty || 1) !== 1)
 const selectedMax = computed(() =>
-	selectedRecipe.value ? maxBatches(selectedRecipe.value) : 0,
+	selectedRecipe.value ? maxUnits(selectedRecipe.value) : 0,
 )
-const outputQty = computed(
-	() => +((batches.value || 0) * (selectedRecipe.value?.output_qty || 0)).toFixed(4),
-)
+const outputQty = computed(() => +(Number(produceQty.value) || 0).toFixed(4))
+// Older payloads lack output_whole: treat as whole, the previous behaviour
+const wholeOutput = computed(() => selectedRecipe.value?.output_whole !== false)
+const minQty = computed(() => (wholeOutput.value ? 1 : 0))
 
-function stepBatches(delta) {
-	batches.value = Math.max(1, Math.floor(Number(batches.value) || 0) + delta)
+function stepQty(delta) {
+	const cur = Number(produceQty.value) || 0
+	produceQty.value = wholeOutput.value
+		? Math.max(1, Math.floor(cur) + delta)
+		: Math.max(0, +(cur + delta).toFixed(3))
 }
 
 function switchView(target) {
@@ -1019,7 +1017,7 @@ function loadRecipes() {
 
 function selectRecipe(recipe) {
 	selectedRecipe.value = recipe
-	batches.value = 1
+	produceQty.value = 1
 	scaleRows()
 	view.value = "detail"
 }
@@ -1027,7 +1025,7 @@ function selectRecipe(recipe) {
 function scaleRows() {
 	const r = selectedRecipe.value
 	if (!r) return
-	const factor = Number(batches.value) || 0
+	const factor = (Number(produceQty.value) || 0) / (r.output_qty || 1)
 	materialRows.value = r.items.map((i) => ({
 		item_code: i.item_code,
 		item_name: i.item_name,
@@ -1046,7 +1044,7 @@ function bestBatch(row) {
 	return (fit || row.batches[0])?.batch_no || ""
 }
 
-watch(batches, scaleRows)
+watch(produceQty, scaleRows)
 
 function rowHasInsufficientStock(row) {
 	return row.has_batch_no

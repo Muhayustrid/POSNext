@@ -180,7 +180,7 @@
 										class="rounded-xl bg-blue-50/70 p-4"
 									>
 										<p class="text-sm text-gray-600">
-											{{ __("{0} (System)", [method.mode_of_payment]) }}
+											{{ __("{0} ({1})", [method.mode_of_payment, handover.shift_slot || __("Previous Shift")]) }}
 										</p>
 										<p class="mt-0.5 text-[28px] font-bold leading-tight text-gray-900 tabular-nums">
 											{{ currencySymbol }} {{ formatCurrency(handover.amounts[method.mode_of_payment]) }}

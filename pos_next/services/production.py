@@ -211,6 +211,9 @@ def get_recipes(pos_profile):
 		[r.production_item for r in recipes] + [r.item_code for rows in by_recipe.values() for r in rows]
 	)
 
+	# UOMs whose quantities must stay whole (Pcs) vs fractional (Kg, Litre)
+	whole_uoms = set(frappe.get_all("UOM", filters={"must_be_whole_number": 1}, pluck="name"))
+
 	out = []
 	for r in recipes:
 		fg = flags.get(r.production_item, frappe._dict())
@@ -236,6 +239,7 @@ def get_recipes(pos_profile):
 				"production_item_name": fg.item_name or r.production_item,
 				"output_qty": flt(r.output_qty),
 				"output_uom": fg.stock_uom or "",
+				"output_whole": (fg.stock_uom or "") in whole_uoms,
 				"fg_stock": _stock_qty(r.production_item, warehouse),
 				"fg_has_batch_no": bool(fg.has_batch_no),
 				"items": items,

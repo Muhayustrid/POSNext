@@ -44,7 +44,7 @@ def get_cash_handover(pos_profile, for_update=False):
 	closings = frappe.db.sql(
 		f"""
 		SELECT
-			pcs.name, pcs.user, pcs.period_end_date, pcs.auto_closed
+			pcs.name, pcs.user, pcs.period_end_date, pcs.auto_closed, pos.shift_slot
 		FROM `tabPOS Closing Shift` pcs
 		INNER JOIN `tabPOS Opening Shift` pos ON pcs.pos_opening_shift = pos.name
 		WHERE pcs.docstatus = 1
@@ -85,6 +85,7 @@ def get_cash_handover(pos_profile, for_update=False):
 		"user_full_name": get_fullname(closing.user),
 		"period_end_date": str(closing.period_end_date),
 		"auto_closed": cint(closing.auto_closed),
+		"shift_slot": closing.shift_slot,
 		"amounts": amounts,
 	}
 

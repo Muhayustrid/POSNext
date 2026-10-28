@@ -263,13 +263,13 @@ describe("ProductionDialog", () => {
 		const wrapper = await mountOpenDialog()
 		expect(wrapper.text()).toContain("Iced Latte")
 		expect(wrapper.text()).not.toContain("makes 2 × Iced Latte")
-		// SYRUP limits: 4 / 0.5 = 8 batches × 2 = 16 cups (MILK allows 50)
-		expect(wrapper.text()).toContain("Stock is enough for 8 batches (16 Cup)")
+		// SYRUP limits: 4 / 0.5 × 2 = 16 cups (MILK allows 100)
+		expect(wrapper.text()).toContain("Stock is enough for 16 Cup")
 	})
 
-	it("names the short material when stock cannot make a single batch", async () => {
+	it("names the short material when stock cannot make a single unit", async () => {
 		const short = structuredClone(RECIPES)
-		short[0].items[0].available_qty = 0.5 // MILK needs 1 per batch
+		short[0].items[0].available_qty = 0.4 // MILK needs 0.5 per cup
 		respond(RECIPES_URL, (_params, opts) =>
 			opts.onSuccess({ pos_profile: "POS-1", company: "Co", warehouse: "WH", recipes: short }),
 		)
@@ -277,38 +277,55 @@ describe("ProductionDialog", () => {
 		expect(wrapper.text()).toContain("Not enough Milk")
 	})
 
-	it("selects a recipe and rescales material rows by batch count", async () => {
+	it("selects a recipe and rescales material rows by output units, not batches", async () => {
 		const wrapper = await mountOpenDialog()
 		await selectFirstRecipe(wrapper)
 
 		expect(wrapper.text()).not.toContain("Output per run")
-		expect(wrapper.text()).toContain("Stock is enough for 8 batches (16 Cup)")
+		expect(wrapper.text()).not.toContain("Number of batches")
+		expect(wrapper.text()).toContain("Stock is enough for 16 Cup")
 		expect(wrapper.text()).toContain("Limited by Syrup")
-		// starts at one batch, not at the recipe's output qty
+		// starts at one unit, not at the recipe's output qty
 		const qtyInputs = wrapper.findAll('input[type="number"]')
 		expect(qtyInputs).toHaveLength(1)
 		expect(qtyInputs[0].element.value).toBe("1")
-		expect(wrapper.text()).toContain("= 2 Cup")
-		expect(wrapper.text()).toContain("1 Litre") // MILK: 1 × 1 batch
-		expect(wrapper.text()).toContain("0.5 Litre") // SYRUP: 0.5 × 1 batch
+		expect(wrapper.text()).toContain("0.5 Litre") // MILK: 1 / 2 cups
+		expect(wrapper.text()).toContain("0.25 Litre") // SYRUP: 0.5 / 2 cups
 		// FIFO pick: first batch with enough stock for the base run
 		expect(wrapper.text()).toContain("B-OLD (1)")
 
 		await qtyInputs[0].setValue("4")
 		await flushPromises()
-		expect(wrapper.text()).toContain("= 8 Cup")
-		expect(wrapper.text()).toContain("4 Litre") // MILK: 1 × 4
-		expect(wrapper.text()).toContain("2 Litre") // SYRUP: 0.5 × 4
+		expect(wrapper.text()).toContain("2 Litre") // MILK: 1 × 4/2
+		expect(wrapper.text()).toContain("1 Litre") // SYRUP: 0.5 × 4/2
 
-		await findButton(wrapper, "Max (8)").trigger("click")
+		await findButton(wrapper, "Max (16)").trigger("click")
 		await flushPromises()
-		expect(qtyInputs[0].element.value).toBe("8")
-		expect(wrapper.text()).toContain("= 16 Cup")
+		expect(qtyInputs[0].element.value).toBe("16")
+		expect(wrapper.text()).toContain("8 Litre") // MILK: 1 × 16/2
 	})
 
-	it("sends batches × output qty to start_production", async () => {
+	it("allows fractional qty when the output UOM is not whole-number", async () => {
+		const kg = structuredClone(RECIPES)
+		kg[0].output_uom = "Kg"
+		kg[0].output_whole = false
+		kg[0].items[1].available_qty = 4.1 // SYRUP: 4.1 / 0.5 × 2 = 16.4 Kg
+		respond(RECIPES_URL, (_params, opts) =>
+			opts.onSuccess({ pos_profile: "POS-1", company: "Co", warehouse: "WH", recipes: kg }),
+		)
+		const wrapper = await mountOpenDialog()
+		await selectFirstRecipe(wrapper)
+		expect(wrapper.text()).toContain("Stock is enough for 16.4 Kg")
+		const input = wrapper.find("#production-qty")
+		expect(input.attributes("inputmode")).toBe("decimal")
+		await input.setValue("0.5")
+		await flushPromises()
+		expect(wrapper.text()).toContain("0.25 Litre") // MILK: 1 × 0.5/2
+	})
+
+	it("sends the typed unit qty to start_production", async () => {
 		const startCall = mockCall(START_URL, () =>
-			Promise.resolve({ work_order: "WO-1", qty: 6 }),
+			Promise.resolve({ work_order: "WO-1", qty: 3 }),
 		)
 		respond(ACTIVE_URL, (_params, opts) => opts.onSuccess(ACTIVE_ZERO))
 		const wrapper = await mountOpenDialog()
@@ -319,7 +336,7 @@ describe("ProductionDialog", () => {
 		await flushPromises()
 		expect(startCall).toHaveBeenCalledWith({
 			recipe: "RECIPE-0001",
-			qty: 6,
+			qty: 3,
 			pos_profile: "POS-1",
 		})
 	})
@@ -400,7 +417,7 @@ describe("ProductionDialog", () => {
 
 		expect(startCall).toHaveBeenCalledWith({
 			recipe: "RECIPE-0001",
-			qty: 2,
+			qty: 1,
 			pos_profile: "POS-1",
 		})
 		// list view shows the running Work Order with planned/produced/elapsed
