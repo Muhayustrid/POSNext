@@ -86,24 +86,43 @@
 							class="w-full text-start px-4 py-3 border border-gray-200 rounded-lg hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
 							@click="selectRecipe(r)"
 						>
-							<div class="font-semibold text-gray-900 truncate">{{ r.recipe_name }}</div>
-							<div class="text-xs text-gray-500 mt-0.5 truncate">
-								{{ __("makes {0} × {1}", [r.output_qty, r.production_item_name]) }}
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<div class="font-semibold text-gray-900 truncate">
+										{{ r.recipe_name }}
+									</div>
+									<div class="text-xs text-gray-500 mt-0.5 truncate">
+										{{ r.production_item_name }}
+									</div>
+								</div>
+								<!-- Capacity: how much today's material stock can still make -->
+								<div class="shrink-0 text-end">
+									<div
+										class="text-2xl font-bold leading-none tabular-nums"
+										:class="maxBatches(r) ? 'text-gray-900' : 'text-red-600'"
+									>
+										{{ fmtQty(maxBatches(r) * r.output_qty) }}
+									</div>
+									<div class="text-xs text-gray-500 mt-1">
+										{{ outputUom(r) }}
+									</div>
+								</div>
 							</div>
 							<div
 								class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium"
-								:class="canMake(r) ? 'text-green-700' : 'text-red-600'"
+								:class="maxBatches(r) ? 'text-green-700' : 'text-red-600'"
 							>
 								<span
 									class="w-2 h-2 rounded-full"
-									:class="canMake(r) ? 'bg-green-500' : 'bg-red-500'"
+									:class="maxBatches(r) ? 'bg-green-500' : 'bg-red-500'"
 									aria-hidden="true"
 								/>
-								{{
-									canMake(r)
-										? __("Materials available")
-										: __("Materials insufficient")
-								}}
+								<template v-if="maxBatches(r)">
+									{{ capacityLabel(r) }}
+								</template>
+								<template v-else>
+									{{ __("Not enough {0}", [limitingMaterial(r)?.item_name || ""]) }}
+								</template>
 							</div>
 						</button>
 					</div>
@@ -178,20 +197,9 @@
 										class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
 										@input="onGoodInput($event)"
 									/>
-								</div>
-								<div>
-									<label class="block text-sm font-medium text-gray-700 mb-1">
-										{{ __("Loss Qty") }}
-									</label>
-									<input
-										:value="lossText"
-										type="text"
-										inputmode="decimal"
-										class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-										@input="onLossInput($event)"
-									/>
-									<p class="text-xs text-gray-500 mt-0.5">
-										{{ __("Auto: planned - good") }}
+									<!-- Loss is no longer typed: whatever is short of the plan is loss -->
+									<p v-if="finishLoss > 0" class="text-xs text-red-600 mt-1">
+										{{ __("{0} short of plan, recorded as loss", [fmtQty(finishLoss)]) }}
 									</p>
 								</div>
 								<!-- Batch pickers: only for batched materials. "Auto" sends
@@ -534,37 +542,94 @@
 
 			<!-- STEP 2: produce (locked except quantity) -->
 			<template v-else>
-				<div class="mb-3">
-					<div class="font-medium text-gray-900">{{ selectedRecipe.recipe_name }}</div>
-					<div class="text-xs text-gray-500">
-						{{
-							__("Output per run: {0} × {1}", [
-								selectedRecipe.output_qty,
-								selectedRecipe.production_item_name,
-							])
-						}}
+				<div class="mb-4">
+					<div class="text-lg font-semibold text-gray-900">
+						{{ selectedRecipe.recipe_name }}
+					</div>
+					<div class="text-sm text-gray-500">{{ selectedRecipe.production_item_name }}</div>
+				</div>
+
+				<!-- Capacity banner: what the outlet's material stock can make right now -->
+				<div
+					class="mb-4 flex items-start gap-3 rounded-lg px-4 py-3"
+					:class="selectedMax ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'"
+				>
+					<FeatherIcon
+						:name="selectedMax ? 'check-circle' : 'alert-circle'"
+						class="w-5 h-5 shrink-0 mt-0.5"
+					/>
+					<div class="text-sm">
+						<template v-if="selectedMax">
+							<div class="font-semibold">{{ capacityLabel(selectedRecipe) }}</div>
+							<div class="text-xs opacity-80">
+								{{
+									__("Limited by {0}", [limitingMaterial(selectedRecipe)?.item_name || ""])
+								}}
+							</div>
+						</template>
+						<div v-else class="font-semibold">
+							{{ __("Not enough {0}", [limitingMaterial(selectedRecipe)?.item_name || ""]) }}
+						</div>
 					</div>
 				</div>
 
-				<label class="block text-sm font-medium text-gray-700 mb-1">
-					{{ __("Quantity to produce ({0})", [selectedRecipe.production_item_name]) }}
+				<!-- Quantity: counted in recipe batches, so a 24-piece recipe steps 24, 48, 72… -->
+				<label for="production-batches" class="block text-sm font-medium text-gray-700 mb-1.5">
+					{{ isBatchRecipe ? __("Number of batches") : __("Quantity to produce") }}
 				</label>
-				<input
-					v-model.number="outputQty"
-					type="number"
-					min="0"
-					step="any"
-					class="w-full px-3 py-2 mb-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-				/>
+				<div class="flex flex-wrap items-center gap-3 mb-5">
+					<div class="inline-flex items-center rounded-lg border border-gray-300 overflow-hidden">
+						<button
+							type="button"
+							class="w-11 h-11 flex items-center justify-center text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+							:aria-label="__('Decrease')"
+							:disabled="batches <= 1"
+							@click="stepBatches(-1)"
+						>
+							<FeatherIcon name="minus" class="w-4 h-4" />
+						</button>
+						<input
+							id="production-batches"
+							v-model.number="batches"
+							type="number"
+							min="1"
+							step="1"
+							inputmode="numeric"
+							class="w-20 h-11 border-0 border-x border-gray-300 text-center text-lg font-semibold tabular-nums focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+						/>
+						<button
+							type="button"
+							class="w-11 h-11 flex items-center justify-center text-gray-700 hover:bg-gray-50"
+							:aria-label="__('Increase')"
+							@click="stepBatches(1)"
+						>
+							<FeatherIcon name="plus" class="w-4 h-4" />
+						</button>
+					</div>
+					<Button
+						v-if="selectedMax > 1"
+						variant="subtle"
+						@click="batches = selectedMax"
+					>
+						{{ __("Max ({0})", [selectedMax]) }}
+					</Button>
+					<div v-if="isBatchRecipe" class="text-sm text-gray-600">
+						=
+						<span class="text-lg font-semibold text-gray-900 tabular-nums">{{
+							fmtQty(outputQty)
+						}}</span>
+						{{ outputUom(selectedRecipe) }}
+					</div>
+				</div>
 
 				<div class="overflow-x-auto -mx-1 px-1">
 					<table class="w-full text-sm">
 						<thead>
 							<tr class="text-start text-xs text-gray-500 uppercase">
 								<th class="py-1 text-start">{{ __("Material") }}</th>
-								<th class="py-1 text-start">{{ __("Qty") }}</th>
-								<th class="py-1 text-start">{{ __("Stock") }}</th>
-								<th class="py-1 text-start" v-if="hasAnyBatch">{{ __("Batch") }}</th>
+								<th class="py-1 text-end">{{ __("Needed") }}</th>
+								<th class="py-1 text-end">{{ __("Stock") }}</th>
+								<th class="py-1 ps-4 text-start" v-if="hasAnyBatch">{{ __("Batch") }}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -572,23 +637,27 @@
 								v-for="row in materialRows"
 								:key="row.item_code"
 								class="border-t border-gray-100"
+								:class="{ 'bg-red-50': rowHasInsufficientStock(row) }"
 							>
-								<td class="py-1.5 pe-2">
+								<td class="py-2 px-1">
 									<div>{{ row.item_name }}</div>
 									<div
 										v-if="rowHasInsufficientStock(row)"
-										class="text-xs text-red-500"
+										class="text-xs text-red-600"
 									>
 										{{ __("insufficient") }}
 									</div>
 								</td>
-								<td class="py-1.5 pe-2 w-24 whitespace-nowrap">
-									{{ row.qty }} {{ row.stock_uom }}
+								<td class="py-2 px-1 text-end font-medium tabular-nums whitespace-nowrap">
+									{{ fmtQty(row.qty) }} {{ row.stock_uom }}
 								</td>
-								<td class="py-1.5 pe-2 text-gray-500 whitespace-nowrap">
-									{{ row.available_qty }} {{ row.stock_uom }}
+								<td
+									class="py-2 px-1 text-end tabular-nums whitespace-nowrap"
+									:class="rowHasInsufficientStock(row) ? 'text-red-600' : 'text-gray-500'"
+								>
+									{{ fmtQty(row.available_qty) }} {{ row.stock_uom }}
 								</td>
-								<td v-if="hasAnyBatch" class="py-1.5 pe-2 w-48">
+								<td v-if="hasAnyBatch" class="py-2 ps-4 w-48">
 									<template v-if="row.has_batch_no">
 										<span v-if="row.batch_no"
 											>{{ row.batch_no }} ({{ batchQty(row) }})</span
@@ -723,7 +792,8 @@ const loadingRecipes = ref(false)
 const recipes = ref([])
 const search = ref("")
 const selectedRecipe = ref(null)
-const outputQty = ref(1)
+// Quantity is entered in recipe batches; outputQty is what that yields
+const batches = ref(1)
 const materialRows = ref([])
 const errorMessage = ref("")
 
@@ -734,8 +804,6 @@ const starting = ref(false)
 const acting = ref(false)
 const finishingWo = ref(null)
 const goodText = ref("")
-const lossText = ref("")
-const lossTouched = ref(false)
 const finishNotes = ref("")
 // Finish batch pickers: "" = Auto (server FEFO-picks at submit — always freshest)
 const finishContext = ref(null)
@@ -827,6 +895,14 @@ const finishingProduction = computed(
 
 const canFinish = computed(() => parseAmountInput(goodText.value) > 0)
 
+// Whatever is short of the remaining plan is loss — never typed by hand.
+const finishLoss = computed(() => {
+	const p = finishingProduction.value
+	if (!p) return 0
+	const remaining = Math.max(0, (p.qty || 0) - (p.produced_qty || 0))
+	return Math.max(0, +(remaining - parseAmountInput(goodText.value)).toFixed(3))
+})
+
 const finishBatchRows = computed(() => {
 	const ctx = finishContext.value
 	if (!ctx) return []
@@ -837,18 +913,51 @@ const finishBatchRows = computed(() => {
 
 function finishNeeded(m) {
 	const woQty = finishContext.value?.wo_qty
-	const gross =
-		parseAmountInput(goodText.value) + parseAmountInput(lossText.value)
+	const gross = parseAmountInput(goodText.value) + finishLoss.value
 	if (!woQty) return m.required_qty
 	return +((m.required_qty * gross) / woQty).toFixed(3)
 }
 
-function canMake(recipe) {
-	return recipe.items.every((i) =>
-		i.has_batch_no
-			? i.batches.some((b) => b.qty >= i.qty)
-			: i.available_qty >= i.qty,
-	)
+// Whole batches the material stock covers; the material with the fewest
+// is the limit. A recipe without materials is never limited by stock.
+function batchesOf(item) {
+	return item.qty > 0
+		? Math.floor((item.available_qty || 0) / item.qty + 1e-9)
+		: Number.POSITIVE_INFINITY
+}
+
+function maxBatches(recipe) {
+	const n = Math.min(...recipe.items.map(batchesOf))
+	return Number.isFinite(n) ? Math.max(0, n) : 0
+}
+
+function limitingMaterial(recipe) {
+	if (!recipe?.items.length) return null
+	return recipe.items.reduce((min, i) => (batchesOf(i) < batchesOf(min) ? i : min))
+}
+
+function outputUom(recipe) {
+	return recipe?.output_uom || recipe?.production_item_name || ""
+}
+
+function capacityLabel(recipe) {
+	const n = maxBatches(recipe)
+	const units = `${fmtQty(n * recipe.output_qty)} ${outputUom(recipe)}`
+	return recipe.output_qty === 1
+		? __("Stock is enough for {0}", [units])
+		: __("Stock is enough for {0} batches ({1})", [n, units])
+}
+
+const isBatchRecipe = computed(() => (selectedRecipe.value?.output_qty || 1) !== 1)
+const selectedMax = computed(() =>
+	selectedRecipe.value ? maxBatches(selectedRecipe.value) : 0,
+)
+const outputQty = computed(
+	() => +((batches.value || 0) * (selectedRecipe.value?.output_qty || 0)).toFixed(4),
+)
+
+function stepBatches(delta) {
+	batches.value = Math.max(1, Math.floor(Number(batches.value) || 0) + delta)
 }
 
 function switchView(target) {
@@ -886,7 +995,7 @@ function loadRecipes() {
 
 function selectRecipe(recipe) {
 	selectedRecipe.value = recipe
-	outputQty.value = recipe.output_qty
+	batches.value = 1
 	scaleRows()
 	view.value = "detail"
 }
@@ -894,7 +1003,7 @@ function selectRecipe(recipe) {
 function scaleRows() {
 	const r = selectedRecipe.value
 	if (!r) return
-	const factor = r.output_qty ? outputQty.value / r.output_qty : 0
+	const factor = Number(batches.value) || 0
 	materialRows.value = r.items.map((i) => ({
 		item_code: i.item_code,
 		item_name: i.item_name,
@@ -913,7 +1022,7 @@ function bestBatch(row) {
 	return (fit || row.batches[0])?.batch_no || ""
 }
 
-watch(outputQty, scaleRows)
+watch(batches, scaleRows)
 
 function rowHasInsufficientStock(row) {
 	return row.has_batch_no
@@ -1082,13 +1191,11 @@ onUnmounted(stopElapsedTimer)
 
 function openFinish(p) {
 	finishingWo.value = p.work_order
-	lossTouched.value = false
 	finishNotes.value = ""
 	// Prefill with what is left of the plan; the cashier edits from there.
 	goodText.value = formatAmountInput(
 		Math.max(0, (p.qty || 0) - (p.produced_qty || 0)),
 	)
-	suggestLoss()
 	loadFinishContext(p.work_order)
 }
 
@@ -1108,29 +1215,14 @@ async function loadFinishContext(wo) {
 	}
 }
 
-function suggestLoss() {
-	const p = finishingProduction.value
-	if (!p) return
-	const good = parseAmountInput(goodText.value)
-	lossText.value = formatAmountInput(Math.max(0, (p.qty || 0) - good))
-}
-
 function onGoodInput(e) {
 	goodText.value = formatAmountInput(e.target.value)
-	if (!lossTouched.value) suggestLoss()
-}
-
-function onLossInput(e) {
-	lossText.value = formatAmountInput(e.target.value)
-	lossTouched.value = true
 }
 
 function cancelFinish() {
 	finishingWo.value = null
 	goodText.value = ""
-	lossText.value = ""
 	finishNotes.value = ""
-	lossTouched.value = false
 	finishContext.value = null
 	finishContextError.value = false
 	batchPicks.value = {}
@@ -1144,7 +1236,7 @@ async function doFinish(p) {
 		const payload = {
 			work_order: p.work_order,
 			good_qty: good,
-			loss_qty: parseAmountInput(lossText.value),
+			loss_qty: finishLoss.value,
 		}
 		const notes = finishNotes.value.trim()
 		if (notes) payload.notes = notes
