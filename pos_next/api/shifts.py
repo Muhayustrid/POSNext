@@ -38,6 +38,8 @@ from pos_next.utils.authz import is_management_user
 
 def get_cash_handover(pos_profile, for_update=False):
 	"""Expected drawer cash from the previous closing on this profile today."""
+	if not cint(frappe.db.get_single_value("POS Next Global Settings", "enable_cash_handover")):
+		return None
 	lock_clause = " FOR UPDATE" if for_update else ""
 	closings = frappe.db.sql(
 		f"""

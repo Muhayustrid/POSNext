@@ -144,6 +144,28 @@ class TestCashHandover(POSInvoiceModeMixin, FrappeTestCase):
 		self.assertTrue(recon)
 		self.assertEqual(flt(recon[0].get("opening_amount")), 200)
 
+	def test_disabled_switch_skips_handover(self):
+		old = frappe.db.get_single_value("POS Next Global Settings", "enable_cash_handover")
+		self.addCleanup(frappe.db.set_single_value, "POS Next Global Settings", "enable_cash_handover", old)
+		frappe.db.set_single_value("POS Next Global Settings", "enable_cash_handover", 0)
+		cash = self._cash_mode()
+		self._set_opening_cash(200)
+		self._close_shift()
+
+		self.assertIsNone(get_cash_handover(self.profile.name))
+		res = create_opening_shift(
+			self.profile.name,
+			self.profile.company,
+			[{"mode_of_payment": cash, "opening_amount": 150}],
+		)
+		b_shift_name = res["pos_opening_shift"]["name"]
+		self._created_shifts.append(b_shift_name)
+		b_shift = frappe.get_doc("POS Opening Shift", b_shift_name)
+		self.assertFalse(b_shift.handover_from)
+		detail = next(d for d in b_shift.balance_details if d.mode_of_payment == cash)
+		self.assertEqual(flt(detail.proposed_amount), 0)
+		self.assertEqual(flt(detail.amount), 150)
+
 	def test_client_handover_fields_ignored(self):
 		cash = self._cash_mode()
 		self._set_opening_cash(200)

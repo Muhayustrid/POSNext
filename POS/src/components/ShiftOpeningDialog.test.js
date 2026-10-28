@@ -570,7 +570,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 			expect(wrapper.vm.step).toBe(2)
 			expect(wrapper.text()).toContain("Cash Received from Previous Shift")
 			expect(wrapper.text()).not.toContain("Modal Awal")
-			expect(wrapper.text()).toContain("System:")
+			expect(wrapper.text()).toContain("System Amount")
 			expect(wrapper.text()).toContain("1000000")
 			expect(wrapper.text()).toContain("Kasir A")
 
@@ -641,6 +641,7 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 			await flushPromises()
 
 			expect(wrapper.text()).not.toContain("Difference:")
+			expect(wrapper.text()).toContain("Matches system")
 		})
 
 		it("shows closed automatically when auto_closed is 1", async () => {

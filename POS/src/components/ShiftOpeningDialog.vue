@@ -152,6 +152,82 @@
 							></div>
 						</div>
 
+						<div v-else-if="handover && cashPaymentMethods.length > 0" class="flex flex-col gap-3">
+							<div
+								v-for="method in cashPaymentMethods"
+								:key="method.name"
+								class="border border-gray-200 rounded-lg overflow-hidden text-start"
+							>
+								<div
+									v-if="handover.amounts?.[method.mode_of_payment] != null"
+									class="bg-gray-50 px-4 py-3 border-b border-gray-200"
+								>
+									<div class="flex items-center justify-between gap-2">
+										<span class="text-sm font-medium text-gray-700">{{ method.mode_of_payment }}</span>
+										<span
+											v-if="handover.auto_closed"
+											class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+										>
+											{{ __("closed automatically") }}
+										</span>
+									</div>
+									<p class="text-xs text-gray-500 mt-2">{{ __("System Amount") }}</p>
+									<p class="text-xl font-semibold text-gray-900 tabular-nums">
+										{{ formatCurrency(handover.amounts[method.mode_of_payment]) }}
+									</p>
+									<p class="text-xs text-gray-500 mt-0.5">
+										{{
+											__("Shift {0} · closed {1}", [
+												handover.user_full_name || handover.user || "",
+												formatTime(handover.period_end_date) ||
+													formatDateTime(handover.period_end_date) ||
+													"",
+											])
+										}}
+									</p>
+								</div>
+								<div v-else class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+									<span class="text-sm font-medium text-gray-700">{{ method.mode_of_payment }}</span>
+								</div>
+								<div class="px-4 py-3">
+									<label
+										:for="`handover-${method.name}`"
+										class="block text-xs font-medium text-gray-700 mb-1"
+									>
+										{{ __("Amount Received") }}
+									</label>
+									<input
+										:id="`handover-${method.name}`"
+										class="w-full h-12 rounded border border-gray-300 bg-white px-3 text-lg text-ink-gray-9 placeholder:text-sm placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
+										:value="openingBalances[method.mode_of_payment]"
+										inputmode="decimal"
+										autocomplete="off"
+										:placeholder="__('Count the cash and enter the amount received')"
+										@input="
+											openingBalances[method.mode_of_payment] =
+												formatAmountInput($event.target.value)
+										"
+									/>
+									<p
+										v-if="hasHandoverDifference(method.mode_of_payment)"
+										class="mt-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 tabular-nums"
+									>
+										{{
+											__("Difference: {0}", [
+												handoverDifferenceFormatted(method.mode_of_payment),
+											])
+										}}
+									</p>
+									<p
+										v-else-if="getHandoverDifference(method.mode_of_payment) === 0"
+										class="mt-2 inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"
+									>
+										{{ __("Matches system") }}
+									</p>
+								</div>
+							</div>
+						</div>
+
 						<div v-else-if="cashPaymentMethods.length > 0" class="flex flex-col gap-3">
 							<div
 								v-for="method in cashPaymentMethods"
@@ -162,47 +238,19 @@
 									<label class="text-sm font-medium text-gray-700">
 										{{ method.mode_of_payment }}
 									</label>
-									<p
-										v-if="handover && handover.amounts?.[method.mode_of_payment] != null"
-										class="text-xs text-gray-500 mt-0.5"
-									>
-										{{
-											__("System: {0} (shift {1}, closed {2})", [
-												formatCurrency(handover.amounts[method.mode_of_payment]),
-												handover.user_full_name || handover.user || "",
-												formatTime(handover.period_end_date) ||
-													formatDateTime(handover.period_end_date) ||
-													"",
-											])
-										}}<span v-if="handover.auto_closed"> ({{ __("closed automatically") }})</span>
-									</p>
 								</div>
-								<div :class="handover ? 'w-48 sm:w-64 text-end' : 'w-32 text-end'">
+								<div class="w-32">
 									<input
 										class="w-full h-11 sm:h-10 min-h-[40px] rounded border border-gray-300 bg-transparent px-3 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
 										:value="openingBalances[method.mode_of_payment]"
 										inputmode="decimal"
 										autocomplete="off"
-										:placeholder="
-											handover
-												? __('Count the cash and enter the amount received')
-												: '0'
-										"
+										placeholder="0"
 										@input="
 											openingBalances[method.mode_of_payment] =
 												formatAmountInput($event.target.value)
 										"
 									/>
-									<p
-										v-if="hasHandoverDifference(method.mode_of_payment)"
-										class="text-xs text-gray-500 mt-1"
-									>
-										{{
-											__("Difference: {0}", [
-												handoverDifferenceFormatted(method.mode_of_payment),
-											])
-										}}
-									</p>
 								</div>
 							</div>
 						</div>

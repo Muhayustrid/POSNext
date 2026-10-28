@@ -23,6 +23,7 @@
   "block_out_of_stock_items",
   "section_break_shift",
   "modal_awal_modes",
+  "enable_cash_handover",
   "section_break_localization",
   "allowed_locales",
   "tab_sales",
@@ -262,6 +263,13 @@
    "fieldtype": "Table MultiSelect",
    "label": "Modal Awal Payment Modes",
    "options": "POS Modal Awal Mode"
+  },
+  {
+   "default": "1",
+   "description": "The next shift on the same POS Profile on the same day sees the previous closing's expected cash and enters the amount received. Off: every opening enters Modal Awal manually.",
+   "fieldname": "enable_cash_handover",
+   "fieldtype": "Check",
+   "label": "Cash Handover Between Shifts"
   },
   {
    "fieldname": "section_break_localization",
@@ -1081,7 +1089,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-27 10:00:00.000000",
+ "modified": "2026-10-28 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",
