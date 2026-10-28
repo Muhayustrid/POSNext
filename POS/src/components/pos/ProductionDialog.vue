@@ -8,7 +8,7 @@
 			<!-- LIST LEVEL: Recipes (one-shot + start) | In Production (two-phase) -->
 			<template v-if="view !== 'detail'">
 				<div class="flex items-end gap-2 mb-4 border-b border-gray-200">
-					<nav class="flex gap-5 overflow-x-auto" role="tablist">
+					<nav class="flex gap-1 overflow-x-auto" role="tablist">
 						<button
 							v-for="tab in [
 								{ id: 'recipes', label: __('Recipes') },
@@ -20,10 +20,10 @@
 							type="button"
 							role="tab"
 							:aria-selected="view === tab.id"
-							class="-mb-px pb-2.5 pt-1 border-b-2 text-sm font-medium whitespace-nowrap transition-colors"
+							class="-mb-px min-h-11 px-3 border-b-2 text-sm font-semibold whitespace-nowrap transition-colors duration-150 touch-manipulation"
 							:class="
 								view === tab.id
-									? 'border-gray-900 text-gray-900'
+									? 'border-blue-600 text-blue-700'
 									: 'border-transparent text-gray-500 hover:text-gray-800'
 							"
 							@click="switchView(tab.id)"
@@ -61,12 +61,18 @@
 
 				<!-- RECIPES: pick a recipe -->
 				<template v-if="view === 'recipes'">
-					<input
-						v-model="search"
-						type="text"
-						:placeholder="__('Search recipe...')"
-						class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-					/>
+					<div class="relative">
+						<FeatherIcon
+							name="search"
+							class="pointer-events-none absolute start-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+						/>
+						<input
+							v-model="search"
+							type="text"
+							:placeholder="__('Search recipe...')"
+							class="w-full h-11 ps-10 pe-3 text-base border border-gray-300 rounded-xl bg-white placeholder-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
+						/>
+					</div>
 					<div v-if="loadingRecipes" class="py-10 text-center text-sm text-gray-500">
 						{{ __("Loading recipes...") }}
 					</div>
@@ -78,12 +84,13 @@
 					</div>
 					<div
 						v-else
-						class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto mt-3"
+						class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[60vh] overflow-y-auto mt-3 p-0.5"
 					>
 						<button
 							v-for="r in filteredRecipes"
 							:key="r.name"
-							class="w-full text-start px-4 py-3 border border-gray-200 rounded-lg hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+							class="w-full text-start px-4 py-3.5 border rounded-xl bg-white touch-manipulation transition-colors duration-150 hover:border-blue-300 hover:bg-blue-50/40 active:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+							:class="maxBatches(r) ? 'border-gray-200' : 'border-red-200 bg-red-50/40'"
 							@click="selectRecipe(r)"
 						>
 							<div class="flex items-start justify-between gap-3">
@@ -98,7 +105,7 @@
 								<!-- Capacity: how much today's material stock can still make -->
 								<div class="shrink-0 text-end">
 									<div
-										class="text-2xl font-bold leading-none tabular-nums"
+										class="text-[28px] font-bold leading-none tabular-nums"
 										:class="maxBatches(r) ? 'text-gray-900' : 'text-red-600'"
 									>
 										{{ fmtQty(maxBatches(r) * r.output_qty) }}
@@ -109,7 +116,7 @@
 								</div>
 							</div>
 							<div
-								class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium"
+								class="mt-3 flex items-center gap-1.5 border-t border-gray-100 pt-2.5 text-xs font-medium"
 								:class="maxBatches(r) ? 'text-green-700' : 'text-red-600'"
 							>
 								<span
@@ -141,12 +148,13 @@
 					</div>
 					<div
 						v-else
-						class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto"
+						class="flex flex-col gap-2.5 max-h-[60vh] overflow-y-auto"
 					>
 						<div
 							v-for="p in productions"
 							:key="p.work_order"
-							class="border border-gray-200 rounded-lg px-4 py-3"
+							class="border rounded-xl px-4 py-3.5 transition-colors"
+							:class="finishingWo === p.work_order ? 'border-blue-500 ring-1 ring-inset ring-blue-500' : 'border-gray-200'"
 						>
 							<div class="flex items-start justify-between gap-2">
 								<div class="min-w-0">
@@ -167,14 +175,14 @@
 							>
 								<span>
 									{{ __("Planned") }}:
-									<span class="font-medium">{{ p.qty }}</span>
+									<span class="font-semibold text-gray-900 tabular-nums">{{ p.qty }}</span>
 								</span>
 								<span>
 									{{ __("Produced") }}:
-									<span class="font-medium">{{ p.produced_qty }}</span>
+									<span class="font-semibold text-gray-900 tabular-nums">{{ p.produced_qty }}</span>
 								</span>
 								<span
-									class="ms-auto inline-flex items-center gap-1 text-xs text-gray-500"
+									class="ms-auto inline-flex items-center gap-1 text-xs text-gray-500 tabular-nums"
 								>
 									<FeatherIcon name="clock" class="w-3.5 h-3.5" />
 									{{ elapsedLabel(p) }}
@@ -184,7 +192,7 @@
 							<!-- Finish form: good (required) + loss (auto-suggest) + notes -->
 							<div
 								v-if="finishingWo === p.work_order"
-								class="mt-3 border-t border-gray-100 pt-3 flex flex-col gap-2"
+								class="mt-3 border-t border-gray-100 pt-3 flex flex-col gap-3"
 							>
 								<div>
 									<label class="block text-sm font-medium text-gray-700 mb-1">
@@ -194,11 +202,12 @@
 										:value="goodText"
 										type="text"
 										inputmode="decimal"
-										class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+										class="w-full h-12 px-4 text-xl font-semibold text-end tabular-nums border border-gray-300 rounded-xl caret-blue-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
 										@input="onGoodInput($event)"
 									/>
 									<!-- Loss is no longer typed: whatever is short of the plan is loss -->
-									<p v-if="finishLoss > 0" class="text-xs text-red-600 mt-1">
+									<p v-if="finishLoss > 0" class="flex items-center gap-1.5 text-sm font-medium text-red-700 mt-1.5" role="status">
+										<FeatherIcon name="alert-circle" class="h-4 w-4 shrink-0" />
 										{{ __("{0} short of plan, recorded as loss", [fmtQty(finishLoss)]) }}
 									</p>
 								</div>
@@ -222,7 +231,7 @@
 												<td class="py-1.5 w-48">
 													<select
 														v-model="batchPicks[m.item_code]"
-														class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+														class="w-full h-10 px-2 text-sm border border-gray-300 rounded-lg bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
 													>
 														<option value="">{{ __("Auto") }}</option>
 														<option
@@ -248,15 +257,17 @@
 									<input
 										v-model="finishNotes"
 										type="text"
-										class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+										class="w-full h-11 px-3 text-base border border-gray-300 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
 									/>
 								</div>
 								<div class="flex justify-end gap-2 pt-1">
-									<Button variant="subtle" :disabled="acting" @click="cancelFinish">
+									<Button variant="subtle" class="min-h-11 px-4 touch-manipulation" :disabled="acting" @click="cancelFinish">
 										{{ __("Cancel") }}
 									</Button>
 									<Button
 										variant="solid"
+										theme="blue"
+										class="min-h-11 px-5 touch-manipulation"
 										:loading="acting"
 										:disabled="!canFinish"
 										@click="doFinish(p)"
@@ -269,13 +280,13 @@
 							<!-- Row actions: Close only once something was produced —
 							     before that Cancel is the clean exit (no stock moved). -->
 							<div v-else class="flex flex-wrap gap-2 mt-3">
-								<Button size="sm" :disabled="acting" @click="openFinish(p)">
+								<Button variant="solid" theme="blue" class="min-h-11 px-5 touch-manipulation" :disabled="acting" @click="openFinish(p)">
 									{{ __("Finish") }}
 								</Button>
 								<Button
 									v-if="p.produced_qty > 0"
 									variant="subtle"
-									size="sm"
+									class="min-h-11 px-4 touch-manipulation"
 									:disabled="acting"
 									@click="askClose(p)"
 								>
@@ -284,7 +295,7 @@
 								<Button
 									variant="subtle"
 									theme="red"
-									size="sm"
+									class="min-h-11 px-4 touch-manipulation ms-auto"
 									:disabled="acting"
 									@click="askCancel(p)"
 								>
@@ -301,7 +312,7 @@
 						<select
 							v-model="period"
 							:aria-label="__('Export period')"
-							class="py-1.5 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white"
+							class="h-10 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
 						>
 							<option v-for="o in periodOptions" :key="o.value" :value="o.value">
 								{{ o.label }}
@@ -403,10 +414,10 @@
 								v-for="o in periodOptions"
 								:key="o.value"
 								type="button"
-								class="px-3 py-1.5 text-sm border-e border-gray-300 last:border-e-0 transition-colors"
+								class="min-h-10 px-3 text-sm font-medium border-e border-gray-300 last:border-e-0 transition-colors touch-manipulation"
 								:class="
 									period === o.value
-										? 'bg-gray-900 text-white'
+										? 'bg-blue-600 text-white'
 										: 'bg-white text-gray-700 hover:bg-gray-50'
 								"
 								:aria-pressed="period === o.value"
@@ -542,16 +553,26 @@
 
 			<!-- STEP 2: produce (locked except quantity) -->
 			<template v-else>
-				<div class="mb-4">
-					<div class="text-lg font-semibold text-gray-900">
-						{{ selectedRecipe.recipe_name }}
+				<div class="mb-4 flex items-center gap-3 border-b border-gray-200 pb-4">
+					<button
+						type="button"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 touch-manipulation"
+						:aria-label="__('Back')"
+						@click="view = 'recipes'"
+					>
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
+					</button>
+					<div class="min-w-0">
+						<div class="truncate text-lg font-semibold text-gray-900">
+							{{ selectedRecipe.recipe_name }}
+						</div>
+						<div class="truncate text-sm text-gray-500">{{ selectedRecipe.production_item_name }}</div>
 					</div>
-					<div class="text-sm text-gray-500">{{ selectedRecipe.production_item_name }}</div>
 				</div>
 
 				<!-- Capacity banner: what the outlet's material stock can make right now -->
 				<div
-					class="mb-4 flex items-start gap-3 rounded-lg px-4 py-3"
+					class="mb-5 flex items-start gap-3 rounded-xl px-4 py-3"
 					:class="selectedMax ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'"
 				>
 					<FeatherIcon
@@ -574,14 +595,14 @@
 				</div>
 
 				<!-- Quantity: counted in recipe batches, so a 24-piece recipe steps 24, 48, 72… -->
-				<label for="production-batches" class="block text-sm font-medium text-gray-700 mb-1.5">
+				<label for="production-batches" class="block text-sm font-semibold text-gray-900 mb-2">
 					{{ isBatchRecipe ? __("Number of batches") : __("Quantity to produce") }}
 				</label>
 				<div class="flex flex-wrap items-center gap-3 mb-5">
-					<div class="inline-flex items-center rounded-lg border border-gray-300 overflow-hidden">
+					<div class="inline-flex items-center rounded-xl border border-gray-300 bg-white overflow-hidden focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/15">
 						<button
 							type="button"
-							class="w-11 h-11 flex items-center justify-center text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+							class="w-14 h-14 flex items-center justify-center text-gray-700 hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 touch-manipulation"
 							:aria-label="__('Decrease')"
 							:disabled="batches <= 1"
 							@click="stepBatches(-1)"
@@ -595,11 +616,11 @@
 							min="1"
 							step="1"
 							inputmode="numeric"
-							class="w-20 h-11 border-0 border-x border-gray-300 text-center text-lg font-semibold tabular-nums focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+							class="w-24 h-14 border-0 border-x border-gray-200 text-center text-2xl font-semibold tabular-nums caret-blue-600 focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
 						/>
 						<button
 							type="button"
-							class="w-11 h-11 flex items-center justify-center text-gray-700 hover:bg-gray-50"
+							class="w-14 h-14 flex items-center justify-center text-gray-700 hover:bg-gray-50 active:bg-gray-100 touch-manipulation"
 							:aria-label="__('Increase')"
 							@click="stepBatches(1)"
 						>
@@ -609,27 +630,28 @@
 					<Button
 						v-if="selectedMax > 1"
 						variant="subtle"
+						class="min-h-11 px-4 touch-manipulation"
 						@click="batches = selectedMax"
 					>
 						{{ __("Max ({0})", [selectedMax]) }}
 					</Button>
 					<div v-if="isBatchRecipe" class="text-sm text-gray-600">
 						=
-						<span class="text-lg font-semibold text-gray-900 tabular-nums">{{
+						<span class="text-2xl font-bold text-gray-900 tabular-nums">{{
 							fmtQty(outputQty)
 						}}</span>
 						{{ outputUom(selectedRecipe) }}
 					</div>
 				</div>
 
-				<div class="overflow-x-auto -mx-1 px-1">
+				<div class="overflow-x-auto rounded-xl border border-gray-200">
 					<table class="w-full text-sm">
-						<thead>
-							<tr class="text-start text-xs text-gray-500 uppercase">
-								<th class="py-1 text-start">{{ __("Material") }}</th>
-								<th class="py-1 text-end">{{ __("Needed") }}</th>
-								<th class="py-1 text-end">{{ __("Stock") }}</th>
-								<th class="py-1 ps-4 text-start" v-if="hasAnyBatch">{{ __("Batch") }}</th>
+						<thead class="bg-gray-50">
+							<tr class="text-start text-xs font-medium text-gray-500">
+								<th class="py-2.5 px-3 text-start">{{ __("Material") }}</th>
+								<th class="py-2.5 px-3 text-end">{{ __("Needed") }}</th>
+								<th class="py-2.5 px-3 text-end">{{ __("Stock") }}</th>
+								<th class="py-2.5 px-3 text-start" v-if="hasAnyBatch">{{ __("Batch") }}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -639,8 +661,8 @@
 								class="border-t border-gray-100"
 								:class="{ 'bg-red-50': rowHasInsufficientStock(row) }"
 							>
-								<td class="py-2 px-1">
-									<div>{{ row.item_name }}</div>
+								<td class="py-2.5 px-3">
+									<div class="text-gray-900">{{ row.item_name }}</div>
 									<div
 										v-if="rowHasInsufficientStock(row)"
 										class="text-xs text-red-600"
@@ -648,16 +670,16 @@
 										{{ __("insufficient") }}
 									</div>
 								</td>
-								<td class="py-2 px-1 text-end font-medium tabular-nums whitespace-nowrap">
+								<td class="py-2.5 px-3 text-end font-semibold text-gray-900 tabular-nums whitespace-nowrap">
 									{{ fmtQty(row.qty) }} {{ row.stock_uom }}
 								</td>
 								<td
-									class="py-2 px-1 text-end tabular-nums whitespace-nowrap"
+									class="py-2.5 px-3 text-end tabular-nums whitespace-nowrap"
 									:class="rowHasInsufficientStock(row) ? 'text-red-600' : 'text-gray-500'"
 								>
 									{{ fmtQty(row.available_qty) }} {{ row.stock_uom }}
 								</td>
-								<td v-if="hasAnyBatch" class="py-2 ps-4 w-48">
+								<td v-if="hasAnyBatch" class="py-2.5 px-3 w-48 tabular-nums">
 									<template v-if="row.has_batch_no">
 										<span v-if="row.batch_no"
 											>{{ row.batch_no }} ({{ batchQty(row) }})</span
@@ -672,10 +694,12 @@
 					</table>
 				</div>
 
-				<div class="mt-4 flex justify-end gap-2">
-					<Button variant="subtle" @click="view = 'recipes'">{{ __("Back") }}</Button>
+				<div class="mt-5 flex justify-end gap-2">
+					<Button variant="subtle" class="min-h-11 px-4 touch-manipulation" @click="view = 'recipes'">{{ __("Back") }}</Button>
 					<Button
 						variant="solid"
+						theme="blue"
+						class="min-h-11 px-5 touch-manipulation"
 						:loading="starting"
 						:disabled="!canSubmit"
 						@click="startProduction"

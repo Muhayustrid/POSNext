@@ -322,7 +322,10 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 		)
 	})
 
-	it("shows a picker with both options and defaults to first when two slots are open", async () => {
+	it("shows a picker with both options and defaults to the most recently started slot", async () => {
+		// 14:00: Shift 1 (05-15) and Shift 2 (13-21) overlap; Shift 2 started last
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(new Date(2026, 9, 28, 14, 0))
 		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
 			payments_method: [
 				{
@@ -360,8 +363,9 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 		expect(options[0].element.value).toBe("Shift 2")
 		expect(options[1].element.value).toBe("Shift 1")
 
-		// Default selection is first open slot
+		// Default selection is the slot that started most recently
 		expect(wrapper.vm.selectedSlot).toBe("Shift 2")
+		vi.useRealTimers()
 
 		// Submit sends default shift_slot
 		await wrapper.vm.openShift()
@@ -383,6 +387,29 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 				shift_slot: "Shift 1",
 			}),
 		)
+	})
+
+	it("defaults to the latest-started slot regardless of list order, across midnight", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(new Date(2026, 9, 28, 1, 0))
+		resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+			payments_method: [
+				{ name: "pm1", parent: "Profile 1", mode_of_payment: "Cash", is_drawer_cash: true },
+			],
+			slots: {
+				"Profile 1": [
+					{ shift_name: "Night", start_time: "22:00:00", end_time: "06:00:00", open_now: true },
+					{ shift_name: "Late", start_time: "00:30:00", end_time: "08:00:00", open_now: true },
+				],
+			},
+		})
+		const wrapper = await mountOpenDialog()
+		wrapper.vm.selectedProfile = PROFILES[0]
+		await wrapper.vm.nextStep()
+		await flushPromises()
+		vi.useRealTimers()
+
+		expect(wrapper.vm.selectedSlot).toBe("Late")
 	})
 
 	it("shows slot name without a picker when only one slot is open", async () => {

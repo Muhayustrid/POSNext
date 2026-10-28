@@ -70,44 +70,59 @@
 				</div>
 
 				<!-- Step 2: Enter Opening Balances -->
-				<div v-if="step === 2" class="flex flex-col gap-4">
-					<div class="mb-4">
-						<div class="flex items-center justify-between">
-							<div class="text-start">
-								<h3 class="font-medium text-gray-900">
-									{{ selectedProfile?.name }}
-								</h3>
-								<p class="text-sm text-gray-500">{{ selectedProfile?.company }}</p>
-							</div>
-							<Button variant="subtle" class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation" @click="step = 1">{{
-								__("Change Profile")
-							}}</Button>
+				<div v-if="step === 2" class="flex flex-col gap-5 text-start">
+					<!-- Profile row -->
+					<div class="flex items-center gap-3 border-b border-gray-200 pb-4">
+						<div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+							<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="M3 9l1.5-5h15L21 9" />
+								<path d="M3 9h18v1.5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z" />
+								<path d="M5 13v7h14v-7" />
+								<path d="M10 20v-4h4v4" />
+							</svg>
 						</div>
+						<div class="min-w-0 flex-1">
+							<h3 class="truncate text-base font-semibold text-gray-900">{{ selectedProfile?.name }}</h3>
+							<p class="truncate text-sm text-gray-500">{{ selectedProfile?.company }}</p>
+						</div>
+						<Button variant="subtle" class="min-h-11 shrink-0 px-4 touch-manipulation" @click="step = 1">{{
+							__("Change Profile")
+						}}</Button>
 					</div>
 
-					<div :class="hasProfileSlots ? 'grid grid-cols-1 md:grid-cols-2 gap-4 items-start' : ''">
+					<div
+						:class="
+							hasProfileSlots
+								? 'grid grid-cols-1 items-start gap-4 md:grid-cols-[1fr_1.12fr]'
+								: ''
+						"
+					>
 						<!-- Shift slot picker -->
-						<section
-							v-if="hasProfileSlots"
-							class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-start"
-						>
-							<h3 class="text-lg font-semibold text-gray-900">{{ __("Shift") }}</h3>
-							<p class="text-sm text-gray-500 mt-0.5">{{
+						<section v-if="hasProfileSlots" class="rounded-2xl border border-gray-200 bg-gray-50/70 p-4 sm:p-5">
+							<h3 class="flex items-center gap-2 text-[15px] font-semibold text-gray-900">
+								<svg class="h-[18px] w-[18px] text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<circle cx="12" cy="12" r="9" />
+									<path d="M12 7v5l3 2" />
+								</svg>
+								{{ __("Shift") }}
+							</h3>
+							<p class="mt-1 text-sm text-gray-500">{{
 								openSlots.length > 1 ? __("Choose the shift to open.") : __("The shift that will be opened.")
 							}}</p>
 
 							<div
 								v-if="openSlots.length > 0"
-								class="flex flex-col gap-2 mt-3"
+								class="mt-4 flex flex-col gap-2.5"
 								:role="openSlots.length > 1 ? 'radiogroup' : undefined"
 							>
 								<label
 									v-for="slot in openSlots"
 									:key="slot.shift_name"
 									:class="[
-										'flex items-center gap-3 rounded-lg border bg-white px-4 py-4 cursor-pointer min-h-[44px] touch-manipulation transition-colors',
+										'flex min-h-[72px] items-center gap-3 rounded-xl border bg-white px-4 py-3 touch-manipulation transition-colors duration-150',
+										openSlots.length > 1 ? 'cursor-pointer' : '',
 										selectedSlot === slot.shift_name
-											? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+											? 'border-blue-500 bg-blue-50/60 ring-1 ring-inset ring-blue-500'
 											: 'border-gray-200 hover:border-blue-300',
 									]"
 								>
@@ -118,10 +133,10 @@
 										type="radio"
 										name="shift-slot"
 										:value="slot.shift_name"
-										class="h-5 w-5 text-blue-600 focus:ring-blue-500"
+										class="h-5 w-5 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500"
 									/>
-									<span class="flex flex-col">
-										<span class="text-base font-semibold text-gray-900">{{ slot.shift_name }}</span>
+									<span class="flex min-w-0 flex-col">
+										<span class="truncate text-sm font-semibold text-gray-900">{{ slot.shift_name }}</span>
 										<span class="text-sm text-gray-500 tabular-nums">
 											{{ hhmm(slot.start_time) }} – {{ hhmm(slot.end_time) }}
 										</span>
@@ -130,103 +145,84 @@
 							</div>
 
 							<!-- Zero open slots: outside shift hours message -->
-							<div v-else class="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-4">
-								<p class="text-amber-800 font-medium text-sm">{{ __("Outside shift hours") }}</p>
-								<p class="text-xs text-amber-700 mt-1">
+							<div v-else class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+								<p class="text-sm font-medium text-amber-800">{{ __("Outside shift hours") }}</p>
+								<p class="mt-1 text-sm text-amber-700">
 									{{ __("A shift cannot be opened outside shift hours.") }}
 								</p>
 							</div>
 						</section>
 
 						<!-- Cash -->
-						<section
-							:class="[
-								'text-start',
-								hasProfileSlots ? 'rounded-xl border border-gray-200 p-4' : '',
-							]"
-						>
-							<h3 class="text-lg font-semibold text-gray-900">
+						<section :class="hasProfileSlots ? 'rounded-2xl border border-gray-200 p-4 sm:p-5' : ''">
+							<h3 class="flex items-center gap-2 text-[15px] font-semibold text-gray-900">
+								<svg class="h-[18px] w-[18px] text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<rect x="2" y="6" width="20" height="12" rx="2" />
+									<circle cx="12" cy="12" r="2.5" />
+									<path d="M6 12h.01M18 12h.01" />
+								</svg>
 								{{ handover ? __("Cash Received from Previous Shift") : __("Modal Awal") }}
 							</h3>
-							<p v-if="handover" class="text-sm text-gray-500 mt-0.5">
+							<p v-if="handover" class="mt-1 text-sm text-gray-500">
 								{{ __("Cash handed over from the previous shift, according to the system.") }}
 							</p>
 
-							<div v-if="dialogDataResource.loading" class="text-center py-4">
-								<div
-									class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"
-								></div>
+							<div v-if="dialogDataResource.loading" class="mt-4 flex flex-col gap-3" aria-busy="true">
+								<div class="h-24 animate-pulse rounded-xl bg-gray-100"></div>
+								<div class="h-14 animate-pulse rounded-xl bg-gray-100"></div>
 							</div>
 
-							<div v-else-if="handover && cashPaymentMethods.length > 0" class="flex flex-col gap-5 mt-3">
+							<div v-else-if="cashPaymentMethods.length > 0" class="mt-4 flex flex-col gap-5">
 								<div v-for="method in cashPaymentMethods" :key="method.name" class="flex flex-col gap-4">
+									<!-- System amount handed over by the previous shift -->
 									<div
-										v-if="handover.amounts?.[method.mode_of_payment] != null"
-										class="rounded-lg bg-gray-100 p-4"
+										v-if="handover && handover.amounts?.[method.mode_of_payment] != null"
+										class="rounded-xl bg-blue-50/70 p-4"
 									>
-										<div class="flex items-center gap-3">
-											<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50">
-												<svg
-													class="h-6 w-6 text-blue-600"
-													viewBox="0 0 24 24"
-													fill="none"
-													stroke="currentColor"
-													stroke-width="1.75"
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													aria-hidden="true"
-												>
-													<circle cx="8" cy="8" r="6" />
-													<path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
-													<path d="M7 6h1v4" />
-													<path d="m16.71 13.88.7.71-2.82 2.82" />
-												</svg>
-											</div>
-											<div class="min-w-0">
-												<p class="text-sm text-gray-500">
-													{{ __("{0} (System)", [method.mode_of_payment]) }}
-												</p>
-												<p class="text-3xl font-bold text-gray-900 tabular-nums">
-													{{ currencySymbol }} {{ formatCurrency(handover.amounts[method.mode_of_payment]) }}
-												</p>
-											</div>
-										</div>
-										<div class="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-500">
-											<p>{{ __("Shift {0}", [handover.user_full_name || handover.user || ""]) }}</p>
-											<p class="flex flex-wrap items-center gap-2">
-												{{
-													__("Closed at {0}", [
-														formatTime(handover.period_end_date) ||
-															formatDateTime(handover.period_end_date) ||
-															"",
-													])
-												}}
-												<span
-													v-if="handover.auto_closed"
-													class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
-												>
-													{{ __("closed automatically") }}
-												</span>
-											</p>
-										</div>
+										<p class="text-sm text-gray-600">
+											{{ __("{0} (System)", [method.mode_of_payment]) }}
+										</p>
+										<p class="mt-0.5 text-[28px] font-bold leading-tight text-gray-900 tabular-nums">
+											{{ currencySymbol }} {{ formatCurrency(handover.amounts[method.mode_of_payment]) }}
+										</p>
+										<p class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-blue-100 pt-3 text-sm text-gray-600">
+											<span>{{ __("Shift {0}", [handover.user_full_name || handover.user || ""]) }}</span>
+											<span aria-hidden="true">·</span>
+											<span class="tabular-nums">{{
+												__("Closed at {0}", [
+													formatTime(handover.period_end_date) ||
+														formatDateTime(handover.period_end_date) ||
+														"",
+												])
+											}}</span>
+											<span
+												v-if="handover.auto_closed"
+												class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+											>
+												{{ __("closed automatically") }}
+											</span>
+										</p>
 									</div>
 
 									<div>
-										<label :for="`handover-${method.name}`" class="block text-base font-semibold text-gray-900">
-											{{ __("Amount Received") }}
+										<label
+											:for="`opening-${method.name}`"
+											class="block text-sm font-semibold text-gray-900"
+										>
+											{{ handover ? __("Amount Received") : method.mode_of_payment }}
 										</label>
-										<p class="text-sm text-gray-500 mb-2">
+										<p v-if="handover" class="text-sm text-gray-500">
 											{{ __("Count the cash and enter the amount received") }}
 										</p>
 										<div
-											class="flex h-14 overflow-hidden rounded-lg border border-gray-300 bg-white focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/30"
+											class="mt-2 flex h-14 overflow-hidden rounded-xl border border-gray-300 bg-white transition-shadow focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/15"
 										>
-											<span class="flex items-center border-e border-gray-300 bg-gray-50 px-4 text-gray-500">
+											<span class="flex w-16 shrink-0 items-center justify-center border-e border-gray-200 bg-gray-50 text-base font-medium text-gray-500">
 												{{ currencySymbol }}
 											</span>
 											<input
-												:id="`handover-${method.name}`"
-												class="min-w-0 flex-1 border-0 bg-transparent px-4 text-2xl font-semibold text-gray-900 tabular-nums text-end placeholder-gray-300 focus:outline-none focus:ring-0"
+												:id="`opening-${method.name}`"
+												class="min-w-0 flex-1 border-0 bg-transparent px-4 text-2xl font-semibold text-gray-900 tabular-nums text-end placeholder-gray-300 caret-blue-600 focus:outline-none focus:ring-0"
 												:value="openingBalances[method.mode_of_payment]"
 												inputmode="decimal"
 												autocomplete="off"
@@ -239,8 +235,13 @@
 										</div>
 										<p
 											v-if="hasHandoverDifference(method.mode_of_payment)"
-											class="mt-2 inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-sm font-medium text-amber-800 tabular-nums"
+											class="mt-2 flex items-center gap-1.5 text-sm font-medium text-red-700 tabular-nums"
+											role="status"
 										>
+											<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+												<circle cx="12" cy="12" r="9" />
+												<path d="M12 8v4M12 16h.01" />
+											</svg>
 											{{
 												__("Difference: {0}", [
 													handoverDifferenceFormatted(method.mode_of_payment),
@@ -249,45 +250,21 @@
 										</p>
 										<p
 											v-else-if="getHandoverDifference(method.mode_of_payment) === 0"
-											class="mt-2 inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-sm font-medium text-green-800"
+											class="mt-2 flex items-center gap-1.5 text-sm font-medium text-green-700"
+											role="status"
 										>
+											<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+												<circle cx="12" cy="12" r="9" />
+												<path d="m8 12 3 3 5-6" />
+											</svg>
 											{{ __("Matches system") }}
 										</p>
 									</div>
 								</div>
 							</div>
 
-							<div v-else-if="cashPaymentMethods.length > 0" class="flex flex-col gap-3 mt-3">
-								<div
-									v-for="method in cashPaymentMethods"
-									:key="method.name"
-									class="flex items-center gap-3 p-3 border rounded-lg"
-								>
-									<div class="flex-1 text-start">
-										<label class="text-sm font-medium text-gray-700">
-											{{ method.mode_of_payment }}
-										</label>
-									</div>
-									<div class="w-32">
-										<input
-											class="w-full h-11 sm:h-10 min-h-[40px] rounded border border-gray-300 bg-transparent px-3 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
-											:value="openingBalances[method.mode_of_payment]"
-											inputmode="decimal"
-											autocomplete="off"
-											placeholder="0"
-											@input="
-												openingBalances[method.mode_of_payment] =
-													formatAmountInput($event.target.value)
-											"
-										/>
-									</div>
-								</div>
-							</div>
-
-							<div v-else class="text-center py-4 text-gray-500">
-								<p class="text-sm">
-									{{ __("No payment methods configured for this POS Profile") }}
-								</p>
+							<div v-else class="mt-4 rounded-xl bg-gray-50 py-6 text-center text-sm text-gray-500">
+								{{ __("No payment methods configured for this POS Profile") }}
 							</div>
 						</section>
 					</div>
@@ -560,6 +537,18 @@ function handoverDifferenceFormatted(mode) {
 	return diff > 0 ? `+${formatCurrency(diff)}` : formatCurrency(diff)
 }
 
+// Overlapping open slots: default to the one that started most recently
+// (13:30 with 05-14 and 13-18 open picks 13-18); wraps past midnight.
+function latestStartedSlot(slots) {
+	const now = new Date()
+	const nowMin = now.getHours() * 60 + now.getMinutes()
+	const sinceStart = (slot) => {
+		const [h, m] = String(slot.start_time).split(":").map(Number)
+		return (nowMin - (h * 60 + (m || 0)) + 1440) % 1440
+	}
+	return slots.reduce((best, s) => (sinceStart(s) < sinceStart(best) ? s : best))
+}
+
 watch(
 	openSlots,
 	(slots) => {
@@ -568,7 +557,7 @@ watch(
 				!selectedSlot.value ||
 				!slots.some((s) => s.shift_name === selectedSlot.value)
 			) {
-				selectedSlot.value = slots[0].shift_name
+				selectedSlot.value = latestStartedSlot(slots).shift_name
 			}
 		} else {
 			selectedSlot.value = null
