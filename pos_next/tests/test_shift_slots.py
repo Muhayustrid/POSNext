@@ -459,14 +459,17 @@ class TestOneOpenShift(POSInvoiceModeMixin, FrappeTestCase):
 		cls.cashier_a = f"cashier_a_{frappe.generate_hash(length=8)}@example.com"
 		cls.cashier_b = f"cashier_b_{frappe.generate_hash(length=8)}@example.com"
 		for email in (cls.cashier_a, cls.cashier_b):
-			frappe.get_doc(
+			user = frappe.get_doc(
 				{
 					"doctype": "User",
 					"email": email,
 					"first_name": email.split("@")[0],
+					"send_welcome_email": 0,
 					"roles": [{"role": "POSNext Cashier"}],
 				}
-			).insert(ignore_permissions=True)
+			)
+			user.flags.no_welcome_mail = True
+			user.insert(ignore_permissions=True)
 
 	@classmethod
 	def tearDownClass(cls):

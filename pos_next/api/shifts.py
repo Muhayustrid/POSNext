@@ -7,7 +7,17 @@ import json
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import add_to_date, cint, flt, get_datetime, getdate, now_datetime, nowdate, nowtime
+from frappe.utils import (
+	add_to_date,
+	cint,
+	flt,
+	get_datetime,
+	get_fullname,
+	getdate,
+	now_datetime,
+	nowdate,
+	nowtime,
+)
 
 from pos_next.api.utilities import get_wallet_payment_modes
 from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
@@ -24,6 +34,57 @@ from pos_next.services.sales_recap import (
 )
 from pos_next.shift_schedule import get_profile_slots, open_slots_now
 from pos_next.utils.authz import is_management_user
+
+
+def get_cash_handover(pos_profile, for_update=False):
+	"""Expected drawer cash from the previous closing on this profile today."""
+	lock_clause = " FOR UPDATE" if for_update else ""
+	closings = frappe.db.sql(
+		f"""
+		SELECT
+			pcs.name, pcs.user, pcs.period_end_date, pcs.auto_closed
+		FROM `tabPOS Closing Shift` pcs
+		INNER JOIN `tabPOS Opening Shift` pos ON pcs.pos_opening_shift = pos.name
+		WHERE pcs.docstatus = 1
+		  AND pcs.pos_profile = %(pos_profile)s
+		  AND pos.docstatus = 1
+		  AND pos.posting_date = %(today)s
+		ORDER BY pcs.period_end_date DESC, pcs.creation DESC
+		LIMIT 1
+		{lock_clause}
+		""",
+		{"pos_profile": pos_profile, "today": nowdate()},
+		as_dict=True,
+	)
+	if not closings:
+		return None
+
+	closing = closings[0]
+	modal_awal_modes = get_modal_awal_modes(pos_profile)
+	details = frappe.db.sql(
+		f"""
+		SELECT mode_of_payment, expected_amount
+		FROM `tabPOS Closing Shift Detail`
+		WHERE parent = %(parent)s AND parenttype = 'POS Closing Shift'
+		{lock_clause}
+		""",
+		{"parent": closing.name},
+		as_dict=True,
+	)
+	amounts = {}
+	for d in details:
+		mode = d.get("mode_of_payment")
+		if mode in modal_awal_modes:
+			amounts[mode] = flt(d.get("expected_amount"))
+
+	return {
+		"closing": closing.name,
+		"user": closing.user,
+		"user_full_name": get_fullname(closing.user),
+		"period_end_date": str(closing.period_end_date),
+		"auto_closed": cint(closing.auto_closed),
+		"amounts": amounts,
+	}
 
 
 @frappe.whitelist()
@@ -96,6 +157,7 @@ def get_opening_dialog_data():
 			for s in all_slots
 		]
 	data["slots"] = slots
+	data["handover"] = {p: get_cash_handover(p) for p in pos_profiles_list}
 
 	return data
 
@@ -191,19 +253,22 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 			throw_profile_in_use(pos_profile, active)
 		return _shift_payload(frappe.get_doc("POS Opening Shift", active.name), resumed=True)
 
-	new_pos_opening = frappe.get_doc(
-		{
-			"doctype": "POS Opening Shift",
-			"period_start_date": get_datetime(),
-			"posting_date": nowdate(),
-			"posting_time": nowtime(),
-			"user": frappe.session.user,
-			"pos_profile": pos_profile,
-			"shift_slot": shift_slot,
-			"company": company,
-			"status": "Open",
-		}
-	)
+	handover = get_cash_handover(pos_profile, for_update=True)
+
+	opening_payload = {
+		"doctype": "POS Opening Shift",
+		"period_start_date": get_datetime(),
+		"posting_date": nowdate(),
+		"posting_time": nowtime(),
+		"user": frappe.session.user,
+		"pos_profile": pos_profile,
+		"shift_slot": shift_slot,
+		"company": company,
+		"status": "Open",
+	}
+	if handover:
+		opening_payload["handover_from"] = handover["closing"]
+	new_pos_opening = frappe.get_doc(opening_payload)
 
 	# Add balance details - map opening_amount to amount
 	# Only the Modal Awal modes may carry an opening balance: a non-cash
@@ -217,9 +282,10 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 		opening_amount = flt(detail.get("opening_amount", 0))
 		if opening_amount and mode not in modal_awal_modes:
 			opening_amount = 0
-		formatted_balance_details.append(
-			{"mode_of_payment": mode, "amount": opening_amount}
-		)
+		row = {"mode_of_payment": mode, "amount": opening_amount}
+		if handover:
+			row["proposed_amount"] = flt(handover["amounts"].get(mode, 0))
+		formatted_balance_details.append(row)
 
 	new_pos_opening.set("balance_details", formatted_balance_details)
 	new_pos_opening.insert(ignore_permissions=True)

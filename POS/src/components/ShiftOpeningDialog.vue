@@ -143,7 +143,7 @@
 
 					<div>
 						<label class="block text-sm font-medium text-gray-700 mb-3 text-start">
-							{{ __("Modal Awal") }}
+							{{ handover ? __("Cash Received from Previous Shift") : __("Modal Awal") }}
 						</label>
 
 						<div v-if="dialogDataResource.loading" class="text-center py-4">
@@ -162,19 +162,47 @@
 									<label class="text-sm font-medium text-gray-700">
 										{{ method.mode_of_payment }}
 									</label>
+									<p
+										v-if="handover && handover.amounts?.[method.mode_of_payment] != null"
+										class="text-xs text-gray-500 mt-0.5"
+									>
+										{{
+											__("System: {0} (shift {1}, closed {2})", [
+												formatCurrency(handover.amounts[method.mode_of_payment]),
+												handover.user_full_name || handover.user || "",
+												formatTime(handover.period_end_date) ||
+													formatDateTime(handover.period_end_date) ||
+													"",
+											])
+										}}<span v-if="handover.auto_closed"> ({{ __("closed automatically") }})</span>
+									</p>
 								</div>
-								<div class="w-32">
+								<div :class="handover ? 'w-48 sm:w-64 text-end' : 'w-32 text-end'">
 									<input
 										class="w-full h-11 sm:h-10 min-h-[40px] rounded border border-gray-300 bg-transparent px-3 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
 										:value="openingBalances[method.mode_of_payment]"
 										inputmode="decimal"
 										autocomplete="off"
-										placeholder="0"
+										:placeholder="
+											handover
+												? __('Count the cash and enter the amount received')
+												: '0'
+										"
 										@input="
 											openingBalances[method.mode_of_payment] =
 												formatAmountInput($event.target.value)
 										"
 									/>
+									<p
+										v-if="hasHandoverDifference(method.mode_of_payment)"
+										class="text-xs text-gray-500 mt-1"
+									>
+										{{
+											__("Difference: {0}", [
+												handoverDifferenceFormatted(method.mode_of_payment),
+											])
+										}}
+									</p>
 								</div>
 							</div>
 						</div>
@@ -293,7 +321,7 @@
 						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
 						@click="openShift"
 						:loading="createShiftResource.loading"
-						:disabled="isOutsideShiftHours"
+						:disabled="isOutsideShiftHours || handoverIncomplete"
 					>
 						{{ __("Open Shift") }}
 					</Button>
@@ -353,7 +381,7 @@ const open = computed({
 
 const { createOpeningShift, getOpeningDialogData, checkOpeningShift } =
 	useShift()
-const { formatDateTime } = useFormatters()
+const { formatCurrency, formatDateTime, formatTime } = useFormatters()
 const { showInfo } = useToast()
 
 const step = ref(1)
@@ -415,6 +443,41 @@ const openSlots = computed(() => {
 const isOutsideShiftHours = computed(() => {
 	return hasProfileSlots.value && openSlots.value.length === 0
 })
+
+const handover = computed(() => {
+	if (!dialogDataResource.data?.handover || !selectedProfile.value) return null
+	return dialogDataResource.data.handover[selectedProfile.value.name] ?? null
+})
+
+const handoverIncomplete = computed(() => {
+	if (!handover.value) return false
+	return cashPaymentMethods.value.some((method) => {
+		const val = openingBalances.value[method.mode_of_payment]
+		return val === undefined || val === null || String(val).trim() === ""
+	})
+})
+
+function getHandoverDifference(mode) {
+	if (!handover.value || handover.value.amounts?.[mode] == null) return null
+	const raw = openingBalances.value[mode]
+	if (raw === undefined || raw === null || String(raw).trim() === "") {
+		return null
+	}
+	const proposed = Number(handover.value.amounts[mode]) || 0
+	const entered = parseAmountInput(raw)
+	return entered - proposed
+}
+
+function hasHandoverDifference(mode) {
+	const diff = getHandoverDifference(mode)
+	return diff !== null && diff !== 0
+}
+
+function handoverDifferenceFormatted(mode) {
+	const diff = getHandoverDifference(mode)
+	if (diff == null) return ""
+	return diff > 0 ? `+${formatCurrency(diff)}` : formatCurrency(diff)
+}
 
 watch(
 	openSlots,
@@ -491,6 +554,9 @@ function hhmm(time) {
 }
 
 function selectPosProfile(profile) {
+	if (selectedProfile.value?.name !== profile?.name) {
+		openingBalances.value = {}
+	}
 	selectedProfile.value = profile
 	selectedSlot.value = null
 }
@@ -528,7 +594,12 @@ async function nextStep() {
 }
 
 async function openShift() {
-	if (!selectedProfile.value || isOutsideShiftHours.value) return
+	if (
+		!selectedProfile.value ||
+		isOutsideShiftHours.value ||
+		handoverIncomplete.value
+	)
+		return
 
 	// Prepare balance details: all payment methods are sent so closing can reconcile them,
 	// but only Cash may carry an opening amount; non-cash is strictly 0.

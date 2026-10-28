@@ -16,6 +16,7 @@
   "company",
   "pos_profile",
   "shift_slot",
+  "handover_from",
   "pos_closing_shift",
   "column_break_7",
   "user",
@@ -100,6 +101,13 @@
    "fieldname": "shift_slot",
    "fieldtype": "Data",
    "label": "Shift Slot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "handover_from",
+   "fieldtype": "Link",
+   "label": "Handover From",
+   "options": "POS Closing Shift",
    "read_only": 1
   },
   {

@@ -6,7 +6,8 @@
  "engine": "InnoDB",
  "field_order": [
   "mode_of_payment",
-  "amount"
+  "amount",
+  "proposed_amount"
  ],
  "fields": [
   {
@@ -25,6 +26,15 @@
    "label": "Modal Awal",
    "options": "company:company_currency",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "proposed_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Menurut Sistem",
+   "options": "company:company_currency",
+   "read_only": 1
   }
  ],
  "istable": 1,

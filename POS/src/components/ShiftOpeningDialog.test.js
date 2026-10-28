@@ -92,6 +92,8 @@ vi.mock("../composables/useShift", () => ({
 vi.mock("../composables/useFormatters", () => ({
 	useFormatters: () => ({
 		formatDateTime: (v) => String(v ?? ""),
+		formatTime: (v) => String(v ?? ""),
+		formatCurrency: (v) => String(v ?? ""),
 	}),
 }))
 
@@ -514,6 +516,217 @@ describe("ShiftOpeningDialog shift slots and Modal Awal cash only", () => {
 			pos_profile: "Profile 1",
 			company: "Test Co",
 			balance_details: [{ mode_of_payment: "Cash", opening_amount: 0 }],
+		})
+	})
+
+	describe("ShiftOpeningDialog cash handover from previous shift", () => {
+		const DIALOG_DATA_URL = "pos_next.api.shifts.get_opening_dialog_data"
+
+		const baseDialogData = (handover = null) => ({
+			payments_method: [
+				{
+					name: "pm1",
+					parent: "Profile 1",
+					mode_of_payment: "Cash",
+					is_drawer_cash: true,
+				},
+			],
+			slots: { "Profile 1": [] },
+			handover: {
+				"Profile 1": handover,
+			},
+		})
+
+		it("no handover shows Modal Awal and enables Open Shift with empty input", async () => {
+			resourceImpls.byUrl[DIALOG_DATA_URL] = () => baseDialogData(null)
+			const wrapper = await mountOpenDialog()
+			wrapper.vm.selectedProfile = PROFILES[0]
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			expect(wrapper.vm.step).toBe(2)
+			expect(wrapper.text()).toContain("Modal Awal")
+			expect(wrapper.text()).not.toContain("Cash Received from Previous Shift")
+
+			const openButton = wrapper
+				.findAll("button")
+				.find((b) => b.text().includes("Open Shift"))
+			expect(openButton.attributes("disabled")).toBeUndefined()
+		})
+
+		it("handover switches label, shows System line with formatted amount, and disables Open Shift while empty", async () => {
+			resourceImpls.byUrl[DIALOG_DATA_URL] = () =>
+				baseDialogData({
+					amounts: { Cash: 1000000 },
+					user_full_name: "Kasir A",
+					period_end_date: "2026-10-28 14:02:00",
+					auto_closed: 0,
+				})
+			const wrapper = await mountOpenDialog()
+			wrapper.vm.selectedProfile = PROFILES[0]
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			expect(wrapper.vm.step).toBe(2)
+			expect(wrapper.text()).toContain("Cash Received from Previous Shift")
+			expect(wrapper.text()).not.toContain("Modal Awal")
+			expect(wrapper.text()).toContain("System:")
+			expect(wrapper.text()).toContain("1000000")
+			expect(wrapper.text()).toContain("Kasir A")
+
+			const openButton = wrapper
+				.findAll("button")
+				.find((b) => b.text().includes("Open Shift"))
+			expect(openButton.attributes("disabled")).toBeDefined()
+
+			const input = wrapper.find("input")
+			expect(input.attributes("placeholder")).toBe(
+				"Count the cash and enter the amount received",
+			)
+		})
+
+		it("typing 0 enables Open Shift and submits opening_amount 0", async () => {
+			resourceImpls.byUrl[DIALOG_DATA_URL] = () =>
+				baseDialogData({
+					amounts: { Cash: 1000000 },
+					user_full_name: "Kasir A",
+					period_end_date: "2026-10-28 14:02:00",
+					auto_closed: 0,
+				})
+			const wrapper = await mountOpenDialog()
+			wrapper.vm.selectedProfile = PROFILES[0]
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			const input = wrapper.find("input")
+			await input.setValue("0")
+			await flushPromises()
+
+			const openButton = wrapper
+				.findAll("button")
+				.find((b) => b.text().includes("Open Shift"))
+			expect(openButton.attributes("disabled")).toBeUndefined()
+
+			await wrapper.vm.openShift()
+			await flushPromises()
+
+			expect(shiftMocks.createOpeningShift.submit).toHaveBeenCalledWith(
+				expect.objectContaining({
+					balance_details: [{ mode_of_payment: "Cash", opening_amount: 0 }],
+				}),
+			)
+		})
+
+		it("typing 200000 shows Difference with negative difference, typing 1000000 hides it", async () => {
+			resourceImpls.byUrl[DIALOG_DATA_URL] = () =>
+				baseDialogData({
+					amounts: { Cash: 1000000 },
+					user_full_name: "Kasir A",
+					period_end_date: "2026-10-28 14:02:00",
+					auto_closed: 0,
+				})
+			const wrapper = await mountOpenDialog()
+			wrapper.vm.selectedProfile = PROFILES[0]
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			const input = wrapper.find("input")
+			await input.setValue("200000")
+			await flushPromises()
+
+			expect(wrapper.text()).toContain("Difference:")
+			expect(wrapper.text()).toContain("-800000")
+
+			await input.setValue("1000000")
+			await flushPromises()
+
+			expect(wrapper.text()).not.toContain("Difference:")
+		})
+
+		it("shows closed automatically when auto_closed is 1", async () => {
+			resourceImpls.byUrl[DIALOG_DATA_URL] = () =>
+				baseDialogData({
+					amounts: { Cash: 1000000 },
+					user_full_name: "Kasir A",
+					period_end_date: "2026-10-28 14:02:00",
+					auto_closed: 1,
+				})
+			const wrapper = await mountOpenDialog()
+			wrapper.vm.selectedProfile = PROFILES[0]
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			expect(wrapper.text()).toContain("closed automatically")
+		})
+
+		it("clears opening balances when switching POS profile so handover validation re-checks for the new profile", async () => {
+			resourceImpls.byUrl[DIALOG_DATA_URL] = () => ({
+				payments_method: [
+					{
+						name: "pm1",
+						parent: "Profile 1",
+						mode_of_payment: "Cash",
+						is_drawer_cash: true,
+					},
+					{
+						name: "pm2",
+						parent: "Profile 2",
+						mode_of_payment: "Cash",
+						is_drawer_cash: true,
+					},
+				],
+				slots: { "Profile 1": [], "Profile 2": [] },
+				handover: {
+					"Profile 1": {
+						amounts: { Cash: 1000000 },
+						user_full_name: "Kasir A",
+						period_end_date: "2026-10-28 14:02:00",
+						auto_closed: 0,
+					},
+					"Profile 2": {
+						amounts: { Cash: 500000 },
+						user_full_name: "Kasir B",
+						period_end_date: "2026-10-28 14:05:00",
+						auto_closed: 0,
+					},
+				},
+			})
+			const wrapper = await mountOpenDialog()
+			wrapper.vm.selectPosProfile(PROFILES[0])
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			expect(wrapper.vm.step).toBe(2)
+			const input = wrapper.find("input")
+			await input.setValue("200000")
+			await flushPromises()
+
+			expect(wrapper.vm.openingBalances.Cash).toBe("200.000")
+			let openButton = wrapper
+				.findAll("button")
+				.find((b) => b.text().includes("Open Shift"))
+			expect(openButton.attributes("disabled")).toBeUndefined()
+
+			// Back to step 1
+			wrapper.vm.step = 1
+			await flushPromises()
+
+			// Select Profile 2
+			wrapper.vm.selectPosProfile(PROFILES[1])
+			await flushPromises()
+
+			// Balances must be cleared
+			expect(wrapper.vm.openingBalances).toEqual({})
+
+			// Proceed to step 2 for Profile 2
+			await wrapper.vm.nextStep()
+			await flushPromises()
+
+			expect(wrapper.vm.handoverIncomplete).toBe(true)
+			openButton = wrapper
+				.findAll("button")
+				.find((b) => b.text().includes("Open Shift"))
+			expect(openButton.attributes("disabled")).toBeDefined()
 		})
 	})
 })
