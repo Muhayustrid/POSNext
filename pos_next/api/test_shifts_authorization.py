@@ -84,7 +84,12 @@ class TestShiftsAuthorization(FrappeTestCase):
 		cls.cashier2 = f"shift-auth.{uuid.uuid4().hex[:8]}@example.com"
 		for email in (cls.intruder, cls.manager, cls.cashier, cls.cashier2):
 			frappe.get_doc(
-				{"doctype": "User", "email": email, "first_name": "Shift Auth Tester"}
+				{
+					"doctype": "User",
+					"email": email,
+					"first_name": "Shift Auth Tester",
+					"send_welcome_email": 0,
+				}
 			).insert()
 		# the cashiers may open shifts on the profile (POS Profile User rows;
 		# removed again in teardown — shared dev profile)
@@ -437,7 +442,12 @@ class TestShiftManagerGates(FrappeTestCase):
 		cls.manager = f"shift-gate.{uuid.uuid4().hex[:8]}@example.com"
 		for email in (cls.cashier_a, cls.cashier_b, cls.manager):
 			frappe.get_doc(
-				{"doctype": "User", "email": email, "first_name": "Shift Gate Tester"}
+				{
+					"doctype": "User",
+					"email": email,
+					"first_name": "Shift Gate Tester",
+					"send_welcome_email": 0,
+				}
 			).insert(ignore_permissions=True)
 		frappe.get_doc("User", cls.manager).add_roles("POSNext Manager")
 		cls.addClassCleanup(cls._revoke_role, cls.manager, "POSNext Manager")

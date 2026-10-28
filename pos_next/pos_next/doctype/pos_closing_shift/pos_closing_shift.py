@@ -163,6 +163,36 @@ class POSClosingShift(Document):
 		# link invoices with this closing shift so ERPNext can block edits
 		self._set_closing_entry_invoices()
 
+	def before_cancel(self):
+		# POS Opening Shift's pos_closing_shift links back to this closing doc
+		# and is unlinked in on_cancel. But handover_from references from subsequent
+		# opening shifts must NOT be ignored: cancelling a closing shift whose cash
+		# was handed over to a subsequent shift leaves that shift dangling and would
+		# reactivate this shift while the other is open.
+		handover_openings = frappe.db.get_all(
+			"POS Opening Shift",
+			filters={"handover_from": self.name, "docstatus": ["!=", 2]},
+			pluck="name",
+		)
+		if handover_openings:
+			frappe.throw(
+				_(
+					"Cannot cancel closing shift {0} because it is the cash handover source for opening shift {1}."
+				).format(self.name, ", ".join(handover_openings))
+			)
+		from pos_next.pos_next.doctype.pos_opening_shift.pos_opening_shift import (
+			get_active_profile_shift,
+		)
+
+		active = get_active_profile_shift(self.pos_profile, exclude=self.pos_opening_shift)
+		if active:
+			frappe.throw(
+				_(
+					"Cannot cancel closing shift {0} because POS Profile {1} already has an active open shift {2}."
+				).format(self.name, self.pos_profile, active.name)
+			)
+		self.ignore_linked_doctypes = ("POS Opening Shift",)
+
 	def on_cancel(self):
 		if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
 			opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)

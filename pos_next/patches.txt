@@ -43,3 +43,4 @@ pos_next.patches.v2_27_0.group_wide_slot_settings
 pos_next.patches.v2_28_0.remove_profile_schedule_fields
 pos_next.patches.v2_29_0.add_opname_row_photo_field
 pos_next.patches.v2_30_0.block_out_of_stock_items
+pos_next.patches.v2_31_0.enable_cash_handover

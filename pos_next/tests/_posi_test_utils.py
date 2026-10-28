@@ -155,6 +155,9 @@ class POSInvoiceModeMixin:
 			if doc.docstatus == 1:
 				doc.reload()
 				doc.flags.ignore_permissions = True
+				for child in frappe.get_all("POS Opening Shift", {"handover_from": doc.name}, pluck="name"):
+					frappe.db.set_value("POS Opening Shift", child, "docstatus", 2, update_modified=False)
+					frappe.delete_doc("POS Opening Shift", child, force=1, ignore_permissions=True)
 				doc.cancel()
 			frappe.delete_doc("POS Closing Shift", doc.name, force=1, ignore_permissions=True)
 		# safety net on this shared site: any merge logs still pointing at

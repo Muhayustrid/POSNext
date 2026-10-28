@@ -1,5 +1,5 @@
 <template>
-	<Dialog v-model="open" :options="{ title: __('Open POS Shift'), size: 'xl' }">
+	<Dialog v-model="open" :options="{ title: __('Open POS Shift'), size: step === 2 && hasProfileSlots ? '3xl' : 'xl' }">
 		<template #body-content>
 			<div class="pos-dialog-bound flex flex-col gap-6 pe-1">
 				<!-- Step 1: Select POS Profile -->
@@ -85,105 +85,211 @@
 						</div>
 					</div>
 
-					<!-- Shift slot selector / display -->
-					<div v-if="hasProfileSlots" class="mb-2">
-						<!-- Two or more open slots: show picker, default is first -->
-						<div v-if="openSlots.length > 1" class="flex flex-col gap-1 text-start">
-							<label for="shift-slot-select" class="block text-sm font-medium text-gray-700 mb-1">
-								{{ __("Shift") }}
-							</label>
-							<select
-								id="shift-slot-select"
-								v-model="selectedSlot"
-								class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer min-h-[44px] sm:min-h-[40px] touch-manipulation"
+					<div :class="hasProfileSlots ? 'grid grid-cols-1 md:grid-cols-2 gap-4 items-start' : ''">
+						<!-- Shift slot picker -->
+						<section
+							v-if="hasProfileSlots"
+							class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-start"
+						>
+							<h3 class="text-lg font-semibold text-gray-900">{{ __("Shift") }}</h3>
+							<p class="text-sm text-gray-500 mt-0.5">{{
+								openSlots.length > 1 ? __("Choose the shift to open.") : __("The shift that will be opened.")
+							}}</p>
+
+							<div
+								v-if="openSlots.length > 0"
+								class="flex flex-col gap-2 mt-3"
+								:role="openSlots.length > 1 ? 'radiogroup' : undefined"
 							>
-								<option
+								<label
 									v-for="slot in openSlots"
 									:key="slot.shift_name"
-									:value="slot.shift_name"
+									:class="[
+										'flex items-center gap-3 rounded-lg border bg-white px-4 py-4 cursor-pointer min-h-[44px] touch-manipulation transition-colors',
+										selectedSlot === slot.shift_name
+											? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+											: 'border-gray-200 hover:border-blue-300',
+									]"
 								>
-									{{ slot.shift_name }} ({{ hhmm(slot.start_time) }} – {{ hhmm(slot.end_time) }})
-								</option>
-							</select>
-						</div>
-
-						<!-- Exactly one open slot: show name without a picker -->
-						<div
-							v-else-if="openSlots.length === 1"
-							class="text-start p-3 bg-gray-50 rounded-lg border border-gray-200"
-						>
-							<div class="flex items-center justify-between">
-								<span class="text-xs font-medium text-gray-500 uppercase tracking-wider">
-									{{ __("Shift") }}
-								</span>
-								<span class="text-xs text-blue-700 font-medium">
-									🕒 {{ hhmm(openSlots[0].start_time) }} – {{ hhmm(openSlots[0].end_time) }}
-								</span>
-							</div>
-							<p class="text-sm font-semibold text-gray-900 mt-1">
-								{{ openSlots[0].shift_name }}
-							</p>
-						</div>
-
-						<!-- Zero open slots: outside shift hours message -->
-						<div
-							v-else
-							class="rounded-lg bg-amber-50 border border-amber-200 p-4 text-start"
-						>
-							<div class="flex items-center gap-2">
-								<span class="text-amber-800 font-medium text-sm">
-									⚠️ {{ __("Outside shift hours") }}
-								</span>
-							</div>
-							<p class="text-xs text-amber-700 mt-1">
-								{{ __("A shift cannot be opened outside shift hours.") }}
-							</p>
-						</div>
-					</div>
-
-					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-3 text-start">
-							{{ __("Modal Awal") }}
-						</label>
-
-						<div v-if="dialogDataResource.loading" class="text-center py-4">
-							<div
-								class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"
-							></div>
-						</div>
-
-						<div v-else-if="cashPaymentMethods.length > 0" class="flex flex-col gap-3">
-							<div
-								v-for="method in cashPaymentMethods"
-								:key="method.name"
-								class="flex items-center gap-3 p-3 border rounded-lg"
-							>
-								<div class="flex-1 text-start">
-									<label class="text-sm font-medium text-gray-700">
-										{{ method.mode_of_payment }}
-									</label>
-								</div>
-								<div class="w-32">
+									<!-- A single open slot needs no choice: show it as a plain card -->
 									<input
-										class="w-full h-11 sm:h-10 min-h-[40px] rounded border border-gray-300 bg-transparent px-3 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
-										:value="openingBalances[method.mode_of_payment]"
-										inputmode="decimal"
-										autocomplete="off"
-										placeholder="0"
-										@input="
-											openingBalances[method.mode_of_payment] =
-												formatAmountInput($event.target.value)
-										"
+										v-if="openSlots.length > 1"
+										v-model="selectedSlot"
+										type="radio"
+										name="shift-slot"
+										:value="slot.shift_name"
+										class="h-5 w-5 text-blue-600 focus:ring-blue-500"
 									/>
+									<span class="flex flex-col">
+										<span class="text-base font-semibold text-gray-900">{{ slot.shift_name }}</span>
+										<span class="text-sm text-gray-500 tabular-nums">
+											{{ hhmm(slot.start_time) }} – {{ hhmm(slot.end_time) }}
+										</span>
+									</span>
+								</label>
+							</div>
+
+							<!-- Zero open slots: outside shift hours message -->
+							<div v-else class="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-4">
+								<p class="text-amber-800 font-medium text-sm">{{ __("Outside shift hours") }}</p>
+								<p class="text-xs text-amber-700 mt-1">
+									{{ __("A shift cannot be opened outside shift hours.") }}
+								</p>
+							</div>
+						</section>
+
+						<!-- Cash -->
+						<section
+							:class="[
+								'text-start',
+								hasProfileSlots ? 'rounded-xl border border-gray-200 p-4' : '',
+							]"
+						>
+							<h3 class="text-lg font-semibold text-gray-900">
+								{{ handover ? __("Cash Received from Previous Shift") : __("Modal Awal") }}
+							</h3>
+							<p v-if="handover" class="text-sm text-gray-500 mt-0.5">
+								{{ __("Cash handed over from the previous shift, according to the system.") }}
+							</p>
+
+							<div v-if="dialogDataResource.loading" class="text-center py-4">
+								<div
+									class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"
+								></div>
+							</div>
+
+							<div v-else-if="handover && cashPaymentMethods.length > 0" class="flex flex-col gap-5 mt-3">
+								<div v-for="method in cashPaymentMethods" :key="method.name" class="flex flex-col gap-4">
+									<div
+										v-if="handover.amounts?.[method.mode_of_payment] != null"
+										class="rounded-lg bg-gray-100 p-4"
+									>
+										<div class="flex items-center gap-3">
+											<div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50">
+												<svg
+													class="h-6 w-6 text-blue-600"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="1.75"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<circle cx="8" cy="8" r="6" />
+													<path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
+													<path d="M7 6h1v4" />
+													<path d="m16.71 13.88.7.71-2.82 2.82" />
+												</svg>
+											</div>
+											<div class="min-w-0">
+												<p class="text-sm text-gray-500">
+													{{ __("{0} (System)", [method.mode_of_payment]) }}
+												</p>
+												<p class="text-3xl font-bold text-gray-900 tabular-nums">
+													{{ currencySymbol }} {{ formatCurrency(handover.amounts[method.mode_of_payment]) }}
+												</p>
+											</div>
+										</div>
+										<div class="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-500">
+											<p>{{ __("Shift {0}", [handover.user_full_name || handover.user || ""]) }}</p>
+											<p class="flex flex-wrap items-center gap-2">
+												{{
+													__("Closed at {0}", [
+														formatTime(handover.period_end_date) ||
+															formatDateTime(handover.period_end_date) ||
+															"",
+													])
+												}}
+												<span
+													v-if="handover.auto_closed"
+													class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+												>
+													{{ __("closed automatically") }}
+												</span>
+											</p>
+										</div>
+									</div>
+
+									<div>
+										<label :for="`handover-${method.name}`" class="block text-base font-semibold text-gray-900">
+											{{ __("Amount Received") }}
+										</label>
+										<p class="text-sm text-gray-500 mb-2">
+											{{ __("Count the cash and enter the amount received") }}
+										</p>
+										<div
+											class="flex h-14 overflow-hidden rounded-lg border border-gray-300 bg-white focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/30"
+										>
+											<span class="flex items-center border-e border-gray-300 bg-gray-50 px-4 text-gray-500">
+												{{ currencySymbol }}
+											</span>
+											<input
+												:id="`handover-${method.name}`"
+												class="min-w-0 flex-1 border-0 bg-transparent px-4 text-2xl font-semibold text-gray-900 tabular-nums text-end placeholder-gray-300 focus:outline-none focus:ring-0"
+												:value="openingBalances[method.mode_of_payment]"
+												inputmode="decimal"
+												autocomplete="off"
+												placeholder="0"
+												@input="
+													openingBalances[method.mode_of_payment] =
+														formatAmountInput($event.target.value)
+												"
+											/>
+										</div>
+										<p
+											v-if="hasHandoverDifference(method.mode_of_payment)"
+											class="mt-2 inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-sm font-medium text-amber-800 tabular-nums"
+										>
+											{{
+												__("Difference: {0}", [
+													handoverDifferenceFormatted(method.mode_of_payment),
+												])
+											}}
+										</p>
+										<p
+											v-else-if="getHandoverDifference(method.mode_of_payment) === 0"
+											class="mt-2 inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-sm font-medium text-green-800"
+										>
+											{{ __("Matches system") }}
+										</p>
+									</div>
 								</div>
 							</div>
-						</div>
 
-						<div v-else class="text-center py-4 text-gray-500">
-							<p class="text-sm">
-								{{ __("No payment methods configured for this POS Profile") }}
-							</p>
-						</div>
+							<div v-else-if="cashPaymentMethods.length > 0" class="flex flex-col gap-3 mt-3">
+								<div
+									v-for="method in cashPaymentMethods"
+									:key="method.name"
+									class="flex items-center gap-3 p-3 border rounded-lg"
+								>
+									<div class="flex-1 text-start">
+										<label class="text-sm font-medium text-gray-700">
+											{{ method.mode_of_payment }}
+										</label>
+									</div>
+									<div class="w-32">
+										<input
+											class="w-full h-11 sm:h-10 min-h-[40px] rounded border border-gray-300 bg-transparent px-3 py-1.5 text-base text-ink-gray-9 placeholder-ink-gray-4 focus:border-gray-500 focus:outline-none focus:ring-0 tabular-nums text-end font-semibold"
+											:value="openingBalances[method.mode_of_payment]"
+											inputmode="decimal"
+											autocomplete="off"
+											placeholder="0"
+											@input="
+												openingBalances[method.mode_of_payment] =
+													formatAmountInput($event.target.value)
+											"
+										/>
+									</div>
+								</div>
+							</div>
+
+							<div v-else class="text-center py-4 text-gray-500">
+								<p class="text-sm">
+									{{ __("No payment methods configured for this POS Profile") }}
+								</p>
+							</div>
+						</section>
 					</div>
 
 					<div v-if="dialogDataResource.error" class="rounded-md bg-red-50 p-4">
@@ -293,7 +399,7 @@
 						class="min-h-10 max-sm:min-h-11 px-4 touch-manipulation"
 						@click="openShift"
 						:loading="createShiftResource.loading"
-						:disabled="isOutsideShiftHours"
+						:disabled="isOutsideShiftHours || handoverIncomplete"
 					>
 						{{ __("Open Shift") }}
 					</Button>
@@ -333,6 +439,7 @@ import { useFormatters } from "../composables/useFormatters"
 import { useToast } from "../composables/useToast"
 import { formatAmountInput, parseAmountInput } from "../utils/amountInput"
 import { serverErrorMessage } from "../utils/apiWrapper"
+import { getCurrencySymbol } from "../utils/currency"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
 
 const props = defineProps({
@@ -353,7 +460,7 @@ const open = computed({
 
 const { createOpeningShift, getOpeningDialogData, checkOpeningShift } =
 	useShift()
-const { formatDateTime } = useFormatters()
+const { formatCurrency, formatDateTime, formatTime } = useFormatters()
 const { showInfo } = useToast()
 
 const step = ref(1)
@@ -415,6 +522,43 @@ const openSlots = computed(() => {
 const isOutsideShiftHours = computed(() => {
 	return hasProfileSlots.value && openSlots.value.length === 0
 })
+
+const handover = computed(() => {
+	if (!dialogDataResource.data?.handover || !selectedProfile.value) return null
+	return dialogDataResource.data.handover[selectedProfile.value.name] ?? null
+})
+
+const currencySymbol = computed(() => getCurrencySymbol(selectedProfile.value?.currency))
+
+const handoverIncomplete = computed(() => {
+	if (!handover.value) return false
+	return cashPaymentMethods.value.some((method) => {
+		const val = openingBalances.value[method.mode_of_payment]
+		return val === undefined || val === null || String(val).trim() === ""
+	})
+})
+
+function getHandoverDifference(mode) {
+	if (!handover.value || handover.value.amounts?.[mode] == null) return null
+	const raw = openingBalances.value[mode]
+	if (raw === undefined || raw === null || String(raw).trim() === "") {
+		return null
+	}
+	const proposed = Number(handover.value.amounts[mode]) || 0
+	const entered = parseAmountInput(raw)
+	return entered - proposed
+}
+
+function hasHandoverDifference(mode) {
+	const diff = getHandoverDifference(mode)
+	return diff !== null && diff !== 0
+}
+
+function handoverDifferenceFormatted(mode) {
+	const diff = getHandoverDifference(mode)
+	if (diff == null) return ""
+	return diff > 0 ? `+${formatCurrency(diff)}` : formatCurrency(diff)
+}
 
 watch(
 	openSlots,
@@ -491,6 +635,9 @@ function hhmm(time) {
 }
 
 function selectPosProfile(profile) {
+	if (selectedProfile.value?.name !== profile?.name) {
+		openingBalances.value = {}
+	}
 	selectedProfile.value = profile
 	selectedSlot.value = null
 }
@@ -528,7 +675,12 @@ async function nextStep() {
 }
 
 async function openShift() {
-	if (!selectedProfile.value || isOutsideShiftHours.value) return
+	if (
+		!selectedProfile.value ||
+		isOutsideShiftHours.value ||
+		handoverIncomplete.value
+	)
+		return
 
 	// Prepare balance details: all payment methods are sent so closing can reconcile them,
 	// but only Cash may carry an opening amount; non-cash is strictly 0.
