@@ -489,6 +489,35 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		self.assertEqual(result["company"], self.profile_company)
 		self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
 
+	def test_no_shift_falls_back_to_users_pos_profile(self):
+		"""Without an open shift the SPA sends no pos_profile — the user's own
+		assigned profile must still supply company + warehouse, not the site
+		default company (which the internal supplier may not transact with)."""
+		if not self.pos_profile:
+			self.skipTest("no POS Profile on this site")
+		row = frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.pos_profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": self.cashier_user,
+			}
+		)
+		row.db_insert()
+		frappe.local.flags.pop("pos_next_user_pos_profile", None)
+		frappe.set_user(self.cashier_user)
+		try:
+			result = self._save(
+				{"supplier": self.supplier, "items": [{"item_code": self.item, "qty": 1}]},
+			)
+			self.assertEqual(result["company"], self.profile_company)
+			self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
+		finally:
+			frappe.set_user(ADMIN)
+			frappe.db.delete("POS Profile User", {"name": row.name})
+			frappe.local.flags.pop("pos_next_user_pos_profile", None)
+
 	def test_pos_settings_supply_po_defaults(self):
 		"""POS Settings (per profile) is the default supplier/warehouse source."""
 		if not self.pos_profile:

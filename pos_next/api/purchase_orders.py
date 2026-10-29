@@ -77,12 +77,51 @@ def _parse(value):
 		frappe.throw(_("Invalid request data"), frappe.ValidationError)
 
 
+def _user_pos_profile():
+	"""The session user's own POS Profile, for calls made without an open shift
+	(the SPA then sends no pos_profile). The profile of the user's latest
+	shift wins while it is still enabled and assigned, else the first assigned
+	profile. Without it the company fell back to the site default, and an
+	internal supplier only allowed to transact with the outlet company failed
+	ERPNext's 'not allowed to transact with' check."""
+	user = frappe.session.user
+	cache = frappe.local.flags.setdefault("pos_next_user_pos_profile", {})
+	if user in cache:
+		return cache[user]
+	assigned = frappe.db.sql(
+		"""
+		SELECT p.name
+		FROM `tabPOS Profile` p
+		INNER JOIN `tabPOS Profile User` u ON u.parent = p.name
+		WHERE p.disabled = 0 AND u.user = %s
+		ORDER BY p.name
+		""",
+		user,
+		pluck=True,
+	)
+	profile = None
+	if assigned:
+		profile = (
+			frappe.db.get_value(
+				"POS Opening Shift",
+				{"user": user, "docstatus": 1, "pos_profile": ("in", assigned)},
+				"pos_profile",
+				order_by="period_start_date desc",
+			)
+			or assigned[0]
+		)
+	cache[user] = profile
+	return profile
+
+
 def _profile_value(pos_profile, fieldname):
+	pos_profile = pos_profile or _user_pos_profile()
 	return frappe.db.get_value("POS Profile", pos_profile, fieldname) if pos_profile else None
 
 
 def _po_setting(pos_profile, fieldname):
 	"""Field from this profile's enabled POS Settings row, else the global single."""
+	pos_profile = pos_profile or _user_pos_profile()
 	if not pos_profile:
 		return None
 	return get_effective_pos_setting(pos_profile, fieldname)
