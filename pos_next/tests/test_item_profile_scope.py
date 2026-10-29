@@ -5,7 +5,8 @@
 
 - search_by_barcode applies the same scope as the catalog query;
 - saving a POS Profile drops the cached scope right away (Desk edits);
-- only items with a valid selling Item Price on the profile price list show.
+- only items with a valid selling Item Price on the profile price list show —
+  for a Price Group outlet that is exactly the Price Group's items.
 
 Run via pos_next/_pn_run_tests.py pos_next.tests.test_item_profile_scope
 """
@@ -13,9 +14,12 @@ Run via pos_next/_pn_run_tests.py pos_next.tests.test_item_profile_scope
 from unittest import mock
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import FrappeTestCase
 
 from pos_next.api import items
+from pos_next.install import ensure_price_group_custom_fields
+from pos_next.tests import price_group_helpers as helpers
 
 
 class TestItemProfileScope(FrappeTestCase):
@@ -109,3 +113,39 @@ class TestPricedItemScope(FrappeTestCase):
 
 	def test_profile_without_price_list_is_unrestricted(self):
 		self.assertTrue(items._has_selling_price(frappe._dict(name=self.unpriced), None))
+
+
+class TestPriceGroupCatalogScope(IntegrationTestCase):
+	"""A Price Group outlet sells only the Price Group's items: the group's
+	managed price list becomes the outlet profile's selling price list, and the
+	sale catalog keeps only items priced on it — whatever their item group."""
+
+	def setUp(self):
+		super().setUp()
+		ensure_price_group_custom_fields(quiet=True)
+
+	def test_outlet_catalog_limited_to_price_group_items(self):
+		company = helpers.make_test_company("scope-pg")
+		warehouse = helpers.make_test_warehouse("scope-pg", company)
+		profile = helpers.make_test_pos_profile("scope-pg", company, warehouse)
+		in_group = helpers.make_test_item("scope-pg-in")
+		not_in_group = helpers.make_test_item("scope-pg-out")
+		helpers.make_price_group(
+			"PG-Scope-1",
+			items=[{"item_code": in_group, "rate": 10000}],
+			outlets=[{"company": company, "warehouse": warehouse}],
+		)
+
+		profile_doc = frappe.get_doc("POS Profile", profile)
+		conditions, params, joins = items._build_item_base_conditions(profile_doc, require_price=True)
+		shown = frappe.db.sql(
+			f"""SELECT i.name FROM `tabItem` i {joins}
+			WHERE {" AND ".join(conditions)} AND i.name IN (%s, %s)""",
+			[*params, in_group, not_in_group],
+			pluck=True,
+		)
+		self.assertEqual(shown, [in_group])
+		self.assertTrue(items._has_selling_price(frappe._dict(name=in_group), profile_doc.selling_price_list))
+		self.assertFalse(
+			items._has_selling_price(frappe._dict(name=not_in_group), profile_doc.selling_price_list)
+		)
