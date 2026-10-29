@@ -1792,18 +1792,23 @@ const emit = defineEmits(["update:modelValue"]);
 
 const show = ref(props.modelValue);
 
-// Sales Management (discount, credit, return rules) is a manager setting;
-// the server drops those fields from a cashier's save as well.
+// Stock and Sales Management are manager settings; the server drops those
+// fields from a cashier's save as well.
 const bootstrapStore = useBootstrapStore();
 const isManagement = computed(() => Boolean(bootstrapStore.data?.is_management));
+// A cashier may only tune printing (the server saves nothing else for them).
 const tabs = computed(() => [
-	{ id: "stock", label: __("Stock Management") },
-	...(isManagement.value ? [{ id: "sales", label: __("Sales Management") }] : []),
+	...(isManagement.value
+		? [
+				{ id: "stock", label: __("Stock Management") },
+				{ id: "sales", label: __("Sales Management") },
+			]
+		: []),
 	{ id: "printing", label: __("Printing") },
 ]);
 
 // State
-const activeTab = ref("stock");
+const activeTab = ref(isManagement.value ? "stock" : "printing");
 const loading = ref(true);
 const saving = ref(false);
 const warehousesList = ref([]);

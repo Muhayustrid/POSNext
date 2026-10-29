@@ -1566,13 +1566,14 @@ function setViewMode(mode) {
 	localStorage.setItem(VIEW_PREF_KEY, mode);
 }
 
-// No "All" chip: tapping the active chip again clears the filter (all items).
+// No "All" chip. An item group is mandatory: tapping the active group chip
+// keeps it selected. Brand chips still toggle off (brand sort mode).
 function handleFilterClick(value) {
-	if (value === activeFilterValue.value) value = null;
 	if (isBrandSortActive.value) {
-		itemStore.setSelectedBrand(value);
+		itemStore.setSelectedBrand(value === activeFilterValue.value ? null : value);
 		return;
 	}
+	if (value === activeFilterValue.value) return;
 	itemStore.setSelectedItemGroup(value);
 }
 
@@ -1657,8 +1658,12 @@ watch(sortBy, async (newSortBy, oldSortBy) => {
 		return;
 	}
 
-	if (oldSortBy === "brand" && selectedBrand.value) {
-		await itemStore.setSelectedBrand(null);
+	if (oldSortBy === "brand") {
+		if (selectedBrand.value) {
+			await itemStore.setSelectedBrand(null);
+		}
+		// back from brand mode: an item group is mandatory again
+		await itemStore.ensureItemGroupSelected();
 	}
 });
 

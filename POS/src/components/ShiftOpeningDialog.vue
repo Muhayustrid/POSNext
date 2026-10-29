@@ -658,8 +658,41 @@ async function nextStep() {
 			)
 			return
 		}
+		// manager on a profile someone already opened: join that shift directly,
+		// the opening balance was entered by whoever opened it
+		if (profile.joinable) {
+			await joinActiveShift()
+			return
+		}
 		await dialogDataResource.fetch()
 		step.value = 2
+	}
+}
+
+async function joinActiveShift() {
+	try {
+		// the server resumes the active shift before reading balance_details;
+		await createShiftResource.submit({
+			pos_profile: selectedProfile.value.name,
+			company: selectedProfile.value.company,
+			balance_details: [],
+			// never open an unfunded drawer if that shift closed meanwhile
+			join_only: 1,
+		})
+		showInfo(
+			__("POS Profile {0} is already active. Resumed shift {1}.", [
+				selectedProfile.value.name,
+				createShiftResource.data?.pos_opening_shift?.name,
+			]),
+		)
+		emit("shift-opened")
+		closeDialog("shift-opened")
+	} catch (error) {
+		console.error("Error joining shift:", error)
+		showBlockedPopup(
+			__("Open Shift"),
+			serverErrorMessage(createShiftResource.error || error),
+		)
 	}
 }
 

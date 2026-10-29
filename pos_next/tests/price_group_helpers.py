@@ -92,6 +92,7 @@ def make_test_company(suffix: str) -> str:
 	if frappe.db.table_exists("Expense Claim Account"):
 		frappe.db.sql(
 			"DELETE FROM `tabExpense Claim Account` WHERE company NOT IN (SELECT name FROM `tabCompany`)"
+			" OR default_account NOT IN (SELECT name FROM `tabAccount`)"
 		)
 	# Company.validate_abbr derives the abbreviation from word initials, so
 	# distinct suffixes (life10, life11) would collide on the same abbr; derive

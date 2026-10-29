@@ -4,6 +4,7 @@
 import json
 import unittest
 import uuid
+from unittest import mock
 
 import frappe
 from frappe import ValidationError
@@ -207,17 +208,17 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				)
 
 		cls.user = f"po.proxy.{cls._uniq()}@example.com"
-		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PO Proxy Tester"}).insert()
+		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PO Proxy Tester", "send_welcome_email": 0}).insert()
 
 		cls.cashier_user = f"po.cashier.{cls._uniq()}@example.com"
 		cashier = frappe.get_doc(
-			{"doctype": "User", "email": cls.cashier_user, "first_name": "PO Cashier Tester"}
+			{"doctype": "User", "email": cls.cashier_user, "first_name": "PO Cashier Tester", "send_welcome_email": 0}
 		).insert()
 		cashier.add_roles("Purchase User", "Stock User")
 
 		cls.manager_user = f"po.manager.{cls._uniq()}@example.com"
 		manager = frappe.get_doc(
-			{"doctype": "User", "email": cls.manager_user, "first_name": "PO Manager Tester"}
+			{"doctype": "User", "email": cls.manager_user, "first_name": "PO Manager Tester", "send_welcome_email": 0}
 		).insert()
 		manager.add_roles("Purchase User", "Stock User", "POSNext Manager")
 
@@ -302,6 +303,11 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 
 	def setUp(self):
 		self.pos = []
+		# cashier-persona tests run outside a real shift; the shift gate has
+		# its own tests (test_shift_gate_*)
+		shift = mock.patch("pos_next.api.purchase_orders._has_open_shift", return_value=True)
+		self.has_open_shift = shift.start()
+		self.addCleanup(shift.stop)
 
 	def tearDown(self):
 		# every PO this test created is cancelled + deleted (suite runs on a live dev site)
@@ -488,6 +494,54 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		)
 		self.assertEqual(result["company"], self.profile_company)
 		self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
+
+	def test_no_shift_falls_back_to_users_pos_profile(self):
+		"""Without an open shift the SPA sends no pos_profile — the user's own
+		assigned profile must still supply company + warehouse, not the site
+		default company (which the internal supplier may not transact with)."""
+		if not self.pos_profile:
+			self.skipTest("no POS Profile on this site")
+		row = frappe.get_doc(
+			{
+				"doctype": "POS Profile User",
+				"parent": self.pos_profile,
+				"parenttype": "POS Profile",
+				"parentfield": "applicable_for_users",
+				"user": self.cashier_user,
+			}
+		)
+		row.db_insert()
+		frappe.local.flags.pop("pos_next_user_pos_profile", None)
+		frappe.set_user(self.cashier_user)
+		try:
+			result = self._save(
+				{"supplier": self.supplier, "items": [{"item_code": self.item, "qty": 1}]},
+			)
+			self.assertEqual(result["company"], self.profile_company)
+			self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
+		finally:
+			frappe.set_user(ADMIN)
+			frappe.db.delete("POS Profile User", {"name": row.name})
+			frappe.local.flags.pop("pos_next_user_pos_profile", None)
+
+	def test_shift_gate_blocks_cashier_without_shift(self):
+		self.has_open_shift.return_value = False
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				save_purchase_order(self._data())
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_shift_gate_lets_manager_through_without_shift(self):
+		self.has_open_shift.return_value = False
+		frappe.set_user(self.manager_user)
+		try:
+			result = self._save()
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(result["docstatus"], 0)
+		self.assertIn("grand_total", result)
 
 	def test_pos_settings_supply_po_defaults(self):
 		"""POS Settings (per profile) is the default supplier/warehouse source."""

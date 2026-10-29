@@ -47,7 +47,7 @@ class TestCashierPermissions(FrappeTestCase):
         # a user whose ONLY role is POSNext Cashier — the pure cashier probe
         cls.cashier = f"cashier-perm.{uuid.uuid4().hex[:8]}@example.com"
         frappe.get_doc(
-            {"doctype": "User", "email": cls.cashier, "first_name": "Cashier Perm Tester"}
+            {"doctype": "User", "email": cls.cashier, "first_name": "Cashier Perm Tester", "send_welcome_email": 0}
         ).insert(ignore_permissions=True)
         frappe.get_doc(
             {
@@ -314,10 +314,16 @@ class TestCashierPermissions(FrappeTestCase):
     def test_production_recipe_read_only(self):
         self._assert_matrix("POS Production Recipe", granted=("read",), denied=("write", "create"))
 
-    def test_no_purchasing(self):
-        # design decision: cashiers sell and produce, they do not purchase
-        self._assert_matrix("Purchase Order", granted=(), denied=("create",))
-        self._assert_matrix("Purchase Receipt", granted=(), denied=("create",))
+    def test_purchasing_without_cancel(self):
+        # cashiers purchase from internal suppliers inside an open shift
+        # (purchase_orders._check_shift); cancel/amend stay with management
+        for doctype in ("Purchase Order", "Purchase Receipt"):
+            self._assert_matrix(
+                doctype,
+                granted=("read", "write", "create", "submit"),
+                denied=("cancel", "amend", "delete"),
+            )
+        self._assert_matrix("Supplier", granted=("read", "select"), denied=("write", "create"))
 
     def test_direct_print_permissions(self):
         from pos_next.api.qz import _PRINT_ROLES

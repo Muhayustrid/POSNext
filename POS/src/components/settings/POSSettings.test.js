@@ -102,6 +102,7 @@ vi.hoisted(() => {
 	};
 });
 
+import { useBootstrapStore } from "@/stores/bootstrap";
 import POSSettings from "./POSSettings.vue";
 
 describe("POSSettings iMin printing relayout and EOD print mode", () => {
@@ -244,6 +245,27 @@ describe("POSSettings iMin printing relayout and EOD print mode", () => {
 			})
 		);
 
+		wrapper.unmount();
+	});
+
+	it("shows a cashier only the Printing tab", async () => {
+		const wrapper = mountSettings();
+		await nextTick();
+		const tabs = wrapper.findAll("button").map((b) => b.text().trim());
+		expect(tabs).toContain("Printing");
+		expect(tabs).not.toContain("Stock Management");
+		expect(tabs).not.toContain("Sales Management");
+		wrapper.unmount();
+	});
+
+	it("shows management every settings tab", async () => {
+		useBootstrapStore().data = { is_management: true };
+		const wrapper = mountSettings();
+		await nextTick();
+		const tabs = wrapper.findAll("button").map((b) => b.text().trim());
+		expect(tabs).toEqual(
+			expect.arrayContaining(["Stock Management", "Sales Management", "Printing"]),
+		);
 		wrapper.unmount();
 	});
 });

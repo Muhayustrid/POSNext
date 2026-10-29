@@ -260,6 +260,28 @@ describe("ShiftOpeningDialog refuses a profile held by another cashier", () => {
 		expect(dialogData.fetch).not.toHaveBeenCalled()
 	})
 
+	it("joins a manager straight into the running shift without balances", async () => {
+		const wrapper = await mountOpenDialog()
+		shiftMocks.createOpeningShift.submit.mockClear()
+		wrapper.vm.selectedProfile = {
+			...PROFILES[0],
+			joinable: true,
+			active_shift: { name: "POPEN-1", user_name: "Jalu", since: "10-10-2026 05:35" },
+		}
+
+		await wrapper.vm.nextStep()
+
+		expect(wrapper.vm.step).toBe(1)
+		expect(shiftMocks.createOpeningShift.submit).toHaveBeenCalledWith(
+			expect.objectContaining({ pos_profile: "Profile 1", balance_details: [], join_only: 1 }),
+		)
+		const dialogData = resources.instances.find(
+			(r) => r.url === "pos_next.api.shifts.get_opening_dialog_data",
+		)
+		expect(dialogData.fetch).not.toHaveBeenCalled()
+		expect(wrapper.emitted("shift-opened")).toBeTruthy()
+	})
+
 	it("proceeds to balances for an unlocked profile", async () => {
 		const wrapper = await mountOpenDialog()
 		wrapper.vm.selectedProfile = PROFILES[0]

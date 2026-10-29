@@ -136,10 +136,24 @@ class TestItemSearchOnSite(unittest.TestCase):
 				VALUES (%s, %s, %s, 'Item', 'barcodes', 1, 0)""",
 				(frappe.generate_hash(length=10), BARCODE, ITEM_PREFIX + "KSB"),
 			)
+			# the sale catalog only lists items priced on the profile's price list
+			price_list = cls.profile.selling_price_list
+			if price_list:
+				currency = frappe.db.get_value("Price List", price_list, "currency")
+				for code in ("NG", "ET", "UB", "WJ", "AG", "AGL", "KSB"):
+					frappe.db.sql(
+						"""INSERT INTO `tabItem Price`
+						(name, item_code, price_list, selling, price_list_rate, currency,
+						uom, owner, modified_by, creation, modified)
+						VALUES (%s, %s, %s, 1, 1000, %s, 'Nos',
+						'Administrator', 'Administrator', %s, %s)""",
+						(frappe.generate_hash(length=10), ITEM_PREFIX + code, price_list, currency, ts, ts),
+					)
 			frappe.db.commit()
 
 	@classmethod
 	def tearDownClass(cls):
+		frappe.db.sql("DELETE FROM `tabItem Price` WHERE item_code LIKE %s", ("\\_PERFBE3-%",))
 		for table in ("`tabItem Barcode`", "`tabItem`"):
 			frappe.db.sql(
 				f"DELETE FROM {table} WHERE "

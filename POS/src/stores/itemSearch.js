@@ -2193,6 +2193,30 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 * @param {string} profile - POS Profile name
 	 * @param {boolean} autoLoadItems - Automatically load items after setting profile (default: true)
 	 */
+	/**
+	 * The catalog always has an item group selected (ItemsSelector never
+	 * clears it); it opens on the profile's first group (row order of the POS
+	 * Profile's Item Groups table) and keeps a still-valid pick.
+	 */
+	function selectFirstItemGroupIfUnset() {
+		// no configured groups = an unrestricted profile: stay on all items
+		if (!profileItemGroups.value?.length || !itemGroups.value.length) return;
+		if (selectedBrand.value || sortBy.value === "brand") return;
+		const valid = itemGroups.value.some((g) => g.item_group === selectedItemGroup.value);
+		if (!valid) {
+			selectedItemGroup.value = itemGroups.value[0].item_group;
+		}
+	}
+
+	/** Re-select (and load) the first item group when none is selected. */
+	async function ensureItemGroupSelected() {
+		const before = selectedItemGroup.value;
+		selectFirstItemGroupIfUnset();
+		if (selectedItemGroup.value !== before) {
+			await setSelectedItemGroup(selectedItemGroup.value);
+		}
+	}
+
 	async function setPosProfile(profile, autoLoadItems = true) {
 		// Skip re-initialization if same profile is already loaded and initialized
 		// This prevents redundant API calls when mobile tab switching
@@ -2237,6 +2261,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Set hierarchical item groups (with child_groups) - INSTANT tab display!
 			itemGroups.value = data?.item_groups_hierarchy || [];
 			log.info(`Loaded ${itemGroups.value.length} item groups with hierarchy`);
+			selectFirstItemGroupIfUnset();
 
 			// Profile data is in place — the catalog may render (0 groups is a
 			// valid loaded state). Must happen before loadAllItems so its guard
@@ -2282,6 +2307,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					log.info(
 						`Restored ${itemGroups.value.length} item groups from session cache (offline)`
 					);
+					selectFirstItemGroupIfUnset();
 
 					// Restored profile data counts as loaded
 					profileLoaded.value = true;
@@ -2364,6 +2390,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		setSearchTerm,
 		clearSearch,
 		setSelectedItemGroup,
+		ensureItemGroupSelected,
 		setSelectedBrand,
 		setCartItems, // Delegates to stock store for reservations
 		setPosProfile,

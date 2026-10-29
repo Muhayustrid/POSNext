@@ -359,6 +359,30 @@ class TestShiftsAuthorization(FrappeTestCase):
 			1,
 		)
 
+	def test_join_only_resumes_without_balance_and_never_opens_unfunded(self):
+		# the SPA joins a manager with balance_details=[] + join_only: resume the
+		# running shift, but refuse once it is gone instead of opening a drawer
+		# with no opening balance
+		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
+		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
+		frappe.get_doc("User", self.cashier2).add_roles("POSNext Manager")
+		self.addCleanup(self._revoke_role, self.cashier2, "POSNext Manager")
+		frappe.set_user(self.cashier2)
+		try:
+			joined = create_opening_shift(self.profile.name, self.profile.company, [], join_only=1)
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertTrue(joined["resumed"])
+		self.assertEqual(joined["pos_opening_shift"].get("name"), first["pos_opening_shift"].name)
+
+		submit_closing_shift(json.dumps({"pos_opening_shift": first["pos_opening_shift"].name}))
+		frappe.set_user(self.cashier2)
+		try:
+			with self.assertRaises(frappe.ValidationError):
+				create_opening_shift(self.profile.name, self.profile.company, [], join_only=1)
+		finally:
+			frappe.set_user(ADMIN)
+
 	def test_second_open_shift_refused_at_doctype_level_even_for_manager(self):
 		# Desk/import path: the doctype guard no longer exempts managers
 		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())

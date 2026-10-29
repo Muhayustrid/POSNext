@@ -198,7 +198,10 @@ doc_events = {
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
 	"POS Profile": {
-		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
+		"on_update": [
+			"pos_next.api.items.clear_profile_item_caches",
+			"pos_next.realtime_events.emit_pos_profile_updated_event",
+		],
 		"validate": "pos_next.shift_schedule.validate_profile_schedule",
 	},
 	"Company": {
@@ -292,7 +295,8 @@ scheduler_events = {
 
 # Request Events
 # ----------------
-# before_request = ["pos_next.utils.before_request"]
+# POS cashiers stay in the SPA: Desk page loads redirect to /pos
+before_request = ["pos_next.utils.desk_guard.block_desk_for_cashiers"]
 # after_request = ["pos_next.utils.after_request"]
 
 # Job Events

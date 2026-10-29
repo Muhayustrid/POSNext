@@ -4,6 +4,7 @@
 import json
 import unittest
 import uuid
+from unittest import mock
 
 import frappe
 from erpnext.buying.doctype.purchase_order.purchase_order import make_inter_company_sales_order
@@ -88,17 +89,17 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		cls.uom = item.stock_uom
 
 		cls.user = f"pr.proxy.{cls._uniq()}@example.com"
-		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PR Proxy Tester"}).insert()
+		frappe.get_doc({"doctype": "User", "email": cls.user, "first_name": "PR Proxy Tester", "send_welcome_email": 0}).insert()
 
 		cls.cashier_user = f"pr.cashier.{cls._uniq()}@example.com"
 		cashier = frappe.get_doc(
-			{"doctype": "User", "email": cls.cashier_user, "first_name": "PR Cashier Tester"}
+			{"doctype": "User", "email": cls.cashier_user, "first_name": "PR Cashier Tester", "send_welcome_email": 0}
 		).insert()
 		cashier.add_roles("Purchase User", "Stock User")
 
 		cls.manager_user = f"pr.manager.{cls._uniq()}@example.com"
 		manager = frappe.get_doc(
-			{"doctype": "User", "email": cls.manager_user, "first_name": "PR Manager Tester"}
+			{"doctype": "User", "email": cls.manager_user, "first_name": "PR Manager Tester", "send_welcome_email": 0}
 		).insert()
 		manager.add_roles("Purchase User", "Stock User", "POSNext Manager")
 
@@ -273,6 +274,11 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 
 	def setUp(self):
 		self.pos = []
+		# cashier-persona tests run outside a real shift; the shift gate has
+		# its own tests (test_shift_gate_*)
+		shift = mock.patch("pos_next.api.purchase_orders._has_open_shift", return_value=True)
+		self.has_open_shift = shift.start()
+		self.addCleanup(shift.stop)
 		self.receipts = []
 		self.sos = []
 		self.dns = []

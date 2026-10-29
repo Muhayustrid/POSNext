@@ -1332,7 +1332,9 @@ async function loadGroups() {
 	}
 	try {
 		itemGroups.value =
-			(await call("pos_next.api.items.get_item_groups", {
+			// every item group, not only the POS Profile's: the count covers
+			// all stock in the warehouse
+			(await call(`${API}.get_opname_item_groups`, {
 				pos_profile: props.posProfile,
 			})) || []
 	} catch {

@@ -78,6 +78,9 @@ def get_pos_profiles():
 			# A shift past its deadline is closed on the spot by create_opening_shift.
 			expired = bool(s and s.pos_schedule_deadline and get_datetime(s.pos_schedule_deadline) < now)
 			p.locked = bool(s and s.user != frappe.session.user and not can_join and not expired)
+			# joinable = a manager resumes someone else's running shift: no opening
+			# balance (that drawer is already counted), straight into the POS
+			p.joinable = bool(s and s.user != frappe.session.user and can_join and not expired)
 
 	return pos_profiles
 

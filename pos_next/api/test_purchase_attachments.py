@@ -17,7 +17,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import nowdate
 
 from pos_next.api.purchase_orders import attach_purchase_files, get_purchase_order
-from pos_next.api.purchase_receipts import get_purchase_receipt, save_purchase_receipt
+from pos_next.api.purchase_receipts import get_purchase_receipt
 from pos_next.api import purchase_orders as po_module
 
 ADMIN = "Administrator"
@@ -59,6 +59,12 @@ class TestPurchaseAttachments(FrappeTestCase):
 					"doctype": "Supplier",
 					"supplier_name": f"_Test Attach Supplier {frappe.generate_hash(length=6)}",
 					"supplier_group": cls.supplier_group,
+					# POS purchases accept internal suppliers only
+					"is_internal_supplier": 1,
+					"represents_company": frappe.db.get_value(
+						"Company", {"name": ("!=", cls.company)}, "name"
+					),
+					"companies": [{"company": cls.company}],
 				}
 			)
 			.insert(ignore_permissions=True)
@@ -120,9 +126,13 @@ class TestPurchaseAttachments(FrappeTestCase):
 
 	def test_attach_to_submitted_pr_and_summary(self):
 		# the POS receive flow submits in one step — evidence lands AFTER submit
-		pr = save_purchase_receipt(json.dumps(self._data()), submit=1)
-		self.pr = pr["name"]
-		self.assertEqual(pr["docstatus"], 1)
+		# internal-supplier receipts come from the Delivery Note flow, which
+		# save_purchase_receipt refuses — build the submitted PR directly
+		data = self._data()
+		pr = frappe.get_doc({"doctype": "Purchase Receipt", **data}).insert(ignore_permissions=True)
+		pr.submit()
+		self.pr = pr.name
+		self.assertEqual(pr.docstatus, 1)
 		res = self._attach("Purchase Receipt", self.pr, filename="surat-jalan.png")
 		self.assertEqual(res[0]["file_name"], "surat-jalan.png")
 		frappe.set_user(ADMIN)
@@ -135,7 +145,7 @@ class TestPurchaseAttachments(FrappeTestCase):
 		self.po = po["name"]
 		self.purchase_docs.append(po["name"])
 		user = f"attach.deny.{frappe.generate_hash(length=6)}@example.com"
-		frappe.get_doc({"doctype": "User", "email": user, "first_name": "Attach Deny"}).insert(
+		frappe.get_doc({"doctype": "User", "email": user, "first_name": "Attach Deny", "send_welcome_email": 0}).insert(
 			ignore_permissions=True
 		)
 		try:

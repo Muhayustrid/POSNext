@@ -11,6 +11,7 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, nowdate
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
+from pos_next.utils.authz import is_management_user
 
 
 def _check_guest():
@@ -23,6 +24,26 @@ def _check_permission(perm, doc=None):
 	# check here gives a clear error and closes read paths get_doc doesn't gate
 	if not frappe.has_permission("Purchase Order", perm, doc=doc):
 		frappe.throw(_("No {0} permission on Purchase Order").format(_(perm)), frappe.PermissionError)
+
+
+def _has_open_shift(user):
+	return bool(
+		frappe.db.exists(
+			"POS Opening Shift",
+			{"user": user, "docstatus": 1, "status": "Open", "pos_closing_shift": ["is", "not set"]},
+		)
+	)
+
+
+def _check_shift():
+	"""Cashiers purchase only inside their own open shift; management
+	(POSNext Manager / System Manager) may purchase without one."""
+	if is_management_user() or _has_open_shift(frappe.session.user):
+		return
+	frappe.throw(
+		_("Open a shift before creating or changing Purchase Orders and Purchase Receipts"),
+		frappe.PermissionError,
+	)
 
 
 def _assert_internal(doc):
@@ -77,12 +98,51 @@ def _parse(value):
 		frappe.throw(_("Invalid request data"), frappe.ValidationError)
 
 
+def _user_pos_profile():
+	"""The session user's own POS Profile, for calls made without an open shift
+	(the SPA then sends no pos_profile). The profile of the user's latest
+	shift wins while it is still enabled and assigned, else the first assigned
+	profile. Without it the company fell back to the site default, and an
+	internal supplier only allowed to transact with the outlet company failed
+	ERPNext's 'not allowed to transact with' check."""
+	user = frappe.session.user
+	cache = frappe.local.flags.setdefault("pos_next_user_pos_profile", {})
+	if user in cache:
+		return cache[user]
+	assigned = frappe.db.sql(
+		"""
+		SELECT p.name
+		FROM `tabPOS Profile` p
+		INNER JOIN `tabPOS Profile User` u ON u.parent = p.name
+		WHERE p.disabled = 0 AND u.user = %s
+		ORDER BY p.name
+		""",
+		user,
+		pluck=True,
+	)
+	profile = None
+	if assigned:
+		profile = (
+			frappe.db.get_value(
+				"POS Opening Shift",
+				{"user": user, "docstatus": 1, "pos_profile": ("in", assigned)},
+				"pos_profile",
+				order_by="period_start_date desc",
+			)
+			or assigned[0]
+		)
+	cache[user] = profile
+	return profile
+
+
 def _profile_value(pos_profile, fieldname):
+	pos_profile = pos_profile or _user_pos_profile()
 	return frappe.db.get_value("POS Profile", pos_profile, fieldname) if pos_profile else None
 
 
 def _po_setting(pos_profile, fieldname):
 	"""Field from this profile's enabled POS Settings row, else the global single."""
+	pos_profile = pos_profile or _user_pos_profile()
 	if not pos_profile:
 		return None
 	return get_effective_pos_setting(pos_profile, fieldname)
@@ -463,6 +523,7 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	field (PO has no remarks field in ERPNext v16).
 	"""
 	_check_guest()
+	_check_shift()
 	data = _parse(data) or {}
 	# payload first, then the profile's POS Settings default supplier
 	supplier = data.get("supplier") or _po_setting(pos_profile, "po_default_supplier")
@@ -648,6 +709,7 @@ def _attachment_counts(doctype, names):
 @frappe.whitelist()
 def submit_purchase_order(name):
 	_check_guest()
+	_check_shift()
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("submit", doc=doc)
 	_assert_internal(doc)
@@ -660,6 +722,7 @@ def submit_purchase_order(name):
 @frappe.whitelist()
 def cancel_purchase_order(name):
 	_check_guest()
+	_check_shift()
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("cancel", doc=doc)
 	_assert_internal(doc)
@@ -691,6 +754,7 @@ def attach_purchase_files(doctype, name, files):
 	gates the whole call — File.validate re-checks it on insert, so attaching
 	works for a submitted receipt exactly as long as the user may edit it."""
 	_check_guest()
+	_check_shift()
 	if doctype not in ATTACHMENT_DOCTYPES:
 		frappe.throw(_("Attachments are only supported on Purchase Order and Purchase Receipt"))
 	doc = frappe.get_doc(doctype, name)

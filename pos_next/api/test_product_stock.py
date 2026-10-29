@@ -248,7 +248,7 @@ class TestProductStock(unittest.TestCase):
 		self.assertEqual(self._ledger()["entries"][0]["out_qty"], 3.25)
 		self.assertNotIn("rate", row)
 
-	def test_assigned_cashier_can_read_only_the_profiles_catalog(self):
+	def test_assigned_cashier_sees_stock_outside_the_sale_catalog_scope(self):
 		user = self._insert(
 			"User",
 			"USER",
@@ -284,9 +284,10 @@ class TestProductStock(unittest.TestCase):
 		frappe.clear_document_cache("POS Profile", self.profile)
 		frappe.cache().delete_value(f"pos_profile_allowed_item_groups:{self.profile}")
 		frappe.set_user(user)
-		self.assertEqual(self._list(), [])
-		with self.assertRaises(frappe.ValidationError):
-			self._ledger()
+		# Products is a stock view: the profile's item-group/brand scope only
+		# limits the sale catalog, so the outlet still sees every stock item.
+		self.assertEqual(self._list()[0]["closing_qty"], 5)
+		self.assertEqual(self._ledger()["closing_qty"], 5)
 
 	def test_legacy_list_without_dates_still_returns_current_stock(self):
 		self._insert("Bin", "BIN", item_code=self.item, warehouse=self.warehouse, actual_qty=17)

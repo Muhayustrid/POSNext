@@ -214,8 +214,12 @@ def check_opening_shift(user=None):
 
 
 @frappe.whitelist()
-def create_opening_shift(pos_profile, company, balance_details, shift_slot=None):
-	"""Create a new POS Opening Shift"""
+def create_opening_shift(pos_profile, company, balance_details, shift_slot=None, join_only=0):
+	"""Create a new POS Opening Shift.
+
+	`join_only`: a manager joining the profile's running shift (no opening
+	balance entered) — refuse instead of opening a fresh, unfunded drawer
+	when that shift is gone by now."""
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
 
 	# only users defined on the profile may open a shift on it
@@ -255,6 +259,12 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None)
 		if not is_management_user():
 			throw_profile_in_use(pos_profile, active)
 		return _shift_payload(frappe.get_doc("POS Opening Shift", active.name), resumed=True)
+	if cint(join_only):
+		frappe.throw(
+			_("POS Profile {0} has no active shift anymore. Open a new shift with an opening balance.").format(
+				pos_profile
+			)
+		)
 
 	handover = get_cash_handover(pos_profile, for_update=True)
 

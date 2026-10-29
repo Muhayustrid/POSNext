@@ -3563,7 +3563,14 @@ const { usePermissionCheck } = usePermissions();
 const { hasPermission: canProduction } = usePermissionCheck("POS Production Log", "create");
 
 // Purchase Order
-const { hasPermission: canPurchaseOrder } = usePermissionCheck("Purchase Order", "create");
+const { hasPermission: hasPurchaseOrderPermission } = usePermissionCheck("Purchase Order", "create");
+// Cashiers purchase only inside an open shift; management (POSNext Manager /
+// System Manager) may purchase without one. The server enforces the same gate.
+const canPurchaseOrder = computed(
+	() =>
+		hasPurchaseOrderPermission.value &&
+		(Boolean(bootstrapStore.data?.is_management) || shiftStore.hasOpenShift),
+);
 
 // Stock Opname (count sheet → HQ approval)
 const { hasPermission: canStockOpname } = usePermissionCheck("Stock Reconciliation", "create");

@@ -1,4 +1,4 @@
-"""POSNext app tile landing: HQ roles -> HQ dashboard, others -> workspace.
+"""POSNext app tile landing: HQ roles -> HQ dashboard, cashiers -> POS.
 
 Run via pos_next/_pn_run_tests.py pos_next.test_posnext_home
 """
@@ -22,11 +22,12 @@ class TestPosnextHome(FrappeTestCase):
     def test_hq_role_lands_on_hq_dashboard(self):
         self.assertEqual(self._landing(), "/desk/hq-sales-monitoring")
 
-    def test_cashier_lands_on_workspace(self):
+    def test_cashier_lands_on_pos(self):
         email = "home-cashier@example.com"
         if not frappe.db.exists("User", email):
             frappe.get_doc(
                 {"doctype": "User", "email": email, "first_name": "Home", "roles": [{"role": "POSNext Cashier"}]}
             ).insert(ignore_permissions=True)
         frappe.set_user(email)
-        self.assertEqual(self._landing(), "/desk/posnext")
+        # cashiers have no Desk (utils/desk_guard)
+        self.assertEqual(self._landing(), "/pos")

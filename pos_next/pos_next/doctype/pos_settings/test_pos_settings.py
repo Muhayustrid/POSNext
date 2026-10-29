@@ -31,6 +31,35 @@ class TestPOSSettings(FrappeTestCase):
 		self.assertEqual(frappe.db.get_value("POS Settings", name, "max_discount_allowed"), before)
 		frappe.db.rollback()
 
+	def test_cashier_saves_print_fields_only(self):
+		from unittest.mock import patch
+
+		from pos_next.pos_next.doctype.pos_settings import pos_settings as mod
+
+		name = frappe.db.get_value("POS Settings", {"enabled": 1}, "name")
+		if not name:
+			self.skipTest("no POS Settings on this site")
+		doc = frappe.get_doc("POS Settings", name)
+		if not frappe.db.exists("POS Profile User", {"parent": doc.pos_profile, "user": frappe.session.user}):
+			frappe.get_doc(
+				{
+					"doctype": "POS Profile User",
+					"parent": doc.pos_profile,
+					"parenttype": "POS Profile",
+					"parentfield": "applicable_for_users",
+					"user": frappe.session.user,
+				}
+			).db_insert()
+		copies = (doc.imin_print_copies or 1) % 3 + 1
+		with patch.object(mod, "is_management_user", return_value=False):
+			mod.update_pos_settings(
+				doc.pos_profile,
+				{"imin_print_copies": copies, "search_limit": (doc.search_limit or 0) + 11},
+			)
+		self.assertEqual(frappe.db.get_value("POS Settings", name, "imin_print_copies"), copies)
+		self.assertEqual(frappe.db.get_value("POS Settings", name, "search_limit"), doc.search_limit)
+		frappe.db.rollback()
+
 	def test_get_pos_settings_includes_automatic_stock_sync(self):
 		profile = frappe.db.get_value("POS Profile", {"disabled": 0}, "name")
 		if not profile:

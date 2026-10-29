@@ -35,7 +35,7 @@ class TestManagerPermissions(FrappeTestCase):
         # a user whose ONLY role is POSNext Manager — the pure manager probe
         cls.manager = f"manager-perm.{uuid.uuid4().hex[:8]}@example.com"
         frappe.get_doc(
-            {"doctype": "User", "email": cls.manager, "first_name": "Manager Perm Tester"}
+            {"doctype": "User", "email": cls.manager, "first_name": "Manager Perm Tester", "send_welcome_email": 0}
         ).insert(ignore_permissions=True)
         frappe.get_doc(
             {
