@@ -308,6 +308,17 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		shift = mock.patch("pos_next.api.purchase_orders._has_open_shift", return_value=True)
 		self.has_open_shift = shift.start()
 		self.addCleanup(shift.stop)
+		# the company a purchase acts for: the cashier's (mocked) shift company,
+		# and for the manager persona a User Permission on the test company
+		shift_profiles = mock.patch(
+			"pos_next.api.purchase_orders._open_shift_profiles",
+			return_value=[frappe._dict(pos_profile=self.pos_profile, company=self.company)],
+		)
+		self.open_shift_profiles = shift_profiles.start()
+		self.addCleanup(shift_profiles.stop)
+		permitted = mock.patch("pos_next.hq_scope.get_permitted_companies", return_value=[self.company])
+		permitted.start()
+		self.addCleanup(permitted.stop)
 
 	def tearDown(self):
 		# every PO this test created is cancelled + deleted (suite runs on a live dev site)
@@ -495,10 +506,50 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		self.assertEqual(result["company"], self.profile_company)
 		self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
 
-	def test_no_shift_falls_back_to_users_pos_profile(self):
-		"""Without an open shift the SPA sends no pos_profile — the user's own
-		assigned profile must still supply company + warehouse, not the site
-		default company (which the internal supplier may not transact with)."""
+	def test_company_and_defaults_follow_the_shift_company(self):
+		"""No company / pos_profile in the call: the cashier's only option (their
+		shift's company) is used, with that POS Profile's warehouse."""
+		if not self.pos_profile:
+			self.skipTest("no POS Profile on this site")
+		frappe.set_user(self.cashier_user)
+		try:
+			result = self._save({"supplier": self.supplier, "items": [{"item_code": self.item, "qty": 1}]})
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(result["company"], self.profile_company)
+		self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
+
+	def test_cashier_cannot_purchase_for_another_company(self):
+		if not self.other_co:
+			self.skipTest("needs a second company")
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				save_purchase_order(self._data(company=self.other_co))
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_manager_company_options_and_choice_required(self):
+		from pos_next.api.purchase_orders import get_purchase_companies
+
+		if not self.other_co:
+			self.skipTest("needs a second company")
+		frappe.set_user(self.manager_user)
+		try:
+			with mock.patch(
+				"pos_next.hq_scope.get_permitted_companies", return_value=[self.company, self.other_co]
+			):
+				res = get_purchase_companies()
+				self.assertEqual({o["company"] for o in res["companies"]}, {self.company, self.other_co})
+				self.assertIsNone(res["default"], "several companies: the manager must choose")
+				with self.assertRaises(frappe.ValidationError):
+					save_purchase_order({"supplier": self.supplier, "items": [{"item_code": self.item, "qty": 1}]})
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_manager_options_come_from_pos_profile_membership(self):
+		from pos_next.api.purchase_orders import _purchase_company_options
+
 		if not self.pos_profile:
 			self.skipTest("no POS Profile on this site")
 		row = frappe.get_doc(
@@ -507,22 +558,20 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 				"parent": self.pos_profile,
 				"parenttype": "POS Profile",
 				"parentfield": "applicable_for_users",
-				"user": self.cashier_user,
+				"user": self.manager_user,
 			}
 		)
 		row.db_insert()
-		frappe.local.flags.pop("pos_next_user_pos_profile", None)
-		frappe.set_user(self.cashier_user)
+		frappe.set_user(self.manager_user)
 		try:
-			result = self._save(
-				{"supplier": self.supplier, "items": [{"item_code": self.item, "qty": 1}]},
-			)
-			self.assertEqual(result["company"], self.profile_company)
-			self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
+			with mock.patch("pos_next.hq_scope.get_permitted_companies", return_value=None):
+				options = _purchase_company_options()
 		finally:
 			frappe.set_user(ADMIN)
 			frappe.db.delete("POS Profile User", {"name": row.name})
-			frappe.local.flags.pop("pos_next_user_pos_profile", None)
+		self.assertEqual(
+			options, [{"company": self.profile_company, "pos_profile": self.pos_profile, "warehouse": self.warehouse}]
+		)
 
 	def test_shift_gate_blocks_cashier_without_shift(self):
 		self.has_open_shift.return_value = False

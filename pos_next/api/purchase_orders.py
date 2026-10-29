@@ -183,6 +183,115 @@ def _resolve_company(pos_profile=None):
 	)
 
 
+def _open_shift_profiles(user):
+	"""(pos_profile, company) of the user's open shifts, newest first."""
+	return frappe.get_all(
+		"POS Opening Shift",
+		filters={"user": user, "docstatus": 1, "status": "Open", "pos_closing_shift": ["is", "not set"]},
+		fields=["pos_profile", "company"],
+		order_by="period_start_date desc",
+	)
+
+
+def _purchase_company_options():
+	"""Companies the session user may act for in PO, PR and stock opname, as
+	[{company, pos_profile, warehouse}] — pos_profile is the profile that
+	represents the company in the form (defaults: warehouse, supplier, price
+	list; the counted warehouse for opname).
+
+	- cashier: only the company of their open shift's POS Profile;
+	- POSNext Manager: companies of the POS Profiles they are a user of, narrowed
+	  by their User Permissions on Company when they have any (HQ users holding
+	  only User Permissions get those companies);
+	- Administrator / System Manager: every company.
+	"""
+	user = frappe.session.user
+
+	def _option(company, pos_profile):
+		return {
+			"company": company,
+			"pos_profile": pos_profile,
+			"warehouse": frappe.db.get_value("POS Profile", pos_profile, "warehouse") if pos_profile else None,
+		}
+
+	if not is_management_user():
+		shifts = _open_shift_profiles(user)
+		options = list({s.company: _option(s.company, s.pos_profile) for s in reversed(shifts)}.values())
+	else:
+		from pos_next.hq_scope import get_permitted_companies
+
+		member = frappe.db.sql(
+			"""
+			SELECT p.name, p.company
+			FROM `tabPOS Profile` p
+			INNER JOIN `tabPOS Profile User` u ON u.parent = p.name
+			WHERE p.disabled = 0 AND u.user = %s
+			ORDER BY p.name
+			""",
+			user,
+			as_dict=True,
+		)
+		preferred = _user_pos_profile()
+		by_company = {}
+		for row in member:
+			if row.company not in by_company or row.name == preferred:
+				by_company[row.company] = row.name
+		if user == "Administrator" or "System Manager" in frappe.get_roles(user):
+			companies = frappe.get_all("Company", pluck="name", order_by="name asc")
+		else:
+			permitted = get_permitted_companies(user)
+			companies = [c for c in by_company if not permitted or c in permitted]
+			companies += [c for c in permitted or [] if c not in companies]
+		options = []
+		for company in sorted(companies):
+			profile = by_company.get(company) or frappe.db.get_value(
+				"POS Profile", {"company": company, "disabled": 0}, "name", order_by="name asc"
+			)
+			options.append(_option(company, profile))
+	return options
+
+
+def _listed_companies(company=None, pos_profile=None):
+	"""Companies a PO/PR list shows: the chosen (or profile's) company, which
+	must be allowed, else every company the user may purchase for."""
+	company = company or _profile_value(pos_profile, "company")
+	if company:
+		_assert_purchase_company(company)
+		return [company]
+	return [o["company"] for o in _purchase_company_options()] or [""]
+
+
+def _assert_purchase_company(company):
+	if company not in {o["company"] for o in _purchase_company_options()}:
+		frappe.throw(
+			_("You are not allowed to act for company {0}").format(company), frappe.PermissionError
+		)
+
+
+def _purchase_profile_for(company, pos_profile=None):
+	"""The POS Profile whose defaults a purchase for `company` uses: the given
+	one when it belongs to that company, else the company's option profile."""
+	if pos_profile and frappe.db.get_value("POS Profile", pos_profile, "company") == company:
+		return pos_profile
+	return next(
+		(o["pos_profile"] for o in _purchase_company_options() if o["company"] == company), None
+	)
+
+
+@frappe.whitelist()
+def get_purchase_companies(pos_profile=None):
+	"""Companies the user may purchase for, and the one the form starts on: the
+	given profile's company when allowed, else the only option, else none (the
+	user must choose)."""
+	_check_guest()
+	options = _purchase_company_options()
+	companies = {o["company"] for o in options}
+	default = _profile_value(pos_profile, "company") if pos_profile else None
+	if default not in companies:
+		default = options[0]["company"] if len(options) == 1 else None
+	return {"companies": options, "default": default}
+
+
 @frappe.whitelist()
 def search_suppliers(search_term=None, limit=20):
 	_check_guest()
@@ -525,6 +634,16 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	_check_guest()
 	_check_shift()
 	data = _parse(data) or {}
+	# the company this purchase represents (payload, else the profile's, else
+	# the user's only option); its POS Profile supplies every default below
+	company = data.get("company") or (_profile_value(pos_profile, "company") if pos_profile else None)
+	if not company:
+		options = _purchase_company_options()
+		if len(options) != 1:
+			frappe.throw(_("Select the company to purchase for"))
+		company = options[0]["company"]
+	_assert_purchase_company(company)
+	pos_profile = _purchase_profile_for(company, pos_profile)
 	# payload first, then the profile's POS Settings default supplier
 	supplier = data.get("supplier") or _po_setting(pos_profile, "po_default_supplier")
 	if not supplier:
@@ -545,6 +664,7 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 		_assert_internal(doc)
 		if doc.docstatus != 0:
 			frappe.throw(_("Only a Draft Purchase Order can be edited"))
+		_assert_purchase_company(doc.company)
 	else:
 		_check_permission("create")
 		doc = frappe.new_doc("Purchase Order")
@@ -556,7 +676,6 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	)
 	schedule_date = data.get("schedule_date") or add_days(nowdate(), 1)
 
-	company = data.get("company") or _resolve_company(pos_profile)
 	doc.supplier = supplier
 	doc.transaction_date = data.get("transaction_date") or nowdate()
 	doc.schedule_date = schedule_date
@@ -616,16 +735,15 @@ def get_purchase_order(name):
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("read", doc=doc)
 	_assert_internal(doc)
+	_assert_purchase_company(doc.company)
 	return _po_summary(doc)
 
 
 @frappe.whitelist()
-def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=50):
+def get_purchase_orders(pos_profile=None, status=None, search_term=None, limit=50, company=None):
 	_check_guest()
 	filters = [["is_internal_supplier", "=", 1]]
-	company = _profile_value(pos_profile, "company")
-	if company:
-		filters.append(["company", "=", company])
+	filters.append(["company", "in", _listed_companies(company, pos_profile)])
 	if status:
 		filters.append(["status", "=", status])
 	or_filters = []
@@ -713,6 +831,7 @@ def submit_purchase_order(name):
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("submit", doc=doc)
 	_assert_internal(doc)
+	_assert_purchase_company(doc.company)
 	if doc.docstatus != 0:
 		frappe.throw(_("Only a Draft Purchase Order can be submitted"))
 	doc.submit()
@@ -726,6 +845,7 @@ def cancel_purchase_order(name):
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("cancel", doc=doc)
 	_assert_internal(doc)
+	_assert_purchase_company(doc.company)
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted Purchase Order can be cancelled"))
 	# the live PO↔SO link lives on the selling-company SO side in v16 — a
@@ -761,6 +881,7 @@ def attach_purchase_files(doctype, name, files):
 	if not frappe.has_permission(doctype, "write", doc=doc):
 		frappe.throw(_("No {0} permission on {1}").format(_("write"), doctype), frappe.PermissionError)
 	_assert_internal(doc)
+	_assert_purchase_company(doc.company)
 	parsed = _parse(files) or []
 	if not parsed:
 		frappe.throw(_("At least one file is required"))

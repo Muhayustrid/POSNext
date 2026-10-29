@@ -279,6 +279,17 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 		shift = mock.patch("pos_next.api.purchase_orders._has_open_shift", return_value=True)
 		self.has_open_shift = shift.start()
 		self.addCleanup(shift.stop)
+		# the company a purchase acts for: the cashier's (mocked) shift company,
+		# and for the manager persona a User Permission on the test company
+		shift_profiles = mock.patch(
+			"pos_next.api.purchase_orders._open_shift_profiles",
+			return_value=[frappe._dict(pos_profile=self.pos_profile, company=self.company)],
+		)
+		self.open_shift_profiles = shift_profiles.start()
+		self.addCleanup(shift_profiles.stop)
+		permitted = mock.patch("pos_next.hq_scope.get_permitted_companies", return_value=[self.company])
+		permitted.start()
+		self.addCleanup(permitted.stop)
 		self.receipts = []
 		self.sos = []
 		self.dns = []

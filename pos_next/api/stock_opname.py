@@ -227,6 +227,11 @@ def _assert_not_frozen(posting_date):
 def _profile_warehouse(pos_profile):
 	_assert_profile_access(pos_profile)
 	company, warehouse = _resolve_profile(pos_profile)
+	if not frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user}):
+		# a manager counting another outlet: only for a company they may act for
+		from pos_next.api.purchase_orders import _assert_purchase_company
+
+		_assert_purchase_company(company)
 	return company, warehouse
 
 

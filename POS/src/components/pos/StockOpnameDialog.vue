@@ -7,6 +7,11 @@
 		<template #body-content>
 			<!-- LIST -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<!-- manager with several companies: which outlet to count -->
+				<CompanyPicker
+					v-model="companyChoice.company.value"
+					:options="companyChoice.options.value"
+				/>
 				<div
 					v-if="statusTabs.length > 1"
 					class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5"
@@ -862,6 +867,8 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import ConfirmDialog from "../common/ConfirmDialog.vue"
 import RefreshButton from "@/components/common/RefreshButton.vue"
+import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
+import { useCompanyChoice } from "@/composables/useCompanyChoice"
 import PurchaseAttachments from "@/components/purchase/PurchaseAttachments.vue"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
@@ -881,6 +888,29 @@ const { showSuccess, showError } = useToast()
 const { formatDate, formatTime, formatDateTime } = useFormatters()
 
 const show = ref(props.modelValue)
+
+// The outlet being counted: the shift's POS Profile for a cashier; a manager
+// with several companies picks one, and that company's POS Profile (its
+// warehouse) is what every call below sends. The server checks it.
+const companyChoice = useCompanyChoice(call, () => props.posProfile)
+const activeProfile = computed(() => companyChoice.profile.value)
+
+function openList() {
+	companyChoice.load().then(() => {
+		loadStates()
+		loadList()
+	})
+}
+
+watch(
+	() => companyChoice.company.value,
+	(next, prev) => {
+		if (!prev || next === prev) return
+		page.value = 0
+		loadList()
+	},
+)
+
 watch(
 	() => props.modelValue,
 	(v) => {
@@ -888,8 +918,7 @@ watch(
 		if (v) {
 			view.value = "list"
 			page.value = 0
-			loadStates()
-			loadList()
+			openList()
 		}
 	},
 )
@@ -1019,13 +1048,13 @@ const hasOpenOpname = computed(() => {
 // ---------------------------------------------------------------------------
 
 async function loadList() {
-	if (!props.posProfile) return
+	if (!activeProfile.value) return
 	loading.value = true
 	try {
 		// one extra row tells whether a next page exists
 		const res =
 			(await call(`${API}.list_opnames`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				start: page.value * PAGE_SIZE,
 				page_length: PAGE_SIZE + 1,
 				status: statusFilter.value || undefined,
@@ -1062,11 +1091,11 @@ const statusTabs = computed(() => [
 ])
 
 async function loadStates() {
-	if (!props.posProfile || states.value.length) return
+	if (!activeProfile.value || states.value.length) return
 	try {
 		states.value =
 			(await call(`${API}.get_opname_states`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 			})) || []
 	} catch {
 		// chips are optional: the list still works unfiltered
@@ -1211,7 +1240,7 @@ async function openDoc(name) {
 	clearSearch()
 	try {
 		applyEditor(
-			await call(`${API}.get_opname`, { pos_profile: props.posProfile, name }),
+			await call(`${API}.get_opname`, { pos_profile: activeProfile.value, name }),
 		)
 		if (!itemGroups.value.length) loadGroups()
 		ensureSerialOptions()
@@ -1289,7 +1318,7 @@ async function ensureSerialOptions() {
 		if (!row.is_serial) continue
 		try {
 			const all = await call(`${API}.get_item_serials`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				item_code: row.item_code,
 			})
 			row.serial_options = Array.from(
@@ -1309,7 +1338,7 @@ async function ensureBatchOptions() {
 		try {
 			const batches =
 				(await call(`${API}.get_item_batches`, {
-					pos_profile: props.posProfile,
+					pos_profile: activeProfile.value,
 					item_code: row.item_code,
 				})) || []
 			// keep a saved batch selectable even if the endpoint omits it (disabled)
@@ -1328,7 +1357,7 @@ async function loadGroups() {
 			// every item group, not only the POS Profile's: the count covers
 			// all stock in the warehouse
 			(await call(`${API}.get_opname_item_groups`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 			})) || []
 	} catch {
 		itemGroups.value = [] // the filter is optional; the sheet still works
@@ -1400,7 +1429,7 @@ async function doSearchRow(row, term) {
 	const seq = ++searchSeq
 	try {
 		const rows = await call(`${API}.search_opname_items`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			search_term: term,
 			start: 0,
 			limit: 10,
@@ -1545,14 +1574,14 @@ async function pickItem(row, item) {
 	if (item.has_serial_no) {
 		const serials =
 			(await call(`${API}.get_item_serials`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				item_code: item.item_code,
 			})) || []
 		setRow(row, { ...base, serial_options: serials, is_serial: true })
 	} else if (item.has_batch_no) {
 		const batches =
 			(await call(`${API}.get_item_batches`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				item_code: item.item_code,
 			})) || []
 		// one batch per row: qty starts at 0 until a batch is counted
@@ -1630,7 +1659,7 @@ async function fetchItems() {
 	try {
 		const rows =
 			(await call(`${API}.fetch_opname_items`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				item_group: itemGroup.value || undefined,
 			})) || []
 		const items = editor.value.items
@@ -1697,7 +1726,7 @@ async function save() {
 			data.posting_time = editor.value.posting_time || undefined
 		}
 		const payload = await call(`${API}.save_opname`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			data,
 		})
 		const uncounted = editor.value.items.filter(
@@ -1760,7 +1789,7 @@ async function submitAction(action) {
 			if (!(await save())) return
 		}
 		await call(`${API}.submit_opname`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			name: editor.value.name,
 			action,
 		})
@@ -1778,7 +1807,7 @@ async function reviseAction(action) {
 	try {
 		applyEditor(
 			await call(`${API}.submit_opname`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				name: editor.value.name,
 				action,
 			}),
@@ -1804,7 +1833,7 @@ async function remove() {
 	acting.value = true
 	try {
 		await call(`${API}.delete_opname`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			name: editor.value.name,
 		})
 		showSuccess(__("Stock opname deleted"))
@@ -1823,7 +1852,7 @@ async function remove() {
 async function downloadTemplate() {
 	try {
 		await downloadXlsx(`${API}.download_opname_template`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			item_group: itemGroup.value || undefined,
 		})
 	} catch (err) {
@@ -1863,7 +1892,7 @@ async function onFilePicked(event) {
 	try {
 		const fileUrl = await uploadFile(file)
 		const result = await call(`${API}.import_opname_template`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			file_url: fileUrl,
 			name: editor.value.name || undefined,
 		})
@@ -1872,7 +1901,7 @@ async function onFilePicked(event) {
 		if (result?.name) {
 			applyEditor(
 				await call(`${API}.get_opname`, {
-					pos_profile: props.posProfile,
+					pos_profile: activeProfile.value,
 					name: result.name,
 				}),
 			)
@@ -1917,7 +1946,7 @@ async function handlePhotoUpload(row, event) {
 					(r) => r.item_code === row.item_code && (r.batch_no || "") === (row.batch_no || ""),
 				) || row
 		const res = await call(`${API}.attach_opname_row_photo`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			name: editor.value.name,
 			file_name: compressed.name || file.name,
 			filedata: b64,
@@ -1943,7 +1972,7 @@ async function sendAttachments(args) {
 	try {
 		editor.value.attachments =
 			(await call(`${API}.attach_opname_files`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				name: editor.value.name,
 				...args,
 			})) || []
@@ -1982,7 +2011,7 @@ async function removeAttachment(row) {
 	try {
 		editor.value.attachments =
 			(await call(`${API}.remove_opname_attachment`, {
-				pos_profile: props.posProfile,
+				pos_profile: activeProfile.value,
 				name: editor.value.name,
 				file: row.name,
 			})) || []
@@ -2001,7 +2030,6 @@ function errMsg(err, fallback) {
 
 if (props.modelValue) {
 	view.value = "list"
-	loadStates()
-	loadList()
+	openList()
 }
 </script>
