@@ -27,6 +27,42 @@ SALES_MANAGEMENT_FIELDS = (
 	"use_percentage_discount",
 )
 
+# The POS "Printing" tab: the only fields a cashier may save through
+# update_pos_settings (cashiers hold read-only POS Settings, so the save runs
+# with ignore_permissions once the profile-membership gate passed).
+CASHIER_PRINT_FIELDS = (
+	"enable_pos_queue",
+	"imin_copy_delay_ms",
+	"imin_crew_delay_ms",
+	"imin_crew_font_scale",
+	"imin_crew_slip_enabled",
+	"imin_custom_dots",
+	"imin_cut_paper",
+	"imin_eod_copy_delay_ms",
+	"imin_eod_feed_dots",
+	"imin_eod_font_scale",
+	"imin_eod_line_spacing",
+	"imin_eod_print_copies",
+	"imin_eod_print_mode",
+	"imin_eod_side_margin",
+	"imin_eod_tail_dots",
+	"imin_eod_top_margin",
+	"imin_feed_dots",
+	"imin_font_scale",
+	"imin_line_spacing",
+	"imin_paper_width",
+	"imin_print_copies",
+	"imin_print_mode",
+	"imin_print_speed",
+	"imin_queue_gap",
+	"imin_side_margin",
+	"imin_tail_dots",
+	"imin_top_margin",
+	"print_driver",
+	"print_fallback_enabled",
+)
+
+
 class POSSettings(Document):
 	def validate(self):
 		"""Validate POS Settings"""
@@ -135,7 +171,12 @@ def update_pos_settings(pos_profile, settings):
 	if not has_access and not frappe.has_permission("POS Settings", "write"):
 		frappe.throw(_("You don't have permission to update this POS Profile"))
 
-	if not is_management_user():
+	# a cashier of this profile may only tune printing; the SPA still posts
+	# the whole form, so everything else is dropped server-side
+	cashier = has_access and not is_management_user()
+	if cashier:
+		settings = {k: v for k, v in settings.items() if k in CASHIER_PRINT_FIELDS}
+	elif not is_management_user():
 		# the SPA still posts the whole form; drop what a cashier may not touch
 		for field in SALES_MANAGEMENT_FIELDS:
 			settings.pop(field, None)
@@ -146,14 +187,18 @@ def update_pos_settings(pos_profile, settings):
 	if existing:
 		doc = frappe.get_doc("POS Settings", existing)
 		doc.update(settings)
-		doc.save()
+		doc.save(ignore_permissions=cashier)
 	else:
 		doc = frappe.new_doc("POS Settings")
 		doc.pos_profile = pos_profile
+		if cashier:
+			# an enabled row wins whole — seed it with the effective values so
+			# a cashier's print-only save keeps every other rule as it was
+			doc.update(get_effective_pos_settings(pos_profile))
 		doc.update(settings)
 		# Every read path filters enabled=1; a stale SPA payload must never
 		# create a row those paths would ignore.
 		doc.enabled = 1
-		doc.insert()
+		doc.insert(ignore_permissions=cashier)
 
 	return doc.as_dict()

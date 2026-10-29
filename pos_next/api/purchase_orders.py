@@ -11,6 +11,7 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, nowdate
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
+from pos_next.utils.authz import is_management_user
 
 
 def _check_guest():
@@ -23,6 +24,26 @@ def _check_permission(perm, doc=None):
 	# check here gives a clear error and closes read paths get_doc doesn't gate
 	if not frappe.has_permission("Purchase Order", perm, doc=doc):
 		frappe.throw(_("No {0} permission on Purchase Order").format(_(perm)), frappe.PermissionError)
+
+
+def _has_open_shift(user):
+	return bool(
+		frappe.db.exists(
+			"POS Opening Shift",
+			{"user": user, "docstatus": 1, "status": "Open", "pos_closing_shift": ["is", "not set"]},
+		)
+	)
+
+
+def _check_shift():
+	"""Cashiers purchase only inside their own open shift; management
+	(POSNext Manager / System Manager) may purchase without one."""
+	if is_management_user() or _has_open_shift(frappe.session.user):
+		return
+	frappe.throw(
+		_("Open a shift before creating or changing Purchase Orders and Purchase Receipts"),
+		frappe.PermissionError,
+	)
 
 
 def _assert_internal(doc):
@@ -502,6 +523,7 @@ def save_purchase_order(data, pos_profile=None, submit=0):
 	field (PO has no remarks field in ERPNext v16).
 	"""
 	_check_guest()
+	_check_shift()
 	data = _parse(data) or {}
 	# payload first, then the profile's POS Settings default supplier
 	supplier = data.get("supplier") or _po_setting(pos_profile, "po_default_supplier")
@@ -687,6 +709,7 @@ def _attachment_counts(doctype, names):
 @frappe.whitelist()
 def submit_purchase_order(name):
 	_check_guest()
+	_check_shift()
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("submit", doc=doc)
 	_assert_internal(doc)
@@ -699,6 +722,7 @@ def submit_purchase_order(name):
 @frappe.whitelist()
 def cancel_purchase_order(name):
 	_check_guest()
+	_check_shift()
 	doc = frappe.get_doc("Purchase Order", name)
 	_check_permission("cancel", doc=doc)
 	_assert_internal(doc)
@@ -730,6 +754,7 @@ def attach_purchase_files(doctype, name, files):
 	gates the whole call — File.validate re-checks it on insert, so attaching
 	works for a submitted receipt exactly as long as the user may edit it."""
 	_check_guest()
+	_check_shift()
 	if doctype not in ATTACHMENT_DOCTYPES:
 		frappe.throw(_("Attachments are only supported on Purchase Order and Purchase Receipt"))
 	doc = frappe.get_doc(doctype, name)

@@ -31,6 +31,11 @@ POS_ROLES = {"POSNext Cashier", "POSNext Manager"}
 #   doctype app.
 # - Company, Purchase Order, Purchase Receipt (entri pn-mgr-*):
 #   paket POSNext Manager — persona manager berdiri sendiri tanpa role core.
+# - Purchase Order, Purchase Receipt (entri pn-cshr-*): kasir membeli dari
+#   supplier internal di dalam shift terbuka (gate _check_shift), tanpa
+#   cancel/amend; harga tetap disembunyikan (_hide_prices).
+# - Supplier (pn-cshr/pn-mgr-supplier, read+select): pencarian supplier dan
+#   get_party_details saat set_missing_values PO/PR menuntut read Supplier.
 # - Account (select=1 tanpa read, kedua role):
 #   ERPNext v16 party.account_perm_check() menuntut select/read Account saat
 #   set_missing_values meresolusi debit_to — field server-managed yang tidak
@@ -67,6 +72,7 @@ ALLOWED_PARENTS = {
     "Sales Invoice Item",
     "Serial and Batch Bundle",
     "Stock Reconciliation",
+    "Supplier",
     "Territory",
     "Warehouse",
 }

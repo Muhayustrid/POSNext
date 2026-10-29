@@ -4,6 +4,7 @@
 import json
 import unittest
 import uuid
+from unittest import mock
 
 import frappe
 from frappe import ValidationError
@@ -302,6 +303,11 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 
 	def setUp(self):
 		self.pos = []
+		# cashier-persona tests run outside a real shift; the shift gate has
+		# its own tests (test_shift_gate_*)
+		shift = mock.patch("pos_next.api.purchase_orders._has_open_shift", return_value=True)
+		self.has_open_shift = shift.start()
+		self.addCleanup(shift.stop)
 
 	def tearDown(self):
 		# every PO this test created is cancelled + deleted (suite runs on a live dev site)
@@ -517,6 +523,25 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 			frappe.set_user(ADMIN)
 			frappe.db.delete("POS Profile User", {"name": row.name})
 			frappe.local.flags.pop("pos_next_user_pos_profile", None)
+
+	def test_shift_gate_blocks_cashier_without_shift(self):
+		self.has_open_shift.return_value = False
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				save_purchase_order(self._data())
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_shift_gate_lets_manager_through_without_shift(self):
+		self.has_open_shift.return_value = False
+		frappe.set_user(self.manager_user)
+		try:
+			result = self._save()
+		finally:
+			frappe.set_user(ADMIN)
+		self.assertEqual(result["docstatus"], 0)
+		self.assertIn("grand_total", result)
 
 	def test_pos_settings_supply_po_defaults(self):
 		"""POS Settings (per profile) is the default supplier/warehouse source."""

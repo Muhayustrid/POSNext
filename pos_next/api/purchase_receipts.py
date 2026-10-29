@@ -13,6 +13,7 @@ from pos_next.api.purchase_orders import (
 	_attachment_counts,
 	_can_see_prices,
 	_check_guest,
+	_check_shift,
 	_hide_prices,
 	_parse,
 	_profile_value,
@@ -247,6 +248,7 @@ def save_purchase_receipt(data, submit=0):
 	reset to their defaults, and the items table is replaced wholesale.
 	"""
 	_check_guest()
+	_check_shift()
 	data = _parse(data) or {}
 	items = _parse(data.get("items")) or []
 	if not items:
@@ -403,6 +405,7 @@ def get_purchase_receipts(pos_profile=None, status=None, search_term=None, limit
 @frappe.whitelist()
 def cancel_purchase_receipt(name):
 	_check_guest()
+	_check_shift()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("cancel", doc=doc)
 	_assert_internal(doc)
@@ -424,6 +427,7 @@ def get_purchase_receipt(name):
 @frappe.whitelist()
 def submit_purchase_receipt(name, action=None):
 	_check_guest()
+	_check_shift()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("submit", doc=doc)
 	if doc.docstatus != 0:

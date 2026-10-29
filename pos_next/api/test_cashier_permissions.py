@@ -314,10 +314,16 @@ class TestCashierPermissions(FrappeTestCase):
     def test_production_recipe_read_only(self):
         self._assert_matrix("POS Production Recipe", granted=("read",), denied=("write", "create"))
 
-    def test_no_purchasing(self):
-        # design decision: cashiers sell and produce, they do not purchase
-        self._assert_matrix("Purchase Order", granted=(), denied=("create",))
-        self._assert_matrix("Purchase Receipt", granted=(), denied=("create",))
+    def test_purchasing_without_cancel(self):
+        # cashiers purchase from internal suppliers inside an open shift
+        # (purchase_orders._check_shift); cancel/amend stay with management
+        for doctype in ("Purchase Order", "Purchase Receipt"):
+            self._assert_matrix(
+                doctype,
+                granted=("read", "write", "create", "submit"),
+                denied=("cancel", "amend", "delete"),
+            )
+        self._assert_matrix("Supplier", granted=("read", "select"), denied=("write", "create"))
 
     def test_direct_print_permissions(self):
         from pos_next.api.qz import _PRINT_ROLES

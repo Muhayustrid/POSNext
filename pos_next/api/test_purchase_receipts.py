@@ -4,6 +4,7 @@
 import json
 import unittest
 import uuid
+from unittest import mock
 
 import frappe
 from erpnext.buying.doctype.purchase_order.purchase_order import make_inter_company_sales_order
@@ -273,6 +274,11 @@ class TestPurchaseReceiptProxy(FrappeTestCase):
 
 	def setUp(self):
 		self.pos = []
+		# cashier-persona tests run outside a real shift; the shift gate has
+		# its own tests (test_shift_gate_*)
+		shift = mock.patch("pos_next.api.purchase_orders._has_open_shift", return_value=True)
+		self.has_open_shift = shift.start()
+		self.addCleanup(shift.stop)
 		self.receipts = []
 		self.sos = []
 		self.dns = []
