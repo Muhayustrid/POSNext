@@ -10,6 +10,7 @@ the frontend fetches everything in one request.
 
 Data Returned:
     - can_switch_to_desk: True if user has role "POSNext Manager" (desk link in POS)
+    - can_open_desk: False for cashiers redirected away from Desk (desk doc links hidden)
     - locale: User's language preference (e.g., "en", "ar")
     - precision: Number formatting settings from System Settings
         - currency: Decimal places for totals (default: 2)
@@ -34,7 +35,7 @@ from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 from pos_next.api.packages import _package_allocation_enabled
 from pos_next.api.settings_resolver import get_effective_pos_settings
 from pos_next.invoice_type import get_pos_invoice_doctype
-from pos_next.utils.authz import is_management_user
+from pos_next.utils.authz import is_desk_blocked, is_management_user
 
 
 @frappe.whitelist()
@@ -71,6 +72,8 @@ def get_initial_data():
 		"precision": _get_precision_settings(),
 		"can_switch_to_desk": "POSNext Manager" in frappe.get_roles(),
 		"is_management": is_management_user(),
+		# False for POS cashiers kept out of Desk (utils/desk_guard)
+		"can_open_desk": not is_desk_blocked(),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,

@@ -135,7 +135,7 @@
 									</td>
 									<!-- FIX #17: actions column — user can open either Opening or Closing shift -->
 									<td class="px-3 py-4 text-end">
-										<div class="flex items-center justify-end gap-1">
+										<div v-if="canOpenDesk" class="flex items-center justify-end gap-1">
 											<button
 												type="button"
 												@click.stop="openShiftDoc(shift, 'opening')"
@@ -227,6 +227,7 @@
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import PosDialogShell from "@/components/common/PosDialogShell.vue"
+import { useBootstrapStore } from "@/stores/bootstrap"
 import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { ref, watch, reactive, onMounted, computed } from "vue"
 
@@ -389,6 +390,11 @@ function exportToCSV() {
 	// Release the object URL from memory — must happen after the click
 	URL.revokeObjectURL(url)
 }
+
+// The Opening/Closing links open Desk, which cashiers cannot reach (the
+// server redirects them to /pos), so they only show for Desk users.
+const bootstrapStore = useBootstrapStore()
+const canOpenDesk = computed(() => bootstrapStore.data?.can_open_desk !== false)
 
 // FIX #17: replaced the old viewShift() that always opened the closing shift
 // (if it existed) with openShiftDoc() that lets the user pick explicitly.

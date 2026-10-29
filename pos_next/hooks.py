@@ -292,7 +292,8 @@ scheduler_events = {
 
 # Request Events
 # ----------------
-# before_request = ["pos_next.utils.before_request"]
+# POS cashiers stay in the SPA: Desk page loads redirect to /pos
+before_request = ["pos_next.utils.desk_guard.block_desk_for_cashiers"]
 # after_request = ["pos_next.utils.after_request"]
 
 # Job Events

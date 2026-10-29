@@ -4,7 +4,9 @@
 """Single-role cashier acceptance.
 
 A cashier holding ONLY "POSNext Cashier" (no Stock User bundle) must drive the
-checkout path end to end: draft, submit, and the salesperson dropdown. The
+checkout path end to end: draft, submit, and the salesperson dropdown — plus
+the outlet back-office flows: Purchase Order (prices hidden), print settings
+and a stock opname draft. The
 Custom DocPerm fixture carries every stock read the ledger path needs
 (Item/Warehouse/Bin), so the historical Stock User bundle should be obsolete.
 If this test fails, the missing permission in the trace is what still ties the
@@ -301,3 +303,90 @@ class TestCashierSingleRole(FrappeTestCase):
         self.assertIsInstance(result, list)
         self.assertTrue(result, "cashier must see the sales person list")
         self.assertIn(seeded, [r.get("name") for r in result])
+
+    # ------------------------------------------------- outlet back-office flows
+
+    def _internal_supplier(self):
+        """Internal supplier the profile company may buy from (factory/HQ side)."""
+        other = frappe.db.get_value(
+            "Company", {"name": ["!=", self.profile.company]}, "name", order_by="creation asc"
+        )
+        group = frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
+        if not (other and group):
+            self.skipTest("needs a second company and a leaf Supplier Group")
+        frappe.set_user("Administrator")
+        supplier = frappe.get_doc(
+            {
+                "doctype": "Supplier",
+                "supplier_name": f"Kasir Single Role Supplier {frappe.generate_hash(length=6)}",
+                "supplier_group": group,
+                "is_internal_supplier": 1,
+                "represents_company": other,
+                "companies": [{"company": self.profile.company}],
+            }
+        )
+        supplier.flags.ignore_permissions = True
+        supplier.insert()
+        self.addCleanup(frappe.delete_doc, "Supplier", supplier.name, force=1, ignore_permissions=True)
+        frappe.set_user(CASHIER)
+        return supplier.name
+
+    def test_single_role_cashier_purchase_order_without_prices(self):
+        """PO search + save + submit inside the shift, prices hidden."""
+        from pos_next.api.purchase_orders import save_purchase_order, search_suppliers
+
+        if not frappe.db.get_value("Item", self.item, "is_purchase_item"):
+            self.skipTest("fixture item is not a purchase item")
+        supplier = self._internal_supplier()
+        self.assertIn(supplier, [s.name for s in search_suppliers(supplier)["suppliers"]])
+        result = save_purchase_order(
+            json.dumps({"supplier": supplier, "items": [{"item_code": self.item, "qty": 1, "uom": self.uom}]}),
+            pos_profile=self.profile.name,
+            submit=1,
+        )
+        frappe.set_user("Administrator")
+        po = frappe.get_doc("Purchase Order", result["name"])
+
+        def _drop_po():
+            frappe.set_user("Administrator")
+            doc = frappe.get_doc("Purchase Order", po.name)
+            if doc.docstatus == 1:
+                doc.cancel()
+            frappe.delete_doc("Purchase Order", po.name, force=1, ignore_permissions=True)
+
+        self.addCleanup(_drop_po)
+        self.assertEqual(result["docstatus"], 1, "single-role cashier must be able to submit a PO")
+        self.assertEqual(po.company, self.profile.company)
+        for key in ("grand_total", "net_total", "rate"):
+            self.assertNotIn(key, result)
+        self.assertNotIn("rate", result["items"][0])
+
+    def test_single_role_cashier_saves_print_settings(self):
+        from pos_next.pos_next.doctype.pos_settings.pos_settings import update_pos_settings
+
+        frappe.set_user("Administrator")
+        existing = frappe.db.get_value("POS Settings", {"pos_profile": self.profile.name}, "name")
+        before = frappe.db.get_value("POS Settings", existing, "imin_print_copies") if existing else None
+        frappe.set_user(CASHIER)
+        copies = (before or 1) % 3 + 1
+        update_pos_settings(self.profile.name, {"imin_print_copies": copies})
+        frappe.set_user("Administrator")
+        name = frappe.db.get_value("POS Settings", {"pos_profile": self.profile.name}, "name")
+        try:
+            self.assertEqual(frappe.db.get_value("POS Settings", name, "imin_print_copies"), copies)
+        finally:
+            if existing:
+                frappe.db.set_value("POS Settings", existing, "imin_print_copies", before)
+            else:
+                frappe.delete_doc("POS Settings", name, force=1, ignore_permissions=True)
+
+    def test_single_role_cashier_stock_opname_draft(self):
+        from pos_next.api.stock_opname import delete_opname, get_editable_open_opname, save_opname
+
+        frappe.set_user("Administrator")
+        if get_editable_open_opname(self.profile.warehouse, include_returned=True):
+            self.skipTest("warehouse already has an open stock opname")
+        frappe.set_user(CASHIER)
+        payload = save_opname(self.profile.name, {"items": [{"item_code": self.item, "qty": 3}]})
+        self.assertTrue(payload["name"])
+        delete_opname(self.profile.name, payload["name"])
