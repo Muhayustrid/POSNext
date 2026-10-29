@@ -63,6 +63,11 @@
 			</div>
 
 			<div v-else class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<!-- manager with several companies: whose receipts to show -->
+				<CompanyPicker
+					v-model="companyChoice.company.value"
+					:options="companyChoice.options.value"
+				/>
 				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
 						v-for="chip in STATUS_CHIPS"
@@ -210,6 +215,8 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
+import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
+import { useCompanyChoice } from "@/composables/useCompanyChoice"
 import PurchaseDocView from "@/components/purchase/PurchaseDocView.vue"
 import { useFormatters } from "@/composables/useFormatters"
 import { usePermissions } from "@/composables/usePermissions"
@@ -274,13 +281,23 @@ let searchTimer = null
 
 onBeforeUnmount(() => clearTimeout(searchTimer))
 
+// The company whose receipts are listed (the shift's for a cashier; a
+// manager with several companies picks one). The server checks every write.
+const companyChoice = useCompanyChoice(call, () => props.posProfile)
+watch(
+	() => companyChoice.company.value,
+	(next, prev) => {
+		if (prev && next !== prev) loadReceipts()
+	},
+)
+
 watch(
 	() => props.modelValue,
 	(val) => {
 		show.value = val
 		if (val) {
 			view.value = "list"
-			loadReceipts()
+			companyChoice.load().then(loadReceipts)
 		} else {
 			clearTimeout(searchTimer)
 		}
@@ -420,7 +437,8 @@ async function loadReceipts() {
 	loadingReceipts.value = true
 	try {
 		const res = await call(`${PR_API}.get_purchase_receipts`, {
-			pos_profile: props.posProfile,
+			pos_profile: companyChoice.profile.value,
+			company: companyChoice.company.value || null,
 			status: statusFilter.value || null,
 			search_term: searchTerm.value || null,
 			limit: 50,

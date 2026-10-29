@@ -7,6 +7,12 @@
 		<template #body-content>
 			<!-- LIST VIEW -->
 			<div v-if="view === 'list'" class="mx-auto flex w-full max-w-6xl flex-col gap-3">
+				<!-- manager with several companies: whose orders / on whose behalf -->
+				<CompanyPicker
+					v-model="companyChoice.company.value"
+					:options="companyChoice.options.value"
+					:label="__('Purchase for')"
+				/>
 				<div class="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5" role="group" :aria-label="__('Status')">
 					<button
 						v-for="chip in STATUS_CHIPS"
@@ -589,10 +595,10 @@
 					</div>
 					<!-- read-only context the PO is created under -->
 					<div
-						v-if="company || form.set_warehouse || form.currency"
+						v-if="formCompany || form.set_warehouse || form.currency"
 						class="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-100 pt-3 text-xs text-gray-500"
 					>
-						<span v-if="company">{{ __("Company") }}: <b class="font-medium text-gray-700">{{ company }}</b></span>
+						<span v-if="formCompany">{{ __("Company") }}: <b class="font-medium text-gray-700">{{ formCompany }}</b></span>
 						<span v-if="form.set_warehouse">{{ __("Warehouse") }}: <b class="font-medium text-gray-700">{{ form.set_warehouse }}</b></span>
 						<span v-if="form.currency">{{ __("Currency") }}: <b class="font-medium text-gray-700">{{ form.currency }}</b></span>
 					</div>
@@ -868,6 +874,8 @@ import { Button, FeatherIcon } from "frappe-ui"
 import { computed, nextTick, reactive, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
+import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
+import { useCompanyChoice } from "@/composables/useCompanyChoice"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -1000,11 +1008,30 @@ let listTimer = null
 // the open watcher: the watcher fires immediately during setup.
 const poDefaults = ref(null)
 
+// The company this PO acts for and the POS Profile representing it (the
+// shift's for a cashier; a manager with several companies picks one).
+const companyChoice = useCompanyChoice(call, () => props.posProfile)
+const activeProfile = computed(() => companyChoice.profile.value)
+const formCompany = computed(
+	() => form.value.company || companyChoice.company.value || props.company,
+)
+
+watch(
+	() => companyChoice.company.value,
+	(next, prev) => {
+		if (!prev || next === prev) return
+		// defaults (supplier, warehouse, price list) belong to the company
+		poDefaults.value = null
+		loadOrders()
+		loadPoDefaults()
+	},
+)
+
 async function loadPoDefaults() {
 	if (poDefaults.value) return poDefaults.value
 	try {
 		poDefaults.value = await call(`${API}.get_po_defaults`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 		})
 	} catch (error) {
 		showError(parseError(error)?.message || serverErrorMessage(error))
@@ -1020,10 +1047,12 @@ watch(
 		show.value = val
 		if (val) {
 			view.value = "list"
-			loadOrders()
-			// the Receive gate reads the POS Settings flag — have it ready by
-			// the time the list renders
-			loadPoDefaults()
+			companyChoice.load().then(() => {
+				loadOrders()
+				// the Receive gate reads the POS Settings flag — have it ready by
+				// the time the list renders
+				loadPoDefaults()
+			})
 		} else {
 			clearTimeout(listTimer)
 		}
@@ -1092,7 +1121,8 @@ async function loadOrders() {
 	loadingOrders.value = true
 	try {
 		const res = await call(`${API}.get_purchase_orders`, {
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
+			company: companyChoice.company.value || null,
 			status: statusFilter.value || null,
 			search_term: searchTerm.value || null,
 			limit: 50,
@@ -1367,7 +1397,7 @@ async function openReceive(order) {
 			supplier: d?.supplier || "",
 			supplier_name: d?.supplier_name || order.supplier_name,
 			posting_date: d?.posting_date || localDate(),
-			company: d?.company || props.company,
+			company: d?.company || formCompany.value,
 			currency: d?.currency || props.currency || "",
 			set_warehouse: d?.set_warehouse || "",
 			inter_company_reference: d?.inter_company_reference || null,
@@ -1439,6 +1469,8 @@ function localDate(offsetDays = 0) {
 function blankForm() {
 	return {
 		name: null,
+		// null = the company picked in the list (formCompany); an edited PO keeps its own
+		company: null,
 		supplier: "",
 		transaction_date: localDate(),
 		schedule_date: localDate(1),
@@ -1588,6 +1620,7 @@ async function openEdit(order) {
 		const d = await call(`${API}.get_purchase_order`, { name: order.name })
 		form.value = {
 			name: d?.name || null,
+			company: d?.company || null,
 			supplier: d?.supplier || "",
 			transaction_date: d?.transaction_date || localDate(),
 			schedule_date: d?.schedule_date || localDate(1),
@@ -1649,7 +1682,7 @@ async function onSupplierSelect(name) {
 	try {
 		const d = await call(`${API}.get_supplier_details`, {
 			supplier: name,
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 		})
 		form.value.currency = d?.currency || props.currency || ""
 		form.value.taxes_and_charges = d?.taxes_and_charges || ""
@@ -1714,10 +1747,10 @@ async function fetchItemDetails(code, uom, qty) {
 	return call(`${API}.get_purchase_item_details`, {
 		item_code: code,
 		supplier: form.value.supplier || null,
-		pos_profile: props.posProfile,
+		pos_profile: activeProfile.value,
 		qty: qty || 1,
 		transaction_date: form.value.transaction_date || null,
-		warehouse: props.warehouse || null,
+		warehouse: companyChoice.warehouse.value || props.warehouse || null,
 		uom: uom || null,
 		price_list: defaults?.price_list || null,
 	})
@@ -1837,7 +1870,7 @@ async function save(submitAfter) {
 			supplier: form.value.supplier,
 			transaction_date: form.value.transaction_date,
 			schedule_date: form.value.schedule_date,
-			company: props.company,
+			company: formCompany.value,
 			currency: form.value.currency,
 			set_warehouse: form.value.set_warehouse || null,
 			buying_price_list: defaults?.price_list || null,
@@ -1853,7 +1886,7 @@ async function save(submitAfter) {
 		if (form.value.name) payload.name = form.value.name
 		const res = await call(`${API}.save_purchase_order`, {
 			data: JSON.stringify(payload),
-			pos_profile: props.posProfile,
+			pos_profile: activeProfile.value,
 			submit: submitAfter ? 1 : 0,
 		})
 		const poName = res?.name || form.value.name

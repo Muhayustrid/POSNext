@@ -290,6 +290,60 @@ describe("PurchaseOrderDialog", () => {
 		vi.useRealTimers()
 	})
 
+	it("lets a manager with several companies pick whose orders to work on", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_companies"))
+				return {
+					companies: [
+						{ company: "Outlet A", pos_profile: "POS-A", warehouse: "WH-A" },
+						{ company: "Outlet B", pos_profile: "POS-B", warehouse: "WH-B" },
+					],
+					default: null,
+				}
+			if (method.includes("get_purchase_orders")) return { orders: [] }
+			return {}
+		})
+		const wrapper = mount(PurchaseOrderDialog, {
+			props: { modelValue: true, posProfile: null, currency: "IDR" },
+			global: { config: { globalProperties: { __: globalThis.__ } } },
+		})
+		await flushPromises()
+
+		const picker = wrapper.find('[data-test="company-picker"] select')
+		expect(picker.exists()).toBe(true)
+		// no shift: starts on the first option, its profile drives the list
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_orders",
+			expect.objectContaining({ pos_profile: "POS-A", company: "Outlet A" }),
+		)
+
+		mocks.call.mockClear()
+		await picker.setValue("Outlet B")
+		await flushPromises()
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_purchase_orders",
+			expect.objectContaining({ pos_profile: "POS-B", company: "Outlet B" }),
+		)
+		expect(mocks.call).toHaveBeenCalledWith(
+			"pos_next.api.purchase_orders.get_po_defaults",
+			{ pos_profile: "POS-B" },
+		)
+	})
+
+	it("shows no company picker for a single company (cashier in a shift)", async () => {
+		mocks.call.mockImplementation(async (method) => {
+			if (method.includes("get_purchase_companies"))
+				return {
+					companies: [{ company: "Test Co", pos_profile: "POS-1", warehouse: "WH-1" }],
+					default: "Test Co",
+				}
+			return { orders: [] }
+		})
+		const wrapper = mountOpen()
+		await flushPromises()
+		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(false)
+	})
+
 	it("mounts, loads the list and shows the empty state", async () => {
 		mocks.call.mockResolvedValue({ orders: [] })
 		const wrapper = mountOpen()

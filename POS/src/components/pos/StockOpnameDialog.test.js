@@ -225,6 +225,29 @@ describe("StockOpnameDialog list", () => {
 		expect(groupsCall).not.toHaveBeenCalled()
 	})
 
+	it("lets a manager without a shift count for the company they pick", async () => {
+		mockCall("pos_next.api.purchase_orders.get_purchase_companies", () =>
+			Promise.resolve({
+				companies: [
+					{ company: "Co A", pos_profile: "POS-A", warehouse: "WH-A" },
+					{ company: "Co B", pos_profile: "POS-B", warehouse: "WH-B" },
+				],
+				default: null,
+			}),
+		)
+		const listCall = mockCall(LIST_URL, () => Promise.resolve([]))
+		mockCall(STATES_URL, () => Promise.resolve([]))
+		const groupsCall = mockCall(GROUPS_URL, () => Promise.resolve([]))
+
+		const wrapper = await mountOpenDialog({ posProfile: null })
+
+		expect(wrapper.text()).not.toContain("No Active Shift")
+		expect(listCall.mock.calls.at(-1)[0].pos_profile).toBe("POS-A")
+		await findButton(wrapper, "New Count").trigger("click")
+		await flushPromises()
+		expect(groupsCall.mock.calls.at(-1)[0].pos_profile).toBe("POS-A")
+	})
+
 	it("renders the Desk list header and clickable rows", async () => {
 		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
 		const wrapper = await mountOpenDialog()

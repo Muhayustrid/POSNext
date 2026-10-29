@@ -10,13 +10,14 @@ from frappe.utils import cint, flt, nowdate
 
 from pos_next.api.purchase_orders import (
 	_assert_internal,
+	_assert_purchase_company,
 	_attachment_counts,
 	_can_see_prices,
 	_check_guest,
 	_check_shift,
 	_hide_prices,
+	_listed_companies,
 	_parse,
-	_profile_value,
 	_resolve_company,
 	_validate_row_uom,
 )
@@ -94,6 +95,7 @@ def get_purchase_receipt_draft(po_name):
 	_check_guest()
 	po = frappe.get_doc("Purchase Order", po_name)
 	_check_po_permission("read", doc=po)
+	_assert_purchase_company(po.company)
 	_check_permission("create")
 	_refuse_internal_suppliers({po.supplier})
 	po_items = {d.name: d for d in po.items}
@@ -114,6 +116,7 @@ def get_intercompany_receipt_draft(po_name):
 	_check_guest()
 	po = frappe.get_doc("Purchase Order", po_name)
 	_check_po_permission("read", doc=po)
+	_assert_purchase_company(po.company)
 	_check_permission("create")
 	if not cint(frappe.db.get_value("Supplier", po.supplier, "is_internal_supplier")):
 		frappe.throw(_("Purchase Order {0} is not from an internal supplier").format(po.name))
@@ -286,7 +289,10 @@ def save_purchase_receipt(data, submit=0):
 
 	doc.supplier = data.get("supplier")
 	doc.posting_date = data.get("posting_date") or nowdate()
-	company = data.get("company") or _resolve_company()
+	company = data.get("company") or (doc.company if name else None) or _resolve_company()
+	if name:
+		_assert_purchase_company(doc.company)
+	_assert_purchase_company(company)
 	doc.company = company
 	if data.get("set_warehouse"):
 		doc.set_warehouse = data.get("set_warehouse")
@@ -358,12 +364,10 @@ def save_purchase_receipt(data, submit=0):
 
 
 @frappe.whitelist()
-def get_purchase_receipts(pos_profile=None, status=None, search_term=None, limit=50):
+def get_purchase_receipts(pos_profile=None, status=None, search_term=None, limit=50, company=None):
 	_check_guest()
 	filters = [["is_internal_supplier", "=", 1]]
-	company = _profile_value(pos_profile, "company")
-	if company:
-		filters.append(["company", "=", company])
+	filters.append(["company", "in", _listed_companies(company, pos_profile)])
 	if status:
 		filters.append(["status", "=", status])
 	or_filters = []
@@ -408,6 +412,7 @@ def cancel_purchase_receipt(name):
 	_check_shift()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("cancel", doc=doc)
+	_assert_purchase_company(doc.company)
 	_assert_internal(doc)
 	if doc.docstatus != 1:
 		frappe.throw(_("Only a submitted Purchase Receipt can be cancelled"))
@@ -420,6 +425,7 @@ def get_purchase_receipt(name):
 	_check_guest()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("read", doc=doc)
+	_assert_purchase_company(doc.company)
 	_assert_internal(doc)
 	return _pr_summary(doc)
 
@@ -430,6 +436,7 @@ def submit_purchase_receipt(name, action=None):
 	_check_shift()
 	doc = frappe.get_doc("Purchase Receipt", name)
 	_check_permission("submit", doc=doc)
+	_assert_purchase_company(doc.company)
 	if doc.docstatus != 0:
 		frappe.throw(_("Only a Draft Purchase Receipt can be submitted"))
 	_assert_internal(doc)
