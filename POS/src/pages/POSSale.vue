@@ -1688,7 +1688,7 @@ watch(
 );
 
 // Shift schedule: warning toast before deadline, auto-close dialog after it.
-// Auto-close is deferred while cart has items, payment/submit is in flight,
+// Auto-close discards an unfinished cart; it is deferred while payment/submit is in flight
 // or offline invoices are pending sync. While deferred, show a single warning toast.
 const isAutoClosing = ref(false);
 const autoClosedShiftIds = new Set();
@@ -1710,11 +1710,6 @@ function getScheduleDeferReason() {
 			"Shift schedule has ended, but payment is in progress. Auto-close is deferred."
 		);
 	}
-	if (cartStore.invoiceItems.length > 0) {
-		return __(
-			"Shift schedule has ended, but cart has items. Auto-close is deferred."
-		);
-	}
 	if (offlineStore.pendingInvoicesCount > 0) {
 		return __(
 			"Shift schedule has ended, but invoices are pending sync. Auto-close is deferred."
@@ -1731,6 +1726,12 @@ function triggerScheduleAutoClose(shiftName) {
 			)
 		);
 		return;
+	}
+
+	// The schedule is mandatory: an unfinished cart is discarded, not kept
+	if (cartStore.invoiceItems.length > 0) {
+		cartStore.clearCart();
+		showWarning(__("Shift schedule has ended. The cart was cleared and the shift is being closed."));
 	}
 
 	autoClosedShiftIds.add(shiftName);

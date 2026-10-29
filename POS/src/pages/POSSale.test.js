@@ -1084,30 +1084,37 @@ describe("return invoice auto-print", () => {
 })
 
 describe("shift schedule auto-closing and reprint (Task B)", () => {
-	it("defers auto-close and shows single warning when cart has items, then auto-closes when cart clears", async () => {
+	it("discards the cart and auto-closes at once when the schedule expires with items in the cart", async () => {
 		await mountPOS({ ShiftClosingDialog: ShiftClosingDialogStub })
 		offlineStore.isOffline = false
 		const shiftStore = usePOSShiftStore(wrapper.vm.$pinia)
-		toastMock.showWarning.mockClear()
 
 		// Cart starts with 1 item from mountPOS
 		expect(cartStore.invoiceItems).toHaveLength(1)
 
-		// Schedule expires with enforce=true
 		shiftStore.scheduleStatus = { enabled: true, enforce: true, expired: true }
 		await flushPromises()
 
-		// Deferred: dialog not shown, warning toast shown
-		expect(uiStore.showCloseShiftDialog).toBe(false)
-		expect(toastMock.showWarning).toHaveBeenCalledTimes(1)
-
-		// Clearing cart triggers auto-close
-		cartStore.invoiceItems = []
-		await flushPromises()
-
+		expect(cartStore.invoiceItems).toHaveLength(0)
 		expect(uiStore.showCloseShiftDialog).toBe(true)
 		const closingDialog = wrapper.findComponent(ShiftClosingDialogStub)
 		expect(closingDialog.props("autoClose")).toBe(true)
+	})
+
+	it("still defers auto-close while a payment is in flight and keeps the cart", async () => {
+		await mountPOS({ ShiftClosingDialog: ShiftClosingDialogStub })
+		offlineStore.isOffline = false
+		const shiftStore = usePOSShiftStore(wrapper.vm.$pinia)
+		toastMock.showWarning.mockClear()
+		cartStore.isSubmitting = true
+
+		shiftStore.scheduleStatus = { enabled: true, enforce: true, expired: true }
+		await flushPromises()
+
+		expect(uiStore.showCloseShiftDialog).toBe(false)
+		expect(cartStore.invoiceItems).toHaveLength(1)
+		expect(toastMock.showWarning).toHaveBeenCalledTimes(1)
+		cartStore.isSubmitting = false
 	})
 
 	it("falls back to manual dialog on auto-close failure and does not re-trigger", async () => {
