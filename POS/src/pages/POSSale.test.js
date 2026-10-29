@@ -746,6 +746,27 @@ describe("invoice history without a shift", () => {
 
 		expect(call.mock.calls.some(([method]) => method === "pos_next.api.invoices.get_invoices")).toBe(false)
 	})
+
+	it("loads history for the profile a manager picked in the menu", async () => {
+		const MenuEmitStub = defineComponent({
+			name: "POSMenuDialog",
+			emits: ["active-profile"],
+			template: `<button data-test="pick-profile" @click="$emit('active-profile', 'Beta POS')"></button>`,
+		})
+		await mountPOS({ POSMenuDialog: MenuEmitStub })
+		shiftState.value = { ...shiftState.value, pos_opening_shift: null, pos_profile: null, isOpen: false }
+		offlineStore.isOffline = false
+		const { call } = await import("@/utils/apiWrapper")
+		call.mockClear()
+
+		await wrapper.find('[data-test="pick-profile"]').trigger("click")
+		await flushPromises()
+
+		expect(call).toHaveBeenCalledWith("pos_next.api.invoices.get_invoices", {
+			pos_profile: "Beta POS",
+			limit: 100,
+		})
+	})
 })
 
 describe("header printer icon", () => {

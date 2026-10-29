@@ -12,8 +12,10 @@ vi.mock("frappe-ui", async () => {
 		name: "Button",
 		template: `<button v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
 	})
-	return { FeatherIcon: stub, Button, call: () => Promise.resolve(null) }
+	return { FeatherIcon: stub, Button, call: (...args) => callMock(...args) }
 })
+
+const callMock = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
 
 // The app installs __() as a global property; some modules call it at
 // module-evaluation time, so this must be hoisted above the imports.
@@ -33,12 +35,19 @@ import { MANAGEMENT_MENU } from "./managementMenu"
 const viewStubs = {
 	PromotionManagement: { template: `<div data-testid="view-promotions" />` },
 	POSSettings: { template: `<div data-testid="view-settings" />` },
-	InvoiceManagement: { template: `<div data-testid="view-invoices" />` },
-	SessionSummary: { template: `<div data-testid="view-sales-recap" />` },
+	InvoiceManagement: {
+		props: ["posProfile"],
+		template: `<div data-testid="view-invoices" :data-profile="posProfile" />`,
+	},
+	SessionSummary: {
+		props: ["posProfile"],
+		template: `<div data-testid="view-sales-recap" :data-profile="posProfile" />`,
+	},
 	ProductsView: { template: `<div data-testid="view-products" />` },
 	ProductionDialog: {
 		name: "ProductionDialog",
-		template: `<div data-testid="view-production" />`,
+		props: ["posProfile"],
+		template: `<div data-testid="view-production" :data-profile="posProfile" />`,
 	},
 	RejectRequestDialog: {
 		name: "RejectRequestDialog",
@@ -89,6 +98,8 @@ function availableLabels(
 
 beforeEach(() => {
 	document.body.innerHTML = ""
+	callMock.mockReset()
+	callMock.mockImplementation(() => Promise.resolve(null))
 })
 
 describe("POSMenuDialog menu", () => {
@@ -406,6 +417,56 @@ describe("POSMenuDialog chrome", () => {
 		expect(back.exists()).toBe(true)
 		await back.trigger("click")
 		expect(wrapper.emitted("update:open")).toEqual([[false]])
+		wrapper.unmount()
+	})
+})
+
+describe("POSMenuDialog company choice without a shift", () => {
+	const companies = {
+		companies: [
+			{ company: "Alpha", pos_profile: "Alpha POS", warehouse: "WA" },
+			{ company: "Beta", pos_profile: "Beta POS", warehouse: "WB" },
+		],
+		default: null,
+	}
+
+	async function flush() {
+		for (let i = 0; i < 4; i++) await nextTick()
+		await new Promise((r) => setTimeout(r))
+		await nextTick()
+	}
+
+	it.each(["invoices", "sales-recap", "production"])(
+		"a manager without a shift picks the company for %s",
+		async (view) => {
+			callMock.mockImplementation((method) =>
+				Promise.resolve(method.endsWith("get_purchase_companies") ? companies : null),
+			)
+			const wrapper = mountShell({ open: true, initialView: view, canProduction: true })
+			await flush()
+			const picker = wrapper.find('[data-test="company-picker"] select')
+			expect(picker.exists()).toBe(true)
+			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
+				"Alpha POS",
+			)
+			await picker.setValue("Beta")
+			await flush()
+			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
+				"Beta POS",
+			)
+			expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"])
+			wrapper.unmount()
+		},
+	)
+
+	it("keeps the shift's profile and shows no picker during a shift", async () => {
+		callMock.mockImplementation(() => Promise.resolve(companies))
+		const wrapper = mountShell({ open: true, initialView: "invoices", posProfile: "Shift POS" })
+		await flush()
+		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(false)
+		expect(wrapper.find('[data-testid="view-invoices"]').attributes("data-profile")).toBe(
+			"Shift POS",
+		)
 		wrapper.unmount()
 	})
 })

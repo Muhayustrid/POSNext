@@ -99,9 +99,20 @@
 				     (view-invoice, print-invoice, promotion-saved, ...) onto
 				     whichever view is mounted, so its handlers stay unchanged. -->
 				<div
-					class="flex-1 min-w-0 overflow-hidden"
-					:class="{ 'hidden md:block': mobileList }"
+					class="flex-1 min-w-0 overflow-hidden flex-col"
+					:class="mobileList ? 'hidden md:flex' : 'flex'"
 				>
+					<!-- manager without a shift: which company these views show -->
+					<div
+						v-if="showCompanyPicker"
+						class="shrink-0 border-b border-gray-200 px-4 py-2 sm:px-6"
+					>
+						<CompanyPicker
+							v-model="companyChoice.company.value"
+							:options="companyChoice.options.value"
+						/>
+					</div>
+					<div class="flex-1 min-h-0">
 					<PromotionManagement
 						v-if="activeView === 'promotions'"
 						embedded
@@ -125,7 +136,7 @@
 						v-else-if="activeView === 'invoices'"
 						embedded
 						:model-value="true"
-						:pos-profile="posProfile"
+						:pos-profile="viewProfile"
 						:currency="currency"
 						:history-invoices="historyInvoices"
 						:draft-invoices="draftInvoices"
@@ -137,8 +148,9 @@
 						<div class="h-full flex flex-col text-start">
 							<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
 								<SessionSummary
+									:key="viewProfile"
 									:opening-shift="openingShift"
-									:pos-profile="posProfile"
+									:pos-profile="viewProfile"
 								/>
 							</div>
 						</div>
@@ -153,7 +165,7 @@
 						v-else-if="activeView === 'production'"
 						embedded
 						:model-value="true"
-						:pos-profile="posProfile"
+						:pos-profile="viewProfile"
 						:company="company"
 						:currency="currency"
 						class="h-full"
@@ -201,6 +213,7 @@
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
 					/>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -208,7 +221,7 @@
 </template>
 
 <script setup>
-import { Button, FeatherIcon } from "frappe-ui"
+import { Button, FeatherIcon, call } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { MANAGEMENT_MENU, MENU_GROUPS } from "./managementMenu"
 import PromotionManagement from "@/components/sale/PromotionManagement.vue"
@@ -221,6 +234,8 @@ import RejectRequestDialog from "@/components/pos/RejectRequestDialog.vue"
 import StockOpnameDialog from "@/components/pos/StockOpnameDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
+import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
+import { useCompanyChoice } from "@/composables/useCompanyChoice"
 
 defineOptions({ inheritAttrs: false })
 
@@ -241,7 +256,7 @@ const props = defineProps({
 	isOffline: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(["update:open", "menu-selected"])
+const emit = defineEmits(["update:open", "menu-selected", "active-profile"])
 
 const activeView = ref(null)
 // One-shot deep link: ProductionDialog's "Submit report" jumps into the
@@ -299,6 +314,35 @@ watch(
 		activeView.value = fallback?.id ?? null
 	},
 	{ immediate: true },
+)
+
+// Views that follow one outlet. Without a shift a manager picks the company
+// (same options and rules as PO/PR); a cashier gets no option and keeps the
+// views' own "no shift" state. The server re-checks profile access.
+const COMPANY_VIEWS = ["invoices", "sales-recap", "production"]
+const companyChoice = useCompanyChoice(call, () => props.posProfile)
+const inCompanyView = computed(() => COMPANY_VIEWS.includes(activeView.value))
+const viewProfile = computed(() =>
+	props.posProfile || (inCompanyView.value ? companyChoice.profile.value : null),
+)
+const showCompanyPicker = computed(
+	() => !props.posProfile && inCompanyView.value && companyChoice.hasChoice.value,
+)
+
+watch(
+	() => props.open && !props.posProfile && inCompanyView.value,
+	(needed) => {
+		if (needed && !companyChoice.loaded.value) companyChoice.load()
+	},
+	{ immediate: true },
+)
+
+// POSSale loads the invoice history the invoices view shows; tell it which profile
+watch(
+	() => (props.posProfile ? null : companyChoice.profile.value),
+	(profile) => {
+		if (profile) emit("active-profile", profile)
+	},
 )
 
 function isDesktop() {

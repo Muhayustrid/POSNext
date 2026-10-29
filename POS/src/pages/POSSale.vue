@@ -701,6 +701,7 @@
 				@load-draft="handleLoadDraftFromManagement"
 				@delete-draft="handleDeleteDraft"
 				@refresh-history="loadInvoiceHistoryData"
+				@active-profile="handleMenuProfile"
 				@promotion-saved="handlePromotionSaved"
 				@production-created="handleProductionCreated"
 			/>
@@ -3582,14 +3583,24 @@ function handleProductionCreated() {
 }
 
 // Load invoice history data
+// Without a shift a manager picks the company in the menu; its profile feeds
+// the invoice history there (the shift's profile always wins).
+const menuProfile = ref(null);
+
+function handleMenuProfile(profile) {
+	menuProfile.value = profile;
+	loadInvoiceHistoryData();
+}
+
 async function loadInvoiceHistoryData() {
-	log.info("Loading invoice history data for profile:", shiftStore.profileName);
+	const profileName = shiftStore.profileName || menuProfile.value;
+	log.info("Loading invoice history data for profile:", profileName);
 
 	// Also reload drafts
 	await draftsStore.loadDrafts();
 
 	// A manager can open the menu without a shift; get_invoices needs a profile
-	if (!shiftStore.profileName) {
+	if (!profileName) {
 		invoiceHistoryData.value = [];
 		return;
 	}
@@ -3598,7 +3609,7 @@ async function loadInvoiceHistoryData() {
 	if (offlineStore.isOffline) {
 		log.info("Offline mode - loading invoice history from cache");
 		try {
-			const cachedInvoices = await getCachedInvoiceHistory(shiftStore.profileName, {
+			const cachedInvoices = await getCachedInvoiceHistory(profileName, {
 				limit: 100,
 			});
 			invoiceHistoryData.value = cachedInvoices || [];
@@ -3613,7 +3624,7 @@ async function loadInvoiceHistoryData() {
 	try {
 		// Use custom API from pos_next.api.invoices
 		const result = await call("pos_next.api.invoices.get_invoices", {
-			pos_profile: shiftStore.profileName,
+			pos_profile: profileName,
 			limit: 100,
 		});
 
@@ -3622,14 +3633,14 @@ async function loadInvoiceHistoryData() {
 
 		// Cache invoices for offline use
 		if (result && result.length > 0) {
-			cacheInvoiceHistory(result, shiftStore.profileName);
+			cacheInvoiceHistory(result, profileName);
 		}
 	} catch (error) {
 		log.error("Error loading invoice history:", error);
 
 		// Fallback to cached data on error
 		try {
-			const cachedInvoices = await getCachedInvoiceHistory(shiftStore.profileName, {
+			const cachedInvoices = await getCachedInvoiceHistory(profileName, {
 				limit: 100,
 			});
 			if (cachedInvoices && cachedInvoices.length > 0) {
