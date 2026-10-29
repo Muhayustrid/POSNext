@@ -4,7 +4,8 @@
 """Items outside the POS Profile's item groups/brands stay out of the POS.
 
 - search_by_barcode applies the same scope as the catalog query;
-- saving a POS Profile drops the cached scope right away (Desk edits).
+- saving a POS Profile drops the cached scope right away (Desk edits);
+- only items with a valid selling Item Price on the profile price list show.
 
 Run via pos_next/_pn_run_tests.py pos_next.tests.test_item_profile_scope
 """
@@ -58,3 +59,53 @@ class TestItemProfileScope(FrappeTestCase):
 		items.clear_profile_item_caches(frappe._dict(name="Outlet 1"))
 		for key in keys:
 			self.assertIsNone(cache.get_value(key), key)
+
+
+class TestPricedItemScope(FrappeTestCase):
+	"""Only items with a valid selling Item Price on the profile's price list
+	reach the sale catalog / barcode lookup."""
+
+	def setUp(self):
+		codes = frappe.get_all(
+			"Item", filters={"disabled": 0, "is_sales_item": 1, "has_variants": 0}, pluck="name", limit=2
+		)
+		if len(codes) < 2:
+			self.skipTest("needs two sales items")
+		self.priced, self.unpriced = codes
+		self.price_list = frappe.get_doc(
+			{
+				"doctype": "Price List",
+				"price_list_name": f"PN Scope {frappe.generate_hash(length=6)}",
+				"selling": 1,
+				"currency": frappe.db.get_default("currency") or "IDR",
+			}
+		).insert(ignore_permissions=True)
+		self._price(self.priced)
+
+	def _price(self, item_code, valid_upto=None):
+		return frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": item_code,
+				"price_list": self.price_list.name,
+				"price_list_rate": 1000,
+				"valid_from": "2020-01-01",
+				**({"valid_upto": valid_upto} if valid_upto else {}),
+			}
+		).insert(ignore_permissions=True)
+
+	def _has(self, item_code):
+		return items._has_selling_price(frappe._dict(name=item_code), self.price_list.name)
+
+	def test_item_on_price_list_passes(self):
+		self.assertTrue(self._has(self.priced))
+
+	def test_item_missing_from_price_list_refused(self):
+		self.assertFalse(self._has(self.unpriced))
+
+	def test_expired_price_does_not_count(self):
+		self._price(self.unpriced, valid_upto="2021-01-01")
+		self.assertFalse(self._has(self.unpriced))
+
+	def test_profile_without_price_list_is_unrestricted(self):
+		self.assertTrue(items._has_selling_price(frappe._dict(name=self.unpriced), None))

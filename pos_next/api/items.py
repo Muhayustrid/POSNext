@@ -840,15 +840,51 @@ def _get_pos_profile_allowed_item_groups(pos_profile_doc):
 	return result
 
 
+def _priced_item_condition(price_list, transaction_date=None):
+	"""SQL condition (+ params, alias `i` = Item): the item has a selling Item
+	Price valid today on `price_list` — its own, its template's (a variant
+	falls back to the template price like ERPNext), or for a template any of
+	its variants'. An outlet whose price list has no row for an item does not
+	sell it, whatever its item group."""
+	date = _get_item_price_transaction_date(transaction_date)
+	valid = (
+		"ip.price_list = %s AND ip.selling = 1"
+		" AND IFNULL(ip.valid_from, '2000-01-01') <= %s"
+		" AND IFNULL(ip.valid_upto, '2500-12-31') >= %s"
+	)
+	condition = (
+		f"(EXISTS (SELECT 1 FROM `tabItem Price` ip WHERE {valid} AND ip.item_code = i.name)"
+		f" OR (IFNULL(i.variant_of, '') != '' AND EXISTS (SELECT 1 FROM `tabItem Price` ip"
+		f" WHERE {valid} AND ip.item_code = i.variant_of))"
+		f" OR (i.has_variants = 1 AND EXISTS (SELECT 1 FROM `tabItem Price` ip"
+		f" INNER JOIN `tabItem` v ON v.name = ip.item_code WHERE {valid} AND v.variant_of = i.name)))"
+	)
+	return condition, [price_list, date, date] * 3
+
+
 def _assert_item_in_profile_scope(item_doc, pos_profile_doc):
 	allowed_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
 	allowed_brands = _get_allowed_profile_brands(pos_profile_doc.name)
-	if (allowed_groups and item_doc.item_group not in allowed_groups) or (
-		allowed_brands and item_doc.brand not in allowed_brands
+	if (
+		(allowed_groups and item_doc.item_group not in allowed_groups)
+		or (allowed_brands and item_doc.brand not in allowed_brands)
+		or not _has_selling_price(item_doc, pos_profile_doc.get("selling_price_list"))
 	):
 		frappe.throw(
 			_("Item {0} is not available in POS Profile {1}").format(item_doc.name, pos_profile_doc.name)
 		)
+
+
+def _has_selling_price(item_doc, price_list):
+	if not price_list:
+		return True
+	condition, params = _priced_item_condition(price_list)
+	return bool(
+		frappe.db.sql(
+			f"SELECT 1 FROM `tabItem` i WHERE i.name = %s AND {condition} LIMIT 1",
+			[item_doc.name, *params],
+		)
+	)
 
 
 def clear_profile_item_caches(doc, method=None):
@@ -872,8 +908,12 @@ def _build_item_base_conditions(
 	exclude_templates=False,
 	hide_unavailable=False,
 	warehouse=None,
+	require_price=False,
 ):
 	"""Build base SQL conditions for POS item search with hierarchical item group support.
+
+	`require_price`: sale catalog only — keep items with a valid selling Item
+	Price on the profile's price list (see _priced_item_condition).
 
 	Returns:
 		tuple: (conditions, params, extra_joins)
@@ -923,6 +963,11 @@ def _build_item_base_conditions(
 	if brand:
 		conditions.append("i.brand = %s")
 		where_params.append(brand)
+
+	if require_price and pos_profile_doc.get("selling_price_list"):
+		price_condition, price_params = _priced_item_condition(pos_profile_doc.selling_price_list)
+		conditions.append(price_condition)
+		where_params.extend(price_params)
 
 	extra_joins = ""
 	join_params = []
@@ -1390,6 +1435,7 @@ def get_items(
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable,
 			warehouse=pos_profile_doc.warehouse,
+			require_price=True,
 		)
 
 		# Build column list with table alias
@@ -1762,6 +1808,7 @@ def get_items_bulk(
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable,
 			warehouse=pos_profile_doc.warehouse,
+			require_price=True,
 		)
 
 		if item_groups:
@@ -1948,6 +1995,7 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable,
 			warehouse=pos_profile_doc.warehouse,
+			require_price=True,
 		)
 
 		where_clause = " AND ".join(conditions)

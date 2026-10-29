@@ -129,6 +129,27 @@ describe("itemSearch profileLoaded gating (FIX C)", () => {
 		expect(store.selectedItemGroup).toBe("Products");
 	});
 
+	it("re-selects the first item group once it was cleared (brand mode exit)", async () => {
+		vi.mocked(call).mockImplementation(async (url) => {
+			if (url === PROFILE_URL) {
+				return {
+					message: null,
+					pos_profile: { item_groups: [{ item_group: "Products" }, { item_group: "Food" }] },
+					item_groups_hierarchy: [{ item_group: "Products" }, { item_group: "Food" }],
+				};
+			}
+			return { message: [] };
+		});
+		const store = useItemSearchStore();
+		await store.setPosProfile("Kasir 1");
+		await flushPromises();
+		await store.setSelectedItemGroup(null);
+
+		await store.ensureItemGroupSelected();
+
+		expect(store.selectedItemGroup).toBe("Products");
+	});
+
 	it("treats a profile with zero item groups as loaded (legit unfiltered profile)", async () => {
 		vi.mocked(call).mockImplementation(async (url) => {
 			if (url === PROFILE_URL) {
