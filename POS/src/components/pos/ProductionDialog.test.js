@@ -253,6 +253,19 @@ describe("ProductionDialog", () => {
 		)
 	})
 
+	it("reloads recipes for the new profile when the picked company changes", async () => {
+		const seen = []
+		respond(RECIPES_URL, (params, opts) => {
+			seen.push(params.pos_profile)
+			opts.onSuccess({ pos_profile: params.pos_profile, company: "Co", warehouse: "WH", recipes: RECIPES })
+		})
+		const wrapper = await mountOpenDialog()
+		await wrapper.setProps({ posProfile: "POS-2" })
+		await flushPromises()
+		expect(seen).toEqual(["POS-1", "POS-2"])
+		expect(wrapper.text()).toContain("Iced Latte")
+	})
+
 	it("shows the loading placeholder while recipes are being fetched", async () => {
 		respond(RECIPES_URL, () => new Promise(() => {})) // never resolves
 		const wrapper = await mountOpenDialog()

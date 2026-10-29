@@ -1631,6 +1631,15 @@ if (props.modelValue) {
 	view.value = "recipes"
 	loadRecipes()
 }
+// A manager without a shift can switch company in the menu; reload for it
+watch(
+	() => props.posProfile,
+	() => {
+		if (!show.value) return
+		view.value = "recipes"
+		loadRecipes()
+	},
+)
 </script>
 
 <style scoped>
