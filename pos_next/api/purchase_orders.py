@@ -157,6 +157,7 @@ def get_po_defaults(pos_profile=None):
 	"""
 	_check_guest()
 	_check_permission("read")
+	_scoped_company(pos_profile)
 	supplier = _po_setting(pos_profile, "po_default_supplier")
 	return _hide_prices(
 		{
@@ -268,10 +269,29 @@ def _assert_purchase_company(company):
 		)
 
 
+def _scoped_company(pos_profile=None, warehouse=None):
+	"""Company the form acts for; an explicit profile must belong to an allowed
+	company and an explicit warehouse to that same company."""
+	company = _resolve_company(pos_profile)
+	if pos_profile:
+		_assert_purchase_company(company)
+	if warehouse and frappe.db.get_value("Warehouse", warehouse, "company") != company:
+		frappe.throw(
+			_("Warehouse {0} does not belong to company {1}").format(warehouse, company),
+			frappe.PermissionError,
+		)
+	return company
+
+
 def _purchase_profile_for(company, pos_profile=None):
 	"""The POS Profile whose defaults a purchase for `company` uses: the given
-	one when it belongs to that company, else the company's option profile."""
-	if pos_profile and frappe.db.get_value("POS Profile", pos_profile, "company") == company:
+	one, which must belong to that company, else the company's option profile."""
+	if pos_profile:
+		if frappe.db.get_value("POS Profile", pos_profile, "company") != company:
+			frappe.throw(
+				_("POS Profile {0} does not belong to company {1}").format(pos_profile, company),
+				frappe.PermissionError,
+			)
 		return pos_profile
 	return next(
 		(o["pos_profile"] for o in _purchase_company_options() if o["company"] == company), None
@@ -333,7 +353,7 @@ def get_supplier_details(supplier, pos_profile=None):
 	details = get_party_details(
 		party=supplier,
 		party_type="Supplier",
-		company=_resolve_company(pos_profile),
+		company=_scoped_company(pos_profile),
 		doctype="Purchase Order",
 	)
 	return _hide_prices(
@@ -375,7 +395,7 @@ def get_purchase_item_details(
 	price_list=None,
 ):
 	_check_guest()
-	company = _resolve_company(pos_profile)
+	company = _scoped_company(pos_profile, warehouse)
 	ctx = {
 		"item_code": item_code,
 		"company": company,

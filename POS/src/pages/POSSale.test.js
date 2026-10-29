@@ -728,6 +728,26 @@ describe("View Shift with active shift", () => {
 	})
 })
 
+describe("invoice history without a shift", () => {
+	it("does not call get_invoices when no POS Profile is loaded", async () => {
+		const MenuEmitStub = defineComponent({
+			name: "POSMenuDialog",
+			emits: ["menu-selected"],
+			template: `<button data-test="pick-invoices" @click="$emit('menu-selected', 'invoices')"></button>`,
+		})
+		await mountPOS({ POSMenuDialog: MenuEmitStub })
+		shiftState.value = { ...shiftState.value, pos_opening_shift: null, pos_profile: null, isOpen: false }
+		offlineStore.isOffline = false
+		const { call } = await import("@/utils/apiWrapper")
+		call.mockClear()
+
+		await wrapper.find('[data-test="pick-invoices"]').trigger("click")
+		await flushPromises()
+
+		expect(call.mock.calls.some(([method]) => method === "pos_next.api.invoices.get_invoices")).toBe(false)
+	})
+})
+
 describe("header printer icon", () => {
 	it("keeps Settings closed when the reconnect attempt fails", async () => {
 		await mountPOS({

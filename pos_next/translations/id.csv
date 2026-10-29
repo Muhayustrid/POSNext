@@ -3623,3 +3623,5 @@ Shipping status,Status pengiriman
 "You are not allowed to act for company {0}","Anda tidak diizinkan bertindak atas nama company {0}",""
 "Select the company to purchase for","Pilih company yang diwakili untuk pembelian ini",""
 "Purchase for","Beli atas nama",""
+"POS Profile {0} does not belong to company {1}","POS Profile {0} bukan milik company {1}",""
+"Warehouse {0} does not belong to company {1}","Gudang {0} bukan milik company {1}",""

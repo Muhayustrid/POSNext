@@ -3588,6 +3588,12 @@ async function loadInvoiceHistoryData() {
 	// Also reload drafts
 	await draftsStore.loadDrafts();
 
+	// A manager can open the menu without a shift; get_invoices needs a profile
+	if (!shiftStore.profileName) {
+		invoiceHistoryData.value = [];
+		return;
+	}
+
 	// Check if offline - use cached data
 	if (offlineStore.isOffline) {
 		log.info("Offline mode - loading invoice history from cache");

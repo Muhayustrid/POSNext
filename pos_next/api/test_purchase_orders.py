@@ -519,6 +519,46 @@ class TestPurchaseOrderProxy(FrappeTestCase):
 		self.assertEqual(result["company"], self.profile_company)
 		self.assertEqual(result["items"][0]["warehouse"], self.warehouse)
 
+	def _foreign_profile(self):
+		"""A POS Profile of a company the test users may not act for."""
+		profile = frappe.db.get_value("POS Profile", {"company": ("!=", self.company), "disabled": 0}, "name")
+		if not profile:
+			self.skipTest("needs a POS Profile of a second company")
+		return profile
+
+	def test_foreign_pos_profile_is_rejected_not_swapped(self):
+		foreign = self._foreign_profile()
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				save_purchase_order(self._data(), pos_profile=foreign)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_read_endpoints_reject_foreign_pos_profile(self):
+		foreign = self._foreign_profile()
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_po_defaults(foreign)
+			with self.assertRaises(frappe.PermissionError):
+				get_supplier_details(self.supplier, pos_profile=foreign)
+			with self.assertRaises(frappe.PermissionError):
+				get_purchase_item_details(self.item, pos_profile=foreign)
+		finally:
+			frappe.set_user(ADMIN)
+
+	def test_item_details_reject_foreign_warehouse(self):
+		foreign_wh = frappe.db.get_value("Warehouse", {"company": ("!=", self.company), "is_group": 0}, "name")
+		if not foreign_wh or not self.pos_profile:
+			self.skipTest("needs a warehouse of a second company")
+		frappe.set_user(self.cashier_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_purchase_item_details(self.item, pos_profile=self.pos_profile, warehouse=foreign_wh)
+		finally:
+			frappe.set_user(ADMIN)
+
 	def test_cashier_cannot_purchase_for_another_company(self):
 		if not self.other_co:
 			self.skipTest("needs a second company")
