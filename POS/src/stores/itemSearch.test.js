@@ -110,6 +110,25 @@ describe("itemSearch profileLoaded gating (FIX C)", () => {
 		expect(names).not.toContain("Other Item");
 	});
 
+	it("opens on the profile's first item group", async () => {
+		vi.mocked(call).mockImplementation(async (url) => {
+			if (url === PROFILE_URL) {
+				return {
+					message: null,
+					pos_profile: { item_groups: [{ item_group: "Products" }, { item_group: "Food" }] },
+					item_groups_hierarchy: [{ item_group: "Products" }, { item_group: "Food" }],
+				};
+			}
+			return { message: [] };
+		});
+
+		const store = useItemSearchStore();
+		await store.setPosProfile("Kasir 1");
+		await flushPromises();
+
+		expect(store.selectedItemGroup).toBe("Products");
+	});
+
 	it("treats a profile with zero item groups as loaded (legit unfiltered profile)", async () => {
 		vi.mocked(call).mockImplementation(async (url) => {
 			if (url === PROFILE_URL) {
@@ -133,6 +152,7 @@ describe("itemSearch profileLoaded gating (FIX C)", () => {
 
 		// 0 groups after a successful load is a ready profile, not "pending".
 		expect(store.profileLoaded).toBe(true);
+		expect(store.selectedItemGroup).toBeNull();
 		expect(store.filteredItems).toHaveLength(2);
 	});
 

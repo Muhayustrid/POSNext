@@ -3595,3 +3595,5 @@ Shipping status,Status pengiriman
 "Difference: {0}","Selisih: {0}",""
 "Count the cash and enter the amount received","Hitung uang lalu isi jumlah yang diterima",""
 "Open a shift before creating or changing Purchase Orders and Purchase Receipts","Buka shift dulu sebelum membuat atau mengubah Purchase Order dan Purchase Receipt",""
+"Item {0} is not available in POS Profile {1}","Item {0} tidak tersedia di POS Profile {1}",""
+"POS Profile {0} has no active shift anymore. Open a new shift with an opening balance.","POS Profile {0} sudah tidak punya shift aktif. Buka shift baru dengan modal awal.",""

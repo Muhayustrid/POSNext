@@ -502,6 +502,10 @@ def search_by_barcode(barcode, pos_profile):
 		if not item_doc.is_sales_item:
 			frappe.throw(_("Item {0} is not allowed for sales").format(item_code))
 
+		# Same profile scope as the catalog (_build_item_base_conditions): a
+		# scanned or typed code must not reach items of other item groups/brands
+		_assert_item_in_profile_scope(item_doc, pos_profile_doc)
+
 		# Prepare item dict for get_item_detail
 		item = {
 			"item_code": item_code,
@@ -834,6 +838,30 @@ def _get_pos_profile_allowed_item_groups(pos_profile_doc):
 	)
 	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
 	return result
+
+
+def _assert_item_in_profile_scope(item_doc, pos_profile_doc):
+	allowed_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
+	allowed_brands = _get_allowed_profile_brands(pos_profile_doc.name)
+	if (allowed_groups and item_doc.item_group not in allowed_groups) or (
+		allowed_brands and item_doc.brand not in allowed_brands
+	):
+		frappe.throw(
+			_("Item {0} is not available in POS Profile {1}").format(item_doc.name, pos_profile_doc.name)
+		)
+
+
+def clear_profile_item_caches(doc, method=None):
+	"""POS Profile on_update: drop the cached item-group/brand scope so a
+	change made in Desk applies at once instead of after the 300s TTL."""
+	cache = frappe.cache()
+	for key in (
+		"pos_item_groups",
+		"pos_profile_allowed_item_groups",
+		"pos_brands",
+		"pos_profile_brands_raw",
+	):
+		cache.delete_value(f"{key}:{doc.name}")
 
 
 def _build_item_base_conditions(
