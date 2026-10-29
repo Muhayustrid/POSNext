@@ -1116,6 +1116,15 @@ def _template_rows(warehouse, item_group=None):
 
 
 @frappe.whitelist()
+def get_opname_item_groups(pos_profile):
+	"""Every Item Group, tree order, for the fetch-by-group filter. An outlet
+	counts all the stock it holds, not just what the POS Profile sells, so this
+	is deliberately NOT the profile's item groups (items.get_item_groups)."""
+	_profile_warehouse(pos_profile)
+	return frappe.get_all("Item Group", fields=["name as item_group"], order_by="lft asc")
+
+
+@frappe.whitelist()
 def fetch_opname_items(pos_profile, item_group=None):
 	"""Item list of the profile warehouse for the count sheet, like ERPNext's
 	"Fetch Items from Warehouse" but without any quantity (blind count)."""

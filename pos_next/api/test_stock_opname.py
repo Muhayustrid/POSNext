@@ -1527,6 +1527,33 @@ class TestStockOpnameSearch(_StockOpnameFixture):
 		self._cashier()
 		return search_opname_items(self.profile, search_term=term, **kwargs)
 
+	def test_search_and_groups_ignore_profile_item_groups(self):
+		"""The POS Profile's item groups scope the sale catalog only: an outlet
+		counts every stock item, so search and the group filter reach beyond."""
+		from pos_next.api.stock_opname import get_opname_item_groups
+
+		frappe.set_user(ADMIN)
+		own_group = frappe.db.get_value("Item", self.plain, "item_group")
+		other_group = frappe.db.get_value("Item Group", {"name": ["!=", own_group], "is_group": 0}, "name")
+		if not other_group:
+			self.skipTest("needs a second leaf Item Group")
+		row = frappe.get_doc(
+			{
+				"doctype": "POS Item Group",
+				"parent": self.profile,
+				"parenttype": "POS Profile",
+				"parentfield": "item_groups",
+				"item_group": other_group,
+			}
+		)
+		row.db_insert()
+		self.addCleanup(frappe.db.delete, "POS Item Group", {"name": row.name})
+
+		self.assertIn(self.plain, [r["item_code"] for r in self._search(self._token(self.plain))])
+		groups = [g["item_group"] for g in get_opname_item_groups(self.profile)]
+		self.assertIn(own_group, groups)
+		self.assertEqual(len(groups), frappe.db.count("Item Group"))
+
 	def test_blind_search_has_no_system_qty(self):
 		rows = self._search(self._token(self.plain))
 		row = next(r for r in rows if r["item_code"] == self.plain)
