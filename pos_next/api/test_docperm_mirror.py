@@ -133,8 +133,11 @@ class TestAfterMigrateRestoresPersonaPerms(FrappeTestCase):
         # production_app.upgrade.retire_stale_docperms runs in an earlier
         # after_migrate hook and deletes every Item/Warehouse Custom DocPerm.
         persona = {"POSNext Cashier", "POSNext Manager"}
-        # PO/PR/Supplier persona rows ride the same fixture re-import.
-        doctypes = ["Item", "Warehouse", "Purchase Order", "Purchase Receipt", "Supplier"]
+        # PO/PR/Supplier/Delivery Note persona rows ride the same fixture re-import;
+        # Delivery Note read is needed to map an intercompany DN into a PR.
+        doctypes = [
+            "Item", "Warehouse", "Purchase Order", "Purchase Receipt", "Supplier", "Delivery Note"
+        ]
         for name in frappe.get_all(
             "Custom DocPerm", filters={"parent": ("in", doctypes)}, pluck="name"
         ):
