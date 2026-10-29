@@ -50,7 +50,7 @@
 					<div class="ms-auto flex items-center gap-2">
 						<RefreshButton :loading="loading" @click="loadList()" />
 						<Button
-							v-if="page === 0 && !filtered && !hasOpenOpname"
+							v-if="posProfile && page === 0 && !filtered && !hasOpenOpname"
 							variant="solid"
 							class="h-[44px] sm:h-10 touch-manipulation"
 							@click="openNew"
@@ -73,9 +73,11 @@
 						</div>
 					</div>
 					<div v-else-if="!opnames.length" class="px-4 py-8 text-center">
-						<p class="text-sm font-medium text-gray-900">{{ __("No stock opname yet") }}</p>
+						<p class="text-sm font-medium text-gray-900">
+							{{ !posProfile ? __("No Active Shift") : __("No stock opname yet") }}
+						</p>
 						<p class="mt-1 text-xs text-gray-500">
-							{{ filtered ? __("Try a different search or status") : __("Start one with New Count") }}
+							{{ !posProfile ? __("No open shift for this session.") : (filtered ? __("Try a different search or status") : __("Start one with New Count")) }}
 						</p>
 					</div>
 					<table v-else class="w-full text-sm">
@@ -1225,6 +1227,7 @@ async function openDoc(name) {
 }
 
 function openNew() {
+	if (!props.posProfile) return
 	editor.value = {
 		name: null,
 		workflow_state: "",
@@ -1323,6 +1326,10 @@ async function ensureBatchOptions() {
 }
 
 async function loadGroups() {
+	if (!props.posProfile) {
+		itemGroups.value = []
+		return
+	}
 	try {
 		itemGroups.value =
 			(await call("pos_next.api.items.get_item_groups", {

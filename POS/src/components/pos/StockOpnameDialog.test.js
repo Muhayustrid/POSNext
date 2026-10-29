@@ -140,9 +140,9 @@ async function pickResult(wrapper, text) {
 	await flushPromises()
 }
 
-async function mountOpenDialog() {
+async function mountOpenDialog(props = {}) {
 	const wrapper = mount(StockOpnameDialog, {
-		props: { modelValue: true, posProfile: "POS-1" },
+		props: { modelValue: true, posProfile: "POS-1", ...props },
 		global: { config: { globalProperties: { __: globalThis.__ } } },
 	})
 	await flushPromises()
@@ -210,6 +210,21 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe("StockOpnameDialog list", () => {
+	it("renders empty state without posProfile, hides New Count, and makes zero API calls", async () => {
+		const listCall = mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		const statesCall = mockCall(STATES_URL, () => Promise.resolve([]))
+		const groupsCall = mockCall(GROUPS_URL, () => Promise.resolve([]))
+
+		const wrapper = await mountOpenDialog({ posProfile: null })
+
+		expect(findButton(wrapper, "New Count")).toBeUndefined()
+		expect(wrapper.text()).toContain("No Active Shift")
+		expect(wrapper.text()).toContain("No open shift for this session.")
+		expect(listCall).not.toHaveBeenCalled()
+		expect(statesCall).not.toHaveBeenCalled()
+		expect(groupsCall).not.toHaveBeenCalled()
+	})
+
 	it("renders the Desk list header and clickable rows", async () => {
 		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
 		const wrapper = await mountOpenDialog()

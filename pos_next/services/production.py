@@ -25,7 +25,7 @@ import frappe
 from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 from frappe import _
-from frappe.utils import cint, flt, get_datetime, get_system_timezone, getdate
+from frappe.utils import add_days, cint, flt, get_datetime, get_system_timezone, getdate
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
 
@@ -734,39 +734,56 @@ def get_active_productions(pos_profile):
 	}
 
 
-def get_production_history(pos_profile, limit=30, offset=0):
+HISTORY_FIELDS = [
+	"name",
+	"production_item",
+	"qty",
+	"produced_qty",
+	"process_loss_qty",
+	"status",
+	"posa_recipe",
+	"posa_operator",
+	"planned_start_date",
+	"actual_start_date",
+	"creation",
+]
+
+
+def get_production_history(pos_profile, limit=30, offset=0, from_date=None, to_date=None):
 	"""Finished Work Orders of this outlet, newest first (D5: the WO is the
 	history — no separate read model). Terminal statuses only, so "Stopped"
-	Work Orders closed from the Desk never appear in either list: by design."""
+	Work Orders closed from the Desk never appear in either list: by design.
+	from_date/to_date narrow by creation date, the same window as the export."""
 	company, _warehouse = _resolve_profile(pos_profile)
 	limit = max(1, min(cint(limit), 100))
 	offset = max(0, cint(offset))
+	filters = [["posa_pos_profile", "=", pos_profile]]
+	if from_date and to_date:
+		# creation is a datetime: half-open day window, so to_date counts whole
+		filters.append(["creation", ">=", getdate(from_date)])
+		filters.append(["creation", "<", add_days(getdate(to_date), 1)])
 	rows = frappe.get_all(
 		"Work Order",
-		filters={"posa_pos_profile": pos_profile},
+		filters=filters,
 		or_filters=[
 			["docstatus", "=", 2],
 			["status", "in", HISTORY_TERMINAL_STATUSES],
 		],
-		fields=[
-			"name",
-			"production_item",
-			"qty",
-			"produced_qty",
-			"process_loss_qty",
-			"status",
-			"posa_recipe",
-			"posa_operator",
-			"planned_start_date",
-			"actual_start_date",
-			"creation",
-		],
+		fields=HISTORY_FIELDS,
 		order_by="creation desc",
 		limit_page_length=limit + 1,
 		limit_start=offset,
 	)
 	has_more = len(rows) > limit
-	rows = rows[:limit]
+	return {
+		"pos_profile": pos_profile,
+		"company": company,
+		"productions": _history_rows(rows[:limit]),
+		"has_more": has_more,
+	}
+
+
+def _history_rows(rows):
 	item_names = {r.production_item for r in rows}
 	items = {
 		r.name: r.item_name
@@ -787,36 +804,111 @@ def get_production_history(pos_profile, limit=30, offset=0):
 		for r in frappe.get_all(
 			"POS Reject Request",
 			filters={"work_order": ["in", [r.name for r in rows]], "is_system_generated": 1},
-			fields=["name", "work_order", "status"],
+			# workflow_state is the live state since the native Workflow
+			# (bf6651a3); the legacy status column is gone on fresh sites
+			fields=["name", "work_order", "workflow_state as status"],
 			order_by="modified desc",
 		)
 		if r.status != "Cancelled"
 	}
-	return {
-		"pos_profile": pos_profile,
-		"company": company,
-		"productions": [
-			{
-				"work_order": r.name,
-				"production_item": r.production_item,
-				"production_item_name": items.get(r.production_item, r.production_item),
-				"recipe": r.posa_recipe,
-				"recipe_name": recipes.get(r.posa_recipe),
-				"qty": flt(r.qty),
-				"produced_qty": flt(r.produced_qty),
-				"process_loss_qty": flt(r.process_loss_qty),
-				"status": r.status,
-				"pos_status": _pos_status_label(r.status, r.produced_qty, r.qty),
-				"operator": r.posa_operator,
-				"started_at": _started_at_epoch(r.actual_start_date or r.planned_start_date),
-				"created_at": r.creation,
-				"reject_request": rejects.get(r.name, {}).get("name"),
-				"reject_status": rejects.get(r.name, {}).get("status"),
-			}
-			for r in rows
-		],
-		"has_more": has_more,
-	}
+	return [
+		{
+			"work_order": r.name,
+			"production_item": r.production_item,
+			"production_item_name": items.get(r.production_item, r.production_item),
+			"recipe": r.posa_recipe,
+			"recipe_name": recipes.get(r.posa_recipe),
+			"qty": flt(r.qty),
+			"produced_qty": flt(r.produced_qty),
+			"process_loss_qty": flt(r.process_loss_qty),
+			"status": r.status,
+			"pos_status": _pos_status_label(r.status, r.produced_qty, r.qty),
+			"operator": r.posa_operator,
+			"started_at": _started_at_epoch(r.actual_start_date or r.planned_start_date),
+			"created_at": r.creation,
+			"reject_request": rejects.get(r.name, {}).get("name"),
+			"reject_status": rejects.get(r.name, {}).get("status"),
+		}
+		for r in rows
+	]
+
+
+SE_FIELDS = ["name", "purpose", "docstatus", "posting_date", "posting_time", "remarks"]
+
+
+def get_production_detail(work_order):
+	"""One history row plus what actually happened: the materials submitted
+	Manufacture entries consumed (cancelled entries are listed but never
+	counted), the write-off issue of a failed run, and the notes. Read from the
+	posted documents, not the recipe: the recipe may have changed since."""
+	rows = frappe.get_all(
+		"Work Order",
+		filters={"name": work_order, "posa_pos_profile": ["is", "set"]},
+		fields=[*HISTORY_FIELDS, "stock_uom"],
+	)
+	if not rows:
+		frappe.throw(_("Work Order {0} was not created from POS").format(work_order))
+	detail = _history_rows(rows)[0]
+	detail["stock_uom"] = rows[0].stock_uom
+
+	# Same remark match as cancel_production: the write-off lost its WO link.
+	marker = f"{WRITEOFF_REMARK_PREFIX}{work_order}"
+	writeoffs = frappe.get_all(
+		"Stock Entry",
+		filters={"purpose": "Material Issue", "docstatus": [">", 0], "remarks": ["like", f"{marker}%"]},
+		fields=SE_FIELDS,
+	)
+	entries = frappe.get_all(
+		"Stock Entry", filters={"work_order": work_order, "docstatus": [">", 0]}, fields=SE_FIELDS
+	) + [w for w in writeoffs if (w.remarks or "") == marker or (w.remarks or "").startswith(marker + " ")]
+	entries.sort(key=lambda e: (str(e.posting_date), str(e.posting_time)))
+
+	submitted = [e.name for e in entries if e.docstatus == 1]
+	written_off = {e.name for e in entries if e.purpose == "Material Issue"}
+	materials = {}
+	if submitted:
+		for d in frappe.get_all(
+			"Stock Entry Detail",
+			filters={"parent": ["in", submitted], "s_warehouse": ["is", "set"]},
+			fields=["parent", "item_code", "item_name", "transfer_qty", "stock_uom", "batch_no"],
+			order_by="idx",
+		):
+			off = d.parent in written_off
+			m = materials.setdefault(
+				(d.item_code, d.batch_no or "", off),
+				{
+					"item_code": d.item_code,
+					"item_name": d.item_name or d.item_code,
+					"stock_uom": d.stock_uom,
+					"batch_no": d.batch_no or "",
+					"written_off": off,
+					"qty": 0.0,
+				},
+			)
+			m["qty"] = flt(m["qty"] + flt(d.transfer_qty), 6)
+
+	detail.update(
+		{
+			"materials": list(materials.values()),
+			"stock_entries": [
+				{
+					"name": e.name,
+					"purpose": e.purpose,
+					"cancelled": e.docstatus == 2,
+					"posted_at": f"{e.posting_date} {str(e.posting_time or '')[:5]}".strip(),
+					"remarks": e.remarks or "",
+				}
+				for e in entries
+			],
+			"notes": frappe.get_all(
+				"Comment",
+				filters={"reference_doctype": "Work Order", "reference_name": work_order, "comment_type": "Comment"},
+				order_by="creation",
+				pluck="content",
+			),
+		}
+	)
+	return detail
 
 
 def get_production_dashboard(pos_profile, from_date, to_date):

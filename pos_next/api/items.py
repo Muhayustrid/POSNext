@@ -16,7 +16,7 @@ from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull, Sum
-from frappe.utils import cint, flt, getdate, nowdate
+from frappe.utils import add_days, cint, flt, getdate, nowdate
 
 from pos_next.utils.authz import is_management_user
 
@@ -2228,23 +2228,132 @@ PRODUCT_SORTS = {
 }
 
 
-def _product_rows(pos_profile, search=None, item_group=None, stock=None, sort=None, start=0, limit=None):
-	"""Products page rows: stock items of the profile scope with total stock in
-	the profile warehouse, group, image and selling price (stock UOM)."""
-	_assert_profile_access(pos_profile)
+def _profile_outlet_warehouses(pos_profile):
+	"""Warehouses of one outlet, resolved server-side (the client never picks)."""
 	profile = frappe.get_cached_doc("POS Profile", pos_profile)
 	if not profile.warehouse:
 		return []
-
-	warehouses = [profile.warehouse]
 	if frappe.db.get_value("Warehouse", profile.warehouse, "is_group"):
-		warehouses = frappe.db.get_descendants("Warehouse", profile.warehouse) or warehouses
+		return frappe.db.get_descendants("Warehouse", profile.warehouse) or [profile.warehouse]
+	return [profile.warehouse]
+
+
+def _period(from_date, to_date):
+	from pos_next.api.shifts import _validate_period
+
+	return _validate_period(from_date, to_date)
+
+
+def _outlet_stock_rows(item_codes, warehouses, from_date, to_date):
+	"""One opening snapshot per warehouse plus period entries, quantities only."""
+	if not item_codes or not warehouses:
+		return []
+	code_ph = ", ".join(["%s"] * len(item_codes))
+	wh_ph = ", ".join(["%s"] * len(warehouses))
+	start, end = f"{from_date} 00:00:00", f"{add_days(to_date, 1)} 00:00:00"
+	base = (*item_codes, *warehouses)
+	return frappe.db.sql(
+		f"""SELECT name, item_code, warehouse, posting_datetime, creation, voucher_type,
+			voucher_no, actual_qty, qty_after_transaction, 1 AS is_opening
+		FROM (
+			SELECT name, item_code, warehouse, posting_datetime, creation, voucher_type,
+				voucher_no, actual_qty, qty_after_transaction,
+				ROW_NUMBER() OVER (PARTITION BY item_code, warehouse
+					ORDER BY posting_datetime DESC, creation DESC, name DESC) AS rn
+			FROM `tabStock Ledger Entry`
+			WHERE item_code IN ({code_ph}) AND warehouse IN ({wh_ph})
+				AND is_cancelled = 0 AND posting_datetime < %s
+		) opening WHERE rn = 1
+		UNION ALL
+		SELECT name, item_code, warehouse, posting_datetime, creation, voucher_type,
+			voucher_no, actual_qty, qty_after_transaction, 0 AS is_opening
+		FROM `tabStock Ledger Entry`
+		WHERE item_code IN ({code_ph}) AND warehouse IN ({wh_ph})
+			AND is_cancelled = 0 AND posting_datetime >= %s AND posting_datetime < %s
+		ORDER BY is_opening DESC, posting_datetime, creation, name""",
+		(*base, start, *base, start, end),
+		as_dict=True,
+	)
+
+
+def _stock_balances(rows, item_codes, include_entries=False):
+	"""Replace each warehouse balance before summing the outlet's balance.
+
+	A reconciliation can set an absolute balance without an actual_qty delta.
+	Using the balance difference also keeps intra-outlet transfers consistent.
+	"""
+	balances = {
+		code: {"opening_qty": 0.0, "in_qty": 0.0, "out_qty": 0.0, "closing_qty": 0.0} for code in item_codes
+	}
+	warehouse_balances = {}
+	entries = []
+	for row in rows:
+		balance = balances[row.item_code]
+		key = (row.item_code, row.warehouse)
+		previous = warehouse_balances.get(key, 0.0)
+		current = flt(row.qty_after_transaction)
+		warehouse_balances[key] = current
+		delta = current - previous
+		balance["closing_qty"] += delta
+		if row.is_opening:
+			balance["opening_qty"] += current
+			continue
+		balance["in_qty"] += max(delta, 0)
+		balance["out_qty"] += max(-delta, 0)
+		if include_entries:
+			entries.append(
+				{
+					"name": row.name,
+					"posting_date": str(row.posting_datetime)[:10],
+					"posting_datetime": str(row.posting_datetime),
+					"voucher_type": row.voucher_type,
+					"voucher_no": row.voucher_no,
+					"warehouse": row.warehouse,
+					"in_qty": max(delta, 0),
+					"out_qty": max(-delta, 0),
+					"balance": balance["closing_qty"],
+				}
+			)
+	return balances, entries
+
+
+def _stock_balance_map(item_codes, warehouses, from_date, to_date):
+	rows = _outlet_stock_rows(item_codes, warehouses, from_date, to_date)
+	return _stock_balances(rows, item_codes)[0]
+
+
+def _product_rows(
+	pos_profile,
+	search=None,
+	item_group=None,
+	stock=None,
+	sort=None,
+	start=0,
+	limit=None,
+	from_date=None,
+	to_date=None,
+):
+	"""Products page rows: stock items of the profile scope with total stock in
+	the profile warehouse, group, image and selling price (stock UOM).
+
+	With a from_date/to_date window each row also carries opening_qty, in_qty,
+	out_qty and closing_qty for the outlet warehouses (qty-only, no
+	valuation). Without a window the caller-supplied actual_qty stays as is.
+	"""
+	_assert_profile_access(pos_profile)
+	profile = frappe.get_cached_doc("POS Profile", pos_profile)
+	warehouses = _profile_outlet_warehouses(pos_profile)
+	if not warehouses:
+		return []
+	if from_date or to_date:
+		from_date, to_date = _period(from_date, to_date)
+		stock, sort = None, "name"
 
 	conditions, params, _joins = _build_item_base_conditions(profile, item_group=item_group or None)
 	conditions += ["i.is_stock_item = 1", "i.has_variants = 0"]
 	if search:
 		conditions.append("(i.name LIKE %s OR i.item_name LIKE %s)")
-		params += [f"%{search}%"] * 2
+		params += [_like_param(search)] * 2
 	having = {"in": "HAVING actual_qty > 0", "out": "HAVING actual_qty <= 0"}.get(stock, "")
 	paging = f"LIMIT {min(cint(limit), 200)} OFFSET {max(cint(start), 0)}" if limit else ""
 	wh_placeholders = ", ".join(["%s"] * len(warehouses))
@@ -2264,6 +2373,11 @@ def _product_rows(pos_profile, search=None, item_group=None, stock=None, sort=No
 		(*warehouses, *params),
 		as_dict=True,
 	)
+	if from_date and to_date:
+		balances = _stock_balance_map([r.item_code for r in rows], warehouses, from_date, to_date)
+		for r in rows:
+			r.update(balances[r.item_code])
+		return rows
 	prices = _fetch_uom_prices_map([r.item_code for r in rows], profile.selling_price_list, selling=True)
 	for r in rows:
 		uom_prices = prices.get(r.item_code, {})
@@ -2273,21 +2387,83 @@ def _product_rows(pos_profile, search=None, item_group=None, stock=None, sort=No
 
 
 @frappe.whitelist()
-def get_product_list(pos_profile, search=None, item_group=None, stock=None, sort=None, start=0, limit=50):
-	"""Products page: filterable, sortable stock list (stock: 'in' | 'out')."""
-	return _product_rows(pos_profile, search, item_group, stock, sort, start, limit or 50)
+def get_product_list(
+	pos_profile,
+	search=None,
+	item_group=None,
+	stock=None,
+	sort=None,
+	start=0,
+	limit=50,
+	from_date=None,
+	to_date=None,
+):
+	"""Products page: filterable, sortable stock list (stock: 'in' | 'out').
+
+	With from_date/to_date each row also carries the outlet's opening, in,
+	out and closing quantities for the window (qty-only, no valuation).
+	"""
+	return _product_rows(pos_profile, search, item_group, stock, sort, start, limit or 50, from_date, to_date)
 
 
 @frappe.whitelist()
-def export_product_list(pos_profile, search=None, item_group=None, stock=None, sort=None):
+def export_product_list(
+	pos_profile, search=None, item_group=None, stock=None, sort=None, from_date=None, to_date=None
+):
 	"""Same filters as get_product_list, every row, as .xlsx (GET)."""
 	from frappe.utils.xlsxutils import build_xlsx_response
 
-	rows = _product_rows(pos_profile, search, item_group, stock, sort)
+	rows = _product_rows(pos_profile, search, item_group, stock, sort, from_date=from_date, to_date=to_date)
+	if from_date and to_date:
+		header = [
+			"Item Code",
+			"Item Name",
+			"UOM",
+			"Opening Balance",
+			"Stock In",
+			"Stock Out",
+			"Closing Balance",
+		]
+		data = [header] + [
+			[r.item_code, r.item_name, r.stock_uom, r.opening_qty, r.in_qty, r.out_qty, r.closing_qty]
+			for r in rows
+		]
+		return build_xlsx_response(data, f"products-{from_date}-{to_date}")
 	data = [["Item Code", "Item Name", "Item Group", "Price", "Stock", "UOM"]] + [
 		[r.item_code, r.item_name, r.item_group, r.rate, r.actual_qty, r.stock_uom] for r in rows
 	]
 	return build_xlsx_response(data, f"products-{nowdate()}")
+
+
+@frappe.whitelist()
+def get_item_stock_ledger(item_code, pos_profile, from_date, to_date, start=0, limit=50):
+	"""Quantity-only ledger with a running balance across the outlet warehouses."""
+	_assert_profile_access(pos_profile)
+	from_date, to_date = _period(from_date, to_date)
+	warehouses = _profile_outlet_warehouses(pos_profile)
+	if not warehouses:
+		frappe.throw(_("Warehouse not set in POS Profile {0}").format(pos_profile))
+	profile = frappe.get_cached_doc("POS Profile", pos_profile)
+	conditions, params, _joins = _build_item_base_conditions(profile)
+	conditions += ["i.is_stock_item = 1", "i.has_variants = 0", "i.name = %s"]
+	params.append(item_code)
+	allowed = frappe.db.sql(
+		f"SELECT i.name FROM `tabItem` i WHERE {' AND '.join(conditions)} LIMIT 1", params
+	)
+	if not allowed:
+		frappe.throw(_("Item {0} is not available in this outlet").format(item_code))
+	rows = _outlet_stock_rows([item_code], warehouses, from_date, to_date)
+	balances, entries = _stock_balances(rows, [item_code], include_entries=True)
+	offset, page_size = max(cint(start), 0), max(1, min(cint(limit) or 50, 200))
+	return {
+		"item_code": item_code,
+		"from_date": str(from_date),
+		"to_date": str(to_date),
+		"opening_qty": balances[item_code]["opening_qty"],
+		"closing_qty": balances[item_code]["closing_qty"],
+		"entries": entries[offset : offset + page_size],
+		"has_more": len(entries) > offset + page_size,
+	}
 
 
 # =============================================================================

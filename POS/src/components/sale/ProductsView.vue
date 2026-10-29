@@ -1,9 +1,11 @@
 <template>
-	<div class="h-full flex flex-col text-start bg-white">
-		<!-- Toolbar: search, group, stock filter, sort, export -->
-		<div class="shrink-0 border-b border-gray-200 px-4 py-3 sm:px-6 flex flex-col gap-3">
-			<div class="flex items-center gap-2">
-				<div class="relative flex-1 min-w-0">
+	<div class="h-full min-w-0 flex flex-col text-start bg-white">
+		<!-- List: one period, one search, the outlet's qty balances -->
+		<template v-if="view === 'list'">
+			<div
+				class="shrink-0 border-b border-gray-200 px-4 py-3 sm:px-6 flex flex-wrap items-center gap-2"
+			>
+				<div class="relative flex-1 min-w-[12rem]">
 					<FeatherIcon
 						name="search"
 						class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
@@ -11,14 +13,25 @@
 					<input
 						v-model="search"
 						type="search"
-						:placeholder="__('Search')"
+						:placeholder="__('Search products')"
 						:aria-label="__('Search products')"
-						class="w-full ps-9 pe-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full min-h-11 ps-9 pe-3 text-sm placeholder:text-gray-700 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						data-test="products-search"
 					/>
 				</div>
+				<select
+					v-model="period"
+					:aria-label="__('Period')"
+					class="min-h-11 py-1.5 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+					data-test="products-period"
+				>
+					<option v-for="o in periodOptions" :key="o.value" :value="o.value">
+						{{ __(o.label) }}
+					</option>
+				</select>
 				<Button
 					variant="subtle"
+					class="min-h-11"
 					:loading="exporting"
 					data-test="products-export"
 					@click="exportList"
@@ -27,155 +40,210 @@
 					{{ __("Export to Excel") }}
 				</Button>
 			</div>
-			<div class="flex flex-wrap items-center gap-2">
-				<select
-					v-model="itemGroup"
-					:aria-label="__('Item Group')"
-					class="py-1.5 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
-					data-test="products-group"
+
+			<div
+				ref="listScroller"
+				data-test="products-list"
+				class="flex-1 min-h-0 min-w-0 overflow-auto"
+			>
+				<div v-if="loading && !rows.length" class="py-16 text-center text-sm text-gray-700">
+					{{ __("Loading products...") }}
+				</div>
+				<div
+					v-else-if="listError"
+					data-test="products-error"
+					class="mx-auto max-w-md py-16 text-center text-sm text-gray-700"
 				>
-					<option value="">{{ __("All groups") }}</option>
-					<option v-for="g in groups" :key="g.item_group" :value="g.item_group">
-						{{ g.item_group }}
-					</option>
-				</select>
-				<div class="flex rounded-lg border border-gray-300 overflow-hidden" role="group">
+					{{ listError }}
 					<button
-						v-for="opt in stockOptions"
-						:key="opt.value"
 						type="button"
-						class="px-3 py-1.5 text-sm transition-colors border-e border-gray-300 last:border-e-0"
-						:class="
-							stock === opt.value
-								? 'bg-gray-900 text-white'
-								: 'bg-white text-gray-700 hover:bg-gray-50'
-						"
-						:aria-pressed="stock === opt.value"
-						@click="stock = opt.value"
+						class="mx-auto mt-3 flex min-h-11 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-900 hover:bg-gray-50 touch-manipulation"
+						@click="load()"
 					>
-						{{ opt.label }}
+						{{ __("Retry") }}
 					</button>
 				</div>
-				<select
-					v-model="sort"
-					:aria-label="__('Sort by')"
-					class="ms-auto py-1.5 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
-					data-test="products-sort"
+				<div
+					v-else-if="!rows.length"
+					data-test="products-empty"
+					class="py-16 text-center text-sm text-gray-700"
 				>
-					<option value="name">{{ __("Name A–Z") }}</option>
-					<option value="stock_asc">{{ __("Lowest stock first") }}</option>
-					<option value="stock_desc">{{ __("Highest stock first") }}</option>
-				</select>
-			</div>
-		</div>
-
-		<!-- List -->
-		<div class="flex-1 min-h-0 overflow-y-auto">
-			<div v-if="loading && !rows.length" class="py-16 text-center text-sm text-gray-500">
-				{{ __("Loading products...") }}
-			</div>
-			<div
-				v-else-if="!rows.length"
-				class="py-16 text-center text-sm text-gray-500"
-				data-test="products-empty"
-			>
-				{{ hasFilters ? __("No products match these filters.") : __("No stock items in this outlet.") }}
-				<button
-					v-if="hasFilters"
-					type="button"
-					class="block mx-auto mt-2 text-blue-600 hover:underline"
-					@click="resetFilters"
-				>
-					{{ __("Clear filters") }}
-				</button>
-			</div>
-			<table v-else class="w-full text-sm">
-				<thead class="sticky top-0 bg-gray-50 text-gray-500 text-xs z-10">
-					<tr>
-						<th class="py-2 ps-4 sm:ps-6 pe-2 text-start font-medium">{{ __("Product") }}</th>
-						<th class="py-2 px-2 text-start font-medium hidden md:table-cell">
-							{{ __("Group") }}
-						</th>
-						<th class="py-2 px-2 text-end font-medium">{{ __("Price") }}</th>
-						<th class="py-2 ps-2 pe-4 sm:pe-6 text-end font-medium">{{ __("Stock") }}</th>
-					</tr>
-				</thead>
-				<tbody>
-					<tr
+					{{
+						search.trim()
+							? __("No products match these filters.")
+							: __("No stock items in this outlet.")
+					}}
+				</div>
+				<template v-else>
+					<!-- One grid at every width; the panel scrolls sideways on phones -->
+					<div
+						class="sticky top-0 z-10 grid min-w-[38rem] grid-cols-[minmax(8rem,1fr)_3.5rem_5.5rem_5rem_5rem_6rem] items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-700 sm:px-6"
+					>
+						<div>{{ __("Product") }}</div>
+						<div>{{ __("UOM") }}</div>
+						<div class="text-end">{{ __("Opening Stock") }}</div>
+						<div class="text-end">{{ __("Stock In") }}</div>
+						<div class="text-end">{{ __("Stock Out") }}</div>
+						<div class="text-end">{{ __("Closing Balance") }}</div>
+					</div>
+					<button
 						v-for="r in rows"
 						:key="r.item_code"
-						tabindex="0"
-						class="border-t border-gray-100 hover:bg-blue-50/50 cursor-pointer focus:outline-none focus-visible:bg-blue-50"
+						type="button"
 						data-test="products-row"
-						@click="openWarehouses(r)"
-						@keydown.enter="openWarehouses(r)"
+						class="grid w-full min-h-11 min-w-[38rem] grid-cols-[minmax(8rem,1fr)_3.5rem_5.5rem_5rem_5rem_6rem] items-center gap-2 border-b border-gray-100 px-4 py-2 text-start text-sm hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 touch-manipulation sm:px-6"
+						@click="openLedger(r)"
 					>
-						<td class="py-2.5 ps-4 sm:ps-6 pe-2">
-							<div class="flex items-center gap-3 min-w-0">
-								<div
-									class="w-10 h-10 shrink-0 rounded-md bg-gray-100 overflow-hidden flex items-center justify-center"
-								>
-									<img
-										v-if="r.image"
-										:src="r.image"
-										:alt="r.item_name"
-										loading="lazy"
-										class="w-full h-full object-cover"
-									/>
-									<span v-else class="text-sm font-semibold text-gray-400">
-										{{ (r.item_name || "?").charAt(0).toUpperCase() }}
-									</span>
-								</div>
-								<div class="min-w-0">
-									<div class="font-medium text-gray-900 truncate">{{ r.item_name }}</div>
-									<div class="text-xs text-gray-500 truncate">
-										{{ r.item_code }}<span class="md:hidden"> — {{ r.item_group }}</span>
-									</div>
-								</div>
-							</div>
-						</td>
-						<td class="py-2.5 px-2 text-gray-600 hidden md:table-cell">{{ r.item_group }}</td>
-						<td class="py-2.5 px-2 text-end tabular-nums whitespace-nowrap">
-							<span v-if="r.rate" class="font-semibold text-gray-900">{{ money(r.rate) }}</span>
-							<span v-else class="text-gray-400">{{ __("No price") }}</span>
-						</td>
-						<td class="py-2.5 ps-2 pe-4 sm:pe-6 text-end tabular-nums whitespace-nowrap">
-							<span class="font-semibold" :class="stockClass(r.actual_qty)">
-								{{ qty(r.actual_qty) }}
-							</span>
-							<span class="text-xs text-gray-500"> {{ r.stock_uom }}</span>
-						</td>
-					</tr>
-				</tbody>
-			</table>
-			<div v-if="hasMore" class="py-4 flex justify-center">
-				<Button variant="subtle" size="sm" :loading="loading" @click="load(false)">
-					{{ __("Load More") }}
-				</Button>
+						<span class="min-w-0">
+							<span class="block truncate font-medium text-gray-900">{{ r.item_name }}</span>
+							<span class="block truncate text-xs text-gray-700">{{ r.item_code }}</span>
+						</span>
+						<span class="text-gray-700">{{ r.stock_uom }}</span>
+						<span class="text-end tabular-nums text-gray-700">{{ qty(r.opening_qty) }}</span>
+						<span class="text-end tabular-nums text-gray-700">{{ qty(r.in_qty) }}</span>
+						<span class="text-end tabular-nums text-gray-700">{{ qty(r.out_qty) }}</span>
+						<span
+							class="text-end tabular-nums font-semibold"
+							:class="stockClass(r.closing_qty)"
+						>
+							{{ qty(r.closing_qty) }}
+						</span>
+					</button>
+					<div v-if="hasMore" class="py-4 flex justify-center">
+						<Button
+							variant="subtle"
+							size="sm"
+							class="min-h-11"
+							:loading="loading"
+							data-test="products-more"
+							@click="load(false)"
+						>
+							{{ __("Load More") }}
+						</Button>
+					</div>
+				</template>
 			</div>
-		</div>
-	</div>
+		</template>
 
-	<WarehouseAvailabilityDialog
-		v-if="selected"
-		v-model="showWarehouses"
-		:item-code="selected.item_code"
-		:item-name="selected.item_name"
-		:uom="selected.stock_uom"
-		:company="company"
-	/>
+		<!-- Ledger: one product's movements in the same panel, no second modal -->
+		<template v-else>
+			<div class="shrink-0 flex items-center gap-3 border-b border-gray-200 px-4 py-3 sm:px-6">
+				<button
+					type="button"
+					data-test="ledger-back"
+					class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 touch-manipulation"
+					:aria-label="__('Back')"
+					@click="closeLedger"
+				>
+					<FeatherIcon name="arrow-left" class="h-5 w-5" />
+				</button>
+				<div class="min-w-0 flex-1">
+					<div class="truncate font-semibold text-gray-900">{{ activeItem?.item_name }}</div>
+					<div class="truncate text-xs text-gray-700">
+						{{ activeItem?.item_code }} · {{ activeItem?.stock_uom }}
+					</div>
+				</div>
+			</div>
+
+			<div class="shrink-0 flex flex-wrap gap-x-6 gap-y-1 border-b border-gray-200 px-4 py-3 text-xs text-gray-700 sm:px-6">
+				<span>{{ range().from }} — {{ range().to }}</span>
+				<span>{{ __("Opening Stock") }}: <strong class="tabular-nums">{{ qty(ledger?.opening_qty ?? activeItem?.opening_qty) }}</strong></span>
+				<span>{{ __("Closing Balance") }}: <strong class="tabular-nums">{{ qty(ledger?.closing_qty ?? activeItem?.closing_qty) }}</strong></span>
+			</div>
+			<div data-test="ledger" class="flex-1 min-h-0 min-w-0 overflow-auto">
+				<div
+					v-if="ledgerLoading && !ledger"
+					class="py-16 text-center text-sm text-gray-700"
+				>
+					{{ __("Loading stock ledger...") }}
+				</div>
+				<div
+					v-else-if="ledgerError"
+					data-test="ledger-error"
+					class="mx-auto max-w-md py-16 text-center text-sm text-gray-700"
+				>
+					{{ ledgerError }}
+					<button
+						type="button"
+						class="mx-auto mt-3 flex min-h-11 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-900 hover:bg-gray-50 touch-manipulation"
+						@click="loadLedger()"
+					>
+						{{ __("Retry") }}
+					</button>
+				</div>
+				<div
+					v-else-if="!ledger?.entries?.length"
+					data-test="ledger-empty"
+					class="py-16 text-center text-sm text-gray-700"
+				>
+					{{ __("No stock movements in this period.") }}
+				</div>
+				<template v-else>
+					<div
+						class="sticky top-0 z-10 grid min-w-[32rem] grid-cols-[5.5rem_minmax(9rem,1fr)_3.5rem_3.5rem_4.5rem] items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-700 sm:px-6"
+					>
+						<div>{{ __("Date") }}</div>
+						<div>{{ __("Transaction") }}</div>
+						<div class="text-end">{{ __("In") }}</div>
+						<div class="text-end">{{ __("Out") }}</div>
+						<div class="text-end">{{ __("Balance") }}</div>
+					</div>
+					<div
+						v-for="e in ledger.entries"
+						:key="e.name"
+						data-test="ledger-row"
+						class="grid min-w-[32rem] grid-cols-[5.5rem_minmax(9rem,1fr)_3.5rem_3.5rem_4.5rem] items-center gap-2 border-b border-gray-100 px-4 py-2.5 text-sm sm:px-6"
+					>
+						<div class="tabular-nums text-gray-700">
+							<div>{{ dayPart(e.posting_datetime || e.posting_date) }}</div>
+							<div class="text-xs text-gray-700">
+								{{ timePart(e.posting_datetime) }}
+							</div>
+						</div>
+						<div class="min-w-0">
+							<div class="truncate font-medium text-gray-900">{{ e.voucher_no }}</div>
+							<div class="truncate text-xs text-gray-700">
+								{{ __(e.voucher_type) }} · {{ e.warehouse }}
+							</div>
+						</div>
+						<div class="text-end tabular-nums text-gray-700">
+							{{ e.in_qty ? qty(e.in_qty) : "—" }}
+						</div>
+						<div class="text-end tabular-nums text-gray-700">
+							{{ e.out_qty ? qty(e.out_qty) : "—" }}
+						</div>
+						<div class="text-end tabular-nums font-semibold text-gray-900">
+							{{ qty(e.balance) }}
+						</div>
+					</div>
+					<div v-if="ledger.has_more" class="py-4 flex justify-center">
+						<Button
+							variant="subtle"
+							size="sm"
+							class="min-h-11"
+							:loading="ledgerLoading"
+							data-test="ledger-more"
+							@click="loadLedger(false)"
+						>
+							{{ __("Load More") }}
+						</Button>
+					</div>
+				</template>
+			</div>
+		</template>
+	</div>
 </template>
 
 <script setup>
 import { Button, call, FeatherIcon } from "frappe-ui"
-import { computed, onUnmounted, ref, watch } from "vue"
-import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
+import { nextTick, onUnmounted, ref, watch } from "vue"
 import { useToast } from "@/composables/useToast"
-import { formatCurrency } from "@/utils/currency"
 import { downloadXlsx } from "@/utils/downloadXlsx"
+import { periodRange } from "@/utils/salesRecap"
 
 const props = defineProps({
 	posProfile: { type: String, default: null },
+	// company and currency are still passed by POSMenuDialog
 	company: { type: String, default: null },
 	currency: { type: String, default: "" },
 })
@@ -183,66 +251,123 @@ const props = defineProps({
 const PAGE = 50
 const { showError } = useToast()
 
+const view = ref("list") // "list" | "ledger"
 const search = ref("")
-const itemGroup = ref("")
-const stock = ref("")
-const sort = ref("name")
+const period = ref("today")
 const rows = ref([])
-const groups = ref([])
 const loading = ref(false)
+const listError = ref("")
 const hasMore = ref(false)
 const exporting = ref(false)
-const selected = ref(null)
-const showWarehouses = ref(false)
+const listScroller = ref(null)
+let listScrollTop = 0
 
-const stockOptions = [
-	{ value: "", label: __("All") },
-	{ value: "in", label: __("In stock") },
-	{ value: "out", label: __("Out of stock") },
+const activeItem = ref(null)
+const ledger = ref(null)
+const ledgerLoading = ref(false)
+const ledgerError = ref("")
+
+const periodOptions = [
+	{ value: "today", label: "Today" },
+	{ value: "last7", label: "Last 7 Days" },
+	{ value: "month", label: "This Month" },
+	{ value: "year", label: "This Year" },
 ]
 
-const hasFilters = computed(() => Boolean(search.value || itemGroup.value || stock.value))
+// The list and the export must always describe the same window.
+function range() {
+	return periodRange(period.value)
+}
 
 function filters() {
+	const r = range()
 	return {
 		pos_profile: props.posProfile,
 		search: search.value.trim(),
-		item_group: itemGroup.value,
-		stock: stock.value,
-		sort: sort.value,
+		from_date: r.from,
+		to_date: r.to,
 	}
 }
 
-// Every request carries a sequence number: a slow page 1 for an old search
-// must not overwrite the rows of the newer one.
-let seq = 0
+function errMsg(err, fallback) {
+	const text =
+		err?.messages?.join("\n") || (typeof err === "string" ? err : err?.message) || ""
+	return text || __(fallback)
+}
+
+// A slow answer for an older search or period must never overwrite the state
+// of the newer one, so each request carries its own sequence number.
+let listSeq = 0
 async function load(reset = true) {
 	if (!props.posProfile) return
-	const mine = ++seq
+	const mine = ++listSeq
+	if (reset) {
+		rows.value = []
+		hasMore.value = false
+	}
 	loading.value = true
+	listError.value = ""
 	try {
 		const data = await call("pos_next.api.items.get_product_list", {
 			...filters(),
 			start: reset ? 0 : rows.value.length,
 			limit: PAGE,
 		})
-		if (mine !== seq) return
+		if (mine !== listSeq) return
 		rows.value = reset ? data || [] : rows.value.concat(data || [])
 		hasMore.value = (data || []).length === PAGE
 	} catch (err) {
-		if (mine === seq) showError(err?.messages?.join("\n") || __("Failed to load products"))
+		if (mine === listSeq) listError.value = errMsg(err, "Failed to load products")
 	} finally {
-		if (mine === seq) loading.value = false
+		if (mine === listSeq) loading.value = false
 	}
 }
 
-async function loadGroups() {
-	if (!props.posProfile) return
+let ledgerSeq = 0
+async function loadLedger(reset = true) {
+	if (!props.posProfile || !activeItem.value) return
+	const mine = ++ledgerSeq
+	const r = range()
+	ledgerLoading.value = true
+	ledgerError.value = ""
 	try {
-		groups.value = (await call("pos_next.api.items.get_item_groups", { pos_profile: props.posProfile })) || []
-	} catch {
-		groups.value = [] // the filter is optional; the list still works
+		const data = await call("pos_next.api.items.get_item_stock_ledger", {
+			item_code: activeItem.value.item_code,
+			pos_profile: props.posProfile,
+			from_date: r.from,
+			to_date: r.to,
+			start: reset ? 0 : ledger.value?.entries?.length || 0,
+			limit: PAGE,
+		})
+		if (mine !== ledgerSeq) return
+		ledger.value = reset
+			? data
+			: { ...data, entries: [...(ledger.value?.entries || []), ...(data?.entries || [])] }
+	} catch (err) {
+		if (mine === ledgerSeq) ledgerError.value = errMsg(err, "Failed to load stock ledger")
+	} finally {
+		if (mine === ledgerSeq) ledgerLoading.value = false
 	}
+}
+
+function openLedger(r) {
+	listScrollTop = listScroller.value?.scrollTop || 0
+	activeItem.value = r
+	ledger.value = null
+	ledgerError.value = ""
+	view.value = "ledger"
+	loadLedger()
+}
+
+async function closeLedger() {
+	ledgerSeq++ // a response landing after Back belongs to a closed view
+	view.value = "list"
+	activeItem.value = null
+	ledger.value = null
+	ledgerError.value = ""
+	ledgerLoading.value = false
+	await nextTick()
+	if (listScroller.value) listScroller.value.scrollTop = listScrollTop
 }
 
 let searchTimer = null
@@ -250,22 +375,27 @@ watch(search, () => {
 	clearTimeout(searchTimer)
 	searchTimer = setTimeout(() => load(), 300)
 })
-watch([itemGroup, stock, sort], () => load())
+watch(period, () => load())
 watch(
 	() => props.posProfile,
 	() => {
-		loadGroups()
+		clearTimeout(searchTimer)
+		loading.value = false
+		listSeq++
+		ledgerSeq++
+		rows.value = []
+		hasMore.value = false
+		listError.value = ""
+		view.value = "list"
+		activeItem.value = null
+		ledger.value = null
+		ledgerError.value = ""
+		ledgerLoading.value = false
 		load()
 	},
 	{ immediate: true },
 )
 onUnmounted(() => clearTimeout(searchTimer))
-
-function resetFilters() {
-	search.value = ""
-	itemGroup.value = ""
-	stock.value = ""
-}
 
 async function exportList() {
 	if (exporting.value) return
@@ -279,16 +409,12 @@ async function exportList() {
 	}
 }
 
-function openWarehouses(r) {
-	selected.value = r
-	showWarehouses.value = true
-}
-
-const money = (v) => formatCurrency(Number(v) || 0, props.currency || undefined)
 const qty = (v) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })
+const dayPart = (v) => String(v || "").slice(0, 10)
+const timePart = (v) => String(v || "").slice(11, 16)
 function stockClass(v) {
 	if (v <= 0) return "text-red-600"
-	if (v < 10) return "text-amber-600"
+	if (v < 10) return "text-amber-700"
 	return "text-gray-900"
 }
 </script>

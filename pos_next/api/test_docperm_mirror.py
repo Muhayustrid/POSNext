@@ -126,3 +126,28 @@ class TestCustomDocPermMirror(FrappeTestCase):
             "Custom DocPerm", filters={"parent": self.doctype}, pluck="name"
         ) if n.startswith(MIRROR_NAME_PREFIX)]
         self.assertTrue(mirror_names, "baris mirror memakai nama deterministik")
+
+
+class TestAfterMigrateRestoresPersonaPerms(FrappeTestCase):
+    def test_persona_rows_survive_other_app_sweep(self):
+        # production_app.upgrade.retire_stale_docperms runs in an earlier
+        # after_migrate hook and deletes every Item/Warehouse Custom DocPerm.
+        persona = {"POSNext Cashier", "POSNext Manager"}
+        for name in frappe.get_all(
+            "Custom DocPerm", filters={"parent": ("in", ["Item", "Warehouse"])}, pluck="name"
+        ):
+            frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
+
+        from pos_next.install import after_migrate
+
+        after_migrate()
+
+        for doctype in ("Item", "Warehouse"):
+            rows = frappe.get_all(
+                "Custom DocPerm", filters={"parent": doctype, "read": 1}, pluck="role"
+            )
+            self.assertTrue(persona <= set(rows), f"{doctype} persona read rows missing")
+            # Standard roles stay reachable through the mirror.
+            standard = set(frappe.get_all("DocPerm", filters={"parent": doctype}, pluck="role"))
+            custom = set(frappe.get_all("Custom DocPerm", filters={"parent": doctype}, pluck="role"))
+            self.assertTrue(standard <= custom, f"{doctype} standard roles locked out")

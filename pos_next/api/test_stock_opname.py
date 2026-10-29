@@ -32,14 +32,42 @@ ADMIN = "Administrator"
 DOCTYPE = "Stock Reconciliation"
 
 
+def _ensure_persona_item_read(role):
+	"""Re-create the shipped Item/Warehouse read rows for `role` if absent.
+
+	Frappe drops every standard DocPerm of a doctype as soon as it carries
+	one Custom DocPerm row, so the POS persona needs its own Item read to
+	survive ERPNext's get_latest_stock_qty check inside Work Order / Stock
+	Reconciliation validate.
+	"""
+	for parent in ("Item", "Warehouse"):
+		if frappe.db.exists("Custom DocPerm", {"parent": parent, "role": role}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Custom DocPerm",
+				"parent": parent,
+				"parenttype": "DocType",
+				"parentfield": "permissions",
+				"role": role,
+				"permlevel": 0,
+				"read": 1,
+				"write": 0,
+			}
+		).insert(ignore_permissions=True)
+		frappe.clear_cache(doctype=parent)
+
+
 def _make_user(role):
 	email = f"so-api-{uuid.uuid4().hex[:10]}@example.com"
 	was_in_import = frappe.flags.in_import
 	frappe.flags.in_import = True
 	try:
-		frappe.get_doc(
+		user_doc = frappe.get_doc(
 			{"doctype": "User", "email": email, "first_name": "SO API Test", "enabled": 1, "send_welcome_email": 0}
-		).insert(ignore_permissions=True)
+		)
+		user_doc.flags.no_welcome_mail = True
+		user_doc.insert(ignore_permissions=True)
 	finally:
 		frappe.flags.in_import = was_in_import
 	frappe.get_doc(
@@ -77,6 +105,8 @@ class _StockOpnameFixture(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user(ADMIN)
+		_ensure_persona_item_read("POSNext Cashier")
+		_ensure_persona_item_read("POSNext Manager")
 		# Bridge for the shared bench: this worktree's `opname_max_backdate_days`
 		# doctype field is not migrated in, so `frappe.db.get_single_value` cannot
 		# resolve it. A transient Custom Field stands in until the field is migrated.
@@ -193,12 +223,17 @@ class _StockOpnameFixture(FrappeTestCase):
 			frappe.delete_doc("Custom Field", cls._cap_custom_field, force=True, ignore_permissions=True)
 			frappe.clear_cache(doctype="POS Next Global Settings")
 			frappe.db.commit()
+		frappe.db.rollback()
 		for profile in (cls.profile, cls.foreign_profile):
 			if frappe.db.exists("POS Profile", profile):
 				frappe.delete_doc("POS Profile", profile, force=True, ignore_permissions=True)
 		for user in (cls.cashier, cls.stock_manager):
 			if frappe.db.exists("User", user):
-				frappe.delete_doc("User", user, force=True, ignore_permissions=True)
+				try:
+					frappe.delete_doc("User", user, force=True, ignore_permissions=True)
+				except frappe.QueryDeadlockError:
+					frappe.db.rollback()
+					frappe.delete_doc("User", user, force=True, ignore_permissions=True)
 		frappe.db.commit()
 		super().tearDownClass()
 

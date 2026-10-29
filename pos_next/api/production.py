@@ -23,6 +23,7 @@ from pos_next.services.production import (  # noqa: F401  (_uom_whole_field re-e
 	get_active_productions as _get_active_productions,
 	get_finish_context as _get_finish_context,
 	get_production_dashboard as _get_production_dashboard,
+	get_production_detail as _get_production_detail,
 	get_production_history as _get_production_history,
 	get_recipes as _get_recipes,
 	start_production as _start_production,
@@ -175,16 +176,34 @@ def get_active_productions(pos_profile):
 
 
 @frappe.whitelist()
-def get_production_history(pos_profile, limit=30, offset=0):
-	"""Finished Work Orders of this outlet (Completed / Closed / Cancelled)."""
+def get_production_history(pos_profile, limit=30, offset=0, from_date=None, to_date=None):
+	"""Finished Work Orders of this outlet (Completed / Closed / Cancelled),
+	optionally narrowed to a creation-date window."""
 	_assert_profile_access(pos_profile)
+	if from_date or to_date:
+		from_date, to_date = _period(from_date, to_date)
 	try:
-		return _get_production_history(pos_profile, limit=cint(limit), offset=cint(offset))
+		return _get_production_history(
+			pos_profile, limit=cint(limit), offset=cint(offset), from_date=from_date, to_date=to_date
+		)
 	except ValidationError:
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Production History Error")
 		frappe.throw(_("Error fetching production history: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_production_detail(work_order):
+	"""One finished Work Order with the materials it actually consumed."""
+	_assert_profile_access(_profile_of(work_order))
+	try:
+		return _get_production_detail(work_order)
+	except ValidationError:
+		raise
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Production Detail Error")
+		frappe.throw(_("Error fetching production detail: {0}").format(str(e)))
 
 
 def _period(from_date, to_date):

@@ -299,7 +299,8 @@ describe("ProductionDialog", () => {
 		expect(wrapper.text()).toContain("2 Litre") // MILK: 1 × 4/2
 		expect(wrapper.text()).toContain("1 Litre") // SYRUP: 0.5 × 4/2
 
-		await findButton(wrapper, "Max (16)").trigger("click")
+		expect(wrapper.findAll("button").some((button) => button.text().includes("Max ("))).toBe(false)
+		await qtyInputs[0].setValue("16")
 		await flushPromises()
 		expect(qtyInputs[0].element.value).toBe("16")
 		expect(wrapper.text()).toContain("8 Litre") // MILK: 1 × 16/2
@@ -631,6 +632,8 @@ describe("ProductionDialog", () => {
 			pos_profile: "POS-1",
 			limit: 30,
 			offset: 0,
+			from_date: expect.any(String), // default period: last 7 days
+			to_date: expect.any(String),
 		})
 		expect(wrapper.text()).toContain("Iced Latte")
 		expect(wrapper.text()).toContain("Completed")
@@ -689,11 +692,13 @@ describe("ProductionDialog", () => {
 		await findButton(wrapper, "Load More").trigger("click")
 		await flushPromises()
 
-		expect(historyCall).toHaveBeenLastCalledWith({
-			pos_profile: "POS-1",
-			limit: 30,
-			offset: 1, // offset = rows already shown (page 1 returned 1 row)
-		})
+		expect(historyCall).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				pos_profile: "POS-1",
+				limit: 30,
+				offset: 1, // offset = rows already shown (page 1 returned 1 row)
+			}),
+		)
 		// page 1 stays, page 2 is appended
 		expect(wrapper.text()).toContain("Iced Latte")
 		expect(wrapper.text()).toContain("Old Bread")
@@ -735,10 +740,9 @@ describe("ProductionDialog", () => {
 	// Only Draft offers "Submit report" — later states are already in the HO lane.
 	it.each([
 		["Draft", "Not submitted", "Submit report"],
-		["Pending", "Waiting for HO", null],
-		["Approved", "Approved", null],
-		["Rejected", "Rejected", null],
-		["Closed", "Closed", null],
+		["Pending Approval", "Waiting for HO", null],
+		["Awaiting Destruction", "Awaiting Destruction", null],
+		["Completed", "Completed", null],
 	])("history badge for %s shows %s", async (status, label, action) => {
 		mockCall(HISTORY_URL, () =>
 			Promise.resolve({
@@ -777,5 +781,81 @@ describe("ProductionDialog", () => {
 
 		expect(wrapper.text()).not.toContain("Not submitted")
 		expect(wrapper.text()).not.toContain("Submit report")
+	})
+
+	it("reloads the history list for the chosen period", async () => {
+		const historyCall = mockCall(HISTORY_URL, () => Promise.resolve(HISTORY))
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "History").trigger("click")
+		await flushPromises()
+
+		await wrapper.find("select").setValue("today")
+		await flushPromises()
+
+		const last = historyCall.mock.calls.at(-1)[0]
+		expect(historyCall).toHaveBeenCalledTimes(2)
+		expect(last.offset).toBe(0)
+		expect(last.from_date).toBe(last.to_date) // today = one day
+	})
+
+	it("opens the detail page of a history row and goes back to the list", async () => {
+		mockCall(HISTORY_URL, () => Promise.resolve(HISTORY))
+		const detailCall = mockCall("pos_next.api.production.get_production_detail", () =>
+			Promise.resolve({
+				...HISTORY.productions[0],
+				stock_uom: "Cup",
+				materials: [
+					{ item_code: "MILK", item_name: "Milk", stock_uom: "Litre", batch_no: "", written_off: false, qty: 6 },
+					{ item_code: "SYRUP", item_name: "Syrup", stock_uom: "Litre", batch_no: "B-OLD", written_off: true, qty: 1 },
+				],
+				stock_entries: [
+					{ name: "STE-0001", purpose: "Manufacture", cancelled: false, posted_at: "2026-09-26 09:00", remarks: "" },
+					{ name: "STE-0002", purpose: "Manufacture", cancelled: true, posted_at: "2026-09-26 09:30", remarks: "" },
+				],
+				notes: ["<p>adonan pagi</p>"],
+			}),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "History").trigger("click")
+		await flushPromises()
+
+		await findButton(wrapper, HISTORY.productions[0].work_order).trigger("click")
+		await flushPromises()
+
+		expect(detailCall).toHaveBeenCalledWith({ work_order: HISTORY.productions[0].work_order })
+		const text = wrapper.text()
+		expect(text).toContain("Materials used")
+		expect(text).toContain("Milk")
+		expect(text).toContain("6 Litre")
+		expect(text).toContain("Written off")
+		expect(text).toContain("STE-0002")
+		expect(text).toContain("adonan pagi")
+		expect(text).not.toContain("<p>")
+
+		await wrapper.find('button[aria-label="Back"]').trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).not.toContain("Materials used")
+		expect(wrapper.text()).toContain("Iced Latte")
+	})
+
+	it("shows a retry when the history detail fails to load", async () => {
+		mockCall(HISTORY_URL, () => Promise.resolve(HISTORY))
+		let fail = true
+		mockCall("pos_next.api.production.get_production_detail", () =>
+			fail
+				? Promise.reject(new Error("boom"))
+				: Promise.resolve({ ...HISTORY.productions[0], materials: [], stock_entries: [], notes: [] }),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "History").trigger("click")
+		await flushPromises()
+		await findButton(wrapper, HISTORY.productions[0].work_order).trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("boom")
+
+		fail = false
+		await findButton(wrapper, "Retry").trigger("click")
+		await flushPromises()
+		expect(wrapper.text()).toContain("No materials were consumed.")
 	})
 })

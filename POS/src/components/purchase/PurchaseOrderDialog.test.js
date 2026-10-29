@@ -6,7 +6,7 @@
  * permission gating of the submit actions.
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
-import { flushPromises, mount } from "@vue/test-utils"
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils"
 
 // The app installs __() as a global property; templates need it, and it must
 // exist before the component module is evaluated.
@@ -268,7 +268,14 @@ async function fillForm(wrapper) {
 }
 
 describe("PurchaseOrderDialog", () => {
+	// Every mount must die with its test: a leftover dialog keeps its own 300 ms
+	// debounce timers, and those fired into later tests' assertions.
+	enableAutoUnmount(afterEach)
+
 	beforeEach(() => {
+		// Fake clock for the whole file, so no debounce timer can ever run on the
+		// real event loop while another test is asserting call history.
+		vi.useFakeTimers()
 		mocks.call.mockReset()
 		mocks.toast.success.mockClear()
 		mocks.toast.error.mockClear()
@@ -279,6 +286,7 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	afterEach(() => {
+		vi.clearAllTimers()
 		vi.useRealTimers()
 	})
 
@@ -731,7 +739,6 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	it("entering the form preloads supplier and item options", async () => {
-		vi.useFakeTimers()
 		mocks.call.mockResolvedValue({
 			suppliers: [],
 			items: [],
@@ -750,7 +757,6 @@ describe("PurchaseOrderDialog", () => {
 			"pos_next.api.purchase_orders.search_purchase_items",
 			expect.objectContaining({ search_term: null }),
 		)
-		vi.useRealTimers()
 	})
 
 	it("New pre-fills the POS Settings default supplier and warehouse", async () => {
@@ -799,7 +805,6 @@ describe("PurchaseOrderDialog", () => {
 	})
 
 	it("supplier search calls search_suppliers with the term after debounce", async () => {
-		vi.useFakeTimers()
 		mocks.call.mockResolvedValue({ suppliers: [] })
 		const wrapper = mountOpen()
 		await flushPromises()

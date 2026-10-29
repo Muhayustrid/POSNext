@@ -11,12 +11,13 @@ from frappe.utils import add_days, flt, getdate
 
 from pos_next.api.production import (
 	_uom_whole_field,
+	cancel_production,
 	close_production,
 	create_production,
-	cancel_production,
 	finish_production,
 	get_active_productions,
 	get_finish_context,
+	get_production_detail,
 	get_production_history,
 	get_production_recipes,
 	start_production,
@@ -623,6 +624,35 @@ class TestCreateProduction(InvoiceTypeAmbientMixin, FrappeTestCase):
 
 	# ---- SEC-NEW-03: production endpoints profile-membership gate ----
 
+	def _ensure_persona_item_read(self, role):
+		"""Re-create the shipped Item/Warehouse read rows for `role` if absent.
+
+		Frappe drops every standard DocPerm of a doctype as soon as it carries
+		one Custom DocPerm row, so the POS persona needs its own Item read to
+		survive ERPNext's get_latest_stock_qty check inside Work Order validate.
+		Sites whose fixtures were synced before those rows existed (or lost
+		them to a stray delete) fail here; the rows come from our own fixture,
+		so re-creating them restores documented state rather than widening it.
+		"""
+		for parent in ("Item", "Warehouse"):
+			if frappe.db.exists("Custom DocPerm", {"parent": parent, "role": role}):
+				continue
+			frappe.get_doc(
+				{
+					"doctype": "Custom DocPerm",
+					"parent": parent,
+					"parenttype": "DocType",
+					"parentfield": "permissions",
+					"role": role,
+					"permlevel": 0,
+					"read": 1,
+					"write": 0,
+				}
+			).insert(ignore_permissions=True)
+			# the perms cache is process-wide and the persona's cache was
+			# dropped before the row existed, so both tiers need a reset
+			frappe.clear_cache(doctype=parent)
+
 	def _make_user(self, first_name):
 		# uuid users: any granted role's redis cache outlives the class
 		# rollback, so users must never be reused across runs/classes
@@ -664,6 +694,7 @@ class TestCreateProduction(InvoiceTypeAmbientMixin, FrappeTestCase):
 		# submit needs write, which the cashier role does not carry.
 		if not frappe.db.exists("Role", "POSNext Manager"):
 			self.skipTest("POSNext Manager role missing")
+		self._ensure_persona_item_read("POSNext Manager")
 		cashier = self._make_user("Prod Sec Cashier")
 		frappe.get_doc(
 			{
@@ -702,6 +733,7 @@ class TestCreateProduction(InvoiceTypeAmbientMixin, FrappeTestCase):
 		# under the function's own ignore_permissions flags
 		if not frappe.db.exists("Role", "POSNext Cashier"):
 			self.skipTest("POSNext Cashier role missing")
+		self._ensure_persona_item_read("POSNext Cashier")
 		cashier = self._make_user("Prod Cashier Lane")
 		frappe.get_doc(
 			{
@@ -1142,6 +1174,39 @@ class TestGetProductionHistory(InvoiceTypeAmbientMixin, FrappeTestCase):
 		self.assertIsNone(rows[without_loss["work_order"]]["reject_request"])
 		self.assertIsNone(rows[without_loss["work_order"]]["reject_status"])
 
+	def test_history_period_filters_by_creation_date(self):
+		result = self._start(2, seed=10)
+		finish_production(result["work_order"], good_qty=2)
+		creation = frappe.db.get_value("Work Order", result["work_order"], "creation")
+		day = str(creation)[:10]
+		rows = self._rows_by_wo(get_production_history(self.pos_profile, from_date=day, to_date=day))
+		self.assertIn(result["work_order"], rows)
+		previous = str(add_days(day, -1))
+		rows = self._rows_by_wo(get_production_history(self.pos_profile, from_date=previous, to_date=previous))
+		self.assertNotIn(result["work_order"], rows)
+
+	def test_detail_lists_consumed_materials_and_notes(self):
+		result = self._start(2, seed=10)
+		frappe.get_doc("Work Order", result["work_order"]).add_comment("Comment", text="Check actual material use")
+		finish_production(result["work_order"], good_qty=2, notes="Finish entry note")
+		detail = get_production_detail(result["work_order"])
+		self.assertEqual(detail["work_order"], result["work_order"])
+		self.assertEqual(detail["produced_qty"], 2)
+		self.assertTrue(detail["stock_uom"])
+		self.assertTrue(detail["materials"])
+		self.assertTrue(any(r["item_code"] == self.mat for r in detail["materials"]))
+		self.assertTrue(detail["stock_entries"])
+		self.assertTrue(any("Finish entry note" in entry["remarks"] for entry in detail["stock_entries"]))
+		self.assertTrue(any("Check actual material use" in note for note in detail["notes"]))
+
+	def test_detail_of_cancelled_counts_no_materials(self):
+		result = self._start(2, seed=10)
+		finish_production(result["work_order"], good_qty=2)
+		cancel_production(result["work_order"])
+		detail = get_production_detail(result["work_order"])
+		self.assertEqual(detail["pos_status"], "Cancelled")
+		self.assertEqual(detail["materials"], [])
+
 	def test_history_pagination_slices_newest_first(self):
 		mine = []
 		for _ in range(3):
@@ -1267,7 +1332,7 @@ class TestFinishBatchPicks(InvoiceTypeAmbientMixin, FrappeTestCase):
 		self.assertEqual(wo.status, "Not Started")
 
 	def test_finish_with_insufficient_pick_rejected_before_submit(self):
-		# b_old holds only 2, the WO needs 2/unit × 3 = 6: the explicit pick must
+		# b_old holds only 2, the WO needs 2/unit x 3 = 6: the explicit pick must
 		# be validated against the same live ledger the FEFO pick reads
 		_seed_stock(self.mat, self.warehouse, 10)
 		_seed_stock(self.mat_b, self.warehouse, 2, batch_no=self.b_old.name)

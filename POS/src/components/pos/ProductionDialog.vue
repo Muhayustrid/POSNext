@@ -2,11 +2,13 @@
 	<DialogHost
 		v-model:show="show"
 		:embedded="embedded"
-		:options="{ title: __('Production'), size: '4xl' }"
+		:options="{ title: __('Production'), size: '3xl' }"
 	>
 		<template #body-content>
+			<!-- Embedded mode fills the menu pane: cap the measure here too -->
+			<div class="mx-auto w-full max-w-3xl">
 			<!-- LIST LEVEL: Recipes (one-shot + start) | In Production (two-phase) -->
-			<template v-if="view !== 'detail'">
+			<template v-if="view !== 'detail' && view !== 'history-detail'">
 				<div class="flex items-end gap-2 mb-4 border-b border-gray-200">
 					<nav class="flex gap-1 overflow-x-auto" role="tablist">
 						<button
@@ -17,14 +19,16 @@
 								{ id: 'overview', label: __('Overview') },
 							]"
 							:key="tab.id"
+							:id="`production-tab-${tab.id}`"
 							type="button"
 							role="tab"
+							aria-controls="production-panel"
 							:aria-selected="view === tab.id"
 							class="-mb-px min-h-11 px-3 border-b-2 text-sm font-semibold whitespace-nowrap transition-colors duration-150 touch-manipulation"
 							:class="
 								view === tab.id
 									? 'border-blue-600 text-blue-700'
-									: 'border-transparent text-gray-500 hover:text-gray-800'
+									: 'border-transparent text-gray-700 hover:text-gray-800'
 							"
 							@click="switchView(tab.id)"
 						>
@@ -59,6 +63,11 @@
 					/>
 				</div>
 
+				<div
+					id="production-panel"
+					role="tabpanel"
+					:aria-labelledby="`production-tab-${view}`"
+				>
 				<!-- RECIPES: pick a recipe -->
 				<template v-if="view === 'recipes'">
 					<div class="relative">
@@ -70,15 +79,16 @@
 							v-model="search"
 							type="text"
 							:placeholder="__('Search recipe...')"
-							class="w-full h-11 ps-10 pe-3 text-base border border-gray-300 rounded-xl bg-white placeholder-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
+							:aria-label="__('Search recipe...')"
+							class="w-full h-11 ps-10 pe-3 text-base border border-gray-300 rounded-xl bg-white placeholder-gray-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
 						/>
 					</div>
-					<div v-if="loadingRecipes" class="py-10 text-center text-sm text-gray-500">
+					<div v-if="loadingRecipes" class="py-10 text-center text-sm text-gray-700">
 						{{ __("Loading recipes...") }}
 					</div>
 					<div
 						v-else-if="!filteredRecipes.length"
-						class="py-10 text-center text-sm text-gray-500"
+						class="py-10 text-center text-sm text-gray-700"
 					>
 						{{ __("No recipes available for this outlet") }}
 					</div>
@@ -98,7 +108,7 @@
 									<div class="font-semibold text-gray-900 truncate">
 										{{ r.recipe_name }}
 									</div>
-									<div class="text-xs text-gray-500 mt-0.5 truncate">
+									<div class="text-xs text-gray-700 mt-0.5 truncate">
 										{{ r.production_item_name }}
 									</div>
 								</div>
@@ -110,7 +120,7 @@
 									>
 										{{ fmtQty(maxUnits(r)) }}
 									</div>
-									<div class="text-xs text-gray-500 mt-1">
+									<div class="text-xs text-gray-700 mt-1">
 										{{ outputUom(r) }}
 									</div>
 								</div>
@@ -137,14 +147,17 @@
 
 				<!-- IN PRODUCTION: live Work Orders of this outlet -->
 				<template v-else-if="view === 'active'">
-					<div v-if="loadingActive" class="py-10 text-center text-sm text-gray-500">
+					<div v-if="loadingActive" class="py-10 text-center text-sm text-gray-700">
 						{{ __("Loading active productions...") }}
 					</div>
 					<div
 						v-else-if="!productions.length"
-						class="py-10 text-center text-sm text-gray-500"
+						class="mx-auto flex max-w-xl flex-col items-center gap-3 py-10 text-center text-sm text-gray-700"
 					>
 						{{ __("No active productions") }}
+						<Button variant="subtle" class="min-h-11 px-4 touch-manipulation" @click="switchView('recipes')">
+							{{ __("Choose a recipe") }}
+						</Button>
 					</div>
 					<div
 						v-else
@@ -161,7 +174,7 @@
 									<div class="font-medium text-gray-900 truncate">
 										{{ p.production_item_name }}
 									</div>
-									<div class="text-xs text-gray-500">{{ p.recipe_name }}</div>
+									<div class="text-xs text-gray-700">{{ p.recipe_name }}</div>
 								</div>
 								<span
 									class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
@@ -182,7 +195,7 @@
 									<span class="font-semibold text-gray-900 tabular-nums">{{ p.produced_qty }}</span>
 								</span>
 								<span
-									class="ms-auto inline-flex items-center gap-1 text-xs text-gray-500 tabular-nums"
+									class="ms-auto inline-flex items-center gap-1 text-xs text-gray-700 tabular-nums"
 								>
 									<FeatherIcon name="clock" class="w-3.5 h-3.5" />
 									{{ elapsedLabel(p) }}
@@ -195,10 +208,11 @@
 								class="mt-3 border-t border-gray-100 pt-3 flex flex-col gap-3"
 							>
 								<div>
-									<label class="block text-sm font-medium text-gray-700 mb-1">
+									<label for="production-good-qty" class="block text-sm font-medium text-gray-700 mb-1">
 										{{ __("Good Qty") }}
 									</label>
 									<input
+										id="production-good-qty"
 										:value="goodText"
 										type="text"
 										inputmode="decimal"
@@ -216,7 +230,7 @@
 								<div v-if="finishBatchRows.length" class="overflow-x-auto -mx-1 px-1">
 									<table class="w-full text-sm">
 										<thead>
-											<tr class="text-start text-xs text-gray-500 uppercase">
+											<tr class="text-start text-xs text-gray-700 uppercase">
 												<th class="py-1 text-start">{{ __("Material") }}</th>
 												<th class="py-1 text-start">{{ __("Qty") }}</th>
 												<th class="py-1 text-start">{{ __("Batch") }}</th>
@@ -247,14 +261,15 @@
 										</tbody>
 									</table>
 								</div>
-								<p v-else-if="finishContextError" class="text-xs text-gray-500">
+								<p v-else-if="finishContextError" class="text-xs text-gray-700">
 									{{ __("Batch list unavailable - the system picks automatically.") }}
 								</p>
 								<div>
-									<label class="block text-sm font-medium text-gray-700 mb-1">
+									<label for="production-finish-notes" class="block text-sm font-medium text-gray-700 mb-1">
 										{{ __("Notes") }}
 									</label>
 									<input
+										id="production-finish-notes"
 										v-model="finishNotes"
 										type="text"
 										class="w-full h-11 px-3 text-base border border-gray-300 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
@@ -308,74 +323,83 @@
 
 				<!-- HISTORY: finished Work Orders of this outlet, newest first -->
 				<template v-else-if="view === 'history'">
-					<div class="flex items-center justify-end gap-2 mb-3">
-						<select
-							v-model="period"
-							:aria-label="__('Export period')"
-							class="h-10 ps-3 pe-8 text-sm border border-gray-300 rounded-lg bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
-						>
-							<option v-for="o in periodOptions" :key="o.value" :value="o.value">
-								{{ o.label }}
-							</option>
-						</select>
-						<Button variant="subtle" :loading="exporting" @click="exportHistory">
+					<div class="flex flex-wrap items-end gap-2 mb-3">
+						<label class="flex flex-col gap-1 text-xs font-medium text-gray-700">
+							{{ __("Period") }}
+							<select
+								v-model="period"
+								class="h-11 ps-3 pe-8 text-sm text-gray-900 border border-gray-300 rounded-lg bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15"
+							>
+								<option v-for="o in periodOptions" :key="o.value" :value="o.value">
+									{{ o.label }}
+								</option>
+							</select>
+						</label>
+						<Button class="ms-auto min-h-11 px-4 touch-manipulation" variant="subtle" :loading="exporting" @click="exportHistory">
 							{{ __("Export to Excel") }}
 						</Button>
 					</div>
-					<div v-if="loadingHistory" class="py-10 text-center text-sm text-gray-500">
+					<div v-if="loadingHistory && !historyProductions.length" class="py-10 text-center text-sm text-gray-700">
 						{{ __("Loading production history...") }}
 					</div>
 					<div
 						v-else-if="!historyProductions.length"
-						class="py-10 text-center text-sm text-gray-500"
+						class="mx-auto max-w-xl py-10 text-center text-sm text-gray-700"
 					>
 						{{ __("No production history yet") }}
 					</div>
 					<template v-else>
-						<div class="flex flex-col max-h-[60vh] overflow-y-auto divide-y divide-gray-100 border-y border-gray-100">
-							<div
-								v-for="p in historyProductions"
-								:key="p.work_order"
-								class="px-1 py-3"
-							>
-								<div class="flex items-start justify-between gap-2">
-									<div class="min-w-0">
-										<div class="font-medium text-gray-900 truncate">
-											{{ p.production_item_name }}
-										</div>
-										<div class="text-xs text-gray-500">{{ p.recipe_name }}</div>
-									</div>
-									<span
-										class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
-										:class="statusClass(p.pos_status)"
-									>
-										{{ posLabel(p) }}
-									</span>
-								</div>
-								<div
-									class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-sm text-gray-700"
+						<div
+							ref="historyScroller"
+							class="flex flex-col max-h-[60vh] overflow-y-auto divide-y divide-gray-100 border-y border-gray-100"
+						>
+							<div v-for="p in historyProductions" :key="p.work_order">
+								<!-- Whole row opens the detail page; the report action sits outside it -->
+								<button
+									type="button"
+									class="flex min-h-11 w-full items-center gap-3 px-2 py-3 text-start transition-colors duration-150 hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 touch-manipulation"
+									@click="openHistoryDetail(p)"
 								>
-									<span>
-										{{ __("Planned") }}:
-										<span class="font-medium tabular-nums">{{ p.qty }}</span>
-									</span>
-									<span>
-										{{ __("Produced") }}:
-										<span class="font-medium tabular-nums">{{ p.produced_qty }}</span>
-									</span>
-									<span v-if="p.process_loss_qty > 0">
-										{{ __("Loss") }}:
-										<span class="font-medium text-red-600 tabular-nums">{{
-											p.process_loss_qty
-										}}</span>
-									</span>
-									<span class="ms-auto text-xs text-gray-500 tabular-nums">
-										{{ historyStamp(p) }}<template v-if="p.operator">, {{ p.operator }}</template>
-									</span>
-								</div>
+									<div class="min-w-0 flex-1">
+										<div class="flex items-start justify-between gap-2">
+											<div class="min-w-0">
+												<div class="font-medium text-gray-900 truncate">
+													{{ p.production_item_name }}
+												</div>
+												<div class="text-xs text-gray-700 truncate">
+													{{ p.recipe_name }} · {{ p.work_order }}
+												</div>
+											</div>
+											<span
+												class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
+												:class="statusClass(p.pos_status)"
+											>
+												{{ posLabel(p) }}
+											</span>
+										</div>
+										<div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-sm text-gray-700">
+											<span>
+												{{ __("Planned") }}:
+												<span class="font-medium text-gray-900 tabular-nums">{{ fmtQty(p.qty) }}</span>
+											</span>
+											<span>
+												{{ __("Produced") }}:
+												<span class="font-medium text-gray-900 tabular-nums">{{ fmtQty(p.produced_qty) }}</span>
+											</span>
+											<span v-if="p.process_loss_qty > 0">
+												{{ __("Loss") }}:
+												<span class="font-medium text-red-700 tabular-nums">{{ fmtQty(p.process_loss_qty) }}</span>
+											</span>
+											<span class="ms-auto text-xs text-gray-700 tabular-nums">
+												{{ historyStamp(p) }}<template v-if="p.operator">, {{ p.operator }}</template>
+											</span>
+										</div>
+									</div>
+									<FeatherIcon name="chevron-right" class="h-4 w-4 shrink-0 text-gray-700" aria-hidden="true" />
+								</button>
 								<!-- Production Loss draft tracking: badge only when a
 								     system reject request exists for this Work Order -->
-								<div v-if="p.reject_request" class="flex items-center gap-2 mt-1.5">
+								<div v-if="p.reject_request" class="flex items-center gap-2 px-2 pb-2 -mt-1">
 									<span
 										class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
 										:class="rejectStatusClass(p.reject_status)"
@@ -385,7 +409,7 @@
 									<button
 										v-if="p.reject_status === 'Draft'"
 										type="button"
-										class="text-xs text-blue-600 hover:underline"
+										class="min-h-11 px-2 text-sm font-medium text-blue-700 hover:underline touch-manipulation"
 										@click="emit('open-reject-request', p.reject_request)"
 									>
 										{{ __("Submit report") }}
@@ -396,7 +420,7 @@
 						<div v-if="historyHasMore" class="mt-3 flex justify-center">
 							<Button
 								variant="subtle"
-								size="sm"
+								class="min-h-11 px-4 touch-manipulation"
 								:loading="loadingHistory"
 								@click="loadHistory(false)"
 							>
@@ -406,15 +430,15 @@
 					</template>
 				</template>
 
-			<!-- OVERVIEW: output / loss for a period, top items, daily trend -->
+				<!-- OVERVIEW: output / loss for a period, top items, daily trend -->
 				<template v-else>
 					<div class="flex flex-wrap items-center gap-2 mb-4">
-						<div class="flex rounded-lg border border-gray-300 overflow-hidden" role="group">
+						<div class="flex w-full sm:w-auto rounded-lg border border-gray-300 overflow-hidden" role="group" :aria-label="__('Period')">
 							<button
 								v-for="o in periodOptions"
 								:key="o.value"
 								type="button"
-								class="min-h-10 px-3 text-sm font-medium border-e border-gray-300 last:border-e-0 transition-colors touch-manipulation"
+								class="flex-1 sm:flex-none min-h-11 px-2 sm:px-3 text-sm font-medium whitespace-nowrap border-e border-gray-300 last:border-e-0 transition-colors touch-manipulation"
 								:class="
 									period === o.value
 										? 'bg-blue-600 text-white'
@@ -426,78 +450,90 @@
 								{{ o.label }}
 							</button>
 						</div>
-						<Button class="ms-auto" variant="subtle" :loading="exporting" @click="exportHistory">
+						<Button class="ms-auto min-h-11 px-4 touch-manipulation" variant="subtle" :loading="exporting" @click="exportHistory">
 							{{ __("Export to Excel") }}
 						</Button>
 					</div>
 					<div
 						v-if="loadingDashboard && !dashboard"
-						class="py-10 text-center text-sm text-gray-500"
+						class="py-10 text-center text-sm text-gray-700"
 					>
 						{{ __("Loading...") }}
 					</div>
 					<div v-else-if="dashboard" class="flex flex-col gap-6">
-						<!-- Figures: produced is the one number that matters, the rest support it -->
-						<div class="grid grid-cols-2 lg:grid-cols-4 gap-y-4 border-y border-gray-200 py-4">
-							<div class="col-span-2 lg:col-span-1 lg:border-e lg:border-gray-200 lg:pe-4">
-								<div class="text-sm text-gray-500">{{ __("Produced") }}</div>
-								<div class="text-4xl font-bold text-gray-900 tabular-nums leading-tight">
+						<!-- Figures: four equal cells, produced leads by weight not size -->
+						<dl class="grid grid-cols-2 sm:grid-cols-4 gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 [&>div]:bg-white [&>div]:px-4 [&>div]:py-3">
+							<div>
+								<dt class="text-sm text-gray-700">{{ __("Produced") }}</dt>
+								<dd class="text-2xl font-bold text-gray-900 tabular-nums">
 									{{ fmtQty(dashboard.produced) }}
-								</div>
-								<div class="text-xs text-gray-500">
+								</dd>
+								<dd class="text-xs text-gray-700">
 									{{ __("{0} runs", [dashboard.runs]) }}
-								</div>
+								</dd>
 							</div>
-							<div class="lg:border-e lg:border-gray-200 lg:px-4">
-								<div class="text-sm text-gray-500">{{ __("Loss rate") }}</div>
-								<div
+							<div>
+								<dt class="text-sm text-gray-700">{{ __("Loss rate") }}</dt>
+								<dd
 									class="text-2xl font-semibold tabular-nums"
-									:class="dashboard.loss_pct >= 10 ? 'text-red-600' : 'text-gray-900'"
+									:class="dashboard.loss_pct >= 10 ? 'text-red-700' : 'text-gray-900'"
 								>
 									{{ dashboard.loss_pct }}%
-								</div>
-								<div class="text-xs text-gray-500">
+								</dd>
+								<dd class="text-xs text-gray-700">
 									{{ __("{0} units lost", [fmtQty(dashboard.loss)]) }}
-								</div>
+								</dd>
 							</div>
-							<div class="lg:border-e lg:border-gray-200 lg:px-4">
-								<div class="text-sm text-gray-500">{{ __("Running now") }}</div>
-								<div class="text-2xl font-semibold text-gray-900 tabular-nums">
+							<div>
+								<dt class="text-sm text-gray-700">{{ __("Running now") }}</dt>
+								<dd class="text-2xl font-semibold text-gray-900 tabular-nums">
 									{{ dashboard.active }}
-								</div>
-								<button
-									v-if="dashboard.active"
-									type="button"
-									class="text-xs text-blue-600 hover:underline"
-									@click="switchView('active')"
-								>
-									{{ __("Open list") }}
-								</button>
+								</dd>
+								<dd v-if="dashboard.active">
+									<button
+										type="button"
+										class="-my-2 min-h-11 text-sm font-medium text-blue-700 hover:underline touch-manipulation"
+										@click="switchView('active')"
+									>
+										{{ __("Open list") }}
+									</button>
+								</dd>
 							</div>
-							<div class="lg:px-4">
-								<div class="text-sm text-gray-500">{{ __("Average per run") }}</div>
-								<div class="text-2xl font-semibold text-gray-900 tabular-nums">
+							<div>
+								<dt class="text-sm text-gray-700">{{ __("Average per run") }}</dt>
+								<dd class="text-2xl font-semibold text-gray-900 tabular-nums">
 									{{ dashboard.runs ? fmtQty(dashboard.produced / dashboard.runs) : "0" }}
-								</div>
+								</dd>
 							</div>
-						</div>
+						</dl>
 
-						<p v-if="!dashboard.runs" class="text-sm text-gray-500 text-center py-6">
+						<p v-if="!dashboard.runs" class="text-sm text-gray-700 text-center py-6">
 							{{ __("Nothing was produced in this period.") }}
 						</p>
-						<div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+						<template v-else>
 							<!-- Daily trend: produced (blue) with loss stacked on top (red) -->
-							<section class="lg:col-span-3">
+							<section>
 								<h3 class="text-sm font-semibold text-gray-900 mb-3">
 									{{ __("Output per day") }}
 								</h3>
-								<div class="flex items-end gap-1 h-40" role="img" :aria-label="__('Output per day')">
+								<div
+									class="flex items-end justify-center h-40"
+									:class="dailyLabelled ? 'gap-2' : 'gap-1'"
+									role="img"
+									:aria-label="__('Output per day')"
+								>
 									<div
 										v-for="d in dashboard.daily"
 										:key="d.day"
-										class="flex-1 min-w-[4px] flex flex-col justify-end h-full"
+										class="flex-1 min-w-[4px] max-w-12 flex flex-col justify-end h-full"
 										:title="`${d.day}: ${fmtQty(d.produced)} / ${__('Loss')} ${fmtQty(d.loss)}`"
 									>
+										<div
+											v-if="dailyLabelled"
+											class="mb-1 text-center text-xs font-medium text-gray-900 tabular-nums"
+										>
+											{{ fmtQty(d.produced) }}
+										</div>
 										<div
 											class="bg-red-400 rounded-t-sm"
 											:style="{ height: barPct(d.loss) }"
@@ -509,13 +545,22 @@
 										/>
 									</div>
 								</div>
-								<div class="flex justify-between mt-1 text-xs text-gray-500 tabular-nums">
+								<!-- Short ranges label every bar; long ones only the ends -->
+								<div
+									v-if="dailyLabelled"
+									class="flex justify-center gap-2 mt-1 text-xs text-gray-700 tabular-nums"
+								>
+									<span v-for="d in dashboard.daily" :key="d.day" class="flex-1 max-w-12 text-center">
+										{{ dayLabel(d.day) }}
+									</span>
+								</div>
+								<div v-else class="flex justify-between mt-1 text-xs text-gray-700 tabular-nums">
 									<span>{{ dashboard.daily[0]?.day }}</span>
 									<span v-if="dashboard.daily.length > 1">{{
 										dashboard.daily[dashboard.daily.length - 1].day
 									}}</span>
 								</div>
-								<div class="flex gap-4 mt-2 text-xs text-gray-600">
+								<div class="flex justify-center gap-4 mt-3 text-xs text-gray-700">
 									<span class="inline-flex items-center gap-1.5"
 										><span class="w-2.5 h-2.5 rounded-sm bg-blue-600" />{{ __("Produced") }}</span
 									>
@@ -525,7 +570,7 @@
 								</div>
 							</section>
 							<!-- Top items -->
-							<section class="lg:col-span-2">
+							<section>
 								<h3 class="text-sm font-semibold text-gray-900 mb-3">
 									{{ __("Most produced") }}
 								</h3>
@@ -546,17 +591,18 @@
 									</li>
 								</ol>
 							</section>
-						</div>
+						</template>
 					</div>
 				</template>
+				</div>
 			</template>
 
 			<!-- STEP 2: produce (locked except quantity) -->
-			<template v-else>
+			<template v-else-if="view === 'detail'">
 				<div class="mb-4 flex items-center gap-3 border-b border-gray-200 pb-4">
 					<button
 						type="button"
-						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 touch-manipulation"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 touch-manipulation"
 						:aria-label="__('Back')"
 						@click="view = 'recipes'"
 					>
@@ -566,7 +612,7 @@
 						<div class="truncate text-lg font-semibold text-gray-900">
 							{{ selectedRecipe.recipe_name }}
 						</div>
-						<div class="truncate text-sm text-gray-500">{{ selectedRecipe.production_item_name }}</div>
+						<div class="truncate text-sm text-gray-700">{{ selectedRecipe.production_item_name }}</div>
 					</div>
 				</div>
 
@@ -627,21 +673,13 @@
 							<FeatherIcon name="plus" class="w-4 h-4" />
 						</button>
 					</div>
-					<Button
-						v-if="selectedMax > minQty"
-						variant="subtle"
-						class="min-h-11 px-4 touch-manipulation"
-						@click="produceQty = selectedMax"
-					>
-						{{ __("Max ({0})", [selectedMax]) }}
-					</Button>
-					<div class="text-sm text-gray-600">{{ outputUom(selectedRecipe) }}</div>
+					<div class="text-sm text-gray-700">{{ outputUom(selectedRecipe) }}</div>
 				</div>
 
 				<div class="overflow-x-auto rounded-xl border border-gray-200">
 					<table class="w-full text-sm">
 						<thead class="bg-gray-50">
-							<tr class="text-start text-xs font-medium text-gray-500">
+							<tr class="text-start text-xs font-medium text-gray-700">
 								<th class="py-2.5 px-3 text-start">{{ __("Material") }}</th>
 								<th class="py-2.5 px-3 text-end">{{ __("Needed") }}</th>
 								<th class="py-2.5 px-3 text-end">{{ __("Stock") }}</th>
@@ -669,7 +707,7 @@
 								</td>
 								<td
 									class="py-2.5 px-3 text-end tabular-nums whitespace-nowrap"
-									:class="rowHasInsufficientStock(row) ? 'text-red-600' : 'text-gray-500'"
+									:class="rowHasInsufficientStock(row) ? 'text-red-600' : 'text-gray-700'"
 								>
 									{{ fmtQty(row.available_qty) }} {{ row.stock_uom }}
 								</td>
@@ -703,7 +741,176 @@
 				</div>
 			</template>
 
+			<!-- HISTORY DETAIL: what one finished Work Order actually did -->
+			<template v-else-if="view === 'history-detail'">
+				<div class="mb-4 flex items-center gap-3 border-b border-gray-200 pb-4">
+					<button
+						type="button"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 touch-manipulation"
+						:aria-label="__('Back')"
+						@click="closeHistoryDetail"
+					>
+						<FeatherIcon name="arrow-left" class="h-5 w-5" />
+					</button>
+					<div class="min-w-0 flex-1">
+						<h3 class="text-lg font-semibold leading-snug text-gray-900 break-words">
+							{{ historyRow.production_item_name }}
+						</h3>
+						<div class="text-sm text-gray-700 break-all">{{ historyRow.work_order }}</div>
+					</div>
+					<span
+						class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
+						:class="statusClass(historyRow.pos_status)"
+					>
+						{{ posLabel(historyRow) }}
+					</span>
+				</div>
+
+				<div v-if="loadingDetail" class="py-10 text-center text-sm text-gray-700">
+					{{ __("Loading...") }}
+				</div>
+				<div v-else-if="detailError" class="mx-auto flex max-w-xl flex-col items-center gap-3 py-10 text-center">
+					<p class="text-sm text-red-700">{{ detailError }}</p>
+					<Button variant="subtle" class="min-h-11 px-4 touch-manipulation" @click="loadHistoryDetail">
+						{{ __("Retry") }}
+					</Button>
+				</div>
+				<div v-else-if="historyDetail" class="flex flex-col gap-6">
+					<!-- Outcome: what was planned against what came out -->
+					<dl class="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 [&>div]:bg-white [&>div]:px-4 [&>div]:py-3">
+						<div>
+							<dt class="text-sm text-gray-700">{{ __("Planned") }}</dt>
+							<dd class="text-2xl font-semibold text-gray-900 tabular-nums">{{ fmtQty(historyDetail.qty) }}</dd>
+							<dd class="text-xs text-gray-700">{{ historyDetail.stock_uom }}</dd>
+						</div>
+						<div>
+							<dt class="text-sm text-gray-700">{{ __("Good") }}</dt>
+							<dd class="text-2xl font-bold text-gray-900 tabular-nums">{{ fmtQty(historyDetail.produced_qty) }}</dd>
+							<dd class="text-xs text-gray-700">{{ historyDetail.stock_uom }}</dd>
+						</div>
+						<div>
+							<dt class="text-sm text-gray-700">{{ __("Loss") }}</dt>
+							<dd
+								class="text-2xl font-semibold tabular-nums"
+								:class="historyDetail.process_loss_qty > 0 ? 'text-red-700' : 'text-gray-900'"
+							>
+								{{ fmtQty(historyDetail.process_loss_qty) }}
+							</dd>
+							<dd class="text-xs text-gray-700">{{ historyDetail.stock_uom }}</dd>
+						</div>
+					</dl>
+
+					<dl class="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+						<div>
+							<dt class="text-gray-700">{{ __("Recipe") }}</dt>
+							<dd class="font-medium text-gray-900">{{ historyDetail.recipe_name || "—" }}</dd>
+						</div>
+						<div>
+							<dt class="text-gray-700">{{ __("Operator") }}</dt>
+							<dd class="font-medium text-gray-900 break-all">{{ historyDetail.operator || "—" }}</dd>
+						</div>
+						<div>
+							<dt class="text-gray-700">{{ __("Created") }}</dt>
+							<dd class="font-medium text-gray-900 tabular-nums">{{ historyStamp(historyDetail) }}</dd>
+						</div>
+						<div>
+							<dt class="text-gray-700">{{ __("Started") }}</dt>
+							<dd class="font-medium text-gray-900 tabular-nums">{{ startedStamp(historyDetail) }}</dd>
+						</div>
+					</dl>
+
+					<section>
+						<h4 class="mb-2 text-sm font-semibold text-gray-900">{{ __("Materials used") }}</h4>
+						<p v-if="!historyDetail.materials.length" class="text-sm text-gray-700">
+							{{ __("No materials were consumed.") }}
+						</p>
+						<div v-else class="overflow-x-auto rounded-xl border border-gray-200">
+							<table class="w-full text-sm">
+								<thead class="bg-gray-50">
+									<tr class="text-xs font-medium text-gray-700">
+										<th class="py-2.5 px-3 text-start">{{ __("Material") }}</th>
+										<th class="py-2.5 px-3 text-start">{{ __("Batch") }}</th>
+										<th class="py-2.5 px-3 text-end">{{ __("Qty") }}</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr
+										v-for="m in historyDetail.materials"
+										:key="`${m.item_code}|${m.batch_no}|${m.written_off}`"
+										class="border-t border-gray-100"
+									>
+										<td class="py-2.5 px-3">
+											<div class="text-gray-900">{{ m.item_name }}</div>
+											<div v-if="m.written_off" class="text-xs font-medium text-red-700">
+												{{ __("Written off") }}
+											</div>
+										</td>
+										<td class="py-2.5 px-3 text-gray-700 tabular-nums">{{ m.batch_no || "—" }}</td>
+										<td class="py-2.5 px-3 text-end font-semibold text-gray-900 tabular-nums whitespace-nowrap">
+											{{ fmtQty(m.qty) }} {{ m.stock_uom }}
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+					</section>
+
+					<section v-if="historyDetail.stock_entries.length">
+						<h4 class="mb-2 text-sm font-semibold text-gray-900">{{ __("Stock entries") }}</h4>
+						<ul class="divide-y divide-gray-100 border-y border-gray-100 text-sm">
+							<li
+								v-for="e in historyDetail.stock_entries"
+								:key="e.name"
+								class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2.5"
+							>
+								<span class="font-medium text-gray-900" :class="{ 'line-through': e.cancelled }">{{ e.name }}</span>
+								<span class="text-gray-700">{{ __(e.purpose) }}</span>
+								<span
+									v-if="e.cancelled"
+									class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700"
+								>
+									{{ __("Cancelled") }}
+								</span>
+								<span class="ms-auto text-xs text-gray-700 tabular-nums">{{ e.posted_at }}</span>
+							</li>
+						</ul>
+					</section>
+
+					<section v-if="historyDetail.notes.length">
+						<h4 class="mb-2 text-sm font-semibold text-gray-900">{{ __("Notes") }}</h4>
+						<!-- Comment content is stored as HTML-escaped text; render as text, never v-html -->
+						<p
+							v-for="(n, i) in historyDetail.notes"
+							:key="i"
+							class="whitespace-pre-line text-sm text-gray-900"
+						>
+							{{ plainNote(n) }}
+						</p>
+					</section>
+
+					<div v-if="historyDetail.reject_request" class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 px-4 py-3">
+						<span class="text-sm text-gray-700">{{ __("Loss report") }}</span>
+						<span
+							class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium"
+							:class="rejectStatusClass(historyDetail.reject_status)"
+						>
+							{{ rejectLabel(historyDetail.reject_status) }}
+						</span>
+						<Button
+							v-if="historyDetail.reject_status === 'Draft'"
+							variant="solid"
+							theme="blue"
+							class="ms-auto min-h-11 px-4 touch-manipulation"
+							@click="emit('open-reject-request', historyDetail.reject_request)"
+						>
+							{{ __("Submit report") }}
+						</Button>
+					</div>
+				</div>
+			</template>
+
 			<div v-if="errorMessage" class="mt-3 text-sm text-red-600">{{ errorMessage }}</div>
+			</div>
 		</template>
 	</DialogHost>
 
@@ -714,7 +921,12 @@
 			class="fixed inset-0 bg-black bg-opacity-50 z-[500] flex items-center justify-center"
 			@click.self="confirmAction = null"
 		>
-			<div class="bg-white rounded-lg shadow-2xl max-w-md w-full mx-4 p-6">
+			<div
+				class="bg-white rounded-lg shadow-2xl max-w-md w-full mx-4 p-6"
+				role="alertdialog"
+				aria-modal="true"
+				aria-labelledby="production-confirm-title"
+			>
 				<div class="flex items-start gap-4">
 					<div class="flex-shrink-0">
 						<div
@@ -724,14 +936,14 @@
 						</div>
 					</div>
 					<div class="flex-1">
-						<h3 class="text-lg font-semibold text-gray-900 mb-2">
+						<h3 id="production-confirm-title" class="text-lg font-semibold text-gray-900 mb-2">
 							{{
 								confirmAction.type === "close"
 									? __("Close Production")
 									: __("Cancel Production")
 							}}
 						</h3>
-						<p class="text-sm text-gray-600 mb-1">
+						<p class="text-sm text-gray-700 mb-1">
 							{{
 								confirmAction.type === "close"
 									? __("Stop production {0}? Produced quantities are kept.", [
@@ -748,7 +960,7 @@
 											)
 							}}
 						</p>
-						<p class="text-sm text-gray-500">
+						<p class="text-sm text-gray-700">
 							{{ __("This action cannot be undone.") }}
 						</p>
 					</div>
@@ -770,7 +982,7 @@
 import { Button, call, createResource, FeatherIcon } from "frappe-ui"
 import { formatAmountInput, parseAmountInput } from "@/utils/amountInput"
 import { useToast } from "@/composables/useToast"
-import { computed, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onUnmounted, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import { downloadXlsx } from "@/utils/downloadXlsx"
@@ -804,7 +1016,8 @@ watch(
 )
 watch(show, (v) => emit("update:modelValue", v))
 
-// view: "recipes" (list) | "detail" (locked recipe form) | "active" (running WOs) | "history" (finished WOs)
+// view: "recipes" (list) | "detail" (locked recipe form) | "active" (running WOs)
+// | "history" (finished WOs) | "history-detail" (one finished WO) | "overview"
 const view = ref("recipes")
 const loadingRecipes = ref(false)
 const recipes = ref([])
@@ -836,8 +1049,15 @@ const historyProductions = ref([])
 const loadingHistory = ref(false)
 const historyHasMore = ref(false)
 const HISTORY_PAGE = 30
+const historyScroller = ref(null)
+// History detail page: the clicked row shows at once, the posted docs follow
+const historyRow = ref(null)
+const historyDetail = ref(null)
+const loadingDetail = ref(false)
+const detailError = ref("")
+let historyScrollTop = 0
 
-// Overview + export share one period
+// Overview, history list and export share one period
 const period = ref("last7")
 const periodOptions = [
 	{ value: "today", label: __("Today") },
@@ -865,7 +1085,10 @@ async function loadDashboard() {
 		loadingDashboard.value = false
 	}
 }
-watch(period, () => view.value === "overview" && loadDashboard())
+watch(period, () => {
+	if (view.value === "overview") loadDashboard()
+	if (view.value === "history") loadHistory()
+})
 
 async function exportHistory() {
 	const range = periodRange(period.value)
@@ -890,6 +1113,10 @@ const dailyMax = computed(() =>
 const barPct = (v) => `${(v / dailyMax.value) * 100}%`
 const topPct = (v) =>
 	`${(v / Math.max(1, dashboard.value?.top_items?.[0]?.produced || 0)) * 100}%`
+// Up to two weeks each bar gets its value and day; longer ranges get too thin
+const dailyLabelled = computed(() => (dashboard.value?.daily?.length || 0) <= 14)
+// "2026-10-08" → "08/10": short, locale-free
+const dayLabel = (day) => `${String(day).slice(8, 10)}/${String(day).slice(5, 7)}`
 const fmtQty = (v) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })
 
 const filteredRecipes = computed(() => {
@@ -1118,12 +1345,15 @@ function loadActive() {
 async function loadHistory(reset = true) {
 	if (!props.posProfile || loadingHistory.value) return
 	const offset = reset ? 0 : historyProductions.value.length
+	const range = periodRange(period.value)
 	loadingHistory.value = true
 	try {
 		const data = await call("pos_next.api.production.get_production_history", {
 			pos_profile: props.posProfile,
 			limit: HISTORY_PAGE,
 			offset,
+			from_date: range?.from,
+			to_date: range?.to,
 		})
 		historyProductions.value = reset
 			? data.productions || []
@@ -1134,6 +1364,51 @@ async function loadHistory(reset = true) {
 	} finally {
 		loadingHistory.value = false
 	}
+}
+
+async function openHistoryDetail(p) {
+	historyScrollTop = historyScroller.value?.scrollTop || 0
+	historyRow.value = p
+	view.value = "history-detail"
+	await loadHistoryDetail()
+}
+
+async function loadHistoryDetail() {
+	const wo = historyRow.value?.work_order
+	if (!wo) return
+	historyDetail.value = null
+	detailError.value = ""
+	loadingDetail.value = true
+	try {
+		const data = await call("pos_next.api.production.get_production_detail", { work_order: wo })
+		// a fast Back-and-open of another row must not show the older answer
+		if (historyRow.value?.work_order === wo) historyDetail.value = data
+	} catch (err) {
+		if (historyRow.value?.work_order === wo)
+			detailError.value = errMsg(err, "Failed to load production detail")
+	} finally {
+		loadingDetail.value = false
+	}
+}
+
+async function closeHistoryDetail() {
+	view.value = "history"
+	historyRow.value = null
+	historyDetail.value = null
+	await nextTick()
+	if (historyScroller.value) historyScroller.value.scrollTop = historyScrollTop
+}
+
+// Comment content can carry markup from Desk; show its text only
+function plainNote(html) {
+	return new DOMParser().parseFromString(String(html || ""), "text/html").body.textContent.trim()
+}
+
+function startedStamp(p) {
+	if (typeof p.started_at !== "number") return "—"
+	const d = new Date(p.started_at * 1000)
+	const pad = (n) => String(n).padStart(2, "0")
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 // "Not Started" is a shared translation key (coupons/promotions reuse it), so
@@ -1147,23 +1422,30 @@ function posLabel(p) {
 function statusClass(posStatus) {
 	if (posStatus === "In Progress") return "bg-blue-100 text-blue-700"
 	if (posStatus === "Failed") return "bg-red-100 text-red-700"
-	return "bg-gray-100 text-gray-600"
+	if (posStatus === "Completed") return "bg-green-100 text-green-800"
+	if (posStatus === "Partially Completed") return "bg-amber-100 text-amber-800"
+	return "bg-gray-100 text-gray-700"
 }
 
 // Same palette as RejectRequestDialog's status chips, so the same reject
 // status reads identically across the two dialogs.
 function rejectStatusClass(status) {
-	if (status === "Pending") return "bg-blue-100 text-blue-700"
-	if (status === "Approved") return "bg-green-100 text-green-700"
-	if (status === "Rejected") return "bg-red-100 text-red-700"
-	if (status === "Closed") return "bg-gray-100 text-gray-600"
-	return "bg-yellow-100 text-yellow-700" // Draft
+	return (
+		{
+			Draft: "bg-orange-50 text-orange-700",
+			"Pending Approval": "bg-blue-50 text-blue-700",
+			"Awaiting Destruction": "bg-amber-50 text-amber-700",
+			"Destruction Submitted": "bg-amber-50 text-amber-700",
+			Completed: "bg-green-50 text-green-700",
+		}[status] || "bg-gray-100 text-gray-700"
+	)
 }
 
+// Workflow states (POS Reject Request.workflow_state)
 function rejectLabel(status) {
-	if (status === "Draft") return __("Not submitted")
-	if (status === "Pending") return __("Waiting for HO")
-	return __(status || "Not submitted")
+	if (!status || status === "Draft") return __("Not submitted")
+	if (status === "Pending Approval") return __("Waiting for HO")
+	return __(status)
 }
 
 // "2026-09-27 19:23:42.123456" → "2026-09-27 19:23": calm and locale-free.

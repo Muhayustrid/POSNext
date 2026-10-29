@@ -580,6 +580,7 @@ def after_migrate():
 
 		sync_custom_fields(quiet=True)
 		ensure_price_group_custom_fields(quiet=True)
+		restore_persona_docperms()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
 		ensure_stock_opname_workflow(quiet=True)
 		ensure_reject_request_workflow(quiet=True)
@@ -954,6 +955,20 @@ def _mirror_target_parents():
 	except OSError:
 		return []
 	return sorted({e.get("parent") for e in entries if e.get("parent")})
+
+
+def restore_persona_docperms():
+	"""Re-import our Custom DocPerm fixture after other apps' after_migrate hooks.
+
+	Fixtures sync before after_migrate, and production_app's
+	retire_stale_docperms (an earlier hook) deletes every Item/Warehouse
+	Custom DocPerm, which would strip the POS personas' read access.
+	"""
+	from frappe.core.doctype.data_import.data_import import import_doc
+
+	path = frappe.get_app_path("pos_next", "fixtures", "custom_docperm.json")
+	if os.path.exists(path):
+		import_doc(path)
 
 
 def mirror_standard_perms_for_custom_doctypes(quiet=False):

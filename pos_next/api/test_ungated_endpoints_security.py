@@ -17,8 +17,10 @@ Covered guards:
 - get_sales_persons stays reachable for the checkout cashier but strips the
   payroll-sensitive `commission_rate` for non-management callers (T4
   decision: the PaymentDialog dropdown needs the names for cashiers).
-- queue.get_next_queue_number, invoices.apply_offers / validate_cart_items /
-  validate_return_items gate the profile/invoice they are asked about.
+- queue.get_next_queue_number, invoices.apply_offers / validate_cart_items
+  gate the profile they are asked about. validate_return_items follows the
+  D10 return scope: an invoice of another company than the caller's shift is
+  denied, a sibling register of the same company is allowed.
 
 Standalone module (own users/profile/warehouse/invoice fixtures); do not
 batch it with another shift-touching module in one process.
@@ -93,9 +95,15 @@ class TestUngatedEndpointsSecurity(FrappeTestCase):
 		cls.cashier = f"ungated-sec.{uuid.uuid4().hex[:8]}@example.com"
 		cls.manager = f"ungated-sec.{uuid.uuid4().hex[:8]}@example.com"
 		for email in (cls.cashier, cls.manager):
-			frappe.get_doc(
+			user = frappe.get_doc(
 				{"doctype": "User", "email": email, "first_name": "Ungated Sec Tester"}
-			).insert(ignore_permissions=True)
+			)
+			# a fresh User defaults to send_welcome_email=1; the queued mail is
+			# flushed by the tearDownClass commit and dies on the fixture site's
+			# Email Account, failing the whole class (no SMTP here by design)
+			user.send_welcome_email = 0
+			user.flags.no_welcome_mail = True
+			user.insert(ignore_permissions=True)
 		cls._grant_role(cls.cashier, "POSNext Cashier")
 		cls._grant_role(cls.manager, "POSNext Manager")
 
@@ -125,10 +133,14 @@ class TestUngatedEndpointsSecurity(FrappeTestCase):
 		cls.created_sales_person = None
 		cls.sales_person = cls._ensure_sales_person()
 
-		# a raw submitted invoice row under profile B for the return-scope
-		# test (the gate reads only pos_profile/posting_date)
+		# return-scope fixtures. The return gate is company-scoped (D10): a
+		# sibling register of the caller's company stays returnable, another
+		# company's invoice does not — the denial case therefore needs a
+		# foreign-company profile, not profile B.
 		cls.customer = get_default_customer()
-		cls.foreign_invoice = cls._seed_invoice(cls.profile_b, cls.profile.company)
+		cls.sibling_invoice = cls._seed_invoice(cls.profile_b, cls.profile.company)
+		cls.created_foreign_profile = None
+		cls.foreign_invoice = cls._seed_foreign_company_invoice()
 
 	@classmethod
 	def tearDownClass(cls):
@@ -142,8 +154,15 @@ class TestUngatedEndpointsSecurity(FrappeTestCase):
 			except Exception:
 				pass
 
-		if getattr(cls, "foreign_invoice", None):
-			_safe(lambda: frappe.db.delete("Sales Invoice", {"name": cls.foreign_invoice}))
+		for invoice in (getattr(cls, "foreign_invoice", None), getattr(cls, "sibling_invoice", None)):
+			if invoice:
+				_safe(lambda name=invoice: frappe.db.delete("Sales Invoice", {"name": name}))
+		if getattr(cls, "created_foreign_profile", None):
+			_safe(
+				lambda: frappe.delete_doc(
+					"POS Profile", cls.created_foreign_profile, force=1, ignore_permissions=True
+				)
+			)
 		if getattr(cls, "created_sales_person", None):
 			_safe(
 				lambda: frappe.delete_doc(
@@ -260,6 +279,49 @@ class TestUngatedEndpointsSecurity(FrappeTestCase):
 		frappe.db.set_value(doctype, doc.name, "docstatus", 1, update_modified=False)
 		return doc.name
 
+	@classmethod
+	def _seed_foreign_company_invoice(cls):
+		"""Submitted invoice of ANOTHER company than the caller's profile.
+
+		The D10 return gate denies by company, so the denial fixture has to be
+		a genuinely foreign company. Site-company discovery only — no Company
+		or Warehouse is created, so nothing here can leak into later modules.
+		"""
+		foreign_company = next(
+			(
+				company
+				for company in frappe.get_all("Company", pluck="name", order_by="creation asc")
+				if company != cls.profile.company
+				and frappe.db.count("Warehouse", {"company": company, "is_group": 0, "disabled": 0})
+			),
+			None,
+		)
+		if not foreign_company:
+			raise unittest.SkipTest("site has no second company with a warehouse")
+
+		warehouse = frappe.get_all(
+			"Warehouse",
+			filters={"company": foreign_company, "is_group": 0, "disabled": 0},
+			pluck="name",
+			limit=1,
+		)[0]
+		profile_name = f"_PNXT Ungated Foreign {uuid.uuid4().hex[:6]}"
+		profile = frappe.get_doc(
+			{
+				"doctype": "POS Profile",
+				"name": profile_name,
+				"company": foreign_company,
+				"warehouse": warehouse,
+			}
+		)
+		# raw insert: a real POS Profile would need accounts/MoP defaults that
+		# are irrelevant to the company-scoped return gate
+		profile.flags.ignore_validate = True
+		profile.flags.ignore_mandatory = True
+		profile.insert(ignore_permissions=True)
+		cls.created_foreign_profile = profile.name
+		return cls._seed_invoice(profile.name, foreign_company)
+
 	# ── items.py: profile membership ─────────────────────────────────────────
 
 	def test_cashier_get_items_own_profile_allowed(self):
@@ -365,6 +427,7 @@ class TestUngatedEndpointsSecurity(FrappeTestCase):
 				validate_cart_items(json.dumps([]), self.profile_b)
 
 	def test_cashier_validate_return_items_foreign_invoice_denied(self):
+		# another company than the caller's profile: the D10 return gate throws
 		with _as(self.cashier):
 			with self.assertRaises(frappe.PermissionError):
 				validate_return_items(
@@ -372,3 +435,15 @@ class TestUngatedEndpointsSecurity(FrappeTestCase):
 					[{"item_code": "NO-SUCH-ITEM", "qty": -1}],
 					doctype="Sales Invoice",
 				)
+
+	def test_cashier_validate_return_items_sibling_profile_allowed(self):
+		# same company, different register: D10 keeps cross-outlet returns of
+		# one company open, so the gate must NOT throw — the answer stays a
+		# structured verdict (the unknown item is simply over its 0 quantity)
+		with _as(self.cashier):
+			result = validate_return_items(
+				self.sibling_invoice,
+				[{"item_code": "NO-SUCH-ITEM", "qty": -1}],
+				doctype="Sales Invoice",
+			)
+		self.assertFalse(result["valid"])
