@@ -87,7 +87,7 @@
 				data-test="attachment-preview"
 				@click.self="previewRow = null"
 			>
-				<div class="flex items-center gap-3 px-4 py-3 text-white">
+				<div class="flex items-center gap-3 bg-black px-4 py-3 text-white">
 					<span class="min-w-0 flex-1 truncate text-sm">{{ nameOf(previewRow) }}</span>
 					<a
 						v-if="previewRow.file_url"

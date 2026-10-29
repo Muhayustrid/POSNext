@@ -25,7 +25,7 @@
 					data-testid="status-dot"
 					:class="['h-2 w-2 shrink-0 rounded-full', toneClass(doc)]"
 				></span>
-				<span class="text-sm text-gray-700">{{ statusLabel }}</span>
+				<span class="text-sm text-gray-700">{{ __(statusLabel) }}</span>
 			</span>
 
 			<span

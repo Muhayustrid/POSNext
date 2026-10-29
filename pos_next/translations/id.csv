@@ -3627,3 +3627,6 @@ Shipping status,Status pengiriman
 "Warehouse {0} does not belong to company {1}","Gudang {0} bukan milik company {1}",""
 "Preview {0}","Pratinjau {0}",""
 "Shift schedule has ended. The cart was cleared and the shift is being closed.","Jadwal shift telah berakhir. Keranjang dikosongkan dan shift sedang ditutup.",""
+"Total Refunds","Total Pengembalian Dana",""
+"No refunds","Tidak ada pengembalian dana",""
+"Back to POS","Kembali ke POS",""
