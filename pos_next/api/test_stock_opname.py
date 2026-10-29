@@ -275,10 +275,14 @@ class TestStockOpnameApi(_StockOpnameFixture):
 		self.assertEqual(str(got["posting_date"]), str(nowdate()))
 		self.assertIsNotNone(got["posting_time"])
 		self.assertEqual(got["set_warehouse"], self.warehouse)
-		# the blind-count forbidden fields must not leak at header or item level
+		# the blind-count forbidden fields — system qty and every price — must
+		# not leak at header or item level
 		forbidden = {
 			"current_qty",
 			"current_valuation_rate",
+			"current_amount",
+			"valuation_rate",
+			"amount",
 			"quantity_difference",
 			"amount_difference",
 			"custom_qty_before",
