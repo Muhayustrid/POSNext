@@ -372,7 +372,7 @@ describe("ReturnInvoiceDialog refund code gate", () => {
 		)
 		expect(statusCallsAfter.length).toBeGreaterThanOrEqual(1)
 		const lastStatusCall = statusCallsAfter.pop()
-		expect(lastStatusCall[1]).toMatchObject({ company: "Original Co" })
+		expect(lastStatusCall[1]).toMatchObject({ company: "Original Co", pos_profile: "Outlet 1" })
 	})
 
 	it("verifies the code with kind 'refund'", async () => {

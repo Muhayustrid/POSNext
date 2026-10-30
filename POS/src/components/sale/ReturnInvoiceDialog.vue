@@ -2112,7 +2112,11 @@ async function fetchRefundGateStatus() {
 	if (!company) return;
 	const requestedCompany = company;
 	try {
-		const result = await call("pos_next.api.discount_code.get_status", { company });
+		// the switch resolves from the return's own POS Profile, as on the server
+		const result = await call("pos_next.api.discount_code.get_status", {
+			company,
+			pos_profile: props.posProfile,
+		});
 		if (originalInvoice.value?.company !== requestedCompany) return;
 		refundCodeRequired.value = result?.refund_code_required !== false;
 	} catch (error) {

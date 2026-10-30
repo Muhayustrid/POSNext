@@ -37,17 +37,17 @@ RATE_LIMIT_SECONDS = 300
 def get_status(company: str = None, pos_profile: str = None):
 	"""Gate states for the POS frontend — UI hints only.
 
-	`enabled` mirrors `discount_code_required` (kept for clients predating the
-	per-Company switches). `refund_code_required`: whether returns need a code
-	for this outlet. The server re-checks both on save/submit, so a tampered
-	client cannot bypass them. `pos_profile` is accepted and ignored for old
+	Both switches resolve from POS Settings: the profile's enabled row, else
+	the global single. `enabled` mirrors `discount_code_required` (kept for
+	older clients). The server re-checks both on save/submit, so a tampered
+	client cannot bypass them. `company` is accepted and ignored for old
 	clients.
 	"""
-	discount_required = discount_code_required(company)
+	discount_required = discount_code_required(pos_profile)
 	return {
 		"enabled": discount_required,
 		"discount_code_required": discount_required,
-		"refund_code_required": refund_code_required(company),
+		"refund_code_required": refund_code_required(pos_profile),
 	}
 
 

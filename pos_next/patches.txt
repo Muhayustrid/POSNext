@@ -29,8 +29,6 @@ pos_next.patches.v2_16_0.move_company_target_fields_to_buying_tab
 pos_next.patches.v2_16_0.enable_automatic_stock_sync
 pos_next.patches.v2_16_0.drop_monthly_target_transactions
 pos_next.patches.v2_17_0.reorder_pos_settings_fields
-pos_next.patches.v2_18_0.seed_company_code_switches
-pos_next.patches.v2_19_0.seed_code_gate_groups
 pos_next.patches.v2_20_0.backfill_offer_usage_invoice_type
 pos_next.patches.v2_20_0.scope_existing_coupons
 pos_next.patches.v2_21_0.repoint_app_desktop_icon
@@ -44,3 +42,4 @@ pos_next.patches.v2_28_0.remove_profile_schedule_fields
 pos_next.patches.v2_29_0.add_opname_row_photo_field
 pos_next.patches.v2_30_0.block_out_of_stock_items
 pos_next.patches.v2_31_0.enable_cash_handover
+pos_next.patches.v2_32_0.move_code_switches_to_pos_settings

@@ -44,6 +44,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime
 
+from pos_next.api.settings_resolver import get_effective_pos_setting
 from pos_next.overrides.pos_offer_usage import parse_applied_offer_rules
 from pos_next.overrides.pricing_rule import MIN_MAX_OPTIONS
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
@@ -706,14 +707,10 @@ def validate_code(code_value, company, doctype=CODE_DOCTYPE):
 # ==========================================================================
 
 
-def _code_required(company, fieldname):
-	"""Per-Company gate switch read straight from the DB (no meta needed).
-
-	Fails closed: a NULL/unset value, or a missing/blank company, keeps the
-	gate on until head office explicitly turns it off."""
-	if not company:
-		return True
-	value = frappe.db.get_value("Company", company, fieldname)
+def _code_required(pos_profile, fieldname):
+	"""Code gate switch from POS Settings: the profile's enabled row, else the
+	global single. Fails closed: an unset value keeps the gate on."""
+	value = get_effective_pos_setting(pos_profile, fieldname)
 	return True if value is None else bool(cint(value))
 
 
@@ -740,14 +737,14 @@ def _gate_company(doc):
 	return doc.get("company")
 
 
-def discount_code_required(company: str | None) -> bool:
-	"""Whether this outlet requires an HQ code for manual discounts."""
-	return _code_required(company, "pos_require_discount_code")
+def discount_code_required(pos_profile: str | None) -> bool:
+	"""Whether this POS Profile requires an HQ code for manual discounts."""
+	return _code_required(pos_profile, "require_discount_code")
 
 
-def refund_code_required(company: str | None) -> bool:
-	"""Whether this outlet requires an HQ code for refunds/returns."""
-	return _code_required(company, "pos_require_refund_code")
+def refund_code_required(pos_profile: str | None) -> bool:
+	"""Whether this POS Profile requires an HQ code for refunds/returns."""
+	return _code_required(pos_profile, "require_refund_code")
 
 
 def validate_invoice_discounts(doc, method=None):
@@ -768,14 +765,14 @@ def validate_invoice_discounts(doc, method=None):
 		# closed): the stamped recompute above refuses stamped returns
 		# outright.
 		gate_company = _gate_company(doc)
-		if refund_code_required(gate_company):
+		if refund_code_required(doc.get("pos_profile")):
 			validate_code(doc.get("refund_confirmation_code"), gate_company, REFUND_CODE_DOCTYPE)
 		return
 	reject_stacked_offer_discounts(doc)
 	if not invoice_has_manual_discount(doc):
 		return
 	gate_company = _gate_company(doc)
-	if not discount_code_required(gate_company):
+	if not discount_code_required(doc.get("pos_profile")):
 		return
 
 	validate_code(doc.get("discount_confirmation_code"), gate_company)
@@ -792,14 +789,14 @@ def record_code_usage_on_submit(doc, method=None):
 	# each only when its own gate is on and the code was actually needed.
 	gate_company = _gate_company(doc)
 	if doc.get("is_return"):
-		if not refund_code_required(gate_company):
+		if not refund_code_required(doc.get("pos_profile")):
 			return
 		doctype = REFUND_CODE_DOCTYPE
 		code_value = (doc.get("refund_confirmation_code") or "").strip().upper()
 	elif not invoice_has_manual_discount(doc):
 		return
 	else:
-		if not discount_code_required(gate_company):
+		if not discount_code_required(doc.get("pos_profile")):
 			return
 		doctype = CODE_DOCTYPE
 		code_value = (doc.get("discount_confirmation_code") or "").strip().upper()

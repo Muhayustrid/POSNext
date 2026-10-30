@@ -33,7 +33,7 @@ from pos_next.services.sales_recap import (
 	shift_scope,
 )
 from pos_next.shift_schedule import get_profile_slots, open_slots_now
-from pos_next.utils.authz import is_management_user
+from pos_next.utils.authz import assert_can_sell, is_management_user
 
 
 def get_cash_handover(pos_profile, for_update=False):
@@ -220,6 +220,7 @@ def create_opening_shift(pos_profile, company, balance_details, shift_slot=None,
 	`join_only`: a manager joining the profile's running shift (no opening
 	balance entered) — refuse instead of opening a fresh, unfunded drawer
 	when that shift is gone by now."""
+	assert_can_sell()
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
 
 	# only users defined on the profile may open a shift on it

@@ -50,6 +50,21 @@ CTRL_PERM_PATCH = patch(f"{SVC_PATH}.frappe.has_permission")
 SVC_DB_PATCH = CTRL_DB_PATCH
 SVC_CHOICE_PATCH = patch(f"{SVC_PATH}.secrets.choice")
 
+# The gate switch comes from the settings resolver; route it through the
+# patched frappe.db so the get_value doubles below answer it as "POS Settings".
+RESOLVER_PATCH = patch(
+	"pos_next.overrides.discount_code.get_effective_pos_setting",
+	side_effect=lambda pos_profile, field: frappe.db.get_value("POS Settings", pos_profile, field),
+)
+
+
+def setUpModule():
+	RESOLVER_PATCH.start()
+
+
+def tearDownModule():
+	RESOLVER_PATCH.stop()
+
 
 class FakeItem(dict):
 	pass
@@ -78,11 +93,11 @@ def _code_row(**overrides):
 
 
 def _company_then_code(setting_value, code_row=None):
-	"""db.get_value double: the Company switch lookup vs the code row lookup —
+	"""db.get_value double: the POS Settings switch lookup vs the code row lookup —
 	the refund gate reads the switch before validating the code."""
 
 	def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
-		if doctype == "Company":
+		if doctype == "POS Settings":
 			return setting_value
 		return code_row
 
@@ -966,7 +981,7 @@ class TestValidateInvoiceDiscounts(unittest.TestCase):
 			validate_invoice_discounts(doc, "validate")  # must not raise
 
 			code_lookups = [
-				call for call in mock_db.get_value.call_args_list if call[0][0] != "Company"
+				call for call in mock_db.get_value.call_args_list if call[0][0] != "POS Settings"
 			]
 			self.assertEqual(code_lookups, [])
 
@@ -992,7 +1007,7 @@ class TestValidateInvoiceDiscounts(unittest.TestCase):
 
 	def test_discount_with_valid_code_passes(self):
 		with DB_PATCH as mock_db:
-			# first call answers the Company switch, the second the code row
+			# first call answers the POS Settings switch, the second the code row
 			mock_db.get_value.side_effect = _company_then_code(1, _code_row())
 			doc = FakeDoc(
 				is_pos=1,
@@ -1010,7 +1025,7 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 	@staticmethod
 	def _code_lookup(validate_result=None, lock_result=None, company_switch=1):
 		def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
-			if doctype == "Company":
+			if doctype == "POS Settings":
 				return company_switch
 			if for_update:
 				return lock_result
@@ -1024,7 +1039,7 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 		read against the refund pool."""
 
 		def lookup(doctype, filters=None, fieldname=None, as_dict=False, for_update=False):
-			if doctype == "Company":
+			if doctype == "POS Settings":
 				return setting_value
 			if for_update:
 				return lock_result
@@ -1236,39 +1251,28 @@ class TestRecordCodeUsageOnSubmit(unittest.TestCase):
 
 
 class TestRefundCodeRequired(unittest.TestCase):
-	"""Per-Company switches; unset/missing company fails closed."""
+	"""Switches resolve per POS Profile from POS Settings; unset fails closed."""
 
-	def test_no_company_fails_closed(self):
-		with DB_PATCH as mock_db:
-			self.assertTrue(discount_code_required(None))
-			self.assertTrue(discount_code_required(""))
-			self.assertTrue(refund_code_required(None))
-			self.assertTrue(refund_code_required(""))
-			mock_db.get_value.assert_not_called()
+	RESOLVER = "pos_next.overrides.discount_code.get_effective_pos_setting"
 
 	def test_switch_off_is_open(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = 0
-			self.assertFalse(discount_code_required("Company A"))
-			self.assertFalse(refund_code_required("Company A"))
-			self.assertEqual(
-				mock_db.get_value.call_args_list[0][0][1:3], ("Company A", "pos_require_discount_code")
-			)
-			self.assertEqual(
-				mock_db.get_value.call_args_list[1][0][1:3], ("Company A", "pos_require_refund_code")
-			)
+		with patch(self.RESOLVER, return_value=0) as resolver:
+			self.assertFalse(discount_code_required("Profile A"))
+			self.assertFalse(refund_code_required("Profile A"))
+		self.assertEqual(
+			[c.args for c in resolver.call_args_list],
+			[("Profile A", "require_discount_code"), ("Profile A", "require_refund_code")],
+		)
 
 	def test_switch_on_is_closed(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = 1
-			self.assertTrue(discount_code_required("Company A"))
-			self.assertTrue(refund_code_required("Company A"))
+		with patch(self.RESOLVER, return_value=1):
+			self.assertTrue(discount_code_required("Profile A"))
+			self.assertTrue(refund_code_required("Profile A"))
 
-	def test_missing_company_row_fails_closed(self):
-		with DB_PATCH as mock_db:
-			mock_db.get_value.return_value = None
-			self.assertTrue(discount_code_required("No Such Company"))
-			self.assertTrue(refund_code_required("No Such Company"))
+	def test_unset_value_fails_closed(self):
+		with patch(self.RESOLVER, return_value=None):
+			self.assertTrue(discount_code_required(None))
+			self.assertTrue(refund_code_required("No Such Profile"))
 
 
 class TestGetStatusAPI(unittest.TestCase):
@@ -1288,8 +1292,8 @@ class TestGetStatusAPI(unittest.TestCase):
 				"refund_code_required": False,
 			},
 		)
-		mock_discount.assert_called_once_with("Company A")
-		mock_refund.assert_called_once_with("Company A")
+		mock_discount.assert_called_once_with("Profile 1")
+		mock_refund.assert_called_once_with("Profile 1")
 
 
 class TestCheckCodeAPI(unittest.TestCase):

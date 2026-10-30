@@ -272,7 +272,7 @@ def get_shift_context(pos_opening_shift):
 
 	from pos_next.api.discount_code import get_status
 
-	code_gate = get_status(company=shift.company)
+	code_gate = get_status(pos_profile=shift.pos_profile)
 
 	closing_counts = []
 	if shift.pos_closing_shift:

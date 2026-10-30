@@ -252,6 +252,7 @@ import { usePOSPackagesStore } from "@/stores/posPackages"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { usePOSSyncStore } from "@/stores/posSync"
 import { usePOSUIStore } from "@/stores/posUI"
+import { useBootstrapStore } from "@/stores/bootstrap"
 import POSSale from "./POSSale.vue"
 
 const CART_ITEM = {
@@ -766,6 +767,38 @@ describe("invoice history without a shift", () => {
 			pos_profile: "Beta POS",
 			limit: 100,
 		})
+	})
+})
+
+describe("POSNext Manager (no sales)", () => {
+	it("gets no sale screen or shift dialog and lands on the menu", async () => {
+		const pinia = createPinia()
+		setActivePinia(pinia)
+		useBootstrapStore().data = { can_sell: false, is_management: true }
+		const shiftStore = usePOSShiftStore()
+		shiftStore.checkShift = vi.fn(async () => true)
+		shiftState.value = {
+			// own shift name: the module-level init key from earlier tests would skip initPOS
+			pos_opening_shift: { name: "POS-OPEN-MGR", period_start_date: "2026-09-22 08:00:00" },
+			pos_profile: { name: "Profile 1", company: "Test Co", currency: "IDR", warehouse: "WH 1" },
+			company: "Test Co",
+			isOpen: true,
+		}
+		const ui = usePOSUIStore()
+		wrapper = mount(POSSale, {
+			global: {
+				plugins: [pinia],
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { ...ALL_DIALOG_STUBS, POSMenuDialog: POSMenuDialogProbe },
+			},
+		})
+		await flushPromises()
+
+		expect(wrapper.find(".pos-content-shell.relative").exists()).toBe(false)
+		expect(ui.showOpenShiftDialog).toBe(false)
+		expect(wrapper.find('[data-test="pos-menu"]').attributes("data-open")).toBe("true")
+		expect(wrapper.text()).not.toContain("Open Shift")
+		wrapper.unmount()
 	})
 })
 

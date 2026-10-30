@@ -53,6 +53,7 @@ declare module 'vue' {
     PurchaseOrderDialog: typeof import('./src/components/purchase/PurchaseOrderDialog.vue')['default']
     PurchaseReceiptDialog: typeof import('./src/components/purchase/PurchaseReceiptDialog.vue')['default']
     RefreshButton: typeof import('./src/components/common/RefreshButton.vue')['default']
+    RefundCodeView: typeof import('./src/components/pos/RefundCodeView.vue')['default']
     RejectRequestDialog: typeof import('./src/components/pos/RejectRequestDialog.vue')['default']
     ReturnInvoiceDialog: typeof import('./src/components/sale/ReturnInvoiceDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']

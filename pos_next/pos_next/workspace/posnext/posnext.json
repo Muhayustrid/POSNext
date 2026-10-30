@@ -183,16 +183,6 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Code Gate Group",
-   "link_count": 0,
-   "link_to": "POS Code Gate Group",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
    "label": "POS Reject Request",
    "link_count": 0,
    "link_to": "POS Reject Request",
@@ -385,7 +375,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-18 15:00:00.000000",
+ "modified": "2026-10-30 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
@@ -440,14 +430,6 @@
    "doc_view": "List",
    "label": "Shift Group",
    "link_to": "POS Profile Group",
-   "stats_filter": "[]",
-   "type": "DocType"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Code Gate Group",
-   "link_to": "POS Code Gate Group",
    "stats_filter": "[]",
    "type": "DocType"
   },

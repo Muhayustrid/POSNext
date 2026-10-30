@@ -55,6 +55,7 @@ from pos_next.api.test_packages import (
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE, get_pos_invoice_doctype
 from pos_next.services.confirmation_code import generate_codes_for
 from pos_next.tests._posi_test_utils import _set_invoice_type
+from pos_next.tests.code_gate_helpers import set_code_switch
 from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
@@ -273,11 +274,6 @@ class TestPOSBackdateEntry(FrappeTestCase):
 		se.submit()
 		self.stock_entry = se
 
-		self._orig_refund_gate = frappe.db.get_value("Company", self.profile.company, "pos_require_refund_code")
-		self._orig_discount_gate = frappe.db.get_value("Company", self.profile.company, "pos_require_discount_code")
-		frappe.db.set_value("Company", self.profile.company, "pos_require_refund_code", 0)
-		frappe.db.set_value("Company", self.profile.company, "pos_require_discount_code", 0)
-
 		frappe.db.set_value(
 			"POS Settings",
 			self.settings_name,
@@ -289,6 +285,10 @@ class TestPOSBackdateEntry(FrappeTestCase):
 				"allow_user_to_edit_rate": 1,
 			},
 		)
+		self._restore_gates = [
+			set_code_switch(self.profile.name, "require_refund_code", 0),
+			set_code_switch(self.profile.name, "require_discount_code", 0),
+		]
 
 		# GC any open shift on the profile left from previous aborts
 		for sname in frappe.get_all(
@@ -316,8 +316,8 @@ class TestPOSBackdateEntry(FrappeTestCase):
 
 	def tearDown(self):
 		frappe.set_user(ADMIN)
-		frappe.db.set_value("Company", self.profile.company, "pos_require_refund_code", self._orig_refund_gate)
-		frappe.db.set_value("Company", self.profile.company, "pos_require_discount_code", self._orig_discount_gate)
+		for restore in reversed(self._restore_gates):
+			restore()
 
 		for name in frappe.get_all("POS Backdate Entry", {"pos_opening_shift": self.shift.name}, pluck="name"):
 			frappe.db.set_value("POS Backdate Entry", name, "docstatus", 2, update_modified=False)
@@ -937,7 +937,7 @@ class TestPOSBackdateEntry(FrappeTestCase):
 		self._close_shift()
 
 		# A. Discount code switch
-		frappe.db.set_value("Company", self.profile.company, "pos_require_discount_code", 1)
+		frappe.db.set_value("POS Settings", self.settings_name, "require_discount_code", 1)
 		try:
 			bde = self._make_bde(
 				items=[
@@ -967,13 +967,13 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			bde.submit()
 			self.assertEqual(bde.docstatus, 1)
 		finally:
-			frappe.db.set_value("Company", self.profile.company, "pos_require_discount_code", 0)
+			frappe.db.set_value("POS Settings", self.settings_name, "require_discount_code", 0)
 
 		# B. Refund code switch
 		# Note: bde submit above re-closed the shift, so the shift is currently Closed.
 		# orig_sale was submitted before initial closing, so it is valid for return on this shift!
 
-		frappe.db.set_value("Company", self.profile.company, "pos_require_refund_code", 1)
+		frappe.db.set_value("POS Settings", self.settings_name, "require_refund_code", 1)
 		try:
 			bde_ret = frappe.get_doc(
 				{
@@ -1022,7 +1022,7 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			bde_ret.submit()
 			self.assertEqual(bde_ret.docstatus, 1)
 		finally:
-			frappe.db.set_value("Company", self.profile.company, "pos_require_refund_code", 0)
+			frappe.db.set_value("POS Settings", self.settings_name, "require_refund_code", 0)
 
 	# ---------------------------------------------------------------------------
 	# Scenario 8: Both invoice doctypes (POS Invoice & Sales Invoice)

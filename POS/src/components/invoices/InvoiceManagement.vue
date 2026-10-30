@@ -416,6 +416,7 @@
 													</div>
 												</div>
 												<button
+													v-if="canSell"
 													@click="selectInvoiceForPayment(invoice)"
 													:disabled="
 														loadingInvoiceDetails || isOffline()
@@ -1457,6 +1458,7 @@ import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue"
 import PaymentDialog from "@/components/sale/PaymentDialog.vue"
 import { useInvoiceFilters } from "@/composables/useInvoiceFilters"
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
+import { useBootstrapStore } from "@/stores/bootstrap"
 import {
 	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
@@ -1571,6 +1573,9 @@ const loading = ref(false)
 // emit() cannot await; track that work locally and clear it when the parent's
 // data lands (see the props watch below).
 const refreshing = ref(false)
+// false for a POSNext Manager: view and print only, no payment or drafts
+const bootstrapStore = useBootstrapStore()
+const canSell = computed(() => bootstrapStore.data?.can_sell !== false)
 const activeTab = ref("partial")
 
 // Initialize filter store and composable
@@ -1767,14 +1772,15 @@ const tabs = computed(() => [
 		activeClass: "text-indigo-600",
 		badge: () => filteredHistoryInvoices.value.length,
 	},
-	{
+	// drafts load into the cart: a POS Manager (no sales) never sees them
+	...(canSell.value ? [{
 		id: "drafts",
 		label: __("Drafts"),
 		icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
 		color: "purple",
 		activeClass: "text-purple-600",
 		badge: () => props.draftInvoices.length,
-	},
+	}] : []),
 	{
 		id: "returns",
 		label: __("Returns"),

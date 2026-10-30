@@ -38,6 +38,7 @@ import pos_next  # noqa: F401 — ensure app hooks load.
 from pos_next.api.invoices import apply_offers, submit_invoice, update_invoice
 from pos_next.invoice_type import SALES_INVOICE
 from pos_next.tests._posi_test_utils import _set_invoice_type
+from pos_next.tests.code_gate_helpers import set_code_switch
 
 ITEM_A = "_PNXT_TEST_ITEM_A"  # Standard Selling: 50
 ITEM_B = "_PNXT_TEST_ITEM_B"  # Standard Selling: 80
@@ -380,28 +381,23 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 def _ensure_profile_gate_off(profile_name):
 	"""Keep the refund-code gate off for the promotions profile.
 
-	The per-Company gate switch (fail-closed) must read 0 on the company the
-	profile invoices; otherwise the gate rejects any return this module could
+	The profile's refund switch (POS Settings row, else global; fail-closed)
+	must read 0; otherwise the gate rejects any return this module could
 	create. Only the refund switch is touched: every invoice here is a sale,
 	so the discount switch is irrelevant. The caller's class cleanup restores
 	the original value (which may be NULL).
 	"""
-	company = _resolve_company()
 	cls = TestPromotions
+	restore = set_code_switch(profile_name, "require_refund_code", 0)
 	if getattr(cls, "_gate_backup", None) is None:
-		cls._gate_backup = (
-			frappe.db.get_value("Company", company, "pos_require_refund_code"),
-			company,
-		)
-	frappe.db.set_value("Company", company, "pos_require_refund_code", 0)
+		cls._gate_backup = restore
 
 
 def _restore_gate():
 	"""Restore the refund gate switch the promotions helper turned off."""
 	cls = TestPromotions
 	if getattr(cls, "_gate_backup", None):
-		value, company = cls._gate_backup
-		frappe.db.set_value("Company", company, "pos_require_refund_code", value)
+		cls._gate_backup()
 		frappe.db.commit()
 		cls._gate_backup = None
 

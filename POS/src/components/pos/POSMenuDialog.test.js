@@ -43,7 +43,14 @@ const viewStubs = {
 		props: ["posProfile"],
 		template: `<div data-testid="view-sales-recap" :data-profile="posProfile" />`,
 	},
-	ProductsView: { template: `<div data-testid="view-products" />` },
+	ProductsView: {
+		props: ["posProfile"],
+		template: `<div data-testid="view-products" :data-profile="posProfile" />`,
+	},
+	RefundCodeView: {
+		props: ["company"],
+		template: `<div data-testid="view-refund-code" :data-company="company" />`,
+	},
 	ProductionDialog: {
 		name: "ProductionDialog",
 		props: ["posProfile"],
@@ -52,7 +59,7 @@ const viewStubs = {
 	RejectRequestDialog: {
 		name: "RejectRequestDialog",
 		props: ["posProfile", "initialRequest"],
-		template: `<div data-testid="view-reject-request" />`,
+		template: `<div data-testid="view-reject-request" :data-profile="posProfile" />`,
 	},
 	PurchaseOrderDialog: {
 		template: `<div data-testid="view-purchase-order" />`,
@@ -92,6 +99,7 @@ function availableLabels(
 			(!i.requiresProduction || (canProduction && !isOffline)) &&
 			(!i.requiresPurchaseOrder || (canPurchaseOrder && !isOffline)) &&
 			(!i.requiresStockOpname || (canStockOpname && !isOffline)) &&
+			!i.requiresManagement &&
 			(!i.requiresOnline || !isOffline),
 	).map((i) => i.label)
 }
@@ -436,7 +444,7 @@ describe("POSMenuDialog company choice without a shift", () => {
 		await nextTick()
 	}
 
-	it.each(["invoices", "sales-recap", "production"])(
+	it.each(["invoices", "sales-recap", "products", "production", "reject-request"])(
 		"a manager without a shift picks the company for %s",
 		async (view) => {
 			callMock.mockImplementation((method) =>
@@ -454,18 +462,81 @@ describe("POSMenuDialog company choice without a shift", () => {
 			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
 				"Beta POS",
 			)
-			expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"])
+			// only the invoices view needs POSSale to reload its history
+			if (view === "invoices")
+				expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"])
+			else expect(wrapper.emitted("active-profile")).toBeUndefined()
 			wrapper.unmount()
 		},
 	)
 
-	it("keeps the shift's profile and shows no picker during a shift", async () => {
-		callMock.mockImplementation(() => Promise.resolve(companies))
-		const wrapper = mountShell({ open: true, initialView: "invoices", posProfile: "Shift POS" })
+	it("a manager with a shift still picks another company", async () => {
+		callMock.mockImplementation(() =>
+			Promise.resolve({
+				companies: [
+					...companies.companies,
+					{ company: "Shift Co", pos_profile: "Other Shift Co POS", warehouse: "WS" },
+				],
+				default: "Shift Co",
+			}),
+		)
+		const wrapper = mountShell({
+			open: true,
+			initialView: "sales-recap",
+			posProfile: "Shift POS",
+			company: "Shift Co",
+			openingShift: "SHIFT-1",
+		})
+		await flush()
+		// the shift's own company keeps the shift's profile
+		expect(wrapper.find('[data-testid="view-sales-recap"]').attributes("data-profile")).toBe(
+			"Shift POS",
+		)
+		await wrapper.find('[data-test="company-picker"] select').setValue("Beta")
+		await flush()
+		expect(wrapper.find('[data-testid="view-sales-recap"]').attributes("data-profile")).toBe(
+			"Beta POS",
+		)
+		wrapper.unmount()
+	})
+
+	it("a cashier with one company sees no picker", async () => {
+		callMock.mockImplementation(() =>
+			Promise.resolve({
+				companies: [{ company: "Shift Co", pos_profile: "Shift POS", warehouse: "WS" }],
+				default: "Shift Co",
+			}),
+		)
+		const wrapper = mountShell({
+			open: true,
+			initialView: "invoices",
+			posProfile: "Shift POS",
+			company: "Shift Co",
+		})
 		await flush()
 		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(false)
 		expect(wrapper.find('[data-testid="view-invoices"]').attributes("data-profile")).toBe(
 			"Shift POS",
+		)
+		wrapper.unmount()
+	})
+
+	it("shows Refund Code to management only, for the picked company", async () => {
+		callMock.mockImplementation(() => Promise.resolve(companies))
+		let wrapper = mountShell({ open: true })
+		expect(sidebarLabels(wrapper)).not.toContain("Refund Code")
+		wrapper.unmount()
+
+		wrapper = mountShell({ open: true, isManagement: true, initialView: "refund-code" })
+		await flush()
+		expect(sidebarLabels(wrapper)).toContain("Refund Code")
+		expect(wrapper.find('[data-testid="view-refund-code"]').attributes("data-company")).toBe(
+			"Alpha",
+		)
+		await wrapper.find('[data-test="company-picker"] select').setValue("Beta")
+		await flush()
+		expect(wrapper.find('[data-testid="view-refund-code"]').attributes("data-company")).toBe(
+			"Beta",
 		)
 		wrapper.unmount()
 	})

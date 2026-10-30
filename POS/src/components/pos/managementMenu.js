@@ -26,6 +26,13 @@ export const MANAGEMENT_MENU = [
 		group: "sales",
 	},
 	{
+		id: "refund-code",
+		icon: "key",
+		label: __("Refund Code"),
+		group: "sales",
+		requiresManagement: true,
+	},
+	{
 		id: "products",
 		icon: "package",
 		label: __("Products"),

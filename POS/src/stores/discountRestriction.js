@@ -75,12 +75,17 @@ export const useDiscountRestrictionStore = defineStore("discountRestriction", ()
 	}
 
 	// Actions
-	async function fetchStatus(company) {
+	// The gate switches resolve per POS Profile (POS Settings, else global);
+	// the company scopes live code validation.
+	async function fetchStatus(company, posProfile) {
 		if (!company) return;
 		_company.value = company;
 		isLoading.value = true;
 		try {
-			const result = await call("pos_next.api.discount_code.get_status", { company });
+			const result = await call("pos_next.api.discount_code.get_status", {
+				company,
+				pos_profile: posProfile,
+			});
 			status.value = result || { enabled: true };
 		} catch (error) {
 			// Status is a UX hint — the server gate still protects checkout.

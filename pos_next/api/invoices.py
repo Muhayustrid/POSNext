@@ -31,7 +31,7 @@ from pos_next.invoice_type import (
 )
 from pos_next.overrides.discount_code import verify_transaction_rule_names
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import expected_coupon_discount
-from pos_next.utils.authz import is_management_user
+from pos_next.utils.authz import assert_can_sell, is_management_user
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -1971,6 +1971,7 @@ def _validate_draft_conflict(invoice_doc, data):
 @frappe.whitelist()
 def update_invoice(data):
 	"""Create or update invoice draft (Step 1)."""
+	assert_can_sell()
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
 		# The relayed applied-rule list must be read before the strip below —
@@ -2652,6 +2653,7 @@ def check_offline_invoice_synced(offline_id):
 @frappe.whitelist()
 def submit_invoice(invoice=None, data=None):
 	"""Submit the invoice (Step 2)."""
+	assert_can_sell()
 	# Handle different calling conventions
 	if invoice is None:
 		if data:
@@ -3504,6 +3506,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 @frappe.whitelist()
 def delete_invoice(invoice):
 	"""Delete draft invoice."""
+	assert_can_sell()
 	doctype = get_pos_invoice_doctype()
 
 	if not frappe.db.exists(doctype, invoice):

@@ -340,8 +340,9 @@ class TestShiftsAuthorization(FrappeTestCase):
 		# own shift on one profile)
 		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
 		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
-		frappe.get_doc("User", self.cashier2).add_roles("POSNext Manager")
-		self.addCleanup(self._revoke_role, self.cashier2, "POSNext Manager")
+		# System Manager: a POSNext Manager never opens or joins a shift
+		frappe.get_doc("User", self.cashier2).add_roles("System Manager")
+		self.addCleanup(self._revoke_role, self.cashier2, "System Manager")
 		frappe.set_user(self.cashier2)
 		try:
 			second = create_opening_shift(
@@ -365,8 +366,9 @@ class TestShiftsAuthorization(FrappeTestCase):
 		# with no opening balance
 		first = create_opening_shift(self.profile.name, self.profile.company, self._balance_details())
 		self.addCleanup(self._remove_shift, first["pos_opening_shift"])
-		frappe.get_doc("User", self.cashier2).add_roles("POSNext Manager")
-		self.addCleanup(self._revoke_role, self.cashier2, "POSNext Manager")
+		# System Manager: a POSNext Manager never opens or joins a shift
+		frappe.get_doc("User", self.cashier2).add_roles("System Manager")
+		self.addCleanup(self._revoke_role, self.cashier2, "System Manager")
 		frappe.set_user(self.cashier2)
 		try:
 			joined = create_opening_shift(self.profile.name, self.profile.company, [], join_only=1)

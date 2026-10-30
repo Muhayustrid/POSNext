@@ -52,7 +52,7 @@ doctype_js = {
 	"POS Refund Code": "public/js/pos_refund_code.js",
 	"Stock Reconciliation": "public/js/stock_reconciliation.js",
 }
-# NOTE: POS Code Gate Group (like POS Profile Group) needs no doctype_js entry:
+# NOTE: POS Profile Group needs no doctype_js entry:
 # Frappe auto-loads pos_next/pos_next/doctype/<slug>/<slug>.js on the form.
 doctype_list_js = {
 	"POS Discount Confirmation Code": "public/js/pos_discount_code_list.js",
@@ -203,12 +203,6 @@ doc_events = {
 			"pos_next.realtime_events.emit_pos_profile_updated_event",
 		],
 		"validate": "pos_next.shift_schedule.validate_profile_schedule",
-	},
-	"Company": {
-		"validate": [
-			"pos_next.overrides.company_code_switch.guard_code_switches",
-			"pos_next.overrides.code_gate_group.validate_company_group_membership",
-		],
 	},
 	"Promotional Scheme": {
 		"validate": [

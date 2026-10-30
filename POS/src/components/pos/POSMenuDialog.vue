@@ -102,7 +102,7 @@
 					class="flex-1 min-w-0 overflow-hidden flex-col"
 					:class="mobileList ? 'hidden md:flex' : 'flex'"
 				>
-					<!-- manager without a shift: which company these views show -->
+					<!-- manager: which company these views show (like PO) -->
 					<div
 						v-if="showCompanyPicker"
 						class="shrink-0 border-b border-gray-200 px-4 py-2 sm:px-6"
@@ -149,7 +149,7 @@
 							<div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
 								<SessionSummary
 									:key="viewProfile"
-									:opening-shift="openingShift"
+									:opening-shift="viewProfile === posProfile ? openingShift : null"
 									:pos-profile="viewProfile"
 								/>
 							</div>
@@ -157,7 +157,7 @@
 					</template>
 					<ProductsView
 						v-else-if="activeView === 'products'"
-						:pos-profile="posProfile"
+						:pos-profile="viewProfile"
 						:company="company"
 						:currency="currency"
 					/>
@@ -175,9 +175,10 @@
 					/>
 					<RejectRequestDialog
 						v-else-if="activeView === 'reject-request'"
+						:key="viewProfile"
 						embedded
 						:model-value="true"
-						:pos-profile="posProfile"
+						:pos-profile="viewProfile"
 						:initial-request="rejectInitialRequest"
 						class="h-full"
 						v-bind="$attrs"
@@ -203,6 +204,10 @@
 						class="h-full"
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
+					/>
+					<RefundCodeView
+						v-else-if="activeView === 'refund-code'"
+						:company="viewCompany"
 					/>
 					<PurchaseReceiptDialog
 						v-else-if="activeView === 'purchase-receipt'"
@@ -234,6 +239,7 @@ import RejectRequestDialog from "@/components/pos/RejectRequestDialog.vue"
 import StockOpnameDialog from "@/components/pos/StockOpnameDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
+import RefundCodeView from "@/components/pos/RefundCodeView.vue"
 import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
 import { useCompanyChoice } from "@/composables/useCompanyChoice"
 
@@ -253,6 +259,7 @@ const props = defineProps({
 	canPurchaseOrder: { type: Boolean, default: false },
 	canProduction: { type: Boolean, default: false },
 	canStockOpname: { type: Boolean, default: false },
+	isManagement: { type: Boolean, default: false },
 	isOffline: { type: Boolean, default: false },
 })
 
@@ -275,6 +282,7 @@ const visibleItems = computed(() =>
 				(props.canPurchaseOrder && !props.isOffline)) &&
 			(!item.requiresStockOpname ||
 				(props.canStockOpname && !props.isOffline)) &&
+			(!item.requiresManagement || (props.isManagement && !props.isOffline)) &&
 			(!item.requiresOnline || !props.isOffline),
 	),
 )
@@ -316,21 +324,33 @@ watch(
 	{ immediate: true },
 )
 
-// Views that follow one outlet. Without a shift a manager picks the company
-// (same options and rules as PO/PR); a cashier gets no option and keeps the
-// views' own "no shift" state. The server re-checks profile access.
-const COMPANY_VIEWS = ["invoices", "sales-recap", "production"]
+// Views that follow one outlet. A manager with several companies always picks
+// the company here (same options and rules as PO/PR), shift or not; a cashier
+// has one option (the shift's) and sees no picker. The server re-checks access.
+const COMPANY_VIEWS = [
+	"invoices",
+	"sales-recap",
+	"products",
+	"production",
+	"reject-request",
+	"refund-code",
+]
 const companyChoice = useCompanyChoice(call, () => props.posProfile)
 const inCompanyView = computed(() => COMPANY_VIEWS.includes(activeView.value))
-const viewProfile = computed(() =>
-	props.posProfile || (inCompanyView.value ? companyChoice.profile.value : null),
-)
+const viewCompany = computed(() => companyChoice.company.value || props.company)
+// The shift's own company keeps the shift's profile (and its shift recap)
+const viewProfile = computed(() => {
+	const picked = companyChoice.company.value
+	if (!inCompanyView.value) return props.posProfile
+	if (props.posProfile && (!picked || picked === props.company)) return props.posProfile
+	return companyChoice.profile.value
+})
 const showCompanyPicker = computed(
-	() => !props.posProfile && inCompanyView.value && companyChoice.hasChoice.value,
+	() => inCompanyView.value && companyChoice.hasChoice.value,
 )
 
 watch(
-	() => props.open && !props.posProfile && inCompanyView.value,
+	() => props.open && inCompanyView.value,
 	(needed) => {
 		if (needed && !companyChoice.loaded.value) companyChoice.load()
 	},
@@ -339,7 +359,7 @@ watch(
 
 // POSSale loads the invoice history the invoices view shows; tell it which profile
 watch(
-	() => (props.posProfile ? null : companyChoice.profile.value),
+	() => (activeView.value === "invoices" ? viewProfile.value : null),
 	(profile) => {
 		if (profile) emit("active-profile", profile)
 	},

@@ -15,6 +15,7 @@ from pos_next.api.shifts import (
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
 )
+from pos_next.tests.code_gate_helpers import set_code_switch
 from pos_next.tests.price_group_helpers import (
 	get_default_company,
 	get_default_customer,
@@ -131,11 +132,8 @@ class TestSessionSummary(IntegrationTestCase):
 			cls.company,
 			make_test_warehouse("SessionSummary", cls.company),
 		)
-		# refund code gate fails closed; turn it off on the profile's company
-		cls._refund_gate_backup = frappe.db.get_value(
-			"Company", cls.company, "pos_require_refund_code"
-		)
-		frappe.db.set_value("Company", cls.company, "pos_require_refund_code", 0)
+		# refund code gate fails closed; turn it off for the test profiles
+		cls._restore_refund_gates = [set_code_switch(cls.pos_profile, "require_refund_code", 0)]
 		cls.debtors_account = frappe.db.get_value(
 			"Account",
 			{"company": cls.company, "account_type": "Receivable", "is_group": 0},
@@ -188,6 +186,7 @@ class TestSessionSummary(IntegrationTestCase):
 				{"mode_of_payment": cls.card_mode},
 			],
 		)
+		cls._restore_refund_gates.append(set_code_switch(cls.pm_profile, "require_refund_code", 0))
 		# a reused pm_profile may predate this run's cls.cash_mode choice —
 		# repoint its default row instead of appending a second default
 		if not frappe.db.exists(
@@ -252,7 +251,8 @@ class TestSessionSummary(IntegrationTestCase):
 				frappe.db.rollback()
 		# restore the gate AFTER the purge block: the set-to-0 was committed in
 		# setUpClass, so a purge rollback must not undo this restore
-		frappe.db.set_value("Company", cls.company, "pos_require_refund_code", cls._refund_gate_backup)
+		for restore in reversed(cls._restore_refund_gates):
+			restore()
 		frappe.db.commit()
 		super().tearDownClass()
 

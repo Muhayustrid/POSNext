@@ -761,6 +761,9 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 	import json
 
 	from pos_next.shift_schedule import assert_invoice_sales_allowed
+	from pos_next.utils.authz import assert_can_sell
+
+	assert_can_sell()
 
 	# Input validation
 	if not invoice_name:

@@ -24,6 +24,7 @@ from pos_next.api.invoices import (
 	submit_invoice,
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
+from pos_next.tests.code_gate_helpers import set_code_switch
 from pos_next.tests.price_group_helpers import get_default_customer
 
 # Schedule-safe profile: inserting a POS Opening Shift must never throw for
@@ -726,9 +727,7 @@ class TestPOSInvoiceReturnStockValue(FrappeTestCase):
 		self.case.setUp()
 		frappe.db.set_value("Item", self.item, "disabled", 0)
 		company = self.case.profile.company
-		self._refund_gate = frappe.db.get_value("Company", company, "pos_require_refund_code")
-		frappe.db.set_value("Company", company, "pos_require_refund_code", 0)
-		self.addCleanup(frappe.db.set_value, "Company", company, "pos_require_refund_code", self._refund_gate)
+		self.addCleanup(set_code_switch(self.case.profile.name, "require_refund_code", 0))
 		se = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",

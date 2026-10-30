@@ -22,6 +22,7 @@ from frappe.utils import nowdate
 
 from pos_next.api.invoices import update_invoice
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE
+from pos_next.tests.code_gate_helpers import set_code_switch
 
 _PROFILE_FILTER = [
     ["disabled", "=", 0],
@@ -99,17 +100,12 @@ class TestReturnTaxFlagMirror(FrappeTestCase):
             cls._tax_backup = None
         # the refund-code gate demands a code on every return; these tests
         # exercise the tax flag mirror, not that gate — toggle it off on the
-        # profile's company (same pattern as test_wallet_return_hardening)
-        cls._refund_gate_backup = frappe.db.get_value(
-            "Company", cls.profile.company, "pos_require_refund_code"
-        )
-        frappe.db.set_value("Company", cls.profile.company, "pos_require_refund_code", 0)
+        # profile (same pattern as test_wallet_return_hardening)
+        cls._restore_refund_gate = set_code_switch(cls.profile.name, "require_refund_code", 0)
 
     @classmethod
     def tearDownClass(cls):
-        frappe.db.set_value(
-            "Company", cls.profile.company, "pos_require_refund_code", cls._refund_gate_backup
-        )
+        cls._restore_refund_gate()
         if cls._settings_row:
             frappe.db.set_value(
                 "POS Settings", cls._settings_row, "tax_inclusive", cls._tax_backup, update_modified=False

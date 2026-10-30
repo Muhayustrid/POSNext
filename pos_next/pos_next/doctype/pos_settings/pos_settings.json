@@ -19,6 +19,7 @@
   "column_break_general",
   "allow_user_to_edit_rate",
   "auto_apply_offers",
+  "require_discount_code",
   "price_replay_audit_only",
   "decimal_precision",
   "tax_inclusive",
@@ -34,6 +35,7 @@
   "column_break_returns",
   "allow_return_without_invoice",
   "allow_free_batch_return",
+  "require_refund_code",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -234,6 +236,13 @@
    "label": "Auto Apply Offers"
   },
   {
+   "default": "1",
+   "description": "Cashiers need a head office code to give a manual discount. Only a System Manager can change this.",
+   "fieldname": "require_discount_code",
+   "fieldtype": "Check",
+   "label": "Require Code for Discount"
+  },
+  {
    "default": "0",
    "description": "Audit-only mode for the server-side offer price replay (SEC-23): magnitude mismatches between the submitted rate and the server-replayed offer rate are logged instead of rejected. Leave unchecked (default) to enforce and reject manipulated submissions.",
    "fieldname": "price_replay_audit_only",
@@ -328,6 +337,13 @@
    "fieldname": "allow_free_batch_return",
    "fieldtype": "Check",
    "label": "Allow Free Batch Return"
+  },
+  {
+   "default": "1",
+   "description": "Cashiers need a head office code to make a return. Only a System Manager can change this.",
+   "fieldname": "require_refund_code",
+   "fieldtype": "Check",
+   "label": "Require Code for Refund"
   },
   {
    "fieldname": "section_break_operations",
@@ -1004,7 +1020,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-27 10:00:00.000000",
+ "modified": "2026-10-30 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

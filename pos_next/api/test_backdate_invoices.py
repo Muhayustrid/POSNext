@@ -42,6 +42,7 @@ from pos_next.api.invoices import (
 from pos_next.api.shifts import get_closing_shift_data, submit_closing_shift
 from pos_next.invoice_type import get_pos_invoice_doctype
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
+from pos_next.tests.code_gate_helpers import set_code_switch
 from pos_next.tests.price_group_helpers import get_default_customer
 
 ADMIN = "Administrator"
@@ -501,14 +502,6 @@ class TestBackdateEntryFlow(FrappeTestCase):
 		self.stock_entry = se
 
 		# backdate lane on for every test; narrow tests flip it off explicitly.
-		# pos_require_refund_code off on the profile's company so returns need
-		# no HO refund code (the code gate itself is covered by the
-		# discount_code suites).
-		self._orig_refund_gate = frappe.db.get_value(
-			"Company", self.profile.company, "pos_require_refund_code"
-		)
-		self._orig_refund_gate_set = True
-		frappe.db.set_value("Company", self.profile.company, "pos_require_refund_code", 0)
 		frappe.db.set_value(
 			"POS Settings",
 			self.settings_name,
@@ -518,6 +511,9 @@ class TestBackdateEntryFlow(FrappeTestCase):
 				"return_validity_days": 0,
 			},
 		)
+		# refund switch off for the profile so returns need no HO refund code
+		# (the code gate itself is covered by the discount_code suites).
+		self._restore_refund_gate = set_code_switch(self.profile.name, "require_refund_code", 0)
 
 		# a shift opened days ago: that is the shift HO reopens to fix
 		self.shift = frappe.get_doc(
@@ -538,12 +534,8 @@ class TestBackdateEntryFlow(FrappeTestCase):
 		frappe.set_user(ADMIN)
 		if not getattr(self, "orig_allow_negative", 1):
 			frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 0)
-		if getattr(self, "_orig_refund_gate_set", False):
-			# write back unconditionally (incl. NULL) so a fail-closed NULL
-			# doesn't end up as 0 (fail-open)
-			frappe.db.set_value(
-				"Company", self.profile.company, "pos_require_refund_code", self._orig_refund_gate
-			)
+		if getattr(self, "_restore_refund_gate", None):
+			self._restore_refund_gate()
 		# closings first: a submitted closing's child links would block the
 		# invoice cancels below (on_cancel clears them)
 		for name in frappe.get_all(

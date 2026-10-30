@@ -22,6 +22,7 @@ from frappe.utils import nowdate
 
 from pos_next.api.invoices import submit_invoice, update_invoice
 from pos_next.invoice_type import POS_INVOICE
+from pos_next.tests.code_gate_helpers import set_code_switch
 
 _PROFILE_FILTER = [
     ["disabled", "=", 0],
@@ -81,18 +82,13 @@ class TestReturnRequiresReturnAgainst(FrappeTestCase):
         cls.uom = frappe.db.get_value("Item", cls.item, "stock_uom")
         # the refund-code gate (fail-closed) demands a refund code on every
         # return; these tests exercise the return_against gate, not that one —
-        # toggle it off on the profile's company and restore afterwards (same
+        # toggle it off for the profile and restore afterwards (same
         # pattern as test_wallet_return_hardening)
-        cls._refund_gate_backup = frappe.db.get_value(
-            "Company", cls.profile.company, "pos_require_refund_code"
-        )
-        frappe.db.set_value("Company", cls.profile.company, "pos_require_refund_code", 0)
+        cls._restore_refund_gate = set_code_switch(cls.profile.name, "require_refund_code", 0)
 
     @classmethod
     def tearDownClass(cls):
-        frappe.db.set_value(
-            "Company", cls.profile.company, "pos_require_refund_code", cls._refund_gate_backup
-        )
+        cls._restore_refund_gate()
         _set_invoice_type(cls.original_invoice_type or POS_INVOICE)
         frappe.db.commit()
         super().tearDownClass()

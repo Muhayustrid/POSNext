@@ -233,7 +233,7 @@
 
 			<!-- Main Content: Responsive Layout -->
 			<div
-				v-if="shiftStore.hasOpenShift"
+				v-if="shiftStore.hasOpenShift && canSell"
 				class="pos-content-shell flex-1 flex overflow-hidden relative"
 			>
 				<!-- Main Content Container -->
@@ -482,15 +482,29 @@
 						{{ __("Welcome to POS Next") }}
 					</h3>
 					<p class="mt-2 text-sm text-gray-500">
-						{{ __("Please open a shift to start making sales") }}
+						{{
+							canSell
+								? __("Please open a shift to start making sales")
+								: __("POS Managers work from the menu: purchasing, stock opname, reject requests and production")
+						}}
 					</p>
 					<Button
+						v-if="canSell"
 						variant="solid"
 						theme="blue"
 						@click="uiStore.showOpenShiftDialog = true"
 						class="mt-6"
 					>
 						{{ __("Open Shift") }}
+					</Button>
+					<Button
+						v-else
+						variant="solid"
+						theme="blue"
+						@click="openPOSMenu()"
+						class="mt-6"
+					>
+						{{ __("Open Menu") }}
 					</Button>
 				</div>
 			</div>
@@ -694,6 +708,7 @@
 				:can-purchase-order="canPurchaseOrder"
 				:can-production="canProduction"
 				:can-stock-opname="canStockOpname"
+				:is-management="Boolean(bootstrapStore.data?.is_management)"
 				:is-offline="offlineStore.isOffline"
 				@menu-selected="handlePOSMenuSelected"
 				@view-invoice="handleViewInvoice"
@@ -1130,13 +1145,13 @@ const restrictionStore = useDiscountRestrictionStore();
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
-// Discount restriction status follows the shift's company (UX hints only — the
-// server enforces every rule again on draft save and submit)
+// Discount restriction status follows the shift's profile and company (UX
+// hints only — the server enforces every rule again on draft save and submit)
 watch(
-	() => shiftStore.profileCompany,
-	(company) => {
+	() => [shiftStore.profileCompany, shiftStore.profileName],
+	([company, profile]) => {
 		if (company) {
-			restrictionStore.fetchStatus(company);
+			restrictionStore.fetchStatus(company, profile);
 		} else {
 			restrictionStore.reset();
 		}
@@ -1284,7 +1299,10 @@ const profileWarehouses = computed(() => {
 	return [];
 });
 
-const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+// A POSNext Manager never sells: no sale screen, shift or cart actions (the
+// server refuses them too); the management menu works with or without a shift.
+const canSell = computed(() => bootstrapStore.data?.can_sell !== false);
+const canAccessShiftActions = computed(() => shiftStore.hasOpenShift && canSell.value);
 
 /** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
 const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
@@ -1613,6 +1631,12 @@ onMounted(async () => {
 
 	async function initPOS() {
 		const hasShift = await shiftStore.checkShift();
+
+		if (!canSell.value) {
+			// the menu is the manager's home screen: skip openPOSMenu's stacked-dialog guard
+			showPOSMenu.value = true;
+			return;
+		}
 
 		if (!hasShift) {
 			uiStore.showOpenShiftDialog = true;
@@ -2694,7 +2718,7 @@ async function handlePaymentCompleted(paymentData) {
 
 				// The submitted invoice consumed restriction quota — refresh hints.
 				// clearCode happened in resetInvoice; quota may have hit its limit.
-				restrictionStore.fetchStatus(shiftStore.profileCompany);
+				restrictionStore.fetchStatus(shiftStore.profileCompany, shiftStore.profileName);
 
 				// Refresh invoice history cache in background (non-blocking)
 				loadInvoiceHistoryData().catch((err) =>
@@ -3584,8 +3608,8 @@ function handleProductionCreated() {
 }
 
 // Load invoice history data
-// Without a shift a manager picks the company in the menu; its profile feeds
-// the invoice history there (the shift's profile always wins).
+// A manager picks the company in the menu (shift or not); its profile feeds
+// the invoice history there. A cashier's menu always reports the shift's own.
 const menuProfile = ref(null);
 
 function handleMenuProfile(profile) {
@@ -3594,7 +3618,7 @@ function handleMenuProfile(profile) {
 }
 
 async function loadInvoiceHistoryData() {
-	const profileName = shiftStore.profileName || menuProfile.value;
+	const profileName = menuProfile.value || shiftStore.profileName;
 	log.info("Loading invoice history data for profile:", profileName);
 
 	// Also reload drafts

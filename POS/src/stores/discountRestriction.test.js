@@ -21,10 +21,11 @@ describe("discountRestriction store", () => {
 			callMock.mockResolvedValue({ enabled: true })
 			const store = useDiscountRestrictionStore()
 
-			await store.fetchStatus("Company A")
+			await store.fetchStatus("Company A", "Profile A")
 
 			expect(callMock).toHaveBeenCalledWith("pos_next.api.discount_code.get_status", {
 				company: "Company A",
+				pos_profile: "Profile A",
 			})
 			expect(store.applicable).toBe(true)
 		})

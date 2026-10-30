@@ -857,7 +857,7 @@ class TestInvoiceProfileGates(FrappeTestCase):
 
 	# ---------------------------------------------------------------- update_invoice
 
-	def test_same_profile_cross_owner_update_rejected_manager_allowed(self):
+	def test_same_profile_cross_owner_update_rejected_admin_allowed(self):
 		draft = self._insert_draft(self.cashier2)
 		name = draft["name"]
 
@@ -869,12 +869,16 @@ class TestInvoiceProfileGates(FrappeTestCase):
 			frappe.set_user(ADMIN)
 		self.assertEqual(frappe.db.get_value(self.doctype, name, "customer"), self.customer)
 
-		# management is the only non-owner path now
+		# a POSNext Manager never sells, so cannot touch drafts either
 		frappe.set_user(self.manager)
 		try:
-			update_invoice(self._payload(name=name, remarks="manager-touch"))
+			with self.assertRaises(frappe.PermissionError):
+				update_invoice(self._payload(name=name, remarks="manager-touch"))
 		finally:
 			frappe.set_user(ADMIN)
+
+		# Administrator / System Manager remain the only non-owner path
+		update_invoice(self._payload(name=name, remarks="manager-touch"))
 		self.assertEqual(frappe.db.get_value(self.doctype, name, "remarks"), "manager-touch")
 
 	def test_cross_profile_insert_rejected_for_cashier(self):
@@ -900,11 +904,11 @@ class TestInvoiceProfileGates(FrappeTestCase):
 			0,
 		)
 
-	def test_cross_profile_update_rejected_for_cashier_manager_allowed(self):
-		# manager seeds a fully-valid draft in the OTHER outlet through the API
+	def test_cross_profile_update_rejected_for_cashier_admin_allowed(self):
+		# Administrator seeds a fully-valid draft in the OTHER outlet through the API
 		# (management bypasses the profile gate on insert)...
 		draft = self._insert_draft(
-			self.manager,
+			ADMIN,
 			item_warehouse=self.other_profile.warehouse,
 			pos_profile=self.other_profile.name,
 		)
@@ -927,8 +931,8 @@ class TestInvoiceProfileGates(FrappeTestCase):
 		finally:
 			frappe.set_user(ADMIN)
 
-		# management is the one non-owner path that accepts the foreign outlet
-		frappe.set_user(self.manager)
+		# Administrator is the one non-owner path that accepts the foreign outlet
+		frappe.set_user(ADMIN)
 		try:
 			update_invoice(
 				self._payload(

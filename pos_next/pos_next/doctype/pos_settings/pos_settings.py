@@ -2,10 +2,15 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
-from pos_next.api.settings_resolver import get_effective_pos_settings
+from pos_next.api.settings_resolver import (
+	_global_value,
+	get_effective_pos_setting,
+	get_effective_pos_settings,
+)
 from pos_next.invoice_type import get_pos_invoice_doctype
 from pos_next.utils.authz import is_management_user
 
@@ -26,6 +31,9 @@ SALES_MANAGEMENT_FIELDS = (
 	"tax_inclusive",
 	"use_percentage_discount",
 )
+
+# HQ code gate switches: System Manager only (guard_code_switches)
+CODE_SWITCH_FIELDS = ("require_discount_code", "require_refund_code")
 
 # The POS "Printing" tab: the only fields a cashier may save through
 # update_pos_settings (cashiers hold read-only POS Settings, so the save runs
@@ -90,6 +98,21 @@ class POSSettings(Document):
 					"Please disable Partial Payment first."
 				)
 
+		self.guard_code_switches()
+
+	def guard_code_switches(self):
+		"""Only a System Manager may change what the code gate resolves to for
+		this profile: flipping a switch, or creating/enabling/disabling a row
+		whose switches differ from the global fallback."""
+		if "System Manager" in frappe.get_roles():
+			return
+		for field in CODE_SWITCH_FIELDS:
+			before = get_effective_pos_setting(self.pos_profile, field)
+			after = self.get(field) if cint(self.enabled) else _global_value(field)
+			if cint(before) != cint(after):
+				frappe.throw(
+					_("Only a System Manager can change the code requirement."), frappe.PermissionError
+				)
 
 
 @frappe.whitelist()
@@ -180,6 +203,11 @@ def update_pos_settings(pos_profile, settings):
 		# the SPA still posts the whole form; drop what a cashier may not touch
 		for field in SALES_MANAGEMENT_FIELDS:
 			settings.pop(field, None)
+	if "System Manager" not in frappe.get_roles():
+		# the SPA posts the whole form; pin the code switches to what the
+		# profile resolves now so guard_code_switches sees no change
+		for field in CODE_SWITCH_FIELDS:
+			settings[field] = get_effective_pos_setting(pos_profile, field)
 
 	# Check if settings exist
 	existing = frappe.db.exists("POS Settings", {"pos_profile": pos_profile})
