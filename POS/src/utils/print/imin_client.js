@@ -52,6 +52,16 @@ export { loadDeviceConfig, saveDeviceConfig, stripDeviceLayoutKeys }
 const log = logger.create("IminClient")
 const STATUS_POLL_MS = 500
 const STATUS_TIMEOUT_MS = 15000
+// A paper/cover fault must hold this long before it fails the job: long
+// enough to ride out a one-poll blip, far shorter than STATUS_TIMEOUT_MS so
+// the cashier hears about an empty roll in seconds.
+const FAULT_CONFIRM_MS = 2000
+// SDK PrinterStatus: 3 OPEN, 7 NOPAPERFEED, 8 PAPERRUNNINGOUT.
+const FAULT_MESSAGES = {
+	3: "Printer cover is open",
+	7: "Printer out of paper",
+	8: "Printer out of paper",
+}
 const STATUS_REPLY_TIMEOUT_MS = 5000
 // Bound on ONE command handed to the SDK. Its bitmap upload is a bare fetch
 // with no timeout, so a wedged print service leaves the promise pending
@@ -186,6 +196,7 @@ export function createIminDriver(deps = {}) {
 	const loadConfig = deps.loadConfig || (() => ({}))
 	const statusTimeoutMs = deps.statusTimeoutMs ?? STATUS_TIMEOUT_MS
 	const statusPollMs = deps.statusPollMs ?? STATUS_POLL_MS
+	const faultConfirmMs = deps.faultConfirmMs ?? FAULT_CONFIRM_MS
 	const statusReplyMs = deps.statusReplyMs ?? STATUS_REPLY_TIMEOUT_MS
 	const sendTimeoutMs = deps.sendTimeoutMs ?? SEND_TIMEOUT_MS
 	const loadLogo = deps.loadLogo || defaultLoadLogo
@@ -333,13 +344,17 @@ export function createIminDriver(deps = {}) {
 
 	async function waitIdle(p) {
 		const deadline = Date.now() + statusTimeoutMs
+		let faultSince = 0
 		for (;;) {
 			const status = await callStatus(p)
 			const code = Number(status?.value)
 			if (code === 0) return
+			const fault = FAULT_MESSAGES[code]
+			faultSince = fault ? faultSince || Date.now() : 0
+			if (fault && Date.now() - faultSince >= faultConfirmMs)
+				throw new Error(__(fault))
 			if (Date.now() > deadline) {
-				if (code === 8 || code === 7)
-					throw new Error(__("Printer out of paper"))
+				if (fault) throw new Error(__(fault))
 				throw new Error(__("Printer not connected (status {0})", { 0: code }))
 			}
 			await new Promise((r) => setTimeout(r, statusPollMs))

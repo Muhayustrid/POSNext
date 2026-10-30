@@ -191,6 +191,41 @@ describe("createIminDriver", () => {
 		).rejects.toThrow(/not connected/i)
 	})
 
+	it("reports out of paper fast, without waiting out the status timeout", async () => {
+		printer.getPrinterStatus.mockResolvedValue({ value: 7 })
+		const empty = createIminDriver({
+			factory: () => printer,
+			loadConfig: () => ({ paper: "58mm", cut: false }),
+			statusTimeoutMs: 10000,
+			statusPollMs: 20,
+			faultConfirmMs: 100,
+		})
+		const t0 = Date.now()
+		await expect(
+			empty.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			}),
+		).rejects.toThrow(/out of paper/i)
+		expect(Date.now() - t0).toBeLessThan(2000)
+	})
+
+	it("rides out a fault code that clears before it is confirmed", async () => {
+		printer.getPrinterStatus
+			.mockResolvedValueOnce({ value: 7 })
+			.mockResolvedValue({ value: 0 })
+		const blip = createIminDriver({
+			factory: () => printer,
+			loadConfig: () => ({ paper: "58mm", cut: false }),
+			statusPollMs: 20,
+			faultConfirmMs: 100,
+		})
+		await expect(
+			blip.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			}),
+		).resolves.toBeTruthy()
+	})
+
 	it("prints each copy with the same bitmap, delay only between copies", async () => {
 		const timeline = []
 		const sleepStart = Date.now()
