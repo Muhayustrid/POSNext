@@ -1114,6 +1114,20 @@ describe("return invoice auto-print", () => {
 
 		expect(printMock.printWithSilentFallback).not.toHaveBeenCalled()
 	})
+
+	it("tells the cashier when the printer fails after paper came out", async () => {
+		const err = Object.assign(new Error("Printer out of paper"), {
+			postPrint: true,
+		})
+		printMock.printWithSilentFallback.mockRejectedValueOnce(err)
+		await createReturn("Auto")
+		const ui = usePOSUIStore(wrapper.vm.$pinia)
+
+		await vi.waitFor(() => expect(ui.showErrorDialog).toBe(true))
+		expect(ui.errorDialogTitle).toBe("Printer Problem")
+		expect(ui.errorDialogMessage).toContain("Printer out of paper")
+		ui.clearError()
+	})
 })
 
 describe("shift schedule auto-closing and reprint (Task B)", () => {

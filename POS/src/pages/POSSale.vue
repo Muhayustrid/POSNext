@@ -3741,11 +3741,19 @@ async function runPrintInvoice(invoiceData) {
 		}
 	} catch (error) {
 		log.error("Error printing invoice:", error);
-		window.frappe?.msgprint({
-			title: __("Error"),
-			message: __("Failed to print invoice"),
-			indicator: "red",
-		});
+		// window.frappe has no msgprint in the SPA: use the SPA's own dialog.
+		const reason = error?.message || String(error);
+		if (error?.postPrint) {
+			uiStore.showError(
+				__("Printer Problem"),
+				__(
+					"Printing stopped: {0}. Part of the receipt may already be printed. Check the printer, then reprint from Invoice History if needed.",
+					[reason],
+				),
+			);
+		} else {
+			uiStore.showError(__("Error"), __("Failed to print invoice"), reason);
+		}
 	}
 }
 
