@@ -1,7 +1,7 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
-"""Shift slots pick an HRMS Shift Type; the slot hours follow the Shift Type."""
+"""Shift slots pick an HRMS Shift Type; hours are prefilled from it and editable per group."""
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -61,20 +61,38 @@ class TestShiftTypeSlots(FrappeTestCase):
 		self.assertEqual(str(row.start_time), "5:00:00")
 		self.assertEqual(str(row.end_time), "13:00:00")
 
-	def test_group_slots_follow_later_shift_type_change(self):
+	def test_slot_hours_editable_and_kept_over_shift_type(self):
 		st = _shift_type(f"_T Siang {self.suffix}", "13:00:00", "21:00:00")
 		group = frappe.get_doc(
 			{
 				"doctype": "POS Profile Group",
-				"group_name": f"_T ST Live {self.suffix}",
-				"shifts": [{"shift_name": st}],
+				"group_name": f"_T ST Edit {self.suffix}",
+				"shifts": [{"shift_name": st, "start_time": "12:00:00", "end_time": "20:00:00"}],
 			}
 		)
 		self._insert(group)
 		frappe.db.set_value("Shift Type", st, {"start_time": "14:00:00", "end_time": "22:00:00"})
 
 		slot = _group_slots(group.name)[0]
-		self.assertEqual((slot["start_time"], slot["end_time"]), ("14:00:00", "22:00:00"))
+		self.assertEqual((slot["start_time"], slot["end_time"]), ("12:00:00", "20:00:00"))
+
+	def test_group_rename_keeps_slots(self):
+		st = _shift_type(f"_T Malam {self.suffix}", "21:00:00", "05:00:00")
+		group = self._insert(
+			frappe.get_doc(
+				{
+					"doctype": "POS Profile Group",
+					"group_name": f"_T ST Old {self.suffix}",
+					"shifts": [{"shift_name": st}],
+				}
+			)
+		)
+		new_name = f"_T ST New {self.suffix}"
+		frappe.rename_doc("POS Profile Group", group.name, new_name, force=True)
+		self.addCleanup(frappe.delete_doc, "POS Profile Group", new_name, force=1, ignore_permissions=True)
+
+		self.assertEqual(frappe.db.get_value("POS Profile Group", new_name, "group_name"), new_name)
+		self.assertEqual(len(_group_slots(new_name)), 1)
 
 	def test_unknown_shift_type_refused(self):
 		group = frappe.get_doc(

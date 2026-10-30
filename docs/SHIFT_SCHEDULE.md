@@ -17,7 +17,7 @@ companies (e.g. a PT parent's HQ profile and its child outlets in one group).
 |---|---|
 | Shift Group | Group name (also the document name). |
 | Enable Shift Schedule | Master switch pushed to members. On by default. |
-| Shifts | One row per shift: pick an HRMS **Shift Type** (Desk → Shift & Attendance → Shift Type). Start/End come from the Shift Type (read-only here, **site timezone**) and always follow it — edit the hours on the Shift Type. An end earlier than the start runs past midnight (e.g. 21:00 → 05:00). |
+| Shifts | One row per shift: pick an HRMS **Shift Type** (Desk → Shift & Attendance → Shift Type). Start/End are prefilled from the Shift Type and can be edited per group (**site timezone**); the slot hours are the ones used — later Shift Type changes do not update existing slots. An end earlier than the start runs past midnight (e.g. 21:00 → 05:00). |
 | Schedule Warning Minutes | Members' cashiers get a toast this many minutes before the end. 0 = no warning. |
 | Enforce Closing After Schedule | When on, the schedule deadline is **hard** for members (see below). When off, advisory only. |
 | POS Profiles (Members) | The profiles that follow these hours — across companies. Each row shows the profile's Company (fetched, read-only). A profile can only be in one group — adding a member of another group is rejected (remove it there first). |
