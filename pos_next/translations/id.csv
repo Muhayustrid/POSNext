@@ -3644,3 +3644,5 @@ Shipping status,Status pengiriman
 "Only a System Manager can change the code requirement.","Hanya System Manager yang dapat mengubah persyaratan kode.",""
 "Cashiers need a head office code to give a manual discount. Only a System Manager can change this.","Kasir memerlukan kode dari kantor pusat untuk memberi diskon manual. Hanya System Manager yang dapat mengubah ini.",""
 "Cashiers need a head office code to make a return. Only a System Manager can change this.","Kasir memerlukan kode dari kantor pusat untuk melakukan retur. Hanya System Manager yang dapat mengubah ini.",""
+"Shift slot {0} has different hours in different Shift Groups. Make them equal first.","Slot shift {0} punya jam berbeda di Shift Group yang berbeda. Samakan dulu.",""
+"Shift Type {0} already exists with other hours ({1}-{2}); the shift slot uses {3}-{4}.","Shift Type {0} sudah ada dengan jam lain ({1}-{2}); slot shift memakai {3}-{4}.",""

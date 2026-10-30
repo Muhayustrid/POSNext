@@ -90,17 +90,21 @@ def _group_slots(group):
 		return []
 	slots = frappe.db.sql(
 		"""
-		SELECT slot.shift_name, slot.start_time, slot.end_time,
+		SELECT slot.shift_name,
+			COALESCE(st.start_time, slot.start_time) AS start_time,
+			COALESCE(st.end_time, slot.end_time) AS end_time,
 			grp.pos_schedule_warning_minutes AS warning_minutes,
 			grp.pos_schedule_enforce_closing AS enforce_closing
 		FROM `tabPOS Shift Slot` slot
 		INNER JOIN `tabPOS Profile Group` grp ON grp.name = slot.parent
+		LEFT JOIN `tabShift Type` st ON st.name = slot.shift_name
 		WHERE slot.parent = %s AND slot.parenttype = 'POS Profile Group'
 		ORDER BY slot.idx ASC
 		""",
 		group,
 		as_dict=True,
 	)
+	# hours follow the HRMS Shift Type (the slot copy is only the fetched snapshot);
 	# warning + enforce are group-wide: every slot carries the group's values
 	return [
 		{

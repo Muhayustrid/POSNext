@@ -12,30 +12,33 @@
  "fields": [
   {
    "fieldname": "shift_name",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Shift Name",
-   "reqd": 1
+   "label": "Shift Type",
+   "reqd": 1,
+   "options": "Shift Type"
   },
   {
    "fieldname": "start_time",
    "fieldtype": "Time",
    "in_list_view": 1,
    "label": "Start Time",
-   "reqd": 1
+   "read_only": 1,
+   "fetch_from": "shift_name.start_time"
   },
   {
    "fieldname": "end_time",
    "fieldtype": "Time",
    "in_list_view": 1,
    "label": "End Time",
-   "reqd": 1
+   "read_only": 1,
+   "fetch_from": "shift_name.end_time"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-24 14:00:00.000000",
+ "modified": "2026-10-30 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Shift Slot",

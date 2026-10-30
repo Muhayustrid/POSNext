@@ -244,6 +244,8 @@ def merge_company(company: str) -> dict:
 				],
 			}
 		)
+		# slot names become Shift Types only in v2_33_0, which runs after this patch
+		group_doc.flags.ignore_links = True
 		group_doc.insert(ignore_permissions=True)
 
 		frappe.db.set_value("POS Profile", kept.name, "pos_profile_group", group_name, update_modified=False)
@@ -293,6 +295,8 @@ def merge_company(company: str) -> dict:
 				],
 			}
 		)
+		# slot names become Shift Types only in v2_33_0, which runs after this patch
+		group_doc.flags.ignore_links = True
 		group_doc.insert(ignore_permissions=True)
 
 		frappe.db.set_value("POS Profile", prof.name, "pos_profile_group", group_name, update_modified=False)

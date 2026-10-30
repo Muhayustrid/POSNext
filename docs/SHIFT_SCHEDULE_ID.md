@@ -14,7 +14,7 @@ diubah massal — nilainya tetap seperti sebelumnya.
 |---|---|
 | Shift Group | Nama grup (mis. "Pagi 05:00-12:00"). |
 | Enable Shift Schedule | Saklar utama yang diterapkan ke anggota. Bawaan: aktif. |
-| Shift Start Time / Shift End Time | Jam shift sesuai **zona waktu server** (contoh 05:00 → 12:00). Jam akhir lebih awal dari jam mulai berarti melewati tengah malam (contoh 21:00 → 05:00). Wajib diisi saat aktif — grup aktif tanpa jam valid ditolak saat disimpan. |
+| Shifts | Satu baris per shift: pilih **Shift Type** HRMS (Desk → Shift & Attendance → Shift Type). Jam mulai/selesai diambil dari Shift Type (baca-saja di sini, **zona waktu server**) dan selalu mengikutinya — ubah jam di Shift Type. Jam akhir lebih awal dari jam mulai berarti melewati tengah malam (contoh 21:00 → 05:00). Migrasi v2_33_0 membuat Shift Type dari slot lama (toleransi check-in/out 0; slot 24 jam berakhir 1 menit lebih awal). |
 | Schedule Warning Minutes | Kasir anggota mendapat peringatan sesuai menit sebelum shift berakhir. 0 = tanpa peringatan. |
 | Enforce Closing After Schedule | Aktif = jadwal bersifat **wajib** untuk anggota (penjualan ditolak setelah jam berakhir). Nonaktif = hanya peringatan. |
 | POS Profiles (Members) | Daftar profil anggota — **boleh lintas perusahaan** (mis. profil PT induk dan profil gerai cabangnya dalam satu grup). Kolom **Company** di tiap baris terisi otomatis dari profil (baca-saja) agar HQ tetap tahu perusahaan tiap gerai. Satu profil hanya boleh di satu grup — memindahkan profil dari grup lain harus dilakukan dari grup lamanya dulu, tidak bisa diam-diam. |

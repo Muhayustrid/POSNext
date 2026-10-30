@@ -53,6 +53,8 @@ POS_ROLES = {"POSNext Cashier", "POSNext Manager"}
 #   menyimpan opname baris serial kosong (reconcile_all) memanggil
 #   StockReconciliation.set_current_serial_and_batch_bundle → bundle.save();
 #   tanpa create, kasir gagal menyimpan (plan Task 3 Step 3).
+# - Shift Type (pn-mgr-shift-type, read+select): slot Shift Group memilih
+#   Shift Type HRMS; manager perlu dropdown-nya, tanpa hak ubah.
 ALLOWED_PARENTS = {
     "Account",
     "Bin",
@@ -71,6 +73,7 @@ ALLOWED_PARENTS = {
     "Sales Invoice",
     "Sales Invoice Item",
     "Serial and Batch Bundle",
+    "Shift Type",
     "Stock Reconciliation",
     "Supplier",
     "Territory",

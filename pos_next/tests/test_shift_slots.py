@@ -308,7 +308,10 @@ class TestShiftSlotGroupValidation(unittest.TestCase):
 class TestGroupWideSlotSettings(FrappeTestCase):
 	def test_group_warning_and_enforce_apply_to_every_slot(self):
 		from pos_next.shift_schedule import _group_slots
+		from pos_next.tests.test_shift_type_slots import _shift_type
 
+		_shift_type("Early", "05:00:00", "15:00:00")
+		_shift_type("Late", "13:00:00", "21:00:00")
 		group = frappe.get_doc(
 			{
 				"doctype": "POS Profile Group",
