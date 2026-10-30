@@ -123,6 +123,31 @@ describe("buildCrewSlipHTML", () => {
 		)
 	})
 
+	it("indents package components under the package line", () => {
+		const pkgDoc = {
+			...doc,
+			items: [
+				{
+					item_name: "Paket Hemat",
+					qty: 1,
+					pos_package_instance: "P1",
+					pos_package_role: "Package",
+				},
+				{
+					item_name: "Kopi Susu",
+					qty: 2,
+					pos_package_instance: "P1",
+					pos_package_role: "Package Item",
+				},
+			],
+		}
+		const body = bodyOf(buildCrewSlipHTML(pkgDoc, {}))
+		expect(body).toContain('<div class="slip-line">1x Paket Hemat</div>')
+		expect(body).toContain(
+			'<div class="slip-line slip-pkg-component">- 2x Kopi Susu</div>',
+		)
+	})
+
 	it("prints a Cashier row when the doc carries a cashier", () => {
 		const withCashier = { ...doc, cashier_name: "Yusuf Daryanto" }
 		expect(bodyOf(buildCrewSlipHTML(withCashier, {}))).toContain("Cashier")

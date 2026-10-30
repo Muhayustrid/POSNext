@@ -404,7 +404,11 @@ export function buildCrewSlipTextJob(doc, { cols, queueGapDots } = {}) {
 		if (!label) continue
 		const qty = item.qty ?? item.quantity
 		const lead = qty == null ? "" : `${qty}x `
-		itemLines.push(...leftRight(`${lead}${label}`, "", cBig, lead.length))
+		// Package components indented under their package line, as on the receipt.
+		const pkg =
+			item.pos_package_instance && item.pos_package_role === "Package Item"
+		const prefix = pkg ? `  - ${lead}` : lead
+		itemLines.push(...leftRight(`${prefix}${label}`, "", cBig, prefix.length))
 	}
 	if (itemLines.length) {
 		s.rule(c)

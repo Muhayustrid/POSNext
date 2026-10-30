@@ -69,6 +69,7 @@ function crewSlipStyles(dots) {
 	/* Item lines: the only bold thing on the slip, a size up from the
 	 * header rows — the crew scans these, the header is bookkeeping. */
 	.slip-line { font-size: 14px; font-weight: bold; margin: 4px 0; }
+	.slip-pkg-component { padding-left: 12px; }
 	@media print {
 		@page { size: ${mm}mm auto; margin: 0; }
 		body { width: ${mm}mm; padding: 2mm; margin: 0; }
@@ -124,7 +125,16 @@ export function buildCrewSlipHTML(invoiceData, { dots } = {}) {
 			// `??` keeps a deliberate 0 (a zero-qty line) from being replaced by
 			// the other field's value.
 			const qty = item.qty ?? item.quantity
-			return `<div class="slip-line">${qty == null ? "" : `${escapeHtml(qty)}x `}${escapeHtml(label)}</div>`
+			const lead = qty == null ? "" : `${escapeHtml(qty)}x `
+			// A package component sits indented under its package line, like the
+			// customer receipt prints it.
+			if (
+				item.pos_package_instance &&
+				item.pos_package_role === "Package Item"
+			) {
+				return `<div class="slip-line slip-pkg-component">- ${lead}${escapeHtml(label)}</div>`
+			}
+			return `<div class="slip-line">${lead}${escapeHtml(label)}</div>`
 		})
 		.join("")
 

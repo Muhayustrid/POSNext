@@ -172,6 +172,30 @@ describe("buildCrewSlipTextJob", () => {
 		expect(texts(ops).join("\n")).not.toMatch(/12\.000/)
 		expect(texts(ops)).toContain("ORDER")
 	})
+
+	it("indents package components under the package line", () => {
+		const ops = buildCrewSlipTextJob(
+			{
+				items: [
+					{
+						item_name: "Paket Hemat",
+						qty: 1,
+						pos_package_instance: "P1",
+						pos_package_role: "Package",
+					},
+					{
+						item_name: "Kopi Susu",
+						qty: 2,
+						pos_package_instance: "P1",
+						pos_package_role: "Package Item",
+					},
+				],
+			},
+			{ cols },
+		)
+		expect(texts(ops)).toContain("1x Paket Hemat")
+		expect(texts(ops)).toContain("  - 2x Kopi Susu")
+	})
 })
 
 describe("buildEodTextJob", () => {
