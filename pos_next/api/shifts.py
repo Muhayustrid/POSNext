@@ -33,6 +33,7 @@ from pos_next.services.sales_recap import (
 	shift_scope,
 )
 from pos_next.shift_schedule import get_profile_slots, open_slots_now
+from pos_next.utils import error_reason
 from pos_next.utils.authz import assert_can_sell, is_management_user
 
 
@@ -358,7 +359,7 @@ def get_closing_shift_data(opening_shift):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Closing Shift Data Error")
-		frappe.throw(_("Error getting closing shift data: {0}").format(str(e)))
+		frappe.throw(_("Error getting closing shift data: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -381,7 +382,7 @@ def submit_closing_shift(closing_shift):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Submit Closing Shift Error")
-		frappe.throw(_("Error submitting closing shift: {0}").format(str(e)))
+		frappe.throw(_("Error submitting closing shift: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()

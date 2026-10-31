@@ -29,6 +29,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_datetime, get_time, nowdate
 
+from pos_next.utils import error_reason
+
 # ==========================================
 # Constants and Configuration
 # ==========================================
@@ -500,7 +502,7 @@ def create_payment_entry(
 		frappe.log_error(
 			title=f"Payment Entry Creation Failed for {invoice_name}", message=frappe.get_traceback()
 		)
-		frappe.throw(_("Failed to create payment entry: {0}").format(str(e)))
+		frappe.throw(_("Failed to create payment entry: {0}").format(error_reason(e)))
 
 
 # ==========================================
@@ -849,7 +851,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 			message=f"Payments: {payments}\nError: {str(e)}\n\n{frappe.get_traceback()}",
 		)
 		frappe.throw(
-			_("Failed to create payment entry: {0}. All changes have been rolled back.").format(str(e))
+			_("Failed to create payment entry: {0}. All changes have been rolled back.").format(error_reason(e))
 		)
 
 	# Get updated invoice details

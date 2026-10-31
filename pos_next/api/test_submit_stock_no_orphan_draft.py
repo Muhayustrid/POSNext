@@ -30,6 +30,7 @@ from unittest import mock
 import frappe
 
 from pos_next.api.invoices import (
+	InsufficientStockError,
 	_collect_stock_errors,
 	_enforce_profile_warehouse,
 	update_invoice,
@@ -279,19 +280,13 @@ class TestSubmitStockNoOrphanDraft(unittest.TestCase):
 			p.start()
 			self.addCleanup(p.stop)
 
-		with self.assertRaises(frappe.ValidationError) as ctx:
+		with self.assertRaises(InsufficientStockError) as ctx:
 			update_invoice(json.dumps(payload))
 
-		# Verify error payload shape and content
-		err_data = json.loads(ctx.exception.args[0])
-		self.assertIn("errors", err_data)
-		self.assertEqual(len(err_data["errors"]), 1)
-		err = err_data["errors"][0]
-		self.assertEqual(err["item_code"], item_code)
-		self.assertEqual(err["warehouse"], profile_wh)
-		self.assertEqual(err["requested_qty"], 1.0)
-		self.assertEqual(err["available_qty"], 0.0)
-		self.assertEqual(err.get("item_name"), "Test Item Name")
+		# A readable line naming the item and the profile warehouse, never raw JSON.
+		self.assertEqual(
+			str(ctx.exception), f"Test Item Name: requested 1, available 0 in {profile_wh}"
+		)
 
 		# Crucial: invoice draft must NOT have been saved!
 		self.assertIsNotNone(mock_inv)
@@ -387,14 +382,12 @@ class TestOneRequestCheckoutLeavesNoDraft(unittest.TestCase):
 		# pos_next's own check (the one the cashier's dialog reads) decides.
 		with (
 			mock.patch("pos_next.api.invoices._should_block", return_value=True),
-			self.assertRaises(frappe.ValidationError) as ctx,
+			self.assertRaises(InsufficientStockError) as ctx,
 		):
 			submit_invoice(invoice=payload)
 		# Mirrors frappe's request handler rollback; raises if anything committed.
 		frappe.db.rollback(save_point="one_request_checkout")
 
-		# Our structured stock error (the cashier's dialog), not ERPNext's ledger error.
-		errors = json.loads(ctx.exception.args[0])["errors"]
-		self.assertEqual(errors[0]["item_code"], self.case.item)
-		self.assertEqual(errors[0]["requested_qty"], 2 * half)
+		# Our stock error (the cashier's dialog), not ERPNext's ledger error.
+		self.assertIn(f"requested {2 * half:g}", str(ctx.exception))
 		self.assertEqual(self._drafts(), 0)

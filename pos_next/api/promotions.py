@@ -9,6 +9,7 @@ from frappe.query_builder.functions import Count
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import coupon_usable_at
+from pos_next.utils import error_reason
 
 
 def _target_summary(doc):
@@ -594,7 +595,7 @@ def create_promotion(data):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Promotion Creation Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to create promotion: {0}").format(str(e)))
+		frappe.throw(_("Failed to create promotion: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -682,7 +683,7 @@ def update_promotion(scheme_name, data):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Promotion Update Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to update promotion: {0}").format(str(e)))
+		frappe.throw(_("Failed to update promotion: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -714,7 +715,7 @@ def toggle_promotion(scheme_name, disable=None):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Promotion Toggle Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to toggle promotion: {0}").format(str(e)))
+		frappe.throw(_("Failed to toggle promotion: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -735,7 +736,7 @@ def delete_promotion(scheme_name):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Promotion Deletion Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to delete promotion: {0}").format(str(e)))
+		frappe.throw(_("Failed to delete promotion: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -944,7 +945,7 @@ def create_coupon(data):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Coupon Creation Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to create coupon: {0}").format(str(e)))
+		frappe.throw(_("Failed to create coupon: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -1003,7 +1004,7 @@ def update_coupon(coupon_name, data):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Coupon Update Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to update coupon: {0}").format(str(e)))
+		frappe.throw(_("Failed to update coupon: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -1035,7 +1036,7 @@ def toggle_coupon(coupon_name, disabled=None):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Coupon Toggle Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to toggle coupon: {0}").format(str(e)))
+		frappe.throw(_("Failed to toggle coupon: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -1063,7 +1064,7 @@ def delete_coupon(coupon_name):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Coupon Deletion Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to delete coupon: {0}").format(str(e)))
+		frappe.throw(_("Failed to delete coupon: {0}").format(error_reason(e)))
 
 
 # =============================================================================
@@ -1100,7 +1101,7 @@ def apply_referral_code(referral_code, customer):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Apply Referral Code Failed"), message=frappe.get_traceback())
-		frappe.throw(_("Failed to apply referral code: {0}").format(str(e)))
+		frappe.throw(_("Failed to apply referral code: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()

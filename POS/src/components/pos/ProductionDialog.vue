@@ -979,7 +979,8 @@
 </template>
 
 <script setup>
-import { Button, call, createResource, FeatherIcon } from "frappe-ui"
+import { Button, createResource, FeatherIcon } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
 import { formatAmountInput, parseAmountInput } from "@/utils/amountInput"
 import { useToast } from "@/composables/useToast"
 import { computed, nextTick, onUnmounted, ref, watch } from "vue"
@@ -1226,7 +1227,7 @@ const recipesResource = createResource({
 	},
 	onError(err) {
 		errorMessage.value =
-			err?.messages?.join("\n") || err || __("Failed to load recipes")
+			err?.messages?.join("\n") || __("Failed to load recipes")
 		loadingRecipes.value = false
 	},
 })

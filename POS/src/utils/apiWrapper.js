@@ -1,6 +1,7 @@
 import { call as frappeCall } from "frappe-ui";
 
 import { forceRefreshCSRFToken, isCSRFApiError } from "./csrf";
+import { humanizeError } from "./errorHandler";
 
 import { __ } from "@/utils/translation";
 
@@ -21,7 +22,7 @@ export async function call(method, params) {
 			console.warn("Could not refresh CSRF token. Server may have ignore_csrf enabled.");
 		}
 
-		throw error;
+		throw humanizeError(error);
 	}
 }
 
@@ -40,3 +41,4 @@ export function serverErrorMessage(
 	if (messages.length) return messages.join(" ");
 	return fallback;
 }
+

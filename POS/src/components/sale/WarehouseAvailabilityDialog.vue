@@ -910,7 +910,7 @@
  * Translations: All user-facing strings use __() for i18n
  */
 import { ref, computed, watch, nextTick } from "vue";
-import { call } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"
 import { __ } from "@/utils/translation";

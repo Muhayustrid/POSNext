@@ -17,6 +17,7 @@ from frappe import _
 from frappe.utils import get_first_day, nowdate
 
 from pos_next.api.hq_monitoring import _check_hq_access, set_outlet_target
+from pos_next.utils import error_reason
 
 EXPORT_HEADERS = (
 	"Company",
@@ -128,6 +129,6 @@ def import_outlet_targets(file_url=None, month_start=None):
 			)
 			updated += 1
 		except Exception as e:
-			errors.append({"row": i, "company": company, "message": str(e)})
+			errors.append({"row": i, "company": company, "message": error_reason(e)})
 
 	return {"updated": updated, "skipped": skipped, "errors": errors}

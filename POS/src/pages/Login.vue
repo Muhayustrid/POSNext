@@ -34,7 +34,7 @@
 									{{ __("Login Failed") }}
 								</h3>
 								<div class="mt-2 text-sm text-red-700">
-									<p>{{ session.login.error.messages.join("\n") }}</p>
+									<p>{{ serverErrorMessage(session.login.error) }}</p>
 								</div>
 							</div>
 						</div>
@@ -123,6 +123,7 @@ import { cleanupUserSession } from "../utils/sessionCleanup";
 import { ensureCSRFToken } from "../utils/csrf";
 import { offlineWorker } from "../utils/offline/workerClient";
 import { logger } from "@/utils/logger";
+import { serverErrorMessage } from "@/utils/apiWrapper";
 
 const log = logger.create("Login");
 

@@ -1199,10 +1199,10 @@ export function useInvoice() {
 							: [];
 
 				if (stockErrors.length > 0) {
-					const payload = JSON.stringify({ errors: stockErrors });
-					const stockError = new Error(payload);
+					// parseError renders these structured rows as one readable line each.
+					const stockError = new Error(__("Insufficient Stock"));
 					stockError.exc_type = "ValidationError";
-					stockError.messages = [payload];
+					stockError.errors = stockErrors;
 					throw stockError;
 				}
 

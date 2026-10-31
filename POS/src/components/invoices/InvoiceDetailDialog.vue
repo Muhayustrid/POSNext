@@ -391,7 +391,8 @@ import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/
 import { formatQueueNumber } from "@/utils/queue/queueNumber";
 import { logger } from "@/utils/logger";
 import { hydrateLocalOnlyInvoice, isLocalOnlyInvoiceName } from "@/utils/printInvoice";
-import { Button, FeatherIcon, call } from "frappe-ui";
+import { Button, FeatherIcon } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import { ref, watch, computed, onMounted, onBeforeUnmount } from "vue";
 
 const log = logger.create("InvoiceDetailDialog");

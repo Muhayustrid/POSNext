@@ -46,7 +46,8 @@
 </template>
 
 <script setup>
-import { Button, call, FeatherIcon } from "frappe-ui"
+import { Button, FeatherIcon } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
 import { ref, watch } from "vue"
 import { useToast } from "@/composables/useToast"
 

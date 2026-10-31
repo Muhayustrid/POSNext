@@ -3649,3 +3649,6 @@ Shipping status,Status pengiriman
 "Printer Problem","Masalah Printer",""
 "Printing stopped: {0}. Part of the receipt may already be printed. Check the printer, then reprint from Invoice History if needed.","Cetak berhenti: {0}. Sebagian struk mungkin sudah tercetak. Periksa printer, lalu cetak ulang dari Riwayat Faktur bila perlu.",""
 "Printer cover is open","Tutup printer terbuka",""
+"unexpected server error, details are in the Error Log","kesalahan server tak terduga, detailnya ada di Error Log",""
+"Invalid data format for '{0}'","Format data '{0}' tidak valid",""
+"Failed to change language: {0}","Gagal mengganti bahasa: {0}",""

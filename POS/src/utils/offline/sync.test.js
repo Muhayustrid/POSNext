@@ -235,9 +235,9 @@ describe("COR-FE-04 sync_failed handling", () => {
 // with a human-readable reason instead of burning MAX_RETRY_COUNT + backoff.
 // Network / timeout / 5xx failures stay transient on the existing schedule.
 describe("fail-fast on server ValidationError (B2)", () => {
-	const validationError = (message, status = 417) => {
-		const error = new Error(`${SUBMIT} ValidationError`);
-		error.exc_type = "ValidationError";
+	const validationError = (message, status = 417, excType = "ValidationError") => {
+		const error = new Error(`${SUBMIT} ${excType}`);
+		error.exc_type = excType;
 		error.response = { status };
 		error.messages = [message];
 		return error;
@@ -259,6 +259,21 @@ describe("fail-fast on server ValidationError (B2)", () => {
 		expect(store.rows[0].retry_count).toBe(1);
 		// The stored reason is the server's message, not frappe-ui's
 		// "POST /api/method/... ValidationError" wrapper.
+		expect(store.rows[0].error).toBe(reason);
+	});
+
+	it("treats the server's InsufficientStockError as permanent too", async () => {
+		store.rows.push(seedRow());
+		const reason = "Roti: requested 2, available 0 in Gudang Utama";
+		call.mockImplementation(async (method) =>
+			method === CHECK
+				? { synced: false }
+				: Promise.reject(validationError(reason, 417, "InsufficientStockError"))
+		);
+
+		await syncOfflineInvoices();
+
+		expect(store.rows[0].sync_failed).toBe(true);
 		expect(store.rows[0].error).toBe(reason);
 	});
 

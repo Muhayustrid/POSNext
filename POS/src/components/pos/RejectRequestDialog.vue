@@ -1170,7 +1170,8 @@
 </template>
 
 <script setup>
-import { Button, FeatherIcon, call } from "frappe-ui"
+import { Button, FeatherIcon } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
 import { computed, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import RefreshButton from "@/components/common/RefreshButton.vue"

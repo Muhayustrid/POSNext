@@ -39,6 +39,7 @@ from frappe.utils import (
 
 from pos_next.api.packages import _assert_profile_access
 from pos_next.services.production import _resolve_profile
+from pos_next.utils import error_reason
 
 DOCTYPE = "Stock Reconciliation"
 REJECT_PREFIX = "Rejected: "
@@ -632,7 +633,7 @@ def list_opnames(pos_profile, start=0, page_length=50, status=None, search=None)
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "List Stock Opnames Error")
-		frappe.throw(_("Error fetching stock opnames: {0}").format(str(e)))
+		frappe.throw(_("Error fetching stock opnames: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -655,7 +656,7 @@ def get_opname(pos_profile, name):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Stock Opname Error")
-		frappe.throw(_("Error fetching stock opname: {0}").format(str(e)))
+		frappe.throw(_("Error fetching stock opname: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -778,7 +779,7 @@ def save_opname(pos_profile, data):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Save Stock Opname Error")
-		frappe.throw(_("Error saving stock opname: {0}").format(str(e)))
+		frappe.throw(_("Error saving stock opname: {0}").format(error_reason(e)))
 
 
 def _prune_row_photos(doc):
@@ -838,7 +839,7 @@ def submit_opname(pos_profile, name, action=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Submit Stock Opname Error")
-		frappe.throw(_("Error submitting stock opname: {0}").format(str(e)))
+		frappe.throw(_("Error submitting stock opname: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -855,7 +856,7 @@ def delete_opname(pos_profile, name):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Delete Stock Opname Error")
-		frappe.throw(_("Error deleting stock opname: {0}").format(str(e)))
+		frappe.throw(_("Error deleting stock opname: {0}").format(error_reason(e)))
 
 
 def _editable_doc(pos_profile, name):
@@ -969,7 +970,7 @@ def get_item_batches(pos_profile, item_code):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Opname Batches Error")
-		frappe.throw(_("Error fetching batches: {0}").format(str(e)))
+		frappe.throw(_("Error fetching batches: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -984,7 +985,7 @@ def get_item_serials(pos_profile, item_code):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Opname Serials Error")
-		frappe.throw(_("Error fetching serials: {0}").format(str(e)))
+		frappe.throw(_("Error fetching serials: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -1052,7 +1053,7 @@ def search_opname_items(pos_profile, search_term=None, start=0, limit=10):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Search Opname Items Error")
-		frappe.throw(_("Error searching items: {0}").format(str(e)))
+		frappe.throw(_("Error searching items: {0}").format(error_reason(e)))
 
 
 def _warehouse_items(warehouse, item_group=None):
@@ -1393,7 +1394,7 @@ def import_opname_template(pos_profile, file_url, name=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Import Stock Opname Error")
-		frappe.throw(_("Error importing stock opname: {0}").format(str(e)))
+		frappe.throw(_("Error importing stock opname: {0}").format(error_reason(e)))
 	finally:
 		try:
 			frappe.delete_doc("File", file_name, ignore_permissions=True)

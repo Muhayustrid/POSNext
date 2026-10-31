@@ -83,3 +83,18 @@ def get_app_version() -> str:
 		str: Application version
 	"""
 	return app_version
+
+
+def error_reason(exc: BaseException) -> str:
+	"""User-facing reason for a caught exception wrapped in a friendly frappe.throw.
+
+	frappe's own errors carry messages written for users; anything else
+	(KeyError, SQL errors, ...) is a programming detail that belongs in the
+	Error Log, not in the cashier's popup.
+	"""
+	import frappe
+	from frappe import _
+
+	if isinstance(exc, frappe.ValidationError | frappe.PermissionError):
+		return str(exc)
+	return _("unexpected server error, details are in the Error Log")

@@ -864,7 +864,8 @@
 </template>
 
 <script setup>
-import { Button, FeatherIcon, call } from "frappe-ui"
+import { Button, FeatherIcon } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import DialogHost from "@/components/common/DialogHost.js"
 import ConfirmDialog from "../common/ConfirmDialog.vue"

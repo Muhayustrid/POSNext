@@ -3,7 +3,7 @@
  * Single source of truth for stock availability checks.
  */
 
-import { call } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 
 /**
  * Determine whether an item requires stock validation.

@@ -20,6 +20,29 @@
  */
 
 /**
+ * Put the server's human message on `error.message` (frappe-ui sets it to
+ * "<method> <ExcType>"), so every `showError(error.message)` shows prose.
+ * The original string stays on `error.technicalMessage` for logs.
+ */
+export function humanizeError(error) {
+	if (!error || typeof error !== "object" || error.technicalMessage !== undefined) return error;
+	const messages = Array.isArray(error.messages)
+		? error.messages.filter((m) => typeof m === "string" && m.trim())
+		: [];
+	if (!messages.length || messages[0] === "Internal Server Error") return error;
+	error.technicalMessage = error.message;
+	const html = messages.join("<br>").replace(/<br\s*\/?>/gi, "\n");
+	const text =
+		typeof DOMParser !== "undefined"
+			? new DOMParser().parseFromString(html, "text/html").documentElement.textContent || ""
+			: html.replace(/<[^>]*>/g, " ");
+	try {
+		error.message = text.replace(/[ \t]+/g, " ").trim();
+	} catch (_) {}
+	return error;
+}
+
+/**
  * Extract structured stock error items from error payload
  */
 function extractStructuredStockErrors(error, message) {
@@ -79,7 +102,11 @@ function cleanErrorMessage(rawMessage) {
 		return cleanErrorMessage(rawMessage.message || rawMessage.title || rawMessage.value);
 	}
 
-	let text = typeof rawMessage === "string" ? rawMessage : String(rawMessage);
+	// <br> separates server lines (e.g. one per short item); keep them as lines.
+	let text = (typeof rawMessage === "string" ? rawMessage : String(rawMessage)).replace(
+		/<br\s*\/?>/gi,
+		"\n"
+	);
 
 	// Remove HTML tags. DOMParser never touches the live DOM; assigning
 	// innerHTML on a detached element still executes payload handlers
@@ -92,7 +119,11 @@ function cleanErrorMessage(rawMessage) {
 		text = text.replace(/<[^>]*>/g, " ");
 	}
 
-	return text.replace(/\s+/g, " ").trim();
+	return text
+		.split("\n")
+		.map((line) => line.replace(/\s+/g, " ").trim())
+		.filter(Boolean)
+		.join("\n");
 }
 
 /**
@@ -185,6 +216,7 @@ export function parseError(error) {
 			.join("\n");
 	} else if (
 		excType === "negativestockerror" ||
+		excType === "insufficientstockerror" ||
 		normalizedMessage.includes("needed in") ||
 		normalizedMessage.includes("insufficient stock") ||
 		normalizedMessage.includes("negative stock")

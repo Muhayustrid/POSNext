@@ -7,6 +7,7 @@ from frappe import _
 from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
+from pos_next.utils import error_reason
 from pos_next.utils.authz import is_management_user
 
 
@@ -222,7 +223,7 @@ def get_payment_methods(pos_profile):
 		return payment_methods
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Payment Methods Error")
-		frappe.throw(_("Error fetching payment methods: {0}").format(str(e)))
+		frappe.throw(_("Error fetching payment methods: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -408,7 +409,7 @@ def update_warehouse(pos_profile, warehouse):
 		return {"success": True, "message": _("Warehouse updated successfully"), "warehouse": warehouse}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Update Warehouse Error")
-		frappe.throw(_("Error updating warehouse: {0}").format(str(e)))
+		frappe.throw(_("Error updating warehouse: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -597,7 +598,7 @@ def get_create_pos_profile(*args, **kwargs):
 		return data
 
 	except Exception as e:
-		frappe.throw(_("Error getting create POS profile: {0}").format(str(e)))
+		frappe.throw(_("Error getting create POS profile: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()

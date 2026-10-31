@@ -176,16 +176,22 @@ class OutletTargetsPage {
 		});
 	}
 
-	// The traceback's last line carries the exception message; the generic
-	// sentence covers transport errors where no server message arrived.
+	// The server's own message (frappe.throw) beats the generic sentence,
+	// which covers transport errors where no server message arrived.
 	_render_error(r) {
 		if (this.datatable) {
 			this.datatable.destroy();
 			this.datatable = null;
 		}
 		let msg = __("Failed to load targets");
-		const exc = r && r.exc ? String(r.exc).trim().split("\n").filter(Boolean) : [];
-		if (exc.length) msg = exc[exc.length - 1];
+		try {
+			const texts = JSON.parse((r && r._server_messages) || "[]")
+				.map((m) => strip_html(JSON.parse(m).message || ""))
+				.filter(Boolean);
+			if (texts.length) msg = texts.join(" ");
+		} catch (e) {
+			// malformed _server_messages: keep the generic sentence
+		}
 		this.$root.html(
 			`<div class="frappe-card"><p class="text-muted">${frappe.utils.escape_html(msg)}</p></div>`
 		);

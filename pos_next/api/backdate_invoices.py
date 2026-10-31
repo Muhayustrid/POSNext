@@ -21,7 +21,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, get_datetime, getdate, now_datetime, nowdate, nowtime
+from frappe.utils import cint, format_datetime, get_datetime, getdate, now_datetime, nowdate, nowtime
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
 
@@ -210,7 +210,7 @@ def _submit_backdated(invoice: dict):
 	if not posting_datetime or posting_datetime < shift_start_dt or posting_datetime > now_dt:
 		frappe.throw(
 			_("Backdated posting date {0} must fall within the shift period ({1} to today)").format(
-				posting_datetime or posting_date, shift_start_dt
+				format_datetime(posting_datetime or posting_date), format_datetime(shift_start_dt)
 			),
 			title=_("Backdate Entry"),
 		)

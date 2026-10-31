@@ -49,3 +49,33 @@ describe("serverErrorMessage", () => {
 		expect(serverErrorMessage(error)).not.toMatch(/api\/method|ValidationError/)
 	})
 })
+
+describe("humanizeError", async () => {
+	const { humanizeError } = await import("./errorHandler")
+
+	it("swaps the 'method ExcType' string for the server's message, keeping lines", () => {
+		const error = new Error("pos_next.api.invoices.submit_invoice InsufficientStockError")
+		error.messages = ["Roti Tawar: requested 3, available 1 in Toko<br>Susu: requested 2, available 0 in Toko"]
+		humanizeError(error)
+		expect(error.message).toBe(
+			"Roti Tawar: requested 3, available 1 in Toko\nSusu: requested 2, available 0 in Toko"
+		)
+		expect(error.technicalMessage).toBe("pos_next.api.invoices.submit_invoice InsufficientStockError")
+	})
+
+	it("strips markup without executing it", () => {
+		const error = new Error("x ValidationError")
+		error.messages = ['<img src=x onerror="window.__xss=1"><b>Shift</b> sudah ditutup']
+		humanizeError(error)
+		expect(error.message).toBe("Shift sudah ditutup")
+		expect(window.__xss).toBeUndefined()
+	})
+
+	it("leaves network errors and frappe's generic fallback alone", () => {
+		const net = new TypeError("Failed to fetch")
+		expect(humanizeError(net).message).toBe("Failed to fetch")
+		const generic = new Error("x")
+		generic.messages = ["Internal Server Error"]
+		expect(humanizeError(generic).message).toBe("x")
+	})
+})

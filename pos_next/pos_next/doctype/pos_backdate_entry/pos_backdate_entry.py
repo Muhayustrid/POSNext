@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime, nowtime
+from frappe.utils import add_to_date, cint, flt, format_datetime, get_datetime, now_datetime, nowtime
 
 from pos_next.api.backdate_invoices import (
 	_check_backdate_access,
@@ -16,6 +16,7 @@ from pos_next.api.backdate_invoices import (
 )
 from pos_next.invoice_type import get_pos_invoice_doctype
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
+from pos_next.utils import error_reason
 
 
 class POSBackdateEntry(Document):
@@ -193,7 +194,7 @@ class POSBackdateEntry(Document):
 			if not pdatetime or pdatetime < shift_start_dt or pdatetime > now_dt:
 				frappe.throw(
 					_("Invoice No. {0}: Posting date {1} must fall within the shift period ({2} to today)").format(
-						inv.invoice_no, pdatetime or inv.posting_date, shift_start_dt
+						inv.invoice_no, format_datetime(pdatetime or inv.posting_date), format_datetime(shift_start_dt)
 					),
 					title=_("Backdate Entry"),
 				)
@@ -212,7 +213,7 @@ class POSBackdateEntry(Document):
 		if not closing_dt or closing_dt < max_posting_dt or closing_dt > now_dt:
 			frappe.throw(
 				_("Closing date/time {0} must be on or after max invoice posting date/time {1} and cannot be in the future").format(
-					closing_dt, max_posting_dt
+					format_datetime(closing_dt), format_datetime(max_posting_dt)
 				),
 				title=_("Backdate Entry"),
 			)
@@ -477,7 +478,7 @@ class POSBackdateEntry(Document):
 			try:
 				res = _submit_backdated(payload)
 			except Exception as e:
-				msg = str(e)
+				msg = error_reason(e)
 				if not msg.startswith(f"Invoice No. {inv.invoice_no}:"):
 					msg = f"Invoice No. {inv.invoice_no}: {msg}"
 				frappe.throw(msg, exc=type(e) if isinstance(e, frappe.ValidationError) else frappe.ValidationError)

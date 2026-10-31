@@ -31,6 +31,7 @@ from pos_next.invoice_type import (
 )
 from pos_next.overrides.discount_code import verify_transaction_rule_names
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import expected_coupon_discount
+from pos_next.utils import error_reason
 from pos_next.utils.authz import assert_can_sell, is_management_user
 
 # ==========================================
@@ -68,6 +69,7 @@ try:
 	from erpnext.accounts.doctype.pricing_rule.utils import (
 		get_applied_pricing_rules as erpnext_get_applied_pricing_rules,
 	)
+
 	from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
 	erpnext_apply_pricing_rule = None
@@ -1540,6 +1542,24 @@ def _collect_stock_errors(items):
 	return errors
 
 
+class InsufficientStockError(frappe.ValidationError):
+	pass
+
+
+def _throw_stock_errors(errors):
+	"""Throw a readable stock shortage (one line per item) for Desk and the SPA."""
+	lines = [
+		_("{0}: requested {1}, available {2} in {3}").format(
+			e.get("item_name") or e.get("item_code"),
+			f"{flt(e.get('requested_qty'), 3):g}",
+			f"{flt(e.get('available_qty'), 3):g}",
+			e.get("warehouse"),
+		)
+		for e in errors
+	]
+	frappe.throw("<br>".join(lines), InsufficientStockError, title=_("Insufficient Stock"))
+
+
 @lru_cache(maxsize=1)
 def _item_has_allow_negative_stock_field():
 	"""Check whether Item doctype has an allow_negative_stock field."""
@@ -1608,7 +1628,7 @@ def _validate_stock_on_invoice(invoice_doc):
 
 	# Throw error if stock insufficient and blocking is enabled
 	if errors and _should_block(invoice_doc.pos_profile):
-		frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
+		_throw_stock_errors(errors)
 
 
 def _require_return_against(invoice_doc):
@@ -2364,7 +2384,7 @@ def update_invoice(data):
 				if stock_items:
 					errors = _collect_stock_errors(stock_items)
 					if errors:
-						frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
+						_throw_stock_errors(errors)
 
 		# Save as draft — permission flags were decided at the top (own draft
 		# bypass only); docstatus stays server-owned.
@@ -2679,11 +2699,7 @@ def submit_invoice(invoice=None, data=None):
 					invoice = data_parsed
 					data = {}
 				else:
-					frappe.throw(
-						_("Missing invoice parameter. Received data: {0}").format(
-							json.dumps(data_parsed, default=str)
-						)
-					)
+					frappe.throw(_("Missing invoice parameter"))
 			else:
 				frappe.throw(_("Missing invoice parameter"))
 		else:
@@ -5358,4 +5374,4 @@ def apply_offers(invoice_data, selected_offers=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Apply Offers Error")
-		frappe.throw(_("Error applying offers: {0}").format(str(e)))
+		frappe.throw(_("Error applying offers: {0}").format(error_reason(e)))

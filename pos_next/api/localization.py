@@ -2,7 +2,9 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe import translate
+from frappe import _, translate
+
+from pos_next.utils import error_reason
 
 
 @frappe.whitelist()
@@ -116,4 +118,4 @@ def change_user_language(locale):
 		return {"success": True, "message": f"Language changed to {locale}", "locale": locale}
 	except Exception as e:
 		frappe.log_error(f"Failed to change user language: {e!s}")
-		frappe.throw(f"Failed to change language: {e!s}", frappe.ValidationError)
+		frappe.throw(_("Failed to change language: {0}").format(error_reason(e)), frappe.ValidationError)

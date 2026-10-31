@@ -247,7 +247,8 @@ const isSyncInProgressError = (error) => {
  * @returns {boolean}
  */
 const isPermanentSyncError = (error) => {
-	if (error?.exc_type !== "ValidationError") return false;
+	// InsufficientStockError subclasses ValidationError on the server.
+	if (!["ValidationError", "InsufficientStockError"].includes(error?.exc_type)) return false;
 	const status = error?.response?.status;
 	return !(typeof status === "number" && status >= 500);
 };

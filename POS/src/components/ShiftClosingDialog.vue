@@ -668,7 +668,7 @@
 									{{ __("Error Closing Shift") }}
 								</h4>
 								<p class="text-xs md:text-sm text-red-700 mt-1">
-									{{ errorMessage || submitResource.error }}
+									{{ errorMessage || serverErrorMessage(submitResource.error) }}
 								</p>
 								<button
 									v-if="errorMessage"
@@ -704,7 +704,7 @@
 								{{ __("Failed to Load Shift Data") }}
 							</h3>
 							<p class="text-xs md:text-sm text-red-700 mt-1">
-								{{ errorMessage || closingDataResource.error }}
+								{{ errorMessage || serverErrorMessage(closingDataResource.error) }}
 							</p>
 						</div>
 					</div>
@@ -798,6 +798,7 @@ import { usePOSSyncStore } from "../stores/posSync"
 import { usePOSCartStore } from "../stores/posCart"
 import { printEODReport, downloadEodPDF } from "../utils/printEod"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
+import { serverErrorMessage } from "@/utils/apiWrapper"
 
 const props = defineProps({
 	modelValue: {

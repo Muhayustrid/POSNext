@@ -380,7 +380,8 @@ import { getShiftBadge, useShiftFilter } from "@/composables/useShiftFilter";
 import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
 import { scheduleBlockingNow } from "@/composables/useShiftSchedule";
-import { Button, call } from "frappe-ui";
+import { Button } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import { onMounted, ref, watch } from "vue";
 
 const posSettingsStore = usePOSSettingsStore();

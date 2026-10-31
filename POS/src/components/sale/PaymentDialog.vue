@@ -1928,7 +1928,8 @@ import {
 } from "@/utils/currency";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
+import { Dialog, FeatherIcon, createResource } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { useToast } from "@/composables/useToast";
 import { useDiscountRestrictionStore } from "@/stores/discountRestriction";

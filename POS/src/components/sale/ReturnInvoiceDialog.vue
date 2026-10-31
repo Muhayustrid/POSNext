@@ -1917,6 +1917,8 @@ function extractErrorMessage(error, fallbackMessage = __("Failed to create retur
 		if (validationMatch) return validationMatch[1];
 	}
 
+	// humanizeError already put the server's own text in message
+	if (error.technicalMessage !== undefined) return error.message;
 	if (error.httpStatusText && error.httpStatusText !== "Expectation Failed")
 		return error.httpStatusText;
 	if (error.message && error.message !== "ValidationError") return error.message;

@@ -52,8 +52,8 @@ def _parse_list_parameter(value, param_name="parameter"):
 		try:
 			value = value.strip()
 			return json.loads(value) if value else []
-		except json.JSONDecodeError as e:
-			frappe.throw(_("Could not parse '{0}' as JSON: {1}").format(param_name, str(e)))
+		except json.JSONDecodeError:
+			frappe.throw(_("Invalid data format for '{0}'").format(param_name))
 
 	if not isinstance(value, list):
 		return []

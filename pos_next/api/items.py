@@ -18,6 +18,7 @@ from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull, Sum
 from frappe.utils import add_days, cint, flt, getdate, nowdate
 
+from pos_next.utils import error_reason
 from pos_next.utils.authz import is_management_user
 
 ITEM_RESULT_FIELDS = [
@@ -559,7 +560,7 @@ def search_by_barcode(barcode, pos_profile):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Search by Barcode Error")
-		frappe.throw(_("Error searching by barcode: {0}").format(str(e)))
+		frappe.throw(_("Error searching by barcode: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -614,7 +615,7 @@ def get_batch_serial_details(item_code, warehouse):
 		return result
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Batch/Serial Details Error")
-		frappe.throw(_("Error fetching batch/serial details: {0}").format(str(e)))
+		frappe.throw(_("Error fetching batch/serial details: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -736,7 +737,7 @@ def get_item_variants(template_item, pos_profile):
 		return variants
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Variants Error")
-		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
+		frappe.throw(_("Error fetching item variants: {0}").format(error_reason(e)))
 
 
 def _get_item_group_with_descendants(item_group):
@@ -1769,7 +1770,7 @@ def get_items(
 		return items
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Items Error")
-		frappe.throw(_("Error fetching items: {0}").format(str(e)))
+		frappe.throw(_("Error fetching items: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -1958,7 +1959,7 @@ def get_items_bulk(
 		return items
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Items Bulk Error")
-		frappe.throw(_("Error fetching items: {0}").format(str(e)))
+		frappe.throw(_("Error fetching items: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -2012,7 +2013,7 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 		return result[0].total if result else 0
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Items Count Error")
-		frappe.throw(_("Error fetching items count: {0}").format(str(e)))
+		frappe.throw(_("Error fetching items count: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -2066,7 +2067,7 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Details Error")
-		frappe.throw(_("Error fetching item details: {0}").format(str(e)))
+		frappe.throw(_("Error fetching item details: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -2122,7 +2123,7 @@ def get_item_groups(pos_profile):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Groups Error")
-		frappe.throw(_("Error fetching item groups: {0}").format(str(e)))
+		frappe.throw(_("Error fetching item groups: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -2156,7 +2157,7 @@ def get_brands(pos_profile):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Brands Error")
-		frappe.throw(_("Error fetching brands: {0}").format(str(e)))
+		frappe.throw(_("Error fetching brands: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -2261,7 +2262,7 @@ def get_stock_quantities(item_codes, warehouse):
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Stock Quantities Error")
-		frappe.throw(_("Error fetching stock quantities: {0}").format(str(e)))
+		frappe.throw(_("Error fetching stock quantities: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -2765,7 +2766,7 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Warehouse Availability Error")
-		frappe.throw(_("Error fetching warehouse availability: {0}").format(str(e)))
+		frappe.throw(_("Error fetching warehouse availability: {0}").format(error_reason(e)))
 
 
 def _pos_reserved_batches_bulk(item_codes, company=None):

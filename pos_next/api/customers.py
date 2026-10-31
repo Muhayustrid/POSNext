@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint
 
 from pos_next.api.settings_resolver import get_effective_pos_setting
+from pos_next.utils import error_reason
 
 
 @frappe.whitelist()
@@ -86,7 +87,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, start=0, modified_
 	except Exception as e:
 		frappe.logger().error(f"Error in get_customers: {e!s}")
 		frappe.logger().error(frappe.get_traceback())
-		frappe.throw(_("Error fetching customers: {0}").format(str(e)))
+		frappe.throw(_("Error fetching customers: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()

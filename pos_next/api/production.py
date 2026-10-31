@@ -28,6 +28,7 @@ from pos_next.services.production import (  # noqa: F401  (_uom_whole_field re-e
 	get_recipes as _get_recipes,
 	start_production as _start_production,
 )
+from pos_next.utils import error_reason
 
 
 @frappe.whitelist()
@@ -40,7 +41,7 @@ def get_production_recipes(pos_profile):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Production Recipes Error")
-		frappe.throw(_("Error fetching production recipes: {0}").format(str(e)))
+		frappe.throw(_("Error fetching production recipes: {0}").format(error_reason(e)))
 
 
 def _parse_float(value):
@@ -82,7 +83,7 @@ def create_production(recipe, qty, pos_profile, items=None, batches=None, good_q
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Create Production Error")
-		frappe.throw(_("Error creating production: {0}").format(str(e)))
+		frappe.throw(_("Error creating production: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -96,7 +97,7 @@ def start_production(recipe, qty, pos_profile, notes=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Start Production Error")
-		frappe.throw(_("Error starting production: {0}").format(str(e)))
+		frappe.throw(_("Error starting production: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -109,7 +110,7 @@ def get_finish_context(work_order):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Finish Context Error")
-		frappe.throw(_("Error fetching finish context: {0}").format(str(e)))
+		frappe.throw(_("Error fetching finish context: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -132,7 +133,7 @@ def finish_production(work_order, good_qty, loss_qty=None, notes=None, batch_pic
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Finish Production Error")
-		frappe.throw(_("Error finishing production: {0}").format(str(e)))
+		frappe.throw(_("Error finishing production: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -146,7 +147,7 @@ def close_production(work_order, writeoff=None, notes=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Close Production Error")
-		frappe.throw(_("Error closing production: {0}").format(str(e)))
+		frappe.throw(_("Error closing production: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -159,7 +160,7 @@ def cancel_production(work_order):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Cancel Production Error")
-		frappe.throw(_("Error cancelling production: {0}").format(str(e)))
+		frappe.throw(_("Error cancelling production: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -172,7 +173,7 @@ def get_active_productions(pos_profile):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Active Productions Error")
-		frappe.throw(_("Error fetching active productions: {0}").format(str(e)))
+		frappe.throw(_("Error fetching active productions: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -190,7 +191,7 @@ def get_production_history(pos_profile, limit=30, offset=0, from_date=None, to_d
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Production History Error")
-		frappe.throw(_("Error fetching production history: {0}").format(str(e)))
+		frappe.throw(_("Error fetching production history: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -203,7 +204,7 @@ def get_production_detail(work_order):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Production Detail Error")
-		frappe.throw(_("Error fetching production detail: {0}").format(str(e)))
+		frappe.throw(_("Error fetching production detail: {0}").format(error_reason(e)))
 
 
 def _period(from_date, to_date):

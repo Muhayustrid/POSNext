@@ -1,5 +1,5 @@
 import { computed, ref, watch } from "vue";
-import { call } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { useToast } from "@/composables/useToast";
 import {

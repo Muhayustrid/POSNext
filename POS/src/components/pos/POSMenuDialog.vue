@@ -226,7 +226,8 @@
 </template>
 
 <script setup>
-import { Button, FeatherIcon, call } from "frappe-ui"
+import { Button, FeatherIcon } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
 import { computed, ref, watch } from "vue"
 import { MANAGEMENT_MENU, MENU_GROUPS } from "./managementMenu"
 import PromotionManagement from "@/components/sale/PromotionManagement.vue"

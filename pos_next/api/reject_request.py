@@ -20,6 +20,7 @@ from pos_next.reject_request_setup import (
 	STATE_DRAFT,
 )
 from pos_next.services import reject_request
+from pos_next.utils import error_reason
 
 LIST_FIELDS = (
 	"name", "purpose", "workflow_state", "incident_date", "deadline_date", "total_amount",
@@ -109,7 +110,7 @@ def get_reject_requests(pos_profile, status=None, limit=30, offset=0):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Reject Requests Error")
-		frappe.throw(_("Error fetching reject requests: {0}").format(str(e)))
+		frappe.throw(_("Error fetching reject requests: {0}").format(error_reason(e)))
 
 
 def _file_counts(names):
@@ -162,7 +163,7 @@ def get_reject_request(name):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Reject Request Error")
-		frappe.throw(_("Error fetching reject request: {0}").format(str(e)))
+		frappe.throw(_("Error fetching reject request: {0}").format(error_reason(e)))
 
 
 def _item_rows(value, incident_date=None):
@@ -258,7 +259,7 @@ def save_reject_request(data, submit=0):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Save Reject Request Error")
-		frappe.throw(_("Error saving reject request: {0}").format(str(e)))
+		frappe.throw(_("Error saving reject request: {0}").format(error_reason(e)))
 
 
 def _summary(doc):
@@ -308,7 +309,7 @@ def set_reject_liability(name, borne_by, liabilities=None):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Set Reject Liability Error")
-		frappe.throw(_("Error setting reject liability: {0}").format(str(e)))
+		frappe.throw(_("Error setting reject liability: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -322,7 +323,7 @@ def record_return_reason(name, reason):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Record Return Reason Error")
-		frappe.throw(_("Error recording return reason: {0}").format(str(e)))
+		frappe.throw(_("Error recording return reason: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -371,7 +372,7 @@ def attach_reject_files(name, kind, files):
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Attach Reject Files Error")
-		frappe.throw(_("Error attaching files: {0}").format(str(e)))
+		frappe.throw(_("Error attaching files: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()
@@ -388,4 +389,4 @@ def get_reject_purposes():
 		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Reject Purposes Error")
-		frappe.throw(_("Error fetching reject purposes: {0}").format(str(e)))
+		frappe.throw(_("Error fetching reject purposes: {0}").format(error_reason(e)))
