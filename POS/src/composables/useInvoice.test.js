@@ -32,11 +32,11 @@ vi.mock("frappe-ui", () => ({
 			data: null,
 			error: null,
 			reload: vi.fn(),
-			// updateInvoiceResource.submit({ data: invoiceData }) — record every
-			// doctype-bearing payload. submitInvoiceResource.submit rides the same
-			// factory but its data carries no doctype, so it never lands here.
+			// Record every doctype-bearing payload: saveDraft sends it as
+			// update_invoice's { data }, checkout as submit_invoice's { invoice }.
 			submit: vi.fn(async (arg) => {
-				if (arg?.data?.doctype) invoicePayloads.push(arg.data)
+				const payload = arg?.invoice?.doctype ? arg.invoice : arg?.data
+				if (payload?.doctype) invoicePayloads.push({ ...payload, _url: opts?.url })
 				return { data: { name: "POS-INV-0001" } }
 			}),
 		}
@@ -449,5 +449,16 @@ describe("submitInvoice stock pre-check", () => {
 
 		expect(stockValidationMock.calls).toHaveLength(1)
 		expect(invoicePayloads).toHaveLength(1)
+	})
+
+	it("checks out in one submit_invoice request, never a separate draft save", async () => {
+		const invoice = setupInvoiceForStockCheck()
+
+		await invoice.submitInvoice()
+
+		// A separate update_invoice draft would survive a failed submit as an orphan.
+		expect(invoicePayloads.map((p) => p._url)).toEqual(["pos_next.api.invoices.submit_invoice"])
+		expect(invoicePayloads[0].name).toBeUndefined()
+		expect(invoicePayloads[0].items[0].item_code).toBe("PJO2605")
 	})
 })

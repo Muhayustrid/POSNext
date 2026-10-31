@@ -325,3 +325,76 @@ class TestValidateCartItemsSkipsNonStock(unittest.TestCase):
 			errors = validate_cart_items(json.dumps(items))
 
 		self.assertEqual([e["item_code"] for e in errors], ["STOCK-B"])
+
+
+class TestCollectStockErrorsAggregates(unittest.TestCase):
+	"""Two rows (or two bundles sharing a component) can each fit the stock
+	while their sum does not; the check must see the sum, not each row."""
+
+	def test_same_item_rows_are_summed(self):
+		rows = [
+			{"item_code": "PJO2604", "item_name": "Gempi", "warehouse": "WH", "qty": 1, "stock_qty": 1},
+			{"item_code": "PJO2604", "item_name": "Gempi", "warehouse": "WH", "qty": 1, "stock_qty": 1},
+			{"item_code": "OTHER", "item_name": "Other", "warehouse": "WH", "qty": 1, "stock_qty": 1},
+		]
+		with (
+			mock.patch("pos_next.api.invoices._get_available_stock", return_value=1),
+			mock.patch("pos_next.api.invoices._get_item_negative_stock_allow_set", return_value=set()),
+		):
+			errors = _collect_stock_errors(rows)
+
+		self.assertEqual(len(errors), 1)
+		self.assertEqual(errors[0]["item_code"], "PJO2604")
+		self.assertEqual(errors[0]["requested_qty"], 2)
+		self.assertEqual(errors[0]["available_qty"], 1)
+
+
+class TestOneRequestCheckoutLeavesNoDraft(unittest.TestCase):
+	"""Online checkout posts the full cart to submit_invoice in one request.
+	A stock shortage must roll the whole request back: no draft survives, and
+	no commit inside the path may release the savepoint."""
+
+	def setUp(self):
+		from pos_next.api.test_pos_invoice_submit import TestSubmitInvoicePOSIMode
+
+		self.case = TestSubmitInvoicePOSIMode()
+		self.case.setUp()
+		self.addCleanup(self.case.tearDown)
+
+	def _drafts(self):
+		return frappe.db.count(
+			"POS Invoice", {"posa_pos_opening_shift": self.case.shift.name, "docstatus": 0}
+		)
+
+	def test_split_rows_shortage_rolls_back_without_draft(self):
+		from pos_next.api.invoices import submit_invoice
+
+		from frappe.utils import flt
+
+		wh = self.case.profile.warehouse
+		available = flt(
+			frappe.db.get_value("Bin", {"item_code": self.case.item, "warehouse": wh}, "actual_qty")
+		)
+		# Each row fits on its own; together they exceed the stock by one.
+		half = available // 2 + 1
+		row = {"item_code": self.case.item, "qty": half, "rate": 100, "warehouse": wh}
+		payload = self.case._payload(
+			items=[dict(row), dict(row)],
+			payments=[{"mode_of_payment": self.case.mode[0], "amount": 200 * half}],
+		)
+		frappe.db.savepoint("one_request_checkout")
+		# The fix site allows negative stock; force the POS block on so only
+		# pos_next's own check (the one the cashier's dialog reads) decides.
+		with (
+			mock.patch("pos_next.api.invoices._should_block", return_value=True),
+			self.assertRaises(frappe.ValidationError) as ctx,
+		):
+			submit_invoice(invoice=payload)
+		# Mirrors frappe's request handler rollback; raises if anything committed.
+		frappe.db.rollback(save_point="one_request_checkout")
+
+		# Our structured stock error (the cashier's dialog), not ERPNext's ledger error.
+		errors = json.loads(ctx.exception.args[0])["errors"]
+		self.assertEqual(errors[0]["item_code"], self.case.item)
+		self.assertEqual(errors[0]["requested_qty"], 2 * half)
+		self.assertEqual(self._drafts(), 0)

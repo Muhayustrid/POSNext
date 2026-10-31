@@ -1501,13 +1501,22 @@ def _collect_stock_errors(items):
 	Respects per-item allow_negative_stock if the field exists on Item.
 	"""
 	allowed_items = _get_item_negative_stock_allow_set(items)
-	errors = []
+	# Sum per (item, warehouse, batch): two rows (or two bundles sharing a
+	# component) can each fit the stock while together they do not.
+	totals = {}
 	for d in items:
 		if flt(d.get("qty")) < 0:
 			continue
-
-		available = _get_available_stock(d)
+		key = (d.get("item_code"), d.get("warehouse"), d.get("batch_no"))
 		requested = flt(d.get("stock_qty") or (flt(d.get("qty")) * flt(d.get("conversion_factor") or 1)))
+		if key in totals:
+			totals[key][1] += requested
+		else:
+			totals[key] = [d, requested]
+
+	errors = []
+	for d, requested in totals.values():
+		available = _get_available_stock(d)
 
 		if requested > available:
 			if d.get("item_code") in allowed_items:
@@ -2779,6 +2788,9 @@ def submit_invoice(invoice=None, data=None):
 			# replay still clears (not just skips) the draft's stamp.
 			if payload_has_coupon_key:
 				invoice["coupon_code"] = payload_coupon_code
+			# The strip above dropped the client doctype; hand back the resolved
+			# one so a Sales Order checkout creates a Sales Order, not an invoice.
+			invoice["doctype"] = doctype
 			created = update_invoice(json.dumps(invoice))
 			if not created or not isinstance(created, dict):
 				frappe.throw(_("Failed to create invoice draft"))

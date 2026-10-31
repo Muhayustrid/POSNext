@@ -1139,9 +1139,9 @@ export function useInvoice() {
 		relayedOfferRules = null
 	) {
 		/**
-		 * Two-step submission process with mutex protection:
-		 * 1. Create/update draft invoice
-		 * 2. Validate stock and submit
+		 * One request: submit_invoice creates, stock-checks and submits the
+		 * invoice in a single DB transaction, so a failure (e.g. stock short)
+		 * rolls back and leaves no orphan draft on the server.
 		 *
 		 * The mutex prevents duplicate invoice creation from:
 		 * - Rapid double-clicks on payment buttons
@@ -1176,6 +1176,9 @@ export function useInvoice() {
 
 				const formattedItems = formatItemsForSubmission(rawItems);
 
+				// Read-only fast-fail before the queue number is allocated (it
+				// commits on its own, so a late stock failure would burn one).
+				// submit_invoice re-checks inside its transaction.
 				const precheckWarehouse = shiftStore.profileWarehouse;
 				const precheckItems = formattedItems.map((item) => ({
 					...item,
@@ -1203,9 +1206,7 @@ export function useInvoice() {
 					throw stockError;
 				}
 
-				// Step 1: Create invoice draft
-
-				// Daily per-outlet queue number, allocated before the draft save so
+				// Daily per-outlet queue number, allocated before the submit so
 				// it rides the invoice everywhere (server print, history, sync).
 				let queueStamp = null;
 				if (
@@ -1245,8 +1246,8 @@ export function useInvoice() {
 				};
 
 				// Relay the applied offer rule names (incl. transaction-scope
-				// rules, which never ride item rows); update_invoice re-verifies
-				// them before writing the server-managed offer stash.
+				// rules, which never ride item rows); submit_invoice hands them to
+				// update_invoice, which re-verifies them before writing the stash.
 				if (Array.isArray(relayedOfferRules) && relayedOfferRules.length > 0) {
 					invoiceData.pos_relayed_offer_rules = relayedOfferRules;
 				}
@@ -1268,19 +1269,6 @@ export function useInvoice() {
 					}));
 				}
 
-				const draftInvoice = await updateInvoiceResource.submit({
-					data: invoiceData,
-				});
-
-				let invoiceDoc = draftInvoice;
-				if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
-					invoiceDoc = draftInvoice.data;
-				}
-
-				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error("Failed to create draft invoice - no invoice name returned");
-				}
-
 				const submitData = {
 					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
@@ -1296,7 +1284,7 @@ export function useInvoice() {
 
 				try {
 					const result = await submitInvoiceResource.submit({
-						invoice: invoiceDoc,
+						invoice: invoiceData,
 						data: submitData,
 					});
 
