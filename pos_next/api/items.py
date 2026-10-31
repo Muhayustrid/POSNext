@@ -2436,6 +2436,15 @@ def _product_rows(
 	having = {"in": "HAVING actual_qty > 0", "out": "HAVING actual_qty <= 0"}.get(stock, "")
 	paging = f"LIMIT {min(cint(limit), 200)} OFFSET {max(cint(start), 0)}" if limit else ""
 	wh_placeholders = ", ".join(["%s"] * len(warehouses))
+	if from_date and to_date:
+		# Like ERPNext Stock Balance: only items that ever moved in the outlet
+		# warehouses up to the period end, not the whole item master.
+		conditions.append(
+			f"""EXISTS (SELECT 1 FROM `tabStock Ledger Entry` sle
+			WHERE sle.item_code = i.name AND sle.warehouse IN ({wh_placeholders})
+				AND sle.is_cancelled = 0 AND sle.posting_datetime < %s)"""
+		)
+		params += [*warehouses, f"{add_days(to_date, 1)} 00:00:00"]
 
 	rows = frappe.db.sql(
 		f"""
