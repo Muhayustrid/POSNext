@@ -197,6 +197,7 @@ beforeEach(() => {
 	mockCall(GET_URL, () => Promise.resolve({ ...DRAFT_DOC }))
 	mockCall(GROUPS_URL, () => Promise.resolve([]))
 	mockCall(STATES_URL, () => Promise.resolve([]))
+	mockCall(FETCH_URL, () => Promise.resolve([]))
 	globalThis.fetch = vi.fn(() =>
 		Promise.resolve({
 			ok: true,
@@ -572,6 +573,28 @@ describe("StockOpnameDialog doc page", () => {
 		expect(details.text()).not.toContain("Last Modified")
 		expect(details.text()).not.toContain("Status")
 		expect(wrapper.text()).toContain("No Data")
+	})
+
+	it("starts a new count with the default list as blank rows, not dirty", async () => {
+		const fetchCall = mockCall(FETCH_URL, () =>
+			Promise.resolve([
+				{ item_code: "PJ1", item_name: "Dough", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+				{ item_code: "BB1", item_name: "Gula", stock_uom: "Nos", has_batch_no: 0, has_serial_no: 0, uoms: [] },
+			]),
+		)
+		const wrapper = await mountOpenDialog()
+		await findButton(wrapper, "New Count").trigger("click")
+		await flushPromises()
+
+		expect(fetchCall).toHaveBeenCalledWith({ pos_profile: "POS-1", default_list: 1 })
+		const inputs = wrapper.findAll('[data-testid="qty-input"]')
+		expect(inputs.map((i) => i.element.value)).toEqual(["", ""])
+		expect(wrapper.text()).toContain("Dough")
+		// prefilled rows are not an edit: leaving must not ask
+		await wrapper.find('[data-testid="doc-back"]').trigger("click")
+		await flushPromises()
+		expect(confirmDialog(wrapper).props("modelValue")).toBe(false)
+		expect(wrapper.find('[data-testid="opname-detail"]').exists()).toBe(false)
 	})
 })
 

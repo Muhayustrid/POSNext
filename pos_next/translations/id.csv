@@ -3652,3 +3652,5 @@ Shipping status,Status pengiriman
 "unexpected server error, details are in the Error Log","kesalahan server tak terduga, detailnya ada di Error Log",""
 "Invalid data format for '{0}'","Format data '{0}' tidak valid",""
 "Failed to change language: {0}","Gagal mengganti bahasa: {0}",""
+"Default Count Items","Daftar Item Hitung Standar",""
+"Items every new Stock Opname starts with, as blank rows in this order.","Item yang otomatis ada di setiap Stock Opname baru, sebagai baris kosong dengan urutan ini.",""

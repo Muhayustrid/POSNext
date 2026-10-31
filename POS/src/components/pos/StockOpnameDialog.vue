@@ -1287,6 +1287,7 @@ function openNew() {
 	clearSearch()
 	if (!itemGroups.value.length) loadGroups()
 	takeSnapshot()
+	loadDefaultItems()
 }
 
 // Guarded: leaving with unsaved edits would lose them silently (N2).
@@ -1670,35 +1671,7 @@ async function fetchItems() {
 				pos_profile: activeProfile.value,
 				item_group: itemGroup.value || undefined,
 			})) || []
-		const items = editor.value.items
-		let added = 0
-		for (const item of rows) {
-			const exists = items.some(
-				(r) =>
-					r.item_code === item.item_code &&
-					(!item.has_batch_no || r.batch_no === item.batch_no),
-			)
-			if (exists) continue
-			const serial = !!item.has_serial_no
-			items.push(
-				blankRow({
-					item_code: item.item_code,
-					item_name: item.item_name || item.item_code,
-					stock_uom: item.stock_uom,
-					uom: item.stock_uom,
-					uoms: altUoms(item),
-					qty: "",
-					batch_no: item.batch_no || null,
-					batches: item.batch_no ? [{ batch_no: item.batch_no }] : [],
-					has_batch_no: item.has_batch_no,
-					has_serial_no: item.has_serial_no,
-					serial_options: serial ? [...(item.serial_nos || [])] : [],
-					is_serial: serial,
-					uncounted: serial,
-				}),
-			)
-			added++
-		}
+		const added = appendBlankRows(rows)
 		if (added) showSuccess(__("{0} items added", [added]))
 		else showSuccess(__("No new items to add"))
 	} catch (err) {
@@ -1706,6 +1679,62 @@ async function fetchItems() {
 	} finally {
 		fetching.value = false
 	}
+}
+
+// A new count starts with the Global Settings default list as blank rows.
+async function loadDefaultItems() {
+	const doc = editor.value
+	fetching.value = true
+	try {
+		const rows =
+			(await call(`${API}.fetch_opname_items`, {
+				pos_profile: activeProfile.value,
+				default_list: 1,
+			})) || []
+		// the user may have left this count while the list loaded
+		if (editor.value !== doc) return
+		appendBlankRows(rows)
+		// prefilled rows are not an edit
+		takeSnapshot()
+	} catch (err) {
+		showError(errMsg(err, "Failed to fetch items"))
+	} finally {
+		fetching.value = false
+	}
+}
+
+/** Append fetched items as blank rows, skipping ones already listed; returns how many were added. */
+function appendBlankRows(rows) {
+	const items = editor.value.items
+	let added = 0
+	for (const item of rows) {
+		const exists = items.some(
+			(r) =>
+				r.item_code === item.item_code &&
+				(!item.has_batch_no || r.batch_no === item.batch_no),
+		)
+		if (exists) continue
+		const serial = !!item.has_serial_no
+		items.push(
+			blankRow({
+				item_code: item.item_code,
+				item_name: item.item_name || item.item_code,
+				stock_uom: item.stock_uom,
+				uom: item.stock_uom,
+				uoms: altUoms(item),
+				qty: "",
+				batch_no: item.batch_no || null,
+				batches: item.batch_no ? [{ batch_no: item.batch_no }] : [],
+				has_batch_no: item.has_batch_no,
+				has_serial_no: item.has_serial_no,
+				serial_options: serial ? [...(item.serial_nos || [])] : [],
+				is_serial: serial,
+				uncounted: serial,
+			}),
+		)
+		added++
+	}
+	return added
 }
 
 // ---------------------------------------------------------------------------

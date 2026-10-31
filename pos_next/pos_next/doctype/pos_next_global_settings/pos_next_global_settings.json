@@ -21,6 +21,8 @@
   "column_break_negative_stock",
   "enable_automatic_stock_sync",
   "block_out_of_stock_items",
+  "section_break_opname",
+  "opname_default_items",
   "section_break_shift",
   "modal_awal_modes",
   "enable_cash_handover",
@@ -253,6 +255,18 @@
    "fieldname": "block_out_of_stock_items",
    "fieldtype": "Check",
    "label": "Block Out-of-Stock Items"
+  },
+  {
+   "fieldname": "section_break_opname",
+   "fieldtype": "Section Break",
+   "label": "Stock Opname"
+  },
+  {
+   "description": "Items every new Stock Opname starts with, as blank rows in this order.",
+   "fieldname": "opname_default_items",
+   "fieldtype": "Table",
+   "label": "Default Count Items",
+   "options": "POS Opname Default Item"
   },
   {
    "fieldname": "section_break_shift",
@@ -1105,7 +1119,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-30 14:00:00.000000",
+ "modified": "2026-10-31 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Next Global Settings",

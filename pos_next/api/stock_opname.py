@@ -1056,13 +1056,18 @@ def search_opname_items(pos_profile, search_term=None, start=0, limit=10):
 		frappe.throw(_("Error searching items: {0}").format(error_reason(e)))
 
 
-def _warehouse_items(warehouse, item_group=None):
-	"""Count rows for every stock item of `item_group` (incl. sub-groups), or, with
-	no group, every item with stock ledger history in the warehouse:
+def _warehouse_items(warehouse, item_group=None, item_codes=None):
+	"""Count rows for every stock item of `item_group` (incl. sub-groups), of
+	`item_codes` (kept in that order), or, with neither, every item with stock
+	ledger history in the warehouse:
 	one per stocked batch, one per serial item (its warehouse serials as options),
 	one per plain item. Never carries a quantity (blind count)."""
 	filters = {"is_stock_item": 1, "disabled": 0}
-	if item_group:
+	if item_codes is not None:
+		if not item_codes:
+			return []
+		filters["name"] = ("in", item_codes)
+	elif item_group:
 		groups = [item_group, *(frappe.db.get_descendants("Item Group", item_group) or [])]
 		filters["item_group"] = ("in", groups)
 	else:
@@ -1081,6 +1086,9 @@ def _warehouse_items(warehouse, item_group=None):
 		fields=["item_code", "item_name", "stock_uom", "item_group", "has_batch_no", "has_serial_no"],
 		order_by="item_code asc",
 	)
+	if item_codes is not None:
+		position = {code: i for i, code in enumerate(item_codes)}
+		items.sort(key=lambda item: position[item.item_code])
 	from erpnext.stock.doctype.batch.batch import get_batch_qty
 
 	rows = []
@@ -1131,11 +1139,21 @@ def get_opname_item_groups(pos_profile):
 
 
 @frappe.whitelist()
-def fetch_opname_items(pos_profile, item_group=None):
+def fetch_opname_items(pos_profile, item_group=None, default_list=0):
 	"""Item list of the profile warehouse for the count sheet, like ERPNext's
-	"Fetch Items from Warehouse" but without any quantity (blind count)."""
+	"Fetch Items from Warehouse" but without any quantity (blind count).
+	`default_list` returns the Global Settings default count items instead."""
 	_company, warehouse = _profile_warehouse(pos_profile)
-	rows = _warehouse_items(warehouse, item_group)
+	if cint(default_list):
+		codes = frappe.get_all(
+			"POS Opname Default Item",
+			filters={"parenttype": "POS Next Global Settings", "parentfield": "opname_default_items"},
+			pluck="item_code",
+			order_by="idx asc",
+		)
+		rows = _warehouse_items(warehouse, item_codes=list(dict.fromkeys(codes)))
+	else:
+		rows = _warehouse_items(warehouse, item_group)
 	uom_map = {}
 	for u in frappe.get_all(
 		"UOM Conversion Detail",

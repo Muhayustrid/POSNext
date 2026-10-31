@@ -1027,6 +1027,36 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		for r in rows:
 			self.assertLessEqual(set(r.keys()), allowed)
 
+	def test_fetch_default_list_follows_global_settings_order(self):
+		from pos_next.api.stock_opname import fetch_opname_items
+
+		frappe.set_user(ADMIN)
+		# no stock history in the warehouse: the default list still offers it
+		unstocked = _make_test_item()
+		settings = frappe.get_single("POS Next Global Settings")
+		saved = [r.item_code for r in settings.opname_default_items]
+
+		def restore():
+			frappe.set_user(ADMIN)
+			doc = frappe.get_single("POS Next Global Settings")
+			doc.set("opname_default_items", [{"item_code": c} for c in saved])
+			doc.save(ignore_permissions=True)
+
+		self.addCleanup(restore)
+		settings.set(
+			"opname_default_items",
+			[{"item_code": c} for c in (unstocked, self.plain, self.batch_item, unstocked)],
+		)
+		settings.save(ignore_permissions=True)
+
+		self._cashier()
+		rows = fetch_opname_items(self.profile, default_list=1)
+		codes = [r["item_code"] for r in rows]
+		# list order, duplicates once, one row per stocked batch
+		self.assertEqual(codes, [unstocked, self.plain, self.batch_item, self.batch_item])
+		self.assertNotIn(self.serial_item, codes)
+		self.assertTrue(all("qty" not in r for r in rows))
+
 	def test_fetch_items_excludes_bin_without_stock_ledger_entry(self):
 		from erpnext.stock.utils import get_bin
 

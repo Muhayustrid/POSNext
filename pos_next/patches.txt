@@ -44,3 +44,4 @@ pos_next.patches.v2_30_0.block_out_of_stock_items
 pos_next.patches.v2_31_0.enable_cash_handover
 pos_next.patches.v2_32_0.move_code_switches_to_pos_settings
 pos_next.patches.v2_33_0.shift_slots_to_shift_type
+pos_next.patches.v2_34_0.seed_opname_default_items
