@@ -1,9 +1,9 @@
 <template>
-	<component :is="tag" :="$attrs" ref="containerRef"> </component>
+	<component :is="tag" :="$attrs" v-html="sanitized"></component>
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { computed } from "vue";
 import DOMPurify from "dompurify";
 
 const props = defineProps({
@@ -18,10 +18,6 @@ const props = defineProps({
 	},
 });
 
-const containerRef = ref(null);
-
-onMounted(() => {
-	const sanitized = DOMPurify.sanitize(props.inner);
-	containerRef.value.innerHTML = sanitized;
-});
+// computed, not onMounted: the text must follow prop changes (e.g. live filter counts)
+const sanitized = computed(() => DOMPurify.sanitize(props.inner));
 </script>

@@ -608,6 +608,31 @@
 									</button>
 								</div>
 
+								<!-- Filters ran over an incomplete list: say so, offer older pages -->
+								<div
+									v-if="historyPartial"
+									data-test="history-partial-notice"
+									class="mb-4 bg-yellow-50 border border-yellow-300 rounded-lg p-3 flex items-center gap-3 text-xs text-yellow-800"
+								>
+									<p class="flex-1 text-start">
+										{{
+											isOffline()
+												? __("Offline: only invoices saved on this device are searched. Older invoices may exist on the server.")
+												: rangeHasMore
+													? __("Only the first {0} matching invoices are loaded.", [rangeInvoices.length])
+													: __("Filters only search the latest {0} invoices.", [props.historyInvoices.length])
+										}}
+									</p>
+									<Button
+										v-if="rangeHasMore && !isOffline()"
+										data-test="history-load-more"
+										:disabled="rangeLoading"
+										@click="loadRange(true)"
+									>
+										{{ __("Load more") }}
+									</Button>
+								</div>
+
 								<!-- Empty State -->
 								<div
 									v-if="historyPager.total === 0"
@@ -627,7 +652,7 @@
 										/>
 									</svg>
 									<p class="text-gray-600 font-medium">
-										{{ __("No invoices found") }}
+										{{ rangeLoading ? __("Loading invoices...") : __("No invoices found") }}
 									</p>
 								</div>
 
@@ -1582,9 +1607,70 @@ const activeTab = ref("partial")
 // Initialize filter store and composable
 const filterStore = useInvoiceFiltersStore()
 
-// Create a computed ref for history invoices to use with filter composable
-const historyInvoicesRef = computed(() => props.historyInvoices)
+// The parent only passes the latest 100 invoices, so a date range is fetched
+// from the server (null = no range loaded, use the parent's list).
+const RANGE_PAGE = 100
+const rangeInvoices = ref(null)
+const rangeHasMore = ref(false)
+const rangeLoading = ref(false)
+let rangeSeq = 0
+
+async function loadRange(more = false) {
+	const seq = more ? rangeSeq : ++rangeSeq
+	const { dateFrom, dateTo } = filterStore
+	if (!more) rangeHasMore.value = false
+	if (!(dateFrom || dateTo) || !props.posProfile || isOffline()) {
+		rangeInvoices.value = null
+		return
+	}
+	rangeLoading.value = true
+	try {
+		const page = await call("pos_next.api.invoices.get_invoices", {
+			pos_profile: props.posProfile,
+			from_date: dateFrom || undefined,
+			to_date: dateTo || undefined,
+			limit: RANGE_PAGE,
+			offset: more ? rangeInvoices.value.length : 0,
+		})
+		if (seq !== rangeSeq) return // a newer range was selected meanwhile
+		rangeInvoices.value = more ? [...rangeInvoices.value, ...(page || [])] : page || []
+		rangeHasMore.value = (page || []).length === RANGE_PAGE
+	} catch (error) {
+		log.error("Error loading invoice history range:", error)
+		if (seq !== rangeSeq) return
+		if (!more) rangeInvoices.value = null
+		showError(error.message || __("Failed to load invoices for the selected dates"))
+	} finally {
+		if (seq === rangeSeq) rangeLoading.value = false
+	}
+}
+
+watch(
+	() => [filterStore.dateFrom, filterStore.dateTo, props.posProfile],
+	() => loadRange(),
+	{ immediate: true },
+)
+
+const historySource = computed(() => {
+	const all = rangeInvoices.value ?? props.historyInvoices
+	return Array.isArray(all) ? all : []
+})
+
+// Counter and dropdowns describe the same non-return rows the table shows
+const historyInvoicesRef = computed(() =>
+	historySource.value.filter((inv) => !inv.is_return),
+)
 const invoiceFilters = useInvoiceFilters(historyInvoicesRef)
+
+// Filters ran over an incomplete list: older matches may exist
+const historyPartial = computed(() => {
+	if (!filterStore.hasActiveFilters && !filterStore.searchTerm) return false
+	if (rangeInvoices.value) return rangeHasMore.value
+	return (
+		!!(filterStore.dateFrom || filterStore.dateTo) ||
+		props.historyInvoices.length >= RANGE_PAGE
+	)
+})
 
 // Unpaid invoices data
 const unpaidInvoices = ref([])
@@ -1687,19 +1773,7 @@ const {
 } = useShiftFilter(returnInvoices)
 
 // Filtered history using the composable (exclude returns, show in separate tab)
-const filteredHistoryInvoices = computed(() => {
-	// Filter out return invoices, then apply all filters from the store
-	const allInvoices = Array.isArray(props.historyInvoices)
-		? props.historyInvoices
-		: []
-	const nonReturnInvoices = allInvoices.filter((inv) => !inv.is_return)
-
-	// Use the filter composable with non-return invoices
-	const tempInvoicesRef = computed(() => nonReturnInvoices)
-	const tempFilters = useInvoiceFilters(tempInvoicesRef)
-
-	return tempFilters.filteredInvoices.value
-})
+const filteredHistoryInvoices = invoiceFilters.filteredInvoices
 
 const {
 	options: historyShiftOptions,
@@ -1849,6 +1923,7 @@ async function refreshCurrentTab() {
 	// until it hands the fresh data back.
 	refreshing.value = true
 	emit("refresh-history")
+	if (activeTab.value === "history") loadRange()
 }
 
 // The parent replaces historyInvoices/draftInvoices when its reload finishes —
