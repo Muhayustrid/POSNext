@@ -309,8 +309,8 @@ describe("PurchaseOrderDialog", () => {
 		})
 		await flushPromises()
 
-		const picker = wrapper.find('[data-test="company-picker"] select')
-		expect(picker.exists()).toBe(true)
+		const picker = wrapper.findComponent({ name: "CompanyPicker" })
+		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(true)
 		// no shift: starts on the first option, its profile drives the list
 		expect(mocks.call).toHaveBeenCalledWith(
 			"pos_next.api.purchase_orders.get_purchase_orders",
@@ -318,7 +318,7 @@ describe("PurchaseOrderDialog", () => {
 		)
 
 		mocks.call.mockClear()
-		await picker.setValue("Outlet B")
+		picker.vm.$emit("update:modelValue", "Outlet B")
 		await flushPromises()
 		expect(mocks.call).toHaveBeenCalledWith(
 			"pos_next.api.purchase_orders.get_purchase_orders",
