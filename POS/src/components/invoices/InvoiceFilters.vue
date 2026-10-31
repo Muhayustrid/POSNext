@@ -152,7 +152,7 @@
 						class="summary-text"
 						:inner="
 							__(
-								'&lt;strong&gt;{0}&lt;/strong&gt; of &lt;strong&gt;{1}&lt;/strong&gt; invoice(s)',
+								'&lt;strong&gt;{0}&lt;/strong&gt; of &lt;strong&gt;{1}&lt;/strong&gt; loaded invoice(s)',
 								[filterStats?.filtered || 0, filterStats?.total || 0]
 							)
 						"
