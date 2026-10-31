@@ -452,12 +452,12 @@ describe("POSMenuDialog company choice without a shift", () => {
 			)
 			const wrapper = mountShell({ open: true, initialView: view, canProduction: true })
 			await flush()
-			const picker = wrapper.find('[data-test="company-picker"] select')
-			expect(picker.exists()).toBe(true)
+			const picker = wrapper.findComponent({ name: "CompanyPicker" })
+			expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(true)
 			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
 				"Alpha POS",
 			)
-			await picker.setValue("Beta")
+			picker.vm.$emit("update:modelValue", "Beta")
 			await flush()
 			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
 				"Beta POS",
@@ -492,7 +492,7 @@ describe("POSMenuDialog company choice without a shift", () => {
 		expect(wrapper.find('[data-testid="view-sales-recap"]').attributes("data-profile")).toBe(
 			"Shift POS",
 		)
-		await wrapper.find('[data-test="company-picker"] select').setValue("Beta")
+		wrapper.findComponent({ name: "CompanyPicker" }).vm.$emit("update:modelValue", "Beta")
 		await flush()
 		expect(wrapper.find('[data-testid="view-sales-recap"]').attributes("data-profile")).toBe(
 			"Beta POS",
@@ -533,7 +533,7 @@ describe("POSMenuDialog company choice without a shift", () => {
 		expect(wrapper.find('[data-testid="view-refund-code"]').attributes("data-company")).toBe(
 			"Alpha",
 		)
-		await wrapper.find('[data-test="company-picker"] select').setValue("Beta")
+		wrapper.findComponent({ name: "CompanyPicker" }).vm.$emit("update:modelValue", "Beta")
 		await flush()
 		expect(wrapper.find('[data-testid="view-refund-code"]').attributes("data-company")).toBe(
 			"Beta",

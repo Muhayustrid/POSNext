@@ -165,14 +165,24 @@ class TestProductStock(unittest.TestCase):
 		ledger = self._ledger()
 		self.assertEqual([e["balance"] for e in ledger["entries"]], [4])
 
-	def test_empty_period_carries_forward_opening_and_new_items_are_zero(self):
+	def test_empty_period_carries_forward_opening(self):
 		self._entry("OPEN", "2026-10-01 08:00:00", 8, 8)
 		row = self._list()[0]
 		self.assertEqual(
 			(row["opening_qty"], row["in_qty"], row["out_qty"], row["closing_qty"]), (8, 0, 0, 8)
 		)
 		self.assertEqual(self._ledger()["entries"], [])
-		frappe.db.delete("Stock Ledger Entry", {"item_code": self.item})
+
+	def test_items_that_never_moved_in_the_outlet_are_hidden(self):
+		# like ERPNext Stock Balance: no ledger in these warehouses -> no row
+		self.assertEqual(self._list(), [])
+		self._entry("FOREIGN", "2026-10-02 08:00:00", 5, 5, warehouse=self.other_warehouse)
+		self._entry("LATER", "2026-10-04 08:00:00", 5, 5)
+		self._entry("VOID", "2026-10-02 09:00:00", 5, 5, is_cancelled=1)
+		self.assertEqual(self._list(), [])
+		# sold out before the period: still listed, with zero balance
+		self._entry("IN", "2026-09-01 08:00:00", 3, 3)
+		self._entry("OUT", "2026-09-02 08:00:00", -3, 0)
 		row = self._list()[0]
 		self.assertEqual(
 			(row["opening_qty"], row["in_qty"], row["out_qty"], row["closing_qty"]), (0, 0, 0, 0)
