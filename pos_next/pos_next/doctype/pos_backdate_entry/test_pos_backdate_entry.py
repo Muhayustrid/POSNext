@@ -753,6 +753,68 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			frappe.db.set_value("POS Opening Shift", successor.name, "docstatus", 2, update_modified=False)
 			frappe.delete_doc("POS Opening Shift", successor.name, force=1, ignore_permissions=True)
 
+	def test_backdate_carries_accepted_modal_awal_into_closed_successor(self):
+		# Successor accepted the proposal as its Modal Awal and already closed:
+		# Modal Awal and the successor closing's expected cash follow the backdate.
+		cash = next(iter(get_modal_awal_modes(self.profile.name)))
+		if cash not in self.mode:
+			self.skipTest("modal awal mode is not a profile payment method")
+		self._submit_original_sale(qty=1, rate=100.0, mode_of_payment=cash)
+		old_closing = self._close_shift()
+
+		successor = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": self.profile.name,
+				"company": self.profile.company,
+				"user": ADMIN,
+				"posting_date": nowdate(),
+				"period_start_date": now_datetime(),
+				"handover_from": old_closing,
+				"balance_details": [
+					{
+						"mode_of_payment": m,
+						"amount": 100.0 if m == cash else 0,
+						"proposed_amount": 100.0 if m == cash else 0,
+					}
+					for m in self.mode
+				],
+			}
+		).insert(ignore_permissions=True)
+		successor.submit()
+		successor_closing = submit_closing_shift(json.dumps(get_closing_shift_data(successor.name)))["name"]
+		try:
+			bde = self._make_bde(
+				items=[{"invoice_no": 1, "item_code": self.item, "qty": 1, "rate": 50.0, "warehouse": self.profile.warehouse}],
+				payments=[{"invoice_no": 1, "mode_of_payment": cash, "amount": 50.0}],
+			)
+			bde.insert()
+			bde.submit()
+
+			opening_row = frappe.db.get_value(
+				"POS Opening Shift Detail",
+				{"parent": successor.name, "mode_of_payment": cash},
+				["amount", "proposed_amount"],
+				as_dict=True,
+			)
+			self.assertEqual(flt(opening_row.amount), 150.0)
+			self.assertEqual(flt(opening_row.proposed_amount), 150.0)
+			closing_row = frappe.db.get_value(
+				"POS Closing Shift Detail",
+				{"parent": successor_closing, "parentfield": "payment_reconciliation", "mode_of_payment": cash},
+				["opening_amount", "expected_amount", "closing_amount", "difference"],
+				as_dict=True,
+			)
+			self.assertEqual(flt(closing_row.opening_amount), 150.0)
+			self.assertEqual(flt(closing_row.expected_amount), 150.0)
+			# closed at expected (accepted, not counted), so it follows too
+			self.assertEqual(flt(closing_row.closing_amount), 150.0)
+			self.assertEqual(flt(closing_row.difference), 0.0)
+		finally:
+			for doctype, name in (("POS Closing Shift", successor_closing), ("POS Opening Shift", successor.name)):
+				frappe.db.set_value(doctype, name, "docstatus", 2, update_modified=False)
+				frappe.delete_doc(doctype, name, force=1, ignore_permissions=True)
+
 	# ---------------------------------------------------------------------------
 	# Scenario 4: Correction flow
 	# ---------------------------------------------------------------------------

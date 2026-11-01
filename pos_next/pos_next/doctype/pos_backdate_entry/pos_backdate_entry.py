@@ -546,14 +546,7 @@ def _move_handover(old_closing, new_closing, pos_profile):
 	}
 	for opening in openings:
 		frappe.db.set_value("POS Opening Shift", opening, "handover_from", new_closing)
-		for row in frappe.get_all(
-			"POS Opening Shift Detail",
-			filters={"parent": opening, "parenttype": "POS Opening Shift"},
-			fields=["name", "mode_of_payment"],
-		):
-			frappe.db.set_value(
-				"POS Opening Shift Detail", row.name, "proposed_amount", expected.get(row.mode_of_payment, 0)
-			)
+		_apply_handover(opening, expected, modal_awal_modes)
 		frappe.get_doc(
 			{
 				"doctype": "Comment",
@@ -565,3 +558,64 @@ def _move_handover(old_closing, new_closing, pos_profile):
 				),
 			}
 		).insert(ignore_permissions=True)
+
+
+def _apply_handover(opening, expected, modal_awal_modes):
+	"""Set proposed amounts on an opening; carry them into Modal Awal and onward.
+
+	A Modal Awal equal to the old proposal was accepted as-is, not counted, so it
+	follows the new proposal. That shift's closing expected cash and every later
+	handover in the chain move by the same delta; closing cash moves too unless it
+	was counted differently from expected.
+	"""
+	delta = {}
+	for row in frappe.get_all(
+		"POS Opening Shift Detail",
+		filters={"parent": opening, "parenttype": "POS Opening Shift"},
+		fields=["name", "mode_of_payment", "amount", "proposed_amount"],
+	):
+		new = flt(expected.get(row.mode_of_payment, 0))
+		values = {"proposed_amount": new}
+		if (
+			row.mode_of_payment in modal_awal_modes
+			and flt(row.amount) == flt(row.proposed_amount)
+			and flt(row.amount) != new
+		):
+			values["amount"] = new
+			delta[row.mode_of_payment] = new - flt(row.amount)
+		frappe.db.set_value("POS Opening Shift Detail", row.name, values)
+	if not delta:
+		return
+
+	closing = frappe.db.get_value("POS Closing Shift", {"pos_opening_shift": opening, "docstatus": 1})
+	if not closing:
+		return
+	next_expected = {}
+	for d in frappe.get_all(
+		"POS Closing Shift Detail",
+		filters={"parent": closing, "parenttype": "POS Closing Shift", "parentfield": "payment_reconciliation"},
+		fields=["name", "mode_of_payment", "opening_amount", "expected_amount", "closing_amount"],
+	):
+		shift = delta.get(d.mode_of_payment, 0)
+		new_expected = flt(d.expected_amount) + shift
+		if d.mode_of_payment in modal_awal_modes:
+			next_expected[d.mode_of_payment] = new_expected
+		if shift:
+			# Same rule as Modal Awal: a closing equal to expected was accepted, not counted.
+			closing_amount = flt(d.closing_amount)
+			if closing_amount == flt(d.expected_amount):
+				closing_amount = new_expected
+			frappe.db.set_value(
+				"POS Closing Shift Detail",
+				d.name,
+				{
+					"opening_amount": flt(d.opening_amount) + shift,
+					"expected_amount": new_expected,
+					"closing_amount": closing_amount,
+					"difference": closing_amount - new_expected,
+				},
+			)
+	for successor in frappe.get_all(
+		"POS Opening Shift", filters={"handover_from": closing, "docstatus": 1}, pluck="name"
+	):
+		_apply_handover(successor, next_expected, modal_awal_modes)
