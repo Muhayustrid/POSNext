@@ -169,6 +169,11 @@ class POSClosingShift(Document):
 		# opening shifts must NOT be ignored: cancelling a closing shift whose cash
 		# was handed over to a subsequent shift leaves that shift dangling and would
 		# reactivate this shift while the other is open.
+		# POS Backdate Entry re-closes this shift in the same transaction and
+		# moves the handover onto the new closing, so nothing is left dangling.
+		if frappe.flags.pos_next_backdate_entry:
+			self.ignore_linked_doctypes = ("POS Opening Shift",)
+			return
 		handover_openings = frappe.db.get_all(
 			"POS Opening Shift",
 			filters={"handover_from": self.name, "docstatus": ["!=", 2]},

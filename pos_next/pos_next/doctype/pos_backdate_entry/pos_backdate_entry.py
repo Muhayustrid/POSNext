@@ -16,6 +16,7 @@ from pos_next.api.backdate_invoices import (
 )
 from pos_next.invoice_type import get_pos_invoice_doctype
 from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submit_closing
+from pos_next.services.cash_mode import get_modal_awal_modes
 from pos_next.utils import error_reason
 
 
@@ -519,3 +520,48 @@ class POSBackdateEntry(Document):
 		)
 		self.new_closing_shift = new_closing
 		self.db_set("new_closing_shift", new_closing)
+
+		# 5. The shift that took this shift's cash now takes it from the new closing
+		_move_handover(self.cancelled_closing_shift, new_closing, self.pos_profile)
+
+
+def _move_handover(old_closing, new_closing, pos_profile):
+	"""Repoint handover_from and refresh the proposed (system) cash amounts."""
+	openings = frappe.get_all(
+		"POS Opening Shift",
+		filters={"handover_from": old_closing, "docstatus": ["!=", 2]},
+		pluck="name",
+	)
+	if not openings:
+		return
+	modal_awal_modes = get_modal_awal_modes(pos_profile)
+	expected = {
+		d.mode_of_payment: flt(d.expected_amount)
+		for d in frappe.get_all(
+			"POS Closing Shift Detail",
+			filters={"parent": new_closing, "parenttype": "POS Closing Shift"},
+			fields=["mode_of_payment", "expected_amount"],
+		)
+		if d.mode_of_payment in modal_awal_modes
+	}
+	for opening in openings:
+		frappe.db.set_value("POS Opening Shift", opening, "handover_from", new_closing)
+		for row in frappe.get_all(
+			"POS Opening Shift Detail",
+			filters={"parent": opening, "parenttype": "POS Opening Shift"},
+			fields=["name", "mode_of_payment"],
+		):
+			frappe.db.set_value(
+				"POS Opening Shift Detail", row.name, "proposed_amount", expected.get(row.mode_of_payment, 0)
+			)
+		frappe.get_doc(
+			{
+				"doctype": "Comment",
+				"comment_type": "Info",
+				"reference_doctype": "POS Opening Shift",
+				"reference_name": opening,
+				"content": _("Cash handover moved from {0} to {1} by backdate entry").format(
+					old_closing, new_closing
+				),
+			}
+		).insert(ignore_permissions=True)

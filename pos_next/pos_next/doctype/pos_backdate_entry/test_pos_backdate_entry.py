@@ -53,6 +53,7 @@ from pos_next.api.test_packages import (
 	_option_id,
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE, get_pos_invoice_doctype
+from pos_next.services.cash_mode import get_modal_awal_modes
 from pos_next.services.confirmation_code import generate_codes_for
 from pos_next.tests._posi_test_utils import _set_invoice_type
 from pos_next.tests.code_gate_helpers import set_code_switch
@@ -693,6 +694,64 @@ class TestPOSBackdateEntry(FrappeTestCase):
 		self.assertEqual(flt(recon_non_cash.closing_amount), 150.0)
 		self.assertEqual(flt(recon_non_cash.expected_amount), 150.0)
 		self.assertEqual(flt(recon_non_cash.difference), 0.0)
+
+	def test_backdate_shift_whose_cash_was_handed_over(self):
+		# The next shift took this shift's cash (handover_from) and is still open:
+		# the entry must reopen anyway and move the handover onto the new closing.
+		cash = next(iter(get_modal_awal_modes(self.profile.name)))
+		if cash not in self.mode:
+			self.skipTest("modal awal mode is not a profile payment method")
+		self._submit_original_sale(qty=1, rate=100.0, mode_of_payment=cash)
+		old_closing = self._close_shift()
+
+		successor = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"pos_profile": self.profile.name,
+				"company": self.profile.company,
+				"user": ADMIN,
+				"posting_date": nowdate(),
+				"period_start_date": now_datetime(),
+				"handover_from": old_closing,
+				"balance_details": [
+					{"mode_of_payment": m, "amount": 0, "proposed_amount": 100.0 if m == cash else 0}
+					for m in self.mode
+				],
+			}
+		).insert(ignore_permissions=True)
+		successor.submit()
+		try:
+			bde = self._make_bde(
+				items=[{"invoice_no": 1, "item_code": self.item, "qty": 1, "rate": 50.0, "warehouse": self.profile.warehouse}],
+				payments=[{"invoice_no": 1, "mode_of_payment": cash, "amount": 50.0}],
+			)
+			bde.insert()
+			bde.submit()
+
+			self.assertEqual(frappe.db.get_value("POS Closing Shift", old_closing, "docstatus"), 2)
+			self.assertEqual(
+				frappe.db.get_value("POS Opening Shift", successor.name, "handover_from"), bde.new_closing_shift
+			)
+			new_expected = frappe.db.get_value(
+				"POS Closing Shift Detail",
+				{"parent": bde.new_closing_shift, "mode_of_payment": cash},
+				"expected_amount",
+			)
+			self.assertEqual(flt(new_expected), 150.0)
+			self.assertEqual(
+				flt(
+					frappe.db.get_value(
+						"POS Opening Shift Detail",
+						{"parent": successor.name, "mode_of_payment": cash},
+						"proposed_amount",
+					)
+				),
+				150.0,
+			)
+			self.assertEqual(frappe.db.get_value("POS Opening Shift", successor.name, "status"), "Open")
+		finally:
+			frappe.db.set_value("POS Opening Shift", successor.name, "docstatus", 2, update_modified=False)
+			frappe.delete_doc("POS Opening Shift", successor.name, force=1, ignore_permissions=True)
 
 	# ---------------------------------------------------------------------------
 	# Scenario 4: Correction flow
