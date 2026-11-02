@@ -527,9 +527,10 @@
 						<div class="min-w-0">
 							<span
 								v-if="isItemBlocked(item)"
-								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20 mb-0.5"
+								class="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20 mb-0.5 max-w-full"
+								:title="getBlockedPillText(item)"
 							>
-								{{ __("Out of stock") }}
+								<span class="truncate">{{ getBlockedPillText(item) }}</span>
 							</span>
 							<span
 								v-if="isPackageItem(item.item_code)"
@@ -819,9 +820,10 @@
 								>
 									<span
 										v-if="isItemBlocked(item)"
-										class="me-1 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20"
+										class="me-1 inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-600/20 max-w-full"
+										:title="getBlockedPillText(item)"
 									>
-										{{ __("Out of stock") }}
+										<span class="truncate">{{ getBlockedPillText(item) }}</span>
 									</span>
 									<span
 										v-if="isPackageItem(item.item_code)"
@@ -1050,11 +1052,14 @@ import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailability
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSPackagesStore } from "@/stores/posPackages";
 import { usePOSSettingsStore } from "@/stores/posSettings";
+import { useStockStore } from "@/stores/stock";
 import { useStock } from "@/composables/useStock";
 import { useDialogState } from "@/composables/useDialogState";
 import { useSearchInput } from "@/composables/useSearchInput";
+import { useFormatters } from "@/composables/useFormatters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { useToast } from "@/composables/useToast";
+import { call } from "@/utils/apiWrapper";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
@@ -1082,8 +1087,10 @@ const emit = defineEmits(["item-selected"]);
 
 // Use composables
 const { getStockStatus } = useStock();
+const { formatQuantity } = useFormatters();
 const settingsStore = usePOSSettingsStore();
 const packagesStore = usePOSPackagesStore();
+const stockStore = useStockStore();
 const { showError, showWarning } = useToast();
 const { isAnyDialogOpen } = useDialogState();
 
@@ -1395,6 +1402,10 @@ onUnmounted(() => {
 	scrollCleanupFns.value = [];
 
 	// Clear handlers and timers
+	if (fetchShortagesTimer) {
+		clearTimeout(fetchShortagesTimer);
+		fetchShortagesTimer = null;
+	}
 	optimizedClickHandlers.clear();
 	clearLongPress();
 	cleanupSearchInput();
@@ -1480,6 +1491,71 @@ function isItemBlocked(item) {
 	return (item.actual_qty ?? item.stock_qty ?? 0) <= 0;
 }
 
+const bundleShortages = ref({});
+let fetchShortagesTimer = null;
+let lastShortagesKey = "";
+
+const blockedBundleCodes = computed(() => {
+	if (!displayedItems.value) return [];
+	return displayedItems.value
+		.filter((item) => item?.is_bundle && isItemBlocked(item))
+		.map((item) => item.item_code);
+});
+
+watch(
+	blockedBundleCodes,
+	(codes) => {
+		if (fetchShortagesTimer) {
+			clearTimeout(fetchShortagesTimer);
+			fetchShortagesTimer = null;
+		}
+
+		if (!codes || codes.length === 0) {
+			return;
+		}
+
+		const uniqueCodes = Array.from(new Set(codes)).sort();
+		const firstBlocked = displayedItems.value.find(
+			(i) => i?.is_bundle && isItemBlocked(i)
+		);
+		const warehouse = firstBlocked?.warehouse || stockStore.warehouse || "";
+		const key = `${warehouse}:${uniqueCodes.join(",")}`;
+
+		if (key === lastShortagesKey) {
+			return;
+		}
+
+		fetchShortagesTimer = setTimeout(async () => {
+			try {
+				const res = await call("pos_next.api.items.get_bundle_shortages", {
+					item_codes: JSON.stringify(uniqueCodes),
+					warehouse,
+				});
+				const data = res?.message || res || {};
+				bundleShortages.value = { ...bundleShortages.value, ...data };
+				lastShortagesKey = key;
+			} catch {
+				// Silently keep old behaviour
+			}
+		}, 300);
+	},
+	{ immediate: true, deep: true }
+);
+
+function getBlockedPillText(item) {
+	if (!item) return __("Out of stock");
+	const shortages = bundleShortages.value[item.item_code];
+	if (shortages && shortages.length > 0) {
+		const firstName = shortages[0].item_name || shortages[0].item_code;
+		const base = __("Short: {0}", [firstName]);
+		if (shortages.length > 1) {
+			return `${base} +${shortages.length - 1}`;
+		}
+		return base;
+	}
+	return __("Out of stock");
+}
+
 /**
  * Validates stock and emits item-selected if valid
  * @param {Object} item - Item to select
@@ -1490,6 +1566,25 @@ function selectItem(item, autoAdd = false) {
 	if (!item) return false;
 
 	if (isItemBlocked(item)) {
+		const shortages = bundleShortages.value[item.item_code];
+		if (shortages && shortages.length > 0) {
+			const parts = shortages
+				.map((s) => {
+					const name = s.item_name || s.item_code;
+					const available = formatQuantity(s.available_qty);
+					const required = formatQuantity(s.required_qty);
+					return __("{0} {1} left, needs {2} per item", [name, available, required]);
+				})
+				.join(", ");
+			showError(
+				__("{0} is out of stock: {1}", [
+					item.item_name || item.item_code,
+					parts,
+				])
+			);
+			return false;
+		}
+
 		showError(
 			__('"{0}" is out of stock in warehouse "{1}".', [
 				item.item_name,

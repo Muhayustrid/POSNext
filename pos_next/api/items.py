@@ -992,6 +992,51 @@ def _build_item_base_conditions(
 	return conditions, join_params + where_params, extra_joins
 
 
+def _get_bundle_components_and_stock(bundle_codes, warehouse):
+	if not bundle_codes or not warehouse:
+		return [], {}
+
+	pb = DocType("Product Bundle")
+	pbi = DocType("Product Bundle Item")
+
+	bundle_components = (
+		frappe.qb.from_(pb)
+		.inner_join(pbi)
+		.on(pbi.parent == pb.name)
+		.select(
+			pb.new_item_code.as_("bundle_code"),
+			pbi.item_code.as_("component_code"),
+			pbi.qty.as_("required_qty"),
+		)
+		.where(pb.new_item_code.isin(bundle_codes))
+		.run(as_dict=True)
+	)
+
+	if not bundle_components:
+		return [], {}
+
+	component_codes = list({c["component_code"] for c in bundle_components})
+
+	warehouses = [warehouse]
+	if frappe.db.get_value("Warehouse", warehouse, "is_group"):
+		child_warehouses = frappe.db.get_descendants("Warehouse", warehouse)
+		warehouses = child_warehouses or [warehouse]
+
+	bin = DocType("Bin")
+
+	component_stock = (
+		frappe.qb.from_(bin)
+		.select(bin.item_code, fn.Coalesce(fn.Sum(bin.actual_qty - bin.reserved_qty), 0).as_("available_qty"))
+		.where(bin.item_code.isin(component_codes))
+		.where(bin.warehouse.isin(warehouses))
+		.groupby(bin.item_code)
+		.run(as_dict=True)
+	)
+
+	component_stock_map = {row["item_code"]: flt(row["available_qty"]) for row in component_stock}
+	return bundle_components, component_stock_map
+
+
 def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 	"""
 	Calculate Product Bundle availability in bulk with component-based calculation.
@@ -1058,114 +1103,10 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 		- Component not in stock table: Treated as 0 availability
 		- Group warehouse with no children: Falls back to warehouse itself
 	"""
-	# ===========================================================================
-	# GUARD CLAUSE: Validate inputs
-	# ===========================================================================
-	if not bundle_codes or not warehouse:
-		return {}
-
-	# ===========================================================================
-	# STEP 1: Fetch Bundle Component Definitions
-	# ===========================================================================
-	# Query all bundle definitions and their components in a single query.
-	# This is more efficient than querying each bundle separately.
-	#
-	# Example Result:
-	# [
-	#   {"bundle_code": "LAPTOP-COMBO", "component_code": "LAPTOP", "required_qty": 1},
-	#   {"bundle_code": "LAPTOP-COMBO", "component_code": "MOUSE", "required_qty": 1},
-	#   {"bundle_code": "LAPTOP-COMBO", "component_code": "KEYBOARD", "required_qty": 1}
-	# ]
-	pb = DocType("Product Bundle")
-	pbi = DocType("Product Bundle Item")
-
-	bundle_components = (
-		frappe.qb.from_(pb)
-		.inner_join(pbi)
-		.on(pbi.parent == pb.name)
-		.select(
-			pb.new_item_code.as_("bundle_code"),
-			pbi.item_code.as_("component_code"),
-			pbi.qty.as_("required_qty"),
-		)
-		.where(pb.new_item_code.isin(bundle_codes))
-		.run(as_dict=True)
-	)
-
+	bundle_components, component_stock_map = _get_bundle_components_and_stock(bundle_codes, warehouse)
 	if not bundle_components:
-		# No bundle definitions found - items are not configured as bundles
 		return {}
 
-	# ===========================================================================
-	# STEP 2: Extract Unique Component Codes
-	# ===========================================================================
-	# Get all unique component item codes needed across all bundles.
-	# This allows us to fetch stock for all components in a single query.
-	#
-	# Example: {"LAPTOP", "MOUSE", "KEYBOARD", "MONITOR", "CABLE"}
-	component_codes = list(set(c["component_code"] for c in bundle_components))
-
-	# ===========================================================================
-	# STEP 3: Resolve Warehouse Hierarchy (Group Warehouse Support)
-	# ===========================================================================
-	# If the warehouse is a group warehouse, expand to include all child warehouses.
-	# This provides accurate stock availability across multiple storage locations.
-	#
-	# Example:
-	#   Input: "Main Store" (group warehouse)
-	#   Output: ["Main Store - A", "Main Store - B", "Main Store - C"]
-	warehouses = [warehouse]
-	if frappe.db.get_value("Warehouse", warehouse, "is_group"):
-		child_warehouses = frappe.db.get_descendants("Warehouse", warehouse)
-		# Fallback to original warehouse if no children found
-		warehouses = child_warehouses or [warehouse]
-
-	# ===========================================================================
-	# STEP 4: Fetch Stock Availability for All Components (Bulk Query)
-	# ===========================================================================
-	# Query stock for all component items across all warehouses in ONE query.
-	# Uses available_qty (actual - reserved) to prevent overselling.
-	#
-	# Performance: Single query handles all components regardless of count
-	# Formula: available_qty = actual_qty - reserved_qty
-	#
-	# Example Result:
-	# [
-	#   {"item_code": "LAPTOP", "available_qty": 50.0},
-	#   {"item_code": "MOUSE", "available_qty": 30.0},
-	#   {"item_code": "KEYBOARD", "available_qty": 100.0}
-	# ]
-	bin = DocType("Bin")
-
-	component_stock = (
-		frappe.qb.from_(bin)
-		.select(bin.item_code, fn.Coalesce(fn.Sum(bin.actual_qty - bin.reserved_qty), 0).as_("available_qty"))
-		.where(bin.item_code.isin(component_codes))
-		.where(bin.warehouse.isin(warehouses))
-		.groupby(bin.item_code)
-		.run(as_dict=True)
-	)
-
-	# Build fast lookup map: item_code -> available_qty
-	# Components not in map are treated as having 0 stock
-	component_stock_map = {row["item_code"]: flt(row["available_qty"]) for row in component_stock}
-
-	# ===========================================================================
-	# STEP 5: Calculate Bundle Availability (Limited by Most Constrained Component)
-	# ===========================================================================
-	# For each bundle, determine how many complete bundles can be made based on
-	# component availability. The bundle quantity is limited by whichever
-	# component can make the FEWEST bundles.
-	#
-	# Formula: possible_bundles = floor(available_qty / required_qty)
-	# Final: bundle_qty = min(possible_bundles across all components)
-	#
-	# Example:
-	#   LAPTOP-COMBO components:
-	#     - LAPTOP (need 1): 50 available → 50 possible bundles
-	#     - MOUSE (need 1): 30 available → 30 possible bundles ← LIMITING FACTOR
-	#     - KEYBOARD (need 1): 100 available → 100 possible bundles
-	#   Result: LAPTOP-COMBO availability = 30 (limited by MOUSE)
 	bundle_availability = {}
 	for comp in bundle_components:
 		bundle_code = comp["bundle_code"]
@@ -1173,15 +1114,10 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 		required = flt(comp["required_qty"])
 
 		if required > 0:
-			# Calculate how many bundles this component can supply
 			possible = int(available / required)
-
-			# Update bundle availability with minimum across all components
 			if bundle_code not in bundle_availability:
-				# First component for this bundle
 				bundle_availability[bundle_code] = possible
 			else:
-				# Subsequent components - take minimum (most constrained)
 				bundle_availability[bundle_code] = min(bundle_availability[bundle_code], possible)
 
 	return bundle_availability
@@ -2263,6 +2199,80 @@ def get_stock_quantities(item_codes, warehouse):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Stock Quantities Error")
 		frappe.throw(_("Error fetching stock quantities: {0}").format(error_reason(e)))
+
+
+@frappe.whitelist()
+def get_bundle_shortages(item_codes, warehouse):
+	_assert_warehouse_in_user_scope(warehouse=warehouse)
+
+	try:
+		if isinstance(item_codes, str):
+			try:
+				item_codes = json.loads(item_codes)
+			except (json.JSONDecodeError, ValueError):
+				item_codes = [item_codes]
+
+		if not item_codes or not warehouse:
+			return {}
+
+		if not isinstance(item_codes, list | tuple | set):
+			item_codes = [item_codes]
+
+		normalized_codes = []
+		seen = set()
+		for code in item_codes:
+			clean_code = (code or "").strip() if isinstance(code, str) else code
+			if not clean_code or clean_code in seen:
+				continue
+			seen.add(clean_code)
+			normalized_codes.append(clean_code)
+
+		if not normalized_codes:
+			return {}
+
+		bundle_components, component_stock_map = _get_bundle_components_and_stock(
+			normalized_codes, warehouse
+		)
+		if not bundle_components:
+			return {}
+
+		shortages_by_bundle = {}
+		short_component_codes = set()
+		for comp in bundle_components:
+			available = component_stock_map.get(comp["component_code"], 0.0)
+			required = flt(comp["required_qty"])
+			if available < required:
+				short_component_codes.add(comp["component_code"])
+				shortages_by_bundle.setdefault(comp["bundle_code"], []).append(
+					{
+						"item_code": comp["component_code"],
+						"available_qty": available,
+						"required_qty": required,
+					}
+				)
+
+		if not shortages_by_bundle:
+			return {}
+
+		Item = DocType("Item")
+		item_rows = (
+			frappe.qb.from_(Item)
+			.select(Item.name, Item.item_name)
+			.where(Item.name.isin(list(short_component_codes)))
+			.run(as_dict=True)
+		)
+		item_name_map = {r["name"]: r["item_name"] for r in item_rows}
+
+		for items in shortages_by_bundle.values():
+			for item in items:
+				item["item_name"] = item_name_map.get(item["item_code"]) or item["item_code"]
+			items.sort(key=lambda c: (c["available_qty"] / c["required_qty"] if c["required_qty"] > 0 else 0.0))
+
+		return shortages_by_bundle
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Bundle Shortages Error")
+		frappe.throw(_("Error fetching bundle shortages: {0}").format(error_reason(e)))
 
 
 @frappe.whitelist()

@@ -3666,3 +3666,6 @@ Shipping status,Status pengiriman
 "Linked","Tertaut",""
 "Shift Slot","Slot Shift",""
 "All Shifts","Semua Shift",""
+"Short: {0}","Kurang: {0}",""
+"{0} is out of stock: {1}","{0} habis: {1}",""
+"{0} {1} left, needs {2} per item","{0} sisa {1}, butuh {2} per porsi",""

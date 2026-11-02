@@ -14,6 +14,15 @@ vi.hoisted(() => {
 
 vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn(async () => ({ message: [] })) }));
 vi.mock("@/utils/offline", () => ({ isOffline: () => false }));
+const toastMock = {
+	showError: vi.fn(),
+	showWarning: vi.fn(),
+	showSuccess: vi.fn(),
+	showInfo: vi.fn(),
+};
+vi.mock("@/composables/useToast", () => ({
+	useToast: () => toastMock,
+}));
 vi.mock("@/utils/offline/workerClient", () => ({
 	offlineWorker: new Proxy(
 		{},
@@ -61,9 +70,16 @@ describe("ItemsSelector stock blocking", () => {
 		localStorage.clear();
 		localStorage.setItem(VIEW_PREF_KEY, "grid");
 		vi.mocked(call).mockReset();
+		toastMock.showError.mockClear();
+		toastMock.showWarning.mockClear();
 	});
 
-	async function mountSelectorWithItems(items, settingsOverride = {}, viewMode = "grid") {
+	async function mountSelectorWithItems(
+		items,
+		settingsOverride = {},
+		viewMode = "grid",
+		shortageData = null
+	) {
 		localStorage.setItem(VIEW_PREF_KEY, viewMode);
 		vi.mocked(call).mockImplementation(async (url) => {
 			if (url === "pos_next.api.pos_profile.get_pos_profile_data") {
@@ -75,6 +91,10 @@ describe("ItemsSelector stock blocking", () => {
 			}
 			if (url === "pos_next.api.items.get_items") {
 				return { message: items };
+			}
+			if (url === "pos_next.api.items.get_bundle_shortages") {
+				if (shortageData instanceof Error) throw shortageData;
+				return shortageData !== null ? shortageData : {};
 			}
 			return { message: [] };
 		});
@@ -247,5 +267,209 @@ describe("ItemsSelector stock blocking", () => {
 
 		await row.trigger("click");
 		expect(wrapper.emitted("item-selected")).toBeUndefined();
+	});
+
+	it("shows short component name on bundle pill when shortage data is present", async () => {
+		const items = [
+			{
+				item_code: "BUNDLE-01",
+				item_name: "Paket Sarapan",
+				rate: 25000,
+				uom: "Pcs",
+				is_stock_item: 0,
+				is_bundle: true,
+				actual_qty: 0,
+			},
+		];
+
+		const shortageData = {
+			"BUNDLE-01": [
+				{
+					item_code: "COMP-01",
+					item_name: "Keju Cheddar",
+					available_qty: 0,
+					required_qty: 1,
+				},
+			],
+		};
+
+		const { wrapper } = await mountSelectorWithItems(
+			items,
+			{ block_out_of_stock_items: 1 },
+			"grid",
+			shortageData
+		);
+
+		await new Promise((r) => setTimeout(r, 350));
+		await flushPromises();
+
+		const bundleCard = wrapper.findAll("div.grid.grid-cols-2 > div")[0];
+		expect(bundleCard.text()).toContain("Short: Keju Cheddar");
+		expect(bundleCard.text()).not.toContain("Out of stock");
+	});
+
+	it("shows +N on bundle pill when multiple components are short", async () => {
+		const items = [
+			{
+				item_code: "BUNDLE-01",
+				item_name: "Paket Sarapan",
+				rate: 25000,
+				uom: "Pcs",
+				is_stock_item: 0,
+				is_bundle: true,
+				actual_qty: 0,
+			},
+		];
+
+		const shortageData = {
+			"BUNDLE-01": [
+				{
+					item_code: "COMP-01",
+					item_name: "Keju Cheddar",
+					available_qty: 0,
+					required_qty: 1,
+				},
+				{
+					item_code: "COMP-02",
+					item_name: "Susu UHT",
+					available_qty: 0.5,
+					required_qty: 2,
+				},
+				{
+					item_code: "COMP-03",
+					item_name: "Tepung",
+					available_qty: 0,
+					required_qty: 1,
+				},
+			],
+		};
+
+		const { wrapper } = await mountSelectorWithItems(
+			items,
+			{ block_out_of_stock_items: 1 },
+			"grid",
+			shortageData
+		);
+
+		await new Promise((r) => setTimeout(r, 350));
+		await flushPromises();
+
+		const bundleCard = wrapper.findAll("div.grid.grid-cols-2 > div")[0];
+		expect(bundleCard.text()).toContain("Short: Keju Cheddar +2");
+	});
+
+	it("falls back to Out of stock when shortage data is absent or call errors", async () => {
+		const items = [
+			{
+				item_code: "BUNDLE-01",
+				item_name: "Paket Sarapan",
+				rate: 25000,
+				uom: "Pcs",
+				is_stock_item: 0,
+				is_bundle: true,
+				actual_qty: 0,
+			},
+		];
+
+		const { wrapper } = await mountSelectorWithItems(
+			items,
+			{ block_out_of_stock_items: 1 },
+			"grid",
+			new Error("Network error")
+		);
+
+		await new Promise((r) => setTimeout(r, 350));
+		await flushPromises();
+
+		const bundleCard = wrapper.findAll("div.grid.grid-cols-2 > div")[0];
+		expect(bundleCard.text()).toContain("Out of stock");
+	});
+
+	it("shows component shortage pill in list view", async () => {
+		const items = [
+			{
+				item_code: "BUNDLE-01",
+				item_name: "Paket Sarapan",
+				rate: 25000,
+				uom: "Pcs",
+				is_stock_item: 0,
+				is_bundle: true,
+				actual_qty: 0,
+			},
+		];
+
+		const shortageData = {
+			"BUNDLE-01": [
+				{
+					item_code: "COMP-01",
+					item_name: "Keju Cheddar",
+					available_qty: 0,
+					required_qty: 1,
+				},
+			],
+		};
+
+		const { wrapper } = await mountSelectorWithItems(
+			items,
+			{ block_out_of_stock_items: 1 },
+			"list",
+			shortageData
+		);
+
+		await new Promise((r) => setTimeout(r, 350));
+		await flushPromises();
+
+		const row = wrapper.find("tbody tr[aria-disabled='true']");
+		expect(row.text()).toContain("Short: Keju Cheddar");
+		expect(row.text()).not.toContain("Out of stock");
+	});
+
+	it("displays toast with detailed shortages when blocked bundle is clicked", async () => {
+		const items = [
+			{
+				item_code: "BUNDLE-01",
+				item_name: "Paket Sarapan",
+				rate: 25000,
+				uom: "Pcs",
+				is_stock_item: 0,
+				is_bundle: true,
+				actual_qty: 0,
+			},
+		];
+
+		const shortageData = {
+			"BUNDLE-01": [
+				{
+					item_code: "COMP-01",
+					item_name: "Keju Cheddar",
+					available_qty: 0,
+					required_qty: 1,
+				},
+				{
+					item_code: "COMP-02",
+					item_name: "Susu UHT",
+					available_qty: 0.5,
+					required_qty: 2,
+				},
+			],
+		};
+
+		const { wrapper } = await mountSelectorWithItems(
+			items,
+			{ block_out_of_stock_items: 1 },
+			"grid",
+			shortageData
+		);
+
+		await new Promise((r) => setTimeout(r, 350));
+		await flushPromises();
+
+		const bundleCard = wrapper.findAll("div.grid.grid-cols-2 > div")[0];
+		await bundleCard.trigger("click");
+
+		expect(toastMock.showError).toHaveBeenCalledTimes(1);
+		expect(toastMock.showError).toHaveBeenCalledWith(
+			"Paket Sarapan is out of stock: Keju Cheddar 0 left, needs 1 per item, Susu UHT 0.5 left, needs 2 per item"
+		);
 	});
 });
