@@ -453,6 +453,83 @@ CUSTOM_FIELDS = {
 	}
 
 
+for _spend_doctype in ("Purchase Invoice", "Journal Entry", "Payment Entry"):
+	CUSTOM_FIELDS[_spend_doctype] = [
+		{
+			"fieldname": "posa_spend_section",
+			"label": "POS Spend",
+			"fieldtype": "Section Break",
+			"collapsible": 1,
+			"no_copy": 1,
+			"read_only": 1,
+		},
+		{
+			"fieldname": "posa_client_request_id",
+			"label": "Client Request ID",
+			"fieldtype": "Data",
+			"unique": 1,
+			"length": 64,
+		},
+		{
+			"fieldname": "posa_spend_template",
+			"label": "Spend Template",
+			"fieldtype": "Link",
+			"options": "POS Spend Template",
+		},
+		{
+			"fieldname": "posa_pos_profile",
+			"label": "POS Profile",
+			"fieldtype": "Link",
+			"options": "POS Profile",
+		},
+		{
+			"fieldname": "posa_pos_opening_shift",
+			"label": "POS Opening Shift",
+			"fieldtype": "Link",
+			"options": "POS Opening Shift",
+			"search_index": 1,
+		},
+		{
+			"fieldname": "posa_shift_account",
+			"label": "Shift Account",
+			"fieldtype": "Link",
+			"options": "Account",
+		},
+		{"fieldname": "posa_vendor_name", "label": "Vendor Name", "fieldtype": "Data"},
+		{
+			"fieldname": "posa_spend_status",
+			"label": "Spend Status",
+			"fieldtype": "Select",
+			"options": "\nRequested\nNeeds Review",
+		},
+		{
+			"fieldname": "posa_correction_of_type",
+			"label": "Correction Of Type",
+			"fieldtype": "Link",
+			"options": "DocType",
+		},
+		{
+			"fieldname": "posa_correction_of",
+			"label": "Correction Of",
+			"fieldtype": "Dynamic Link",
+			"options": "posa_correction_of_type",
+		},
+	]
+	_previous = "posa_spend_section"
+	for _field in CUSTOM_FIELDS[_spend_doctype][1:]:
+		_field.update(no_copy=1, read_only=1, insert_after=_previous)
+		_previous = _field["fieldname"]
+CUSTOM_FIELDS["Supplier"] = [
+	{
+		"fieldname": "posa_is_walk_in_supplier",
+		"label": "Is Walk-in Supplier",
+		"fieldtype": "Check",
+		"no_copy": 1,
+		"insert_after": "supplier_name",
+	},
+]
+
+
 def ensure_site_indexes():
 	"""Run the site-level DDL index patches, skipping indexes that already exist.
 
