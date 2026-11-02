@@ -283,6 +283,8 @@ def get_sales_monitoring(
 	from_date = _parse_date(from_date) or get_first_day(to_date)
 	if to_date > today:
 		to_date = today
+	if from_date > today:
+		from_date = today
 	if from_date > to_date:
 		frappe.throw(_("From Date cannot be after To Date"))
 	if (to_date - from_date).days > MAX_RANGE_DAYS:
