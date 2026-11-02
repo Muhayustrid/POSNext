@@ -408,6 +408,30 @@ describe("SessionSummary", () => {
 		expect(months.text()).toContain("Sales by Month")
 	})
 
+	it("filters a period recap by shift slot", async () => {
+		resources.instances.length = 0
+		const wrapper = mountSummary({ posProfile: "Kasir 1" })
+		// shift lens has no slot bar
+		expect(wrapper.find('[data-test="slot-bar"]').exists()).toBe(false)
+		await wrapper.find('[data-test="period-chip-today"]').trigger("click")
+		const entry = resources.instances.find(
+			(i) => i.url === "pos_next.api.shifts.get_period_summary",
+		)
+		entry.resource.data = {
+			...SUMMARY,
+			opening_shift: undefined,
+			shift_slots: ["SHIFT 1", "SHIFT 2"],
+		}
+		entry.resource.loading = false
+		await flushPromises()
+		expect(entry.opts.makeParams().shift_slot).toBeUndefined()
+
+		entry.resource.reload.mockClear()
+		await wrapper.find('[data-test="slot-chip-SHIFT 2"]').trigger("click")
+		expect(entry.opts.makeParams().shift_slot).toBe("SHIFT 2")
+		expect(entry.resource.reload).toHaveBeenCalled()
+	})
+
 	it("hides the trend card when the payload has no buckets", async () => {
 		const { wrapper } = await mountWithSummary({ hourly: [] })
 		expect(wrapper.find('[data-test="trend-section"]').exists()).toBe(false)

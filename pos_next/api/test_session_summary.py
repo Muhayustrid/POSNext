@@ -1193,6 +1193,24 @@ class TestSessionSummary(IntegrationTestCase):
 		self.assertEqual(after_old["net_sales"], before_old["net_sales"] + 1000)
 		self.assertEqual(after_old["sales_count"], before_old["sales_count"] + 1)
 
+	def test_period_filters_by_shift_slot(self):
+		today = frappe.utils.nowdate()
+		before = get_period_summary(self.pos_profile, today, today, "_SESSUM Slot B")
+		shift_a = self._make_opening_shift(opening_cash=3000)
+		self._make_invoice_on(shift_a, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=1000)
+		self._close_shift(shift_a)
+		shift_b = self._make_opening_shift(opening_cash=4000, user=self.second_cashier)
+		self._make_invoice_on(shift_b, [{"item": self.item_b, "qty": 2, "rate": 250}], paid=500)
+		# the slot is snapshotted from the Shift Group at open; set it directly
+		frappe.db.set_value("POS Opening Shift", shift_a, "shift_slot", "_SESSUM Slot A")
+		frappe.db.set_value("POS Opening Shift", shift_b, "shift_slot", "_SESSUM Slot B")
+
+		after = get_period_summary(self.pos_profile, today, today, "_SESSUM Slot B")
+		self.assertEqual(after["shift_slot"], "_SESSUM Slot B")
+		self.assertEqual(after["shift_count"], before["shift_count"] + 1)
+		self.assertEqual(after["net_sales"], before["net_sales"] + 500)
+		self.assertEqual(after["opening_cash"], before["opening_cash"] + 4000)
+
 	def test_period_agrees_with_session_summary(self):
 		"""Both endpoints share one aggregation: the period delta equals the
 		lone shift's own session summary, section by section."""

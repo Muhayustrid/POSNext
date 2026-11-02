@@ -61,11 +61,12 @@ def shift_scope(opening_shift):
 	)
 
 
-def period_scope(pos_profile, from_date, to_date):
+def period_scope(pos_profile, from_date, to_date, shift_slot=None):
 	"""Every submitted invoice posted in [from_date, to_date] under any shift of
 	the profile (all cashiers), plus the drawers of the shifts opened in that
 	window — a shift crossing midnight is attributed to its opening day, the
-	same rule a per-shift closing follows.
+	same rule a per-shift closing follows. ``shift_slot`` narrows both lists to
+	the shifts opened in that Shift Group slot.
 
 	Outlet attribution goes through the shift link, the key every other recap
 	surface (closing, session summary) uses — never through the invoice's own
@@ -78,9 +79,12 @@ def period_scope(pos_profile, from_date, to_date):
 	# `IN (SELECT os.name ...)` subquery selected, minus the subquery itself,
 	# which used to re-probe tabPOS Opening Shift in every union branch of
 	# every recap query.
+	filters = {"docstatus": 1, "pos_profile": pos_profile}
+	if shift_slot:
+		filters["shift_slot"] = shift_slot
 	rows = frappe.get_all(
 		"POS Opening Shift",
-		filters={"docstatus": 1, "pos_profile": pos_profile},
+		filters=filters,
 		fields=["name", "posting_date"],
 	)
 	shifts = [

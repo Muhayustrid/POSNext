@@ -156,6 +156,7 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 					__("Period"),
 					`${fmtDate(summary.period_from)} - ${fmtDate(summary.period_to)}`,
 				),
+				...(summary.shift_slot ? [row(__("Shift Slot"), summary.shift_slot)] : []),
 				row(__("Shifts"), String(summary.shift_count ?? 0)),
 			]
 	header.push(row(__("Print Date"), fmtDateTime(printedAt)))
@@ -297,7 +298,9 @@ export async function printSalesRecap(summary, { posProfile = null } = {}) {
 
 /** Default download name for a summary's PDF export (see downloadRecapPDF). */
 export function recapPDFFilename(summary) {
-	const reference = summary.opening_shift || summary.pos_profile || "recap"
+	const reference =
+		summary.opening_shift ||
+		[summary.pos_profile || "recap", summary.shift_slot].filter(Boolean).join(" ")
 	return `${__("Sales Recap")} ${reference}.pdf`
 }
 

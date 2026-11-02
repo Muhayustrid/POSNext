@@ -591,7 +591,7 @@ MAX_PERIOD_DAYS = 366
 
 @frappe.whitelist()
 @rate_limit(limit=30, seconds=60)
-def get_period_summary(pos_profile, from_date, to_date):
+def get_period_summary(pos_profile, from_date, to_date, shift_slot=None):
 	"""Sales recap of one POS Profile over a posting-date range, all cashiers.
 
 	Same sections and money semantics as get_session_summary, aggregated over
@@ -600,7 +600,8 @@ def get_period_summary(pos_profile, from_date, to_date):
 	Cash figures (opening float, Payment Entries) come from the shifts opened
 	in the window, so a shift crossing midnight is attributed to its opening
 	day — the rule a per-shift closing follows too. Period presets are the
-	client's job; the server only accepts explicit dates.
+	client's job; the server only accepts explicit dates. ``shift_slot``
+	narrows the recap to shifts opened in that Shift Group slot.
 
 	Security: members of the profile and management users (the profile pins
 	the company, and naming another outlet's profile is refused).
@@ -621,7 +622,7 @@ def get_period_summary(pos_profile, from_date, to_date):
 	from_date, to_date = _validate_period(from_date, to_date)
 
 	cash_mode = get_cash_mode_of_payment(pos_profile)
-	scope = period_scope(pos_profile, from_date, to_date)
+	scope = period_scope(pos_profile, from_date, to_date, shift_slot)
 	summary = {
 		"pos_profile": pos_profile,
 		"company": profile.company,
@@ -630,6 +631,9 @@ def get_period_summary(pos_profile, from_date, to_date):
 		"period_from": from_date,
 		"period_to": to_date,
 		"shift_count": len(scope.shifts),
+		"shift_slot": shift_slot or None,
+		# slot filter options: the profile's Shift Group slots
+		"shift_slots": [slot["shift_name"] for slot in get_profile_slots(pos_profile)],
 		"generated_at": get_datetime(),
 	}
 	summary.update(build_recap(scope, cash_mode, pos_profile))
@@ -639,7 +643,9 @@ def get_period_summary(pos_profile, from_date, to_date):
 
 
 @frappe.whitelist()
-def export_sales_recap(opening_shift=None, pos_profile=None, from_date=None, to_date=None):
+def export_sales_recap(
+	opening_shift=None, pos_profile=None, from_date=None, to_date=None, shift_slot=None
+):
 	"""The sales recap (shift or period) as one .xlsx sheet: totals, payments,
 	items. Same gates as the on-screen recap — it is built by those endpoints."""
 	from frappe.utils.xlsxutils import build_xlsx_response
@@ -648,8 +654,10 @@ def export_sales_recap(opening_shift=None, pos_profile=None, from_date=None, to_
 		s = get_session_summary(opening_shift)
 		title = opening_shift
 	else:
-		s = get_period_summary(pos_profile, from_date, to_date)
+		s = get_period_summary(pos_profile, from_date, to_date, shift_slot)
 		title = f"{pos_profile} {s['period_from']} - {s['period_to']}"
+		if shift_slot:
+			title = f"{title} {shift_slot}"
 
 	rows = [
 		[_("Sales Recap"), title],

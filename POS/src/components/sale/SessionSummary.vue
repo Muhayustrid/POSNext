@@ -66,6 +66,32 @@
 			</DateRangePicker>
 		</div>
 
+		<!-- Shift slot filter: the profile's Shift Group slots, period views only -->
+		<div
+			v-if="!isShiftMode && slotOptions.length"
+			class="inline-flex self-start overflow-x-auto rounded-xl bg-gray-100 p-1"
+			role="group"
+			:aria-label="__('Shift Slot')"
+			data-test="slot-bar"
+		>
+			<button
+				v-for="opt in [{ value: '', label: __('All Shifts') }, ...slotOptions]"
+				:key="opt.value"
+				type="button"
+				class="min-h-9 whitespace-nowrap rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors"
+				:class="
+					shiftSlot === opt.value
+						? 'bg-white text-blue-700 shadow-sm'
+						: 'text-gray-600 hover:text-gray-900'
+				"
+				:data-test="`slot-chip-${opt.value || 'all'}`"
+				:aria-pressed="shiftSlot === opt.value"
+				@click="shiftSlot = opt.value"
+			>
+				{{ opt.label }}
+			</button>
+		</div>
+
 		<!-- Mobile period sheet: presets as full-width rows; custom keeps the
 		     sheet open for its date inputs and Apply. -->
 		<BottomSheet :open="sheetOpen" :title="__('Period')" @update:open="sheetOpen = $event">
@@ -167,7 +193,7 @@
 						class="truncate text-xs text-gray-500 tabular-nums"
 						data-test="period-info"
 					>
-						{{ periodLabel }} · {{ __("Shifts") }} {{ summary.shift_count ?? 0 }} ·
+						{{ periodLabel }}<template v-if="summary.shift_slot"> · {{ summary.shift_slot }}</template> · {{ __("Shifts") }} {{ summary.shift_count ?? 0 }} ·
 						{{ __("All cashiers") }}
 					</p>
 				</div>
@@ -787,6 +813,13 @@ const periodOptions = computed(() => [
 	{ value: "custom", label: __("Custom Range") },
 ])
 
+// "" = every slot. Options come from the last period response, so the bar
+// survives a reload filtered to one slot.
+const shiftSlot = ref("")
+const slotOptions = computed(() =>
+	(periodResource.data?.shift_slots || []).map((name) => ({ value: name, label: name })),
+)
+
 const stale = ref(false)
 const printing = ref(false)
 const exporting = ref(false)
@@ -818,6 +851,7 @@ async function exportExcel() {
 						pos_profile: props.posProfile,
 						from_date: range.value?.from,
 						to_date: range.value?.to,
+						shift_slot: shiftSlot.value || undefined,
 					},
 		)
 	} catch (error) {
@@ -846,6 +880,7 @@ const periodResource = createResource({
 			pos_profile: props.posProfile,
 			from_date: range.value?.from,
 			to_date: range.value?.to,
+			shift_slot: shiftSlot.value || undefined,
 		}
 	},
 	auto: false,
@@ -873,7 +908,7 @@ function refresh() {
 }
 
 watch(
-	[() => props.openingShift, period, range],
+	[() => props.openingShift, period, range, shiftSlot],
 	([shift]) => {
 		stale.value = false
 		if (!shift && isShiftMode.value) {
