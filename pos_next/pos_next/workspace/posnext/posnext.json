@@ -375,7 +375,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-30 14:00:00.000000",
+ "modified": "2026-11-01 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
@@ -538,13 +538,6 @@
    "link_to": "Stock Reconciliation",
    "stats_filter": "{\"workflow_state\": \"Approval Pending by Accounts Manager\"}",
    "type": "DocType"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "",
-   "label": "Direct Print",
-   "type": "URL",
-   "url": "/pos/direct-print"
   }
  ],
  "title": "POSNext"
