@@ -1,0 +1,28 @@
+{
+ "doctype": "DocType",
+ "name": "POS Spend Template Payment Source",
+ "module": "POS Next",
+ "engine": "InnoDB",
+ "field_order": [
+  "mode_of_payment",
+  "is_default"
+ ],
+ "fields": [
+  {
+   "fieldname": "mode_of_payment",
+   "label": "Mode Of Payment",
+   "fieldtype": "Link",
+   "options": "Mode of Payment",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "is_default",
+   "label": "Is Default",
+   "fieldtype": "Check",
+   "in_list_view": 1
+  }
+ ],
+ "permissions": [],
+ "istable": 1
+}

@@ -1,0 +1,28 @@
+{
+ "doctype": "DocType",
+ "name": "POS Spend Template Item",
+ "module": "POS Next",
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_group"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "label": "Item Code",
+   "fieldtype": "Link",
+   "options": "Item",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "item_group",
+   "label": "Item Group",
+   "fieldtype": "Link",
+   "options": "Item Group",
+   "in_list_view": 1
+  }
+ ],
+ "permissions": [],
+ "istable": 1
+}

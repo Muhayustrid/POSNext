@@ -1,0 +1,185 @@
+{
+ "doctype": "DocType",
+ "name": "POS Spend Template",
+ "module": "POS Next",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "category",
+  "enabled",
+  "document_type",
+  "payment_timing",
+  "update_stock",
+  "debit_account_strategy",
+  "reference_company",
+  "reference_debit_account",
+  "default_supplier",
+  "allow_supplier_change",
+  "require_vendor_name",
+  "apply_purchase_tax",
+  "requires_attachment",
+  "max_amount",
+  "over_limit_policy",
+  "items",
+  "payment_sources",
+  "companies",
+  "roles"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "label": "Title",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "category",
+   "label": "Category",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "enabled",
+   "label": "Enabled",
+   "fieldtype": "Check",
+   "default": "1"
+  },
+  {
+   "fieldname": "document_type",
+   "label": "Document Type",
+   "fieldtype": "Select",
+   "options": "Journal Entry\nPurchase Invoice",
+   "reqd": 1
+  },
+  {
+   "fieldname": "payment_timing",
+   "label": "Payment Timing",
+   "fieldtype": "Select",
+   "options": "Pay Now\nPay Later",
+   "default": "Pay Now",
+   "reqd": 1
+  },
+  {
+   "fieldname": "update_stock",
+   "label": "Update Stock",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "debit_account_strategy",
+   "label": "Debit Account Strategy",
+   "fieldtype": "Select",
+   "options": "Template Account\nItem Default",
+   "default": "Template Account",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_company",
+   "label": "Reference Company",
+   "fieldtype": "Link",
+   "options": "Company"
+  },
+  {
+   "fieldname": "reference_debit_account",
+   "label": "Reference Debit Account",
+   "fieldtype": "Link",
+   "options": "Account"
+  },
+  {
+   "fieldname": "default_supplier",
+   "label": "Default Supplier",
+   "fieldtype": "Link",
+   "options": "Supplier"
+  },
+  {
+   "fieldname": "allow_supplier_change",
+   "label": "Allow Supplier Change",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "require_vendor_name",
+   "label": "Require Vendor Name",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "apply_purchase_tax",
+   "label": "Apply Purchase Tax",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "requires_attachment",
+   "label": "Requires Attachment",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "max_amount",
+   "label": "Max Amount",
+   "fieldtype": "Currency",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "over_limit_policy",
+   "label": "Over Limit Policy",
+   "fieldtype": "Select",
+   "options": "\nRequest First\nRecord and Flag"
+  },
+  {
+   "fieldname": "items",
+   "label": "Items",
+   "fieldtype": "Table",
+   "options": "POS Spend Template Item"
+  },
+  {
+   "fieldname": "payment_sources",
+   "label": "Payment Sources",
+   "fieldtype": "Table",
+   "options": "POS Spend Template Payment Source"
+  },
+  {
+   "fieldname": "companies",
+   "label": "Companies",
+   "fieldtype": "Table",
+   "options": "POS Spend Template Company"
+  },
+  {
+   "fieldname": "roles",
+   "label": "Roles",
+   "fieldtype": "Table",
+   "options": "POS Spend Template Role"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "POSNext Manager",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "autoname": "field:title",
+ "title_field": "title",
+ "track_changes": 1
+}

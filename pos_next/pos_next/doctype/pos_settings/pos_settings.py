@@ -99,6 +99,23 @@ class POSSettings(Document):
 				)
 
 		self.guard_code_switches()
+		self.validate_shift_spend_sources()
+
+	def validate_shift_spend_sources(self):
+		if not self.get("posa_shift_spend_sources"):
+			return
+		if not self.pos_profile:
+			frappe.throw(_("Shift spend sources require a POS Profile; no global fallback is allowed."))
+		from pos_next.services.spend_accounts import resolve_payment_account
+
+		profile = frappe.get_doc("POS Profile", self.pos_profile)
+		payments = {row.mode_of_payment for row in profile.payments}
+		seen = set()
+		for row in self.posa_shift_spend_sources:
+			if row.mode_of_payment not in payments or row.mode_of_payment in seen:
+				frappe.throw(_("Each shift spend source must be a unique POS Profile payment method."))
+			seen.add(row.mode_of_payment)
+			resolve_payment_account(row.mode_of_payment, profile.company)
 
 	def guard_code_switches(self):
 		"""Only a System Manager may change what the code gate resolves to for

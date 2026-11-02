@@ -10,6 +10,8 @@
   "column_break_profile",
   "enabled",
   "invoice_type",
+  "section_break_spend",
+  "posa_shift_spend_sources",
   "tab_sales",
   "section_break_general",
   "allow_user_to_edit_additional_discount",
@@ -139,6 +141,8 @@
   "barcode_rules"
  ],
  "fields": [
+  {"fieldname": "section_break_spend", "fieldtype": "Section Break", "label": "Spend"},
+  {"fieldname": "posa_shift_spend_sources", "fieldtype": "Table", "label": "Shift Spend Sources", "options": "POS Shift Spend Source"},
   {
    "fieldname": "tab_general",
    "fieldtype": "Tab Break",

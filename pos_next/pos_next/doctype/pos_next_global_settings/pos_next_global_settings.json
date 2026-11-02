@@ -5,6 +5,7 @@
  "engine": "InnoDB",
  "field_order": [
   "tab_general",
+  "spend_reference_company",
   "section_break_invoice_target",
   "invoice_type",
   "column_break_invoice_target",
@@ -153,6 +154,7 @@
   "barcode_rules"
  ],
  "fields": [
+  {"fieldname": "spend_reference_company", "fieldtype": "Link", "label": "Spend Reference Company", "options": "Company"},
   {
    "fieldname": "tab_general",
    "fieldtype": "Tab Break",

@@ -1,0 +1,21 @@
+{
+ "doctype": "DocType",
+ "name": "POS Spend Template Role",
+ "module": "POS Next",
+ "engine": "InnoDB",
+ "field_order": [
+  "role"
+ ],
+ "fields": [
+  {
+   "fieldname": "role",
+   "label": "Role",
+   "fieldtype": "Link",
+   "options": "Role",
+   "reqd": 1,
+   "in_list_view": 1
+  }
+ ],
+ "permissions": [],
+ "istable": 1
+}

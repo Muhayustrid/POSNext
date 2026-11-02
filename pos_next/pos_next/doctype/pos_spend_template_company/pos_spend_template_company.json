@@ -1,0 +1,45 @@
+{
+ "doctype": "DocType",
+ "name": "POS Spend Template Company",
+ "module": "POS Next",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "debit_account",
+  "cost_center",
+  "purchase_taxes_template"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "options": "Company",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "debit_account",
+   "label": "Debit Account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "label": "Cost Center",
+   "fieldtype": "Link",
+   "options": "Cost Center",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "purchase_taxes_template",
+   "label": "Purchase Taxes Template",
+   "fieldtype": "Link",
+   "options": "Purchase Taxes and Charges Template",
+   "in_list_view": 1
+  }
+ ],
+ "permissions": [],
+ "istable": 1
+}
