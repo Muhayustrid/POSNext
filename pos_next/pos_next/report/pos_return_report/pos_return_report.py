@@ -30,7 +30,7 @@ from pos_next.invoice_type import (
 
 _INVOICE_COLS = (
 	"si.name, si.posting_date, si.posting_time, si.return_against,"
-	" si.company, si.pos_profile, si.owner, si.customer"
+	" si.company, si.pos_profile, si.owner, si.customer, si.refund_confirmation_code"
 )
 
 
@@ -103,6 +103,8 @@ def get_columns(by_item):
 		{"fieldname": "pos_profile", "label": _("POS Profile"), "fieldtype": "Link", "options": "POS Profile", "width": 140},
 		{"fieldname": "owner", "label": _("Cashier"), "fieldtype": "Link", "options": "User", "width": 160},
 		{"fieldname": "customer", "label": _("Customer"), "fieldtype": "Link", "options": "Customer", "width": 150},
+		{"fieldname": "refund_code", "label": _("Refund Code"), "fieldtype": "Data", "width": 110},
+		{"fieldname": "refund_code_owner", "label": _("Code Created By"), "fieldtype": "Link", "options": "User", "width": 160},
 		{"fieldname": "currency", "label": _("Currency"), "fieldtype": "Link", "options": "Currency", "hidden": 1},
 	]
 	if by_item:
@@ -153,7 +155,7 @@ def get_data(filters, by_item=False):
 		rows = frappe.db.sql(
 			f"""
 			SELECT sii.doctype, sii.name, sii.posting_date, sii.posting_time, sii.return_against,
-				sii.company, sii.pos_profile, sii.owner, sii.customer, sii.item_code, sii.item_name,
+				sii.company, sii.pos_profile, sii.owner, sii.customer, sii.refund_confirmation_code, sii.item_code, sii.item_name,
 				ABS(sii.qty) AS qty, ABS(sii.base_amount) AS amount
 			FROM {source}
 			WHERE {package_sold_row_filter('base_amount')}
@@ -166,7 +168,7 @@ def get_data(filters, by_item=False):
 		rows = frappe.db.sql(
 			f"""
 			SELECT doctype, name, posting_date, posting_time, return_against, company,
-				pos_profile, owner, customer, ABS(total_qty) AS qty, ABS(base_grand_total) AS amount
+				pos_profile, owner, customer, refund_confirmation_code, ABS(total_qty) AS qty, ABS(base_grand_total) AS amount
 			FROM {sales_invoice_union("'{dt}' AS doctype, " + _INVOICE_COLS + ", si.total_qty, si.base_grand_total", where)}
 			ORDER BY posting_date DESC, posting_time DESC, name DESC
 			""",
@@ -175,7 +177,13 @@ def get_data(filters, by_item=False):
 		)
 
 	currency_map = _currency_map(scope["companies"])
+	codes = {(r.refund_confirmation_code or "").strip().upper() for r in rows} - {""}
+	code_owners = dict(
+		frappe.get_all("POS Refund Code", filters={"code": ["in", list(codes)]}, fields=["code", "owner"], as_list=True)
+	) if codes else {}
 	for r in rows:
+		r.refund_code = (r.pop("refund_confirmation_code", None) or "").strip().upper()
+		r.refund_code_owner = code_owners.get(r.refund_code)
 		r.posting_time = str(r.posting_time).split(".")[0].zfill(8)[:5] if r.posting_time is not None else ""
 		r.currency = currency_map.get(r.company)
 		r.qty = flt(r.qty)

@@ -34,4 +34,10 @@ describe("CompanyPicker", () => {
 		expect(wrapper.emitted("update:modelValue")).toBeUndefined()
 		wrapper.unmount()
 	})
+
+	it("hides the Company label when asked", () => {
+		const wrapper = mount(CompanyPicker, { props: { modelValue: "JURI GROUP", options, hideLabel: true } })
+		expect(wrapper.text()).not.toContain("Company")
+		wrapper.unmount()
+	})
 })

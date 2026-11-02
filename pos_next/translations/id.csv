@@ -3673,3 +3673,5 @@ Shipping status,Status pengiriman
 "{0}: system cash {1} -> {2}, Modal Awal stays {3} ({4})","{0}: kas sistem {1} -> {2}, Modal Awal tetap {3} ({4})",""
 "This shift was changed by another backdate entry. Closing amounts were recalculated from {0}; check them and the invoice rows before saving.","Shift ini sudah diubah oleh entri backdate lain. Nominal closing dihitung ulang dari {0}; periksa kembali angka tersebut dan baris faktur sebelum menyimpan.",""
 "Previously counted {0}: {1}","Hitungan sebelumnya {0}: {1}",""
+"Created by {0} on {1}","Dibuat oleh {0} pada {1}",""
+"Code Created By","Kode Dibuat Oleh",""

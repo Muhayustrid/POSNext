@@ -1376,6 +1376,14 @@ class TestHQMonitoring(IntegrationTestCase):
 		self.assertEqual(len(row.posting_time), 5)
 		self.assertEqual(chart["data"]["datasets"][0]["values"], [row.amount])
 		self.assertEqual(summary[1]["value"], row.amount)
+		self.assertEqual((row.refund_code, row.refund_code_owner), ("", None))
+
+		code = frappe.get_doc({"doctype": "POS Refund Code", "status": "Active"}).insert()
+		frappe.db.set_value(row.doctype, row.name, "refund_confirmation_code", code.code.lower())
+		columns, rows = execute(base)[:2]
+		row = rows[0]
+		self.assertIn("refund_code_owner", [c["fieldname"] for c in columns])
+		self.assertEqual((row.refund_code, row.refund_code_owner), (code.code, ADMIN))
 
 		columns, items = execute({**base, "group_by": "Item"})[:2]
 		self.assertIn("item_code", [c["fieldname"] for c in columns])

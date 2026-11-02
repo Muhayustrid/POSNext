@@ -4,6 +4,13 @@
 frappe.ui.form.on("POS Refund Code", {
 	refresh(frm) {
 		if (frm.is_new()) return;
+		frm.set_intro(
+			__("Created by {0} on {1}", [
+				frappe.utils.escape_html(frappe.user.full_name(frm.doc.owner)),
+				frappe.datetime.str_to_user(frm.doc.creation),
+			]),
+			"blue"
+		);
 
 		frm.add_custom_button(__("View Usage"), () => {
 			frappe.set_route("List", "POS Invoice", {
