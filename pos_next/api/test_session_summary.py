@@ -655,6 +655,27 @@ class TestSessionSummary(IntegrationTestCase):
 			[(c["item_code"], c["qty"]) for c in eod[(self.pkg_parent, 1)].components], [(self.item_a, -1)]
 		)
 
+		# Sales per item counts package contents toward their own item; the
+		# zero-money package line drops out, the money still reconciles
+		expected = {
+			(self.item_a, False): (1, 30000),
+			(self.item_a, True): (-1, -30000),
+			(self.pkg_component, False): (2, 20000),
+		}
+		self.assertEqual(
+			{(r["item_code"], r["is_return"]): (r["qty"], r["base_net_amount"]) for r in summary["sales_per_item"]},
+			expected,
+		)
+		from pos_next.pos_next.utils.pos_closing_print import _fetch_per_item_for_targets
+
+		self.assertEqual(
+			{
+				(r["item_code"], r["is_return"]): (r["qty"], r["amount"])
+				for r in _fetch_per_item_for_targets({(sale, "Sales Invoice"), (ret, "Sales Invoice")})
+			},
+			expected,
+		)
+
 	def test_legacy_mode_package_with_instance_keeps_its_price(self):
 		shift = self._make_opening_shift(opening_cash=0)
 		sale = self._make_invoice_on(
@@ -677,6 +698,11 @@ class TestSessionSummary(IntegrationTestCase):
 			[(self.pkg_parent, 1, 50000)],
 		)
 		self.assertEqual(summary["items"], [])
+		# legacy pricing keeps the money on the package line, so it stays listed
+		self.assertEqual(
+			{r["item_code"]: (r["qty"], r["base_net_amount"]) for r in summary["sales_per_item"]},
+			{self.pkg_parent: (1, 50000), self.pkg_component: (2, 0)},
+		)
 
 	def test_credit_return_without_payments_excluded(self):
 		"""Mirror closing: a return with no payment rows moved no money."""

@@ -296,6 +296,7 @@ class TestGetSalesRecap(FrappeTestCase):
 				"payment_discount": 0.0,
 				"refund_total": 0.0,
 				"categories": [],
+				"sales_per_item": [],
 			},
 		)
 

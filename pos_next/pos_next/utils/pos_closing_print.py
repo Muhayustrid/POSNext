@@ -8,7 +8,12 @@ from frappe.query_builder import DocType
 from frappe.utils import flt
 from pypika.functions import Sum
 
-from pos_next.invoice_type import package_components, package_sold_amount, package_sold_row_filter
+from pos_next.invoice_type import (
+	package_components,
+	package_sold_amount,
+	package_sold_row_filter,
+	per_item_row_filter,
+)
 
 _TAX_KEYWORDS = ("PPN", "TAX", "VAT", "PAJAK")
 _SERVICE_KEYWORDS = ("SERVICE", "JASA", "CHARGE")
@@ -230,6 +235,37 @@ def _fetch_grouped_items_for_targets(parent_targets: set[tuple[str, str]]) -> li
 	return rows
 
 
+def _fetch_per_item_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]:
+	"""Sales per item: package contents count toward their own item, so an
+	item sold alone and inside packages prints as one line. Returns keep
+	their own line, as in Sales per Category."""
+	merged: dict[tuple[str, bool], dict] = {}
+	for doctype in ("Sales Invoice", "POS Invoice"):
+		parents = sorted(parent for parent, parenttype in parent_targets if parenttype == doctype)
+		if not parents:
+			continue
+		rows = frappe.db.sql(
+			f"""
+			SELECT sii.item_code, MAX(sii.item_name) AS item_name, si.is_return,
+				SUM(sii.qty) AS qty, SUM(sii.amount) AS amount
+			FROM `tab{doctype} Item` sii
+			JOIN `tab{doctype}` si ON si.name = sii.parent
+			WHERE sii.parent IN %(parents)s AND {per_item_row_filter("amount")}
+			GROUP BY sii.item_code, si.is_return
+			""",
+			{"parents": parents},
+			as_dict=True,
+		)
+		for row in rows:
+			key = (row.item_code, bool(row.is_return))
+			bucket = merged.setdefault(
+				key, {"item_code": key[0], "item_name": row.item_name, "is_return": key[1], "qty": 0.0, "amount": 0.0}
+			)
+			bucket["qty"] = flt(bucket["qty"] + flt(row.qty), 2)
+			bucket["amount"] = flt(bucket["amount"] + flt(row.amount), 2)
+	return sorted(merged.values(), key=lambda r: r["amount"], reverse=True)
+
+
 def _collect_categories(rows: list[dict]) -> list[dict]:
 	grouped: dict[str, dict] = {}
 
@@ -368,4 +404,5 @@ def get_sales_recap(doc) -> dict:
 			2,
 		),
 		"categories": _collect_categories(_fetch_grouped_items_for_targets(parent_targets)),
+		"sales_per_item": _fetch_per_item_for_targets(parent_targets) if parent_targets else [],
 	}

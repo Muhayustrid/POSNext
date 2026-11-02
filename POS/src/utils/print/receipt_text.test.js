@@ -249,6 +249,10 @@ describe("buildEodTextJob", () => {
 					],
 				},
 			],
+			sales_per_item: [
+				{ qty: 5, item_name: "Ropi Butter", amount: 50000, is_return: false },
+				{ qty: 1, item_name: "Roti Keju", amount: -12000, is_return: true },
+			],
 		},
 	}
 
@@ -290,6 +294,9 @@ describe("buildEodTextJob", () => {
 			"Bread",
 			"2x Roti Coklat",
 			"  2x Plastik Roti",
+			"1x Roti Keju (Return)",
+			"SALES PER ITEM",
+			"5x Ropi Butter",
 			"1x Roti Keju (Return)",
 			"-- Akhir Laporan --",
 		]

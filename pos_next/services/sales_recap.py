@@ -24,6 +24,7 @@ from pos_next.invoice_type import (
 	package_components,
 	package_sold_amount,
 	package_sold_row_filter,
+	per_item_row_filter,
 	sales_invoice_item_union,
 	sales_invoice_union,
 )
@@ -135,6 +136,7 @@ def build_recap(scope, cash_mode, pos_profile):
 	recap.update(_aggregate_items(scope))
 	recap.update(_aggregate_charges(scope))
 	recap.update(_aggregate_categories(scope))
+	recap["sales_per_item"] = _aggregate_sales_per_item(scope)
 	# item_discount joins the invoice_discount already reported by totals
 	recap.update(_aggregate_discounts(scope))
 	recap["total_discount"] = flt(recap.get("item_discount", 0) + recap.get("invoice_discount", 0))
@@ -304,7 +306,7 @@ _INVOICE_COLUMNS = (
 _ITEM_COLUMNS = (
 	"sii.parent, sii.item_code, sii.item_name, sii.item_group, sii.qty,"
 	f" {package_sold_amount()} AS base_net_amount, sii.price_list_rate, sii.rate,"
-	" sii.pos_package_role, sii.pos_package_instance"
+	" sii.pos_package_role, sii.pos_package_instance, sii.base_net_amount AS row_net_amount"
 )
 
 # The hourly rollup reads the posting timestamp the shared projection doesn't
@@ -766,6 +768,36 @@ def _aggregate_categories(scope, limit=20):
 		"categories_total_groups": total_groups,
 		"categories_truncated": total_groups > len(rows),
 	}
+
+
+def _aggregate_sales_per_item(scope):
+	"""Sales per item for the printed recap: package contents count toward
+	their own item (unlike the category view, where a package is one line), so
+	the same item sold alone and in packages prints once. Returns keep their
+	own line."""
+	rows = frappe.db.sql(
+		f"""
+		SELECT sii.item_code, MAX(sii.item_name) AS item_name, si.is_return,
+			SUM(sii.qty) AS qty, SUM(sii.row_net_amount) AS base_net_amount
+		FROM {_item_from(scope)}
+		JOIN {_invoice_from(scope)} ON si.name = sii.parent
+		WHERE {per_item_row_filter("row_net_amount")}
+		GROUP BY sii.item_code, si.is_return
+		ORDER BY base_net_amount DESC
+		""",
+		scope.values,
+		as_dict=True,
+	)
+	return [
+		{
+			"item_code": row.item_code,
+			"item_name": row.item_name,
+			"is_return": bool(cint(row.is_return)),
+			"qty": flt(row.qty),
+			"base_net_amount": flt(row.base_net_amount),
+		}
+		for row in rows
+	]
 
 
 def _aggregate_discounts(scope):

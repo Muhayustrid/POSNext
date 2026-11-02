@@ -251,6 +251,18 @@ export function buildRecapHTML(summary, { printedAt = new Date() } = {}) {
 			),
 		)
 	}
+	const perItem = (summary.sales_per_item || []).map((i) =>
+		itemRow(
+			i.qty,
+			`${i.item_name || i.item_code}${i.is_return ? ` (${__("Return")})` : ""}`,
+			money(i.base_net_amount),
+		),
+	)
+	body.push(
+		DIVIDER,
+		title(__("SALES PER ITEM")),
+		...(perItem.length ? perItem : [note("-")]),
+	)
 	body.push(DIVIDER, `<div class="footer">${__("-- Akhir Laporan --")}</div>`)
 
 	return `<!DOCTYPE html>

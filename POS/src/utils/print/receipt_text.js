@@ -534,6 +534,20 @@ export function buildEodTextJob(data, { cols } = {}) {
 	}
 	s.rule(c)
 
+	s.text("SALES PER ITEM", { align: ALIGN_CENTER, bold: true })
+	const perItem = r.sales_per_item || []
+	if (perItem.length > 0) {
+		for (const item of perItem) {
+			const lead = `${formatQty(item.qty || 0)}x `
+			const ret = item.is_return ? " (Return)" : ""
+			const itemName = `${lead}${item.item_name || item.item_code || ""}${ret}`
+			s.lines(leftRight(itemName, formatRupiah(item.amount || 0), c, lead.length))
+		}
+	} else {
+		s.text("-", { align: ALIGN_CENTER })
+	}
+	s.rule(c)
+
 	s.text("-- Akhir Laporan --", { align: ALIGN_CENTER })
 	return s.ops
 }

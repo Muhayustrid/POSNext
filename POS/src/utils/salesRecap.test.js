@@ -187,6 +187,7 @@ describe("buildRecapHTML", () => {
 			"DISCOUNT",
 			"REFUND",
 			"SALES PER CATEGORY",
+			"SALES PER ITEM",
 			"-- Akhir Laporan --",
 		]
 		let last = -1
@@ -202,6 +203,22 @@ describe("buildRecapHTML", () => {
 		// EOD's category section nests items under the category name; there is
 		// no separate ITEMS SOLD section to drift out of sync with it.
 		expect(html).not.toContain("ITEMS SOLD")
+	})
+
+	it("lists sales per item with returns on their own line", () => {
+		const html = buildRecapHTML(
+			{
+				...PERIOD_SUMMARY,
+				sales_per_item: [
+					{ item_code: "RP001", item_name: "Ropi Butter", qty: 5, base_net_amount: 50000, is_return: false },
+					{ item_code: "RP001", item_name: "Ropi Butter", qty: -1, base_net_amount: -10000, is_return: true },
+				],
+			},
+			{ printedAt },
+		)
+		const section = html.slice(html.indexOf("SALES PER ITEM"))
+		expect(section).toContain("5x Ropi Butter")
+		expect(section).toContain("-1x Ropi Butter (Return)")
 	})
 
 	it("prints the period header for a date-range recap", () => {

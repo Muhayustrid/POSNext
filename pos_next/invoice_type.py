@@ -207,6 +207,17 @@ def package_sold_row_filter(amount="base_net_amount"):
 	)
 
 
+def per_item_row_filter(amount="base_net_amount"):
+	"""SQL condition (``sii`` alias) for the per-item sales list: package
+	contents count toward their own item. A zero-money package line is dropped
+	(its money sits on the components); one that carries money (legacy pricing)
+	stays so the list still adds up to the sales total."""
+	return (
+		f"(ifnull(sii.pos_package_role, '') = '' OR sii.{amount} <> 0"
+		" OR (ifnull(sii.pos_package_instance, '') <> '' AND sii.pos_package_role = 'Package Item'))"
+	)
+
+
 def package_components(rows):
 	"""Contents of the packages sold, for printing under each package line.
 
