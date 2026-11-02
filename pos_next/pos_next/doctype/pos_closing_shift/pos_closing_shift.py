@@ -172,7 +172,7 @@ class POSClosingShift(Document):
 		# POS Backdate Entry re-closes this shift in the same transaction and
 		# moves the handover onto the new closing, so nothing is left dangling.
 		if frappe.flags.pos_next_backdate_entry:
-			self.ignore_linked_doctypes = ("POS Opening Shift",)
+			self.ignore_linked_doctypes = ("POS Opening Shift", "POS Backdate Entry")
 			return
 		handover_openings = frappe.db.get_all(
 			"POS Opening Shift",

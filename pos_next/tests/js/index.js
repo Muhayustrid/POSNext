@@ -6,3 +6,4 @@
 // name.
 require("./hq_monitoring_utils.test.cjs");
 require("./hq_ux_rules.test.cjs");
+require("./pos_backdate_entry.test.cjs");

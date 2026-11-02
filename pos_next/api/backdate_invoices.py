@@ -275,6 +275,7 @@ def get_shift_context(pos_opening_shift):
 	code_gate = get_status(pos_profile=shift.pos_profile)
 
 	closing_counts = []
+	closing_period_end = None
 	if shift.pos_closing_shift:
 		closing_counts = frappe.get_all(
 			"POS Closing Shift Detail",
@@ -282,6 +283,8 @@ def get_shift_context(pos_opening_shift):
 			fields=["mode_of_payment", "opening_amount", "expected_amount", "closing_amount", "difference"],
 			order_by="idx",
 		)
+		period_end = frappe.db.get_value("POS Closing Shift", shift.pos_closing_shift, "period_end_date")
+		closing_period_end = str(period_end) if period_end else None
 
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import get_pos_invoices
 
@@ -304,6 +307,8 @@ def get_shift_context(pos_opening_shift):
 
 	return {
 		"shift": shift,
+		"current_closing": shift.pos_closing_shift or "",
+		"closing_period_end": closing_period_end,
 		"shift_period": shift_period,
 		"default_customer": default_customer,
 		"payment_modes": payment_modes,

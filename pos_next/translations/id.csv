@@ -3669,3 +3669,7 @@ Shipping status,Status pengiriman
 "Short: {0}","Kurang: {0}",""
 "{0} is out of stock: {1}","{0} habis: {1}",""
 "{0} {1} left, needs {2} per item","{0} sisa {1}, butuh {2} per porsi",""
+"Shift {0} was changed by another backdate entry (closing {1} is now {2}). Reload this entry and check the amounts again.","Shift {0} sudah diubah oleh entri backdate lain (closing {1} sekarang {2}). Muat ulang entri ini dan periksa kembali angkanya.",""
+"{0}: system cash {1} -> {2}, Modal Awal stays {3} ({4})","{0}: kas sistem {1} -> {2}, Modal Awal tetap {3} ({4})",""
+"This shift was changed by another backdate entry. Closing amounts were recalculated from {0}; check them and the invoice rows before saving.","Shift ini sudah diubah oleh entri backdate lain. Nominal closing dihitung ulang dari {0}; periksa kembali angka tersebut dan baris faktur sebelum menyimpan.",""
+"Previously counted {0}: {1}","Hitungan sebelumnya {0}: {1}",""

@@ -32,10 +32,16 @@ frappe.ui.form.on("POS Backdate Entry", {
 			const [d, t] = system_now()
 			frm.doc.closing_date = d
 			frm.doc.closing_time = t
+		} else {
+			restore_touched_closing_modes(frm)
 		}
 		if (frm.doc.pos_opening_shift) {
 			load_shift_context(frm)
 		}
+	},
+
+	closing_date(frm) {
+		fetch_packages(frm)
 	},
 
 	refresh(frm) {
@@ -53,7 +59,11 @@ frappe.ui.form.on("POS Backdate Entry", {
 			}
 		}
 
-		if (frm.doc.pos_opening_shift && !frm._shift_context) {
+		if (
+			frm.doc.pos_opening_shift &&
+			!frm._shift_context &&
+			!frm._loading_shift_context
+		) {
 			load_shift_context(frm)
 		} else if (frm._shift_context) {
 			render_shift_invoices(frm)
@@ -297,16 +307,51 @@ frappe.ui.form.on("POS Backdate Entry Closing Payment", {
 
 function load_shift_context(frm) {
 	if (!frm.doc.pos_opening_shift) return
+	if (
+		frm._loading_shift_context &&
+		frm._loading_opening_shift === frm.doc.pos_opening_shift
+	)
+		return
+	frm._loading_shift_context = true
+	frm._loading_opening_shift = frm.doc.pos_opening_shift
 	frm._prev_opening_shift = frm.doc.pos_opening_shift
+	const requested_shift = frm.doc.pos_opening_shift
+	// each request gets its own token: only the latest one may apply or clear the in-flight flag
+	const request_id = (frm._shift_context_request_id || 0) + 1
+	frm._shift_context_request_id = request_id
+	const is_latest = () => frm._shift_context_request_id === request_id
 
 	frappe.call({
 		method: "pos_next.api.backdate_invoices.get_shift_context",
-		args: { pos_opening_shift: frm.doc.pos_opening_shift },
+		args: { pos_opening_shift: requested_shift },
 		freeze: true,
 		freeze_message: __("Loading shift context..."),
+		// always fires on success, error and statuses frappe handles itself (timeouts, deadlocks)
+		always: () => {
+			if (!is_latest()) return
+			frm._loading_shift_context = false
+			frm._loading_opening_shift = null
+		},
 		callback: (r) => {
+			// a late response from a superseded request or another shift is ignored
+			if (!is_latest() || frm.doc.pos_opening_shift !== requested_shift) return
 			if (!r.message) return
 			const ctx = r.message
+			const current_closing =
+				ctx.current_closing || ctx.shift?.pos_closing_shift || ""
+
+			// If closing shift is already pinned to a different closing on a new form,
+			// do not overwrite context/pin without recalculating amounts. Keep the pin
+			// matching the data used so the server stale guard will reject it.
+			if (
+				frm.is_new() &&
+				frm.doc.cancelled_closing_shift &&
+				current_closing &&
+				frm.doc.cancelled_closing_shift !== current_closing
+			) {
+				return
+			}
+
 			frm._shift_context = ctx
 
 			if (ctx.shift) {
@@ -315,16 +360,71 @@ function load_shift_context(frm) {
 				if (ctx.shift_period) frm.set_value("shift_period", ctx.shift_period)
 			}
 
+			if (frm.doc.docstatus === 0 && frm.is_new() && ctx.closing_period_end) {
+				const m =
+					typeof moment !== "undefined"
+						? moment(ctx.closing_period_end)
+						: null
+				const is_valid = m
+					? typeof m.isValid === "function"
+						? m.isValid()
+						: true
+					: false
+				if (m && is_valid) {
+					frm.set_value("closing_date", m.format("YYYY-MM-DD"))
+					frm.set_value("closing_time", m.format("HH:mm:ss"))
+				} else {
+					const parts = String(ctx.closing_period_end).split(" ")
+					frm.set_value("closing_date", parts[0])
+					frm.set_value("closing_time", parts[1] || "00:00:00")
+				}
+			}
+
 			resolve_cash_mode(frm)
 			fetch_packages(frm)
 			render_shift_invoices(frm)
 			toggle_confirmation_code(frm)
 
-			if (
-				frm.doc.docstatus === 0 &&
-				(!frm.doc.closing_payments || !frm.doc.closing_payments.length)
-			) {
-				recompute_closing_payments(frm)
+			if (frm.doc.docstatus === 0) {
+				if (frm.is_new()) {
+					if (!frm.doc.cancelled_closing_shift) {
+						frm.set_value("cancelled_closing_shift", current_closing)
+					}
+					if (!frm.doc.closing_payments || !frm.doc.closing_payments.length) {
+						recompute_closing_payments(frm)
+					}
+				} else {
+					const has_closing_payments = Boolean(
+						frm.doc.closing_payments && frm.doc.closing_payments.length,
+					)
+					const is_stale =
+						(!frm.doc.cancelled_closing_shift && has_closing_payments) ||
+						(frm.doc.cancelled_closing_shift &&
+							current_closing &&
+							frm.doc.cancelled_closing_shift !== current_closing)
+
+					if (is_stale) {
+						frm.set_value("cancelled_closing_shift", current_closing)
+						frm.doc.closing_payments = []
+						frm._touched_closing_modes = new Set()
+						recompute_closing_payments(frm)
+						if (typeof frm.dirty === "function") frm.dirty()
+						frappe.msgprint(
+							__(
+								"This shift was changed by another backdate entry. Closing amounts were recalculated from {0}; check them and the invoice rows before saving.",
+								[current_closing],
+							),
+						)
+					} else {
+						if (!frm.doc.cancelled_closing_shift) {
+							frm.set_value("cancelled_closing_shift", current_closing)
+						}
+						restore_touched_closing_modes(frm)
+						if (!has_closing_payments) {
+							recompute_closing_payments(frm)
+						}
+					}
+				}
 			}
 		},
 	})
@@ -497,9 +597,20 @@ function clear_entry_data(frm) {
 	frm.doc.items = []
 	frm.doc.payments = []
 	frm.doc.closing_payments = []
+	frm.doc.cancelled_closing_shift = ""
+	frm._shift_context = null
 	frm._touched_closing_modes = new Set()
 	frm._touched_payment_rows = new Set()
-	frm.refresh_fields(["invoices", "items", "payments", "closing_payments"])
+	if (typeof frm.set_df_property === "function") {
+		frm.set_df_property("closing_payments", "description", "")
+	}
+	frm.refresh_fields([
+		"invoices",
+		"items",
+		"payments",
+		"closing_payments",
+		"cancelled_closing_shift",
+	])
 }
 
 function refresh_invoice_no_options(frm) {
@@ -874,6 +985,17 @@ function recompute_all(frm) {
 	recompute_closing_payments(frm)
 }
 
+function restore_touched_closing_modes(frm) {
+	// closing follows expected by default; a saved row only keeps its amount when it differs.
+	// shortcut: a count typed equal to expected follows expected after reopen, store a flag if that matters
+	frm._touched_closing_modes = frm._touched_closing_modes || new Set()
+	;(frm.doc.closing_payments || []).forEach((row) => {
+		if (row.mode_of_payment && flt(row.closing_amount) !== flt(row.expected_amount)) {
+			frm._touched_closing_modes.add(row.mode_of_payment)
+		}
+	})
+}
+
 function recompute_closing_payments(frm) {
 	if (!frm._shift_context || !frm._shift_context.closing_counts) return
 	frm._touched_closing_modes = frm._touched_closing_modes || new Set()
@@ -947,8 +1069,7 @@ function recompute_closing_payments(frm) {
 		if (frm._touched_closing_modes.has(mode) && existing) {
 			closing_amount = flt(existing.closing_amount)
 		} else {
-			const is_cash = mode === cash_mode || mode.toLowerCase().includes("cash")
-			closing_amount = is_cash ? old.closing_amount : new_expected
+			closing_amount = new_expected
 		}
 
 		const diff = flt(closing_amount - new_expected, 2)
@@ -961,6 +1082,29 @@ function recompute_closing_payments(frm) {
 			difference: diff,
 		})
 	})
+
+	const old_cash_row = old_counts.find(
+		(r) =>
+			r.mode_of_payment === cash_mode ||
+			r.mode_of_payment?.toLowerCase().includes("cash"),
+	)
+	if (old_cash_row && typeof frm.set_df_property === "function") {
+		const formatted_old =
+			typeof format_currency === "function"
+				? format_currency(
+						old_cash_row.closing_amount,
+						frm._shift_context.currency,
+					)
+				: old_cash_row.closing_amount
+		frm.set_df_property(
+			"closing_payments",
+			"description",
+			__(
+				"Previously counted {0}: {1}",
+				[old_cash_row.mode_of_payment || cash_mode, formatted_old],
+			),
+		)
+	}
 
 	frm.refresh_field("closing_payments")
 }
@@ -1216,4 +1360,13 @@ function prompt_edit_package(frm) {
 		},
 	})
 	d.show()
+}
+
+if (typeof module !== "undefined" && module.exports) {
+	module.exports = {
+		load_shift_context,
+		clear_entry_data,
+		recompute_closing_payments,
+		restore_touched_closing_modes,
+	}
 }

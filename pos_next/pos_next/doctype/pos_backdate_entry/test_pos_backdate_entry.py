@@ -753,9 +753,10 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			frappe.db.set_value("POS Opening Shift", successor.name, "docstatus", 2, update_modified=False)
 			frappe.delete_doc("POS Opening Shift", successor.name, force=1, ignore_permissions=True)
 
-	def test_backdate_carries_accepted_modal_awal_into_closed_successor(self):
+	def test_backdate_leaves_closed_successor_untouched(self):
 		# Successor accepted the proposal as its Modal Awal and already closed:
-		# Modal Awal and the successor closing's expected cash follow the backdate.
+		# backdate updates the proposed amount and repoints handover_from, but
+		# leaves Modal Awal and the successor closing untouched.
 		cash = next(iter(get_modal_awal_modes(self.profile.name)))
 		if cash not in self.mode:
 			self.skipTest("modal awal mode is not a profile payment method")
@@ -783,6 +784,12 @@ class TestPOSBackdateEntry(FrappeTestCase):
 		).insert(ignore_permissions=True)
 		successor.submit()
 		successor_closing = submit_closing_shift(json.dumps(get_closing_shift_data(successor.name)))["name"]
+		before_closing_row = frappe.db.get_value(
+			"POS Closing Shift Detail",
+			{"parent": successor_closing, "parentfield": "payment_reconciliation", "mode_of_payment": cash},
+			["opening_amount", "expected_amount", "closing_amount", "difference"],
+			as_dict=True,
+		)
 		try:
 			bde = self._make_bde(
 				items=[{"invoice_no": 1, "item_code": self.item, "qty": 1, "rate": 50.0, "warehouse": self.profile.warehouse}],
@@ -797,7 +804,7 @@ class TestPOSBackdateEntry(FrappeTestCase):
 				["amount", "proposed_amount"],
 				as_dict=True,
 			)
-			self.assertEqual(flt(opening_row.amount), 150.0)
+			self.assertEqual(flt(opening_row.amount), 100.0)
 			self.assertEqual(flt(opening_row.proposed_amount), 150.0)
 			closing_row = frappe.db.get_value(
 				"POS Closing Shift Detail",
@@ -805,11 +812,28 @@ class TestPOSBackdateEntry(FrappeTestCase):
 				["opening_amount", "expected_amount", "closing_amount", "difference"],
 				as_dict=True,
 			)
-			self.assertEqual(flt(closing_row.opening_amount), 150.0)
-			self.assertEqual(flt(closing_row.expected_amount), 150.0)
-			# closed at expected (accepted, not counted), so it follows too
-			self.assertEqual(flt(closing_row.closing_amount), 150.0)
-			self.assertEqual(flt(closing_row.difference), 0.0)
+			self.assertEqual(flt(closing_row.opening_amount), 100.0)
+			self.assertEqual(flt(closing_row.expected_amount), flt(before_closing_row.expected_amount))
+			self.assertEqual(flt(closing_row.closing_amount), flt(before_closing_row.closing_amount))
+			self.assertEqual(flt(closing_row.difference), flt(before_closing_row.difference))
+
+			self.assertEqual(
+				frappe.db.get_value("POS Opening Shift", successor.name, "handover_from"),
+				bde.new_closing_shift,
+			)
+
+			comments = frappe.get_all(
+				"Comment",
+				filters={
+					"reference_doctype": "POS Opening Shift",
+					"reference_name": successor.name,
+				},
+				pluck="content",
+			)
+			self.assertTrue(
+				any(bde.name in c and "150" in c for c in comments),
+				f"Expected comment referencing {bde.name} and 150, got {comments}",
+			)
 		finally:
 			for doctype, name in (("POS Closing Shift", successor_closing), ("POS Opening Shift", successor.name)):
 				frappe.db.set_value(doctype, name, "docstatus", 2, update_modified=False)
@@ -1394,7 +1418,7 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			bde_sale_with_return.insert()
 		self.assertIn("submitted return exists against it", str(ctx.exception))
 
-		# C. Cannot correct invoice that has already been amended
+		# C. Invoice with amended_from set (and no submitted amendment) passes insert
 		frappe.db.set_value(self.doctype, orig_amended["name"], "amended_from", "PREV-INV-001")
 		try:
 			bde_amended = self._make_bde(
@@ -1410,9 +1434,8 @@ class TestPOSBackdateEntry(FrappeTestCase):
 					}
 				]
 			)
-			with self.assertRaises(frappe.ValidationError) as ctx:
-				bde_amended.insert()
-			self.assertIn("has already been amended", str(ctx.exception))
+			bde_amended.insert()
+			bde_amended.delete()
 		finally:
 			frappe.db.set_value(self.doctype, orig_amended["name"], "amended_from", None)
 
@@ -1496,10 +1519,15 @@ class TestPOSBackdateEntry(FrappeTestCase):
 	# ---------------------------------------------------------------------------
 	def test_helper_get_shift_context(self):
 		self._submit_original_sale()
-		self._close_shift()
+		closing = self._close_shift()
 
 		# A. Happy path returns context payload with warehouse, currency, etc.
 		ctx = get_shift_context(self.shift.name)
+		self.assertEqual(ctx["current_closing"], closing)
+		self.assertEqual(
+			ctx["closing_period_end"],
+			str(frappe.db.get_value("POS Closing Shift", closing, "period_end_date")),
+		)
 		self.assertEqual(ctx["shift"]["name"], self.shift.name)
 		self.assertEqual(ctx["warehouse"], self.profile.warehouse)
 		expected_currency = frappe.get_cached_value("Company", self.profile.company, "default_currency")
@@ -1609,3 +1637,171 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			self.assertIn("disabled", str(c.exception))
 		finally:
 			frappe.db.set_value("POS Settings", self.settings_name, "allow_change_posting_date", 1)
+
+	def test_second_entry_corrects_invoice_created_by_first_correction(self):
+		_set_invoice_type(SALES_INVOICE)
+		self.doctype = SALES_INVOICE
+		try:
+			orig, _ = self._submit_original_sale(qty=1, rate=100.0, mode_of_payment=self.mode[0])
+			self._close_shift()
+
+			def corr(against, rate):
+				return self._make_bde(
+					invoices=[
+						{
+							"invoice_no": 1,
+							"entry_type": "Correction",
+							"against_invoice": against,
+							"against_doctype": self.doctype,
+							"customer": self.customer,
+							"posting_date": add_days(nowdate(), -1),
+							"posting_time": "10:00:00",
+						}
+					],
+					items=[
+						{
+							"invoice_no": 1,
+							"item_code": self.item,
+							"qty": 1,
+							"rate": rate,
+							"warehouse": self.profile.warehouse,
+						}
+					],
+					payments=[{"invoice_no": 1, "mode_of_payment": self.mode[0], "amount": rate}],
+				)
+
+			first = corr(orig["name"], 80.0)
+			first.insert()
+			first.submit()
+			x = first.invoices[0].created_invoice
+			second = corr(x, 60.0)
+			second.insert()
+			second.submit()
+
+			self.assertEqual(frappe.db.get_value(self.doctype, x, "docstatus"), 2)
+			y = second.invoices[0].created_invoice
+			self.assertEqual(frappe.db.get_value(self.doctype, y, "amended_from"), x)
+			self.assertEqual(second.cancelled_closing_shift, first.new_closing_shift)
+			self.assertEqual(frappe.db.get_value("POS Closing Shift", first.new_closing_shift, "docstatus"), 2)
+			expected = frappe.db.get_value(
+				"POS Closing Shift Detail",
+				{"parent": second.new_closing_shift, "mode_of_payment": self.mode[0]},
+				"expected_amount",
+			)
+			self.assertEqual(flt(expected), 60.0)
+			# the cancelled original can never be corrected again
+			third = corr(orig["name"], 50.0)
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				third.insert()
+			self.assertIn("must be submitted", str(ctx.exception))
+		finally:
+			_set_invoice_type(self._invoice_type_baseline)
+
+	def test_stale_draft_is_rejected_after_another_entry(self):
+		_set_invoice_type(SALES_INVOICE)
+		self.doctype = SALES_INVOICE
+		try:
+			self._submit_original_sale(qty=1, rate=100.0)
+			old_closing = self._close_shift()
+			a = self._make_bde()
+			a.insert()
+			b = self._make_bde()
+			b.insert()
+			self.assertEqual(b.cancelled_closing_shift, old_closing)
+			a.submit()
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				b.submit()
+			self.assertIn("changed by another backdate entry", str(ctx.exception))
+			self.assertEqual(frappe.db.get_value("POS Backdate Entry", b.name, "docstatus"), 0)
+			# re-based draft goes through
+			b.reload()
+			b.cancelled_closing_shift = a.new_closing_shift
+			b.closing_payments = []
+			b.submit()
+			self.assertEqual(b.cancelled_closing_shift, a.new_closing_shift)
+		finally:
+			_set_invoice_type(self._invoice_type_baseline)
+
+	def test_new_entry_prepared_before_another_entry_is_rejected_on_first_save(self):
+		_set_invoice_type(SALES_INVOICE)
+		self.doctype = SALES_INVOICE
+		try:
+			self._submit_original_sale(qty=1, rate=100.0)
+			old_closing = self._close_shift()
+			# the form pins the closing it loaded before the first save
+			b = self._make_bde()
+			b.cancelled_closing_shift = old_closing
+			a = self._make_bde()
+			a.insert()
+			a.submit()
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				b.insert()
+			self.assertIn("changed by another backdate entry", str(ctx.exception))
+		finally:
+			_set_invoice_type(self._invoice_type_baseline)
+
+	def test_legacy_draft_without_cancelled_closing_shift_detected_if_stale(self):
+		_set_invoice_type(SALES_INVOICE)
+		self.doctype = SALES_INVOICE
+		try:
+			self._submit_original_sale(qty=1, rate=100.0)
+			old_closing = self._close_shift()
+			legacy = self._make_bde()
+			legacy.insert()
+			# Simulate a legacy draft saved in DB before cancelled_closing_shift was introduced
+			frappe.db.set_value("POS Backdate Entry", legacy.name, "cancelled_closing_shift", None)
+			legacy.reload()
+			self.assertIsNone(legacy.cancelled_closing_shift)
+
+			# If shift closing has not changed, validate infers old_closing
+			legacy.validate()
+			self.assertEqual(legacy.cancelled_closing_shift, old_closing)
+
+			# Now another entry submits, shifting the closing to a new closing
+			other = self._make_bde()
+			other.insert()
+			other.submit()
+			new_closing = other.new_closing_shift
+
+			# Legacy draft still has cancelled_closing_shift as None in DB
+			frappe.db.set_value("POS Backdate Entry", legacy.name, "cancelled_closing_shift", None)
+			legacy.reload()
+			self.assertIsNone(legacy.cancelled_closing_shift)
+
+			# When legacy draft tries to submit, it detects closing changed since creation
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				legacy.submit()
+			self.assertIn("changed by another backdate entry", str(ctx.exception))
+			self.assertEqual(frappe.db.get_value("POS Backdate Entry", legacy.name, "docstatus"), 0)
+
+			# Re-based legacy draft can submit cleanly
+			legacy.reload()
+			legacy.cancelled_closing_shift = new_closing
+			legacy.closing_payments = []
+			legacy.submit()
+			self.assertEqual(legacy.cancelled_closing_shift, new_closing)
+			self.assertEqual(frappe.db.get_value("POS Backdate Entry", legacy.name, "docstatus"), 1)
+		finally:
+			_set_invoice_type(self._invoice_type_baseline)
+
+	def test_execute_submit_locking_read_detects_interleaved_closing_change(self):
+		_set_invoice_type(SALES_INVOICE)
+		self.doctype = SALES_INVOICE
+		try:
+			self._submit_original_sale(qty=1, rate=100.0)
+			old_closing = self._close_shift()
+			bde = self._make_bde()
+			bde.insert()
+			self.assertEqual(bde.cancelled_closing_shift, old_closing)
+
+			# Simulate concurrent transaction updating pos_closing_shift in DB before lock is acquired
+			orig_closing_in_db = frappe.db.get_value("POS Opening Shift", bde.pos_opening_shift, "pos_closing_shift")
+			frappe.db.set_value("POS Opening Shift", bde.pos_opening_shift, "pos_closing_shift", "INTERLEAVED-CLOSING-001")
+			try:
+				with self.assertRaises(frappe.ValidationError) as ctx:
+					bde._execute_submit()
+				self.assertIn("changed by another backdate entry", str(ctx.exception))
+			finally:
+				frappe.db.set_value("POS Opening Shift", bde.pos_opening_shift, "pos_closing_shift", orig_closing_in_db)
+		finally:
+			_set_invoice_type(self._invoice_type_baseline)

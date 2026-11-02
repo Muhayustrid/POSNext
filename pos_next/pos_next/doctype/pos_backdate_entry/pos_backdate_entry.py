@@ -19,6 +19,8 @@ from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _submi
 from pos_next.services.cash_mode import get_modal_awal_modes
 from pos_next.utils import error_reason
 
+STALE_MSG = "Shift {0} was changed by another backdate entry (closing {1} is now {2}). Reload this entry and check the amounts again."
+
 
 class POSBackdateEntry(Document):
 	def validate(self):
@@ -53,6 +55,35 @@ class POSBackdateEntry(Document):
 		if frappe.db.get_value("POS Closing Shift", shift.pos_closing_shift, "docstatus") != 1:
 			frappe.throw(
 				_("POS Closing Shift {0} is not submitted").format(shift.pos_closing_shift),
+				title=_("Backdate Entry"),
+			)
+		if not self.cancelled_closing_shift:
+			if self.is_new() or not self.creation:
+				self.cancelled_closing_shift = shift.pos_closing_shift
+			else:
+				# Legacy draft saved before cancelled_closing_shift was tracked:
+				# determine which closing was active when this draft was created.
+				orig_closing = frappe.db.sql(
+					"""SELECT name FROM `tabPOS Closing Shift`
+					WHERE pos_opening_shift = %s AND creation <= %s
+					ORDER BY creation DESC LIMIT 1""",
+					(self.pos_opening_shift, self.creation),
+					pluck="name",
+				)
+				if orig_closing:
+					self.cancelled_closing_shift = orig_closing[0]
+				else:
+					closing_created = frappe.db.get_value(
+						"POS Closing Shift", shift.pos_closing_shift, "creation"
+					)
+					if closing_created and closing_created > self.creation:
+						self.cancelled_closing_shift = "unknown"
+					else:
+						self.cancelled_closing_shift = shift.pos_closing_shift
+
+		if self.cancelled_closing_shift != shift.pos_closing_shift:
+			frappe.throw(
+				_(STALE_MSG).format(self.pos_opening_shift, self.cancelled_closing_shift, shift.pos_closing_shift),
 				title=_("Backdate Entry"),
 			)
 		if self.company and self.company != shift.company:
@@ -245,7 +276,7 @@ class POSBackdateEntry(Document):
 				against_info = frappe.db.get_value(
 					inv.against_doctype,
 					inv.against_invoice,
-					("docstatus", "is_return", "posa_pos_opening_shift", "amended_from"),
+					("docstatus", "is_return", "posa_pos_opening_shift"),
 					as_dict=True,
 				)
 				if not against_info or against_info.docstatus != 1:
@@ -273,16 +304,9 @@ class POSBackdateEntry(Document):
 
 				if inv.entry_type == "Correction":
 					# R10: Corrections blocked when unsafe
-					if against_info.amended_from:
-						frappe.throw(
-							_("Invoice No. {0}: Invoice {1} has already been amended.").format(
-								inv.invoice_no, inv.against_invoice
-							),
-							title=_("Backdate Entry"),
-						)
 					already_amended = (
-						frappe.db.exists("POS Invoice", {"amended_from": inv.against_invoice})
-						or frappe.db.exists("Sales Invoice", {"amended_from": inv.against_invoice})
+						frappe.db.exists("POS Invoice", {"amended_from": inv.against_invoice, "docstatus": 1})
+						or frappe.db.exists("Sales Invoice", {"amended_from": inv.against_invoice, "docstatus": 1})
 					)
 					if already_amended:
 						frappe.throw(
@@ -382,19 +406,22 @@ class POSBackdateEntry(Document):
 			frappe.flags.pos_next_backdate_entry = prev_flag
 
 	def _execute_submit(self):
-		# 1. Lock POS Opening Shift row
-		frappe.db.sql(
-			"SELECT name FROM `tabPOS Opening Shift` WHERE name = %s FOR UPDATE",
+		# 1. Lock POS Opening Shift row and read latest committed state
+		shift_rows = frappe.db.sql(
+			"""SELECT docstatus, status, pos_closing_shift
+			FROM `tabPOS Opening Shift`
+			WHERE name = %s FOR UPDATE""",
 			self.pos_opening_shift,
-		)
-		shift = frappe.db.get_value(
-			"POS Opening Shift",
-			self.pos_opening_shift,
-			("docstatus", "status", "pos_closing_shift"),
 			as_dict=True,
 		)
+		shift = shift_rows[0] if shift_rows else None
 		if not shift or shift.docstatus != 1 or shift.status != "Closed" or not shift.pos_closing_shift:
 			frappe.throw(_("Shift {0} is not closed").format(self.pos_opening_shift), title=_("Backdate Entry"))
+		if self.cancelled_closing_shift != shift.pos_closing_shift:
+			frappe.throw(
+				_(STALE_MSG).format(self.pos_opening_shift, self.cancelled_closing_shift, shift.pos_closing_shift),
+				title=_("Backdate Entry"),
+			)
 
 		# 2. Cancel submitted closing shift
 		reopen_res = _reopen(self.pos_opening_shift)
@@ -522,11 +549,15 @@ class POSBackdateEntry(Document):
 		self.db_set("new_closing_shift", new_closing)
 
 		# 5. The shift that took this shift's cash now takes it from the new closing
-		_move_handover(self.cancelled_closing_shift, new_closing, self.pos_profile)
+		_move_handover(self.cancelled_closing_shift, new_closing, self.pos_profile, self.name)
 
 
-def _move_handover(old_closing, new_closing, pos_profile):
-	"""Repoint handover_from and refresh the proposed (system) cash amounts."""
+def _move_handover(old_closing, new_closing, pos_profile, entry):
+	"""Repoint handover_from and refresh proposed amounts.
+
+	A backdate corrects records, not the cash that was physically handed over:
+	Modal Awal and later shifts are never rewritten.
+	"""
 	openings = frappe.get_all(
 		"POS Opening Shift",
 		filters={"handover_from": old_closing, "docstatus": ["!=", 2]},
@@ -544,78 +575,36 @@ def _move_handover(old_closing, new_closing, pos_profile):
 		)
 		if d.mode_of_payment in modal_awal_modes
 	}
+	def fmt(v):
+		return frappe.format_value(v, {"fieldtype": "Currency"})
+
 	for opening in openings:
 		frappe.db.set_value("POS Opening Shift", opening, "handover_from", new_closing)
-		_apply_handover(opening, expected, modal_awal_modes)
+		changes = []
+		for row in frappe.get_all(
+			"POS Opening Shift Detail",
+			filters={"parent": opening, "parenttype": "POS Opening Shift"},
+			fields=["name", "mode_of_payment", "amount", "proposed_amount"],
+		):
+			new_proposed = flt(expected.get(row.mode_of_payment, 0))
+			old_proposed = flt(row.proposed_amount)
+			frappe.db.set_value("POS Opening Shift Detail", row.name, "proposed_amount", new_proposed)
+			if row.mode_of_payment in modal_awal_modes and old_proposed != new_proposed:
+				changes.append((row.mode_of_payment, old_proposed, new_proposed, flt(row.amount)))
+
+		lines = [_("Cash handover moved from {0} to {1} by backdate entry").format(old_closing, new_closing)]
+		for mode, old, new, amount in changes:
+			lines.append(
+				_("{0}: system cash {1} -> {2}, Modal Awal stays {3} ({4})").format(
+					mode, fmt(old), fmt(new), fmt(amount), entry
+				)
+			)
 		frappe.get_doc(
 			{
 				"doctype": "Comment",
 				"comment_type": "Info",
 				"reference_doctype": "POS Opening Shift",
 				"reference_name": opening,
-				"content": _("Cash handover moved from {0} to {1} by backdate entry").format(
-					old_closing, new_closing
-				),
+				"content": "<br>".join(lines),
 			}
 		).insert(ignore_permissions=True)
-
-
-def _apply_handover(opening, expected, modal_awal_modes):
-	"""Set proposed amounts on an opening; carry them into Modal Awal and onward.
-
-	A Modal Awal equal to the old proposal was accepted as-is, not counted, so it
-	follows the new proposal. That shift's closing expected cash and every later
-	handover in the chain move by the same delta; closing cash moves too unless it
-	was counted differently from expected.
-	"""
-	delta = {}
-	for row in frappe.get_all(
-		"POS Opening Shift Detail",
-		filters={"parent": opening, "parenttype": "POS Opening Shift"},
-		fields=["name", "mode_of_payment", "amount", "proposed_amount"],
-	):
-		new = flt(expected.get(row.mode_of_payment, 0))
-		values = {"proposed_amount": new}
-		if (
-			row.mode_of_payment in modal_awal_modes
-			and flt(row.amount) == flt(row.proposed_amount)
-			and flt(row.amount) != new
-		):
-			values["amount"] = new
-			delta[row.mode_of_payment] = new - flt(row.amount)
-		frappe.db.set_value("POS Opening Shift Detail", row.name, values)
-	if not delta:
-		return
-
-	closing = frappe.db.get_value("POS Closing Shift", {"pos_opening_shift": opening, "docstatus": 1})
-	if not closing:
-		return
-	next_expected = {}
-	for d in frappe.get_all(
-		"POS Closing Shift Detail",
-		filters={"parent": closing, "parenttype": "POS Closing Shift", "parentfield": "payment_reconciliation"},
-		fields=["name", "mode_of_payment", "opening_amount", "expected_amount", "closing_amount"],
-	):
-		shift = delta.get(d.mode_of_payment, 0)
-		new_expected = flt(d.expected_amount) + shift
-		if d.mode_of_payment in modal_awal_modes:
-			next_expected[d.mode_of_payment] = new_expected
-		if shift:
-			# Same rule as Modal Awal: a closing equal to expected was accepted, not counted.
-			closing_amount = flt(d.closing_amount)
-			if closing_amount == flt(d.expected_amount):
-				closing_amount = new_expected
-			frappe.db.set_value(
-				"POS Closing Shift Detail",
-				d.name,
-				{
-					"opening_amount": flt(d.opening_amount) + shift,
-					"expected_amount": new_expected,
-					"closing_amount": closing_amount,
-					"difference": closing_amount - new_expected,
-				},
-			)
-	for successor in frappe.get_all(
-		"POS Opening Shift", filters={"handover_from": closing, "docstatus": 1}, pluck="name"
-	):
-		_apply_handover(successor, next_expected, modal_awal_modes)
