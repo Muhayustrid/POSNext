@@ -19,7 +19,7 @@ from pos_next.api.bootstrap import get_initial_data
 from pos_next.api.invoices import delete_invoice, submit_invoice, update_invoice
 from pos_next.api.partial_payments import add_payment_to_partial_invoice
 from pos_next.api.shifts import create_opening_shift
-from pos_next.pos_next.doctype.pos_refund_code.pos_refund_code import generate_daily_code
+from pos_next.pos_next.doctype.pos_refund_code.pos_refund_code import generate_daily_code, get_my_daily_codes
 
 ADMIN = "Administrator"
 
@@ -101,6 +101,25 @@ class TestManagerNoSales(FrappeTestCase):
 		self.assertEqual(status(first), "Disabled")
 		self.assertEqual(status(second), "Active")
 		self.assertEqual(frappe.db.get_value("POS Refund Code", hq.name, "status"), "Active")
+
+	def test_my_daily_codes_lists_only_own_codes_newest_first(self):
+		other = frappe.get_doc(
+			{
+				"doctype": "POS Refund Code",
+				"status": "Active",
+				"company_scope": "Selected Outlets",
+				"companies": [{"company": self.company}],
+			}
+		).insert(ignore_permissions=True)  # owned by Administrator
+		self.addCleanup(frappe.db.delete, "POS Refund Code", {"name": other.name})
+		frappe.set_user(self.manager)
+		first = generate_daily_code(self.company)["code"]
+		second = generate_daily_code(self.company)["code"]
+		codes = get_my_daily_codes(self.company)
+		frappe.set_user(ADMIN)
+		self.assertEqual([c.code for c in codes][:2], [second, first])
+		self.assertNotIn(other.code, [c.code for c in codes])
+		self.assertEqual([c.status for c in codes][:2], ["Active", "Disabled"])
 
 	def test_daily_refund_code_refuses_foreign_company_and_cashier(self):
 		other = frappe.get_all("Company", filters={"name": ["!=", self.company]}, pluck="name", limit=1)

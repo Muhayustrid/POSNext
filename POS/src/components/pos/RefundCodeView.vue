@@ -41,6 +41,35 @@
 					{{ __("Copy") }}
 				</Button>
 			</div>
+
+			<section class="text-left" data-test="refund-code-history">
+				<h3 class="text-sm font-semibold text-gray-900">{{ __("My Refund Codes") }}</h3>
+				<p v-if="!history.length" class="mt-2 text-sm text-gray-700">
+					{{ historyLoading ? __("Loading...") : __("No codes generated yet") }}
+				</p>
+				<ul v-else class="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
+					<li
+						v-for="row in history"
+						:key="row.code"
+						class="flex items-center justify-between gap-3 px-3 py-2"
+					>
+						<div class="min-w-0">
+							<p class="font-mono text-base font-semibold tracking-wider text-gray-900 select-all">
+								{{ row.code }}
+							</p>
+							<p class="text-xs text-gray-700">
+								{{ String(row.creation || "").slice(0, 16) }} · {{ __("Used {0}x", [row.used_count || 0]) }}
+							</p>
+						</div>
+						<span
+							class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+							:class="row.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'"
+						>
+							{{ __(row.status) }}
+						</span>
+					</li>
+				</ul>
+			</section>
 		</div>
 	</div>
 </template>
@@ -58,13 +87,36 @@ const props = defineProps({
 const { showError, showSuccess } = useToast()
 const loading = ref(false)
 const result = ref(null)
+const history = ref([])
+const historyLoading = ref(false)
+
+async function loadHistory() {
+	const company = props.company
+	history.value = []
+	if (!company) return
+	historyLoading.value = true
+	try {
+		const rows = await call(
+			"pos_next.pos_next.doctype.pos_refund_code.pos_refund_code.get_my_daily_codes",
+			{ company },
+		)
+		// a slow answer for the previous company must not overwrite this one
+		if (company === props.company) history.value = rows || []
+	} catch (err) {
+		showError(err?.messages?.[0] || err?.message || __("Failed to load codes"))
+	} finally {
+		historyLoading.value = false
+	}
+}
 
 // a code shown for one company must not linger after switching to another
 watch(
 	() => props.company,
 	() => {
 		result.value = null
+		loadHistory()
 	},
+	{ immediate: true },
 )
 
 async function generate() {
@@ -75,6 +127,7 @@ async function generate() {
 			"pos_next.pos_next.doctype.pos_refund_code.pos_refund_code.generate_daily_code",
 			{ company: props.company },
 		)
+		loadHistory()
 	} catch (err) {
 		showError(err?.messages?.[0] || err?.message || __("Failed to generate code"))
 	} finally {

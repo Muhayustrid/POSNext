@@ -3676,3 +3676,7 @@ Shipping status,Status pengiriman
 "Created by {0} on {1}","Dibuat oleh {0} pada {1}",""
 "Code Created By","Kode Dibuat Oleh",""
 "SALES PER ITEM","PENJUALAN PER ITEM",""
+"My Refund Codes","Kode Refund Saya",""
+"No codes generated yet","Belum ada kode yang dibuat",""
+"Used {0}x","Dipakai {0}x",""
+"Failed to load codes","Gagal memuat kode",""
