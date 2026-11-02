@@ -696,6 +696,14 @@
 								<td class="py-2.5 px-3">
 									<div class="text-gray-900">{{ row.item_name }}</div>
 									<div
+										v-if="row.alternative_item_name"
+										class="text-xs text-gray-600"
+									>
+										{{
+											__("Using alternative: {0}", [row.alternative_item_name])
+										}}
+									</div>
+									<div
 										v-if="rowHasInsufficientStock(row)"
 										class="text-xs text-red-600"
 									>
@@ -1257,6 +1265,8 @@ function scaleRows() {
 	materialRows.value = r.items.map((i) => ({
 		item_code: i.item_code,
 		item_name: i.item_name,
+		alternative_item_code: i.alternative_item_code || "",
+		alternative_item_name: i.alternative_item_name || "",
 		stock_uom: i.stock_uom,
 		has_batch_no: i.has_batch_no,
 		available_qty: i.available_qty,

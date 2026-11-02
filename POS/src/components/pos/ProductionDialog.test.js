@@ -319,6 +319,22 @@ describe("ProductionDialog", () => {
 		expect(wrapper.text()).toContain("8 Litre") // MILK: 1 × 16/2
 	})
 
+	it("displays alternative item label under material name when alternative_item_name is present and omits it otherwise", async () => {
+		const withAlt = structuredClone(RECIPES)
+		withAlt[0].items[0].alternative_item_code = "OAT-MILK"
+		withAlt[0].items[0].alternative_item_name = "Oat Milk"
+		respond(RECIPES_URL, (_params, opts) =>
+			opts.onSuccess({ pos_profile: "POS-1", company: "Co", warehouse: "WH", recipes: withAlt }),
+		)
+		const wrapper = await mountOpenDialog()
+		await selectFirstRecipe(wrapper)
+
+		expect(wrapper.text()).toContain("Milk")
+		expect(wrapper.text()).toContain("Using alternative: Oat Milk")
+		expect(wrapper.text()).toContain("Syrup")
+		expect(wrapper.text()).not.toContain("Using alternative: Syrup")
+	})
+
 	it("allows fractional qty when the output UOM is not whole-number", async () => {
 		const kg = structuredClone(RECIPES)
 		kg[0].output_uom = "Kg"

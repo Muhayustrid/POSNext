@@ -48,13 +48,13 @@ LABEL_BY_STATUS = {
 
 
 def _item_flags(item_codes):
-	"""item_code -> {item_name, stock_uom, has_batch_no} for the given codes."""
+	"""item_code -> {item_name, stock_uom, has_batch_no, allow_alternative_item} for the given codes."""
 	if not item_codes:
 		return {}
 	rows = frappe.get_all(
 		"Item",
 		filters={"name": ["in", item_codes]},
-		fields=["name", "item_name", "stock_uom", "has_batch_no", "disabled"],
+		fields=["name", "item_name", "stock_uom", "has_batch_no", "disabled", "allow_alternative_item"],
 	)
 	return {r.name: r for r in rows}
 
@@ -62,6 +62,114 @@ def _item_flags(item_codes):
 def _stock_qty(item_code, warehouse):
 	bin_qty = frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty")
 	return flt(bin_qty)
+
+
+def _find_alternative_item(item_code, warehouse, required_qty=0.0, min_stock=None):
+	"""Find the first eligible alternative for item_code.
+
+	Eligible alternative:
+	- Defined in Item Alternative (direct, or reverse with two_way=1).
+	- Both original and alternative have allow_alternative_item = 1.
+	- Neither original nor alternative has has_batch_no = 1.
+	- Alternative is not disabled, and its stock_uom equals the original's or both
+	  items share a UOM in their conversion tables (see _alt_factor).
+	- Deterministic order by alternative item_code.
+
+	Quantities in and out (required_qty, min_stock, available_qty) are in the
+	original's stock UOM; ``factor`` converts them to alternative stock units.
+	"""
+	orig = frappe.db.get_value(
+		"Item",
+		item_code,
+		["stock_uom", "has_batch_no", "allow_alternative_item", "disabled"],
+		as_dict=True,
+	)
+	if not orig or orig.disabled or orig.has_batch_no or not orig.allow_alternative_item:
+		return None
+
+	direct = frappe.get_all(
+		"Item Alternative",
+		filters={"item_code": item_code},
+		pluck="alternative_item_code",
+	)
+	two_way = frappe.get_all(
+		"Item Alternative",
+		filters={"alternative_item_code": item_code, "two_way": 1},
+		pluck="item_code",
+	)
+	candidates = sorted({c for c in direct + two_way if c and c != item_code})
+	if not candidates:
+		return None
+
+	alt_items = frappe.get_all(
+		"Item",
+		filters={
+			"name": ["in", candidates],
+			"disabled": 0,
+			"has_batch_no": 0,
+			"allow_alternative_item": 1,
+		},
+		fields=["name", "item_name", "stock_uom"],
+		order_by="name asc",
+	)
+	options = []
+	for alt in alt_items:
+		factor = _alt_factor(item_code, orig.stock_uom, alt.name, alt.stock_uom)
+		if factor:
+			options.append(
+				{
+					"item_code": alt.name,
+					"item_name": alt.item_name or alt.name,
+					"stock_uom": alt.stock_uom,
+					"factor": factor,
+					"available_qty": flt(_stock_qty(alt.name, warehouse) / factor, 9),
+				}
+			)
+
+	if required_qty > 0:
+		for opt in options:
+			if opt["available_qty"] >= flt(required_qty, 9):
+				return opt
+
+	if min_stock is not None:
+		for opt in options:
+			if opt["available_qty"] > min_stock:
+				return opt
+
+	return None
+
+
+def _uom_factors(item_code, stock_uom):
+	"""UOM -> stock units of item_code per 1 of that UOM (stock UOM itself is 1)."""
+	factors = {
+		r.uom: flt(r.conversion_factor)
+		for r in frappe.get_all(
+			"UOM Conversion Detail",
+			filters={"parent": item_code, "parenttype": "Item"},
+			fields=["uom", "conversion_factor"],
+		)
+		if flt(r.conversion_factor) > 0
+	}
+	factors[stock_uom] = 1.0
+	return factors
+
+
+def _alt_factor(item_code, stock_uom, alt_code, alt_stock_uom):
+	"""Alternative stock units equal to 1 stock unit of item_code, bridged by a UOM
+	both items convert (e.g. Sachet and Botol via g). None when there is no bridge or
+	BOM component quantities are validated."""
+	if stock_uom == alt_stock_uom:
+		return 1.0
+	# ERPNext compares consumed qty with the BOM qty here, so a converted row would fail at Finish
+	if frappe.db.get_single_value("Manufacturing Settings", "validate_components_quantities_per_bom"):
+		return None
+	ours, theirs = _uom_factors(item_code, stock_uom), _uom_factors(alt_code, alt_stock_uom)
+	shared = sorted(set(ours) & set(theirs))
+	if not shared:
+		return None
+	# prefer a stock UOM as the bridge; otherwise any shared UOM, deterministically
+	bridge = next((u for u in (stock_uom, alt_stock_uom) if u in shared), shared[0])
+	return theirs[bridge] / ours[bridge]
 
 
 def _batch_list(item_code, warehouse):
@@ -220,6 +328,16 @@ def get_recipes(pos_profile):
 		items = []
 		for row in by_recipe.get(r.name, []):
 			info = flags.get(row.item_code, frappe._dict())
+			avail = _stock_qty(row.item_code, warehouse)
+			alt_code, alt_name = None, None
+			if not info.has_batch_no and avail < flt(row.qty):
+				alt = _find_alternative_item(
+					row.item_code, warehouse, required_qty=flt(row.qty), min_stock=avail
+				)
+				if alt:
+					avail = alt["available_qty"]
+					alt_code = alt["item_code"]
+					alt_name = alt["item_name"]
 			items.append(
 				{
 					"item_code": row.item_code,
@@ -227,7 +345,9 @@ def get_recipes(pos_profile):
 					"qty": flt(row.qty),
 					"stock_uom": info.stock_uom or "",
 					"has_batch_no": bool(info.has_batch_no),
-					"available_qty": _stock_qty(row.item_code, warehouse),
+					"available_qty": avail,
+					"alternative_item_code": alt_code,
+					"alternative_item_name": alt_name,
 					"batches": _batch_list(row.item_code, warehouse) if info.has_batch_no else [],
 				}
 			)
@@ -284,11 +404,23 @@ def _bom_matches(bom_no, recipe, company):
 	if not bom_no or not frappe.db.exists("BOM", bom_no):
 		return False
 	bom = frappe.db.get_value(
-		"BOM", bom_no, ["item", "company", "quantity", "with_operations", "docstatus", "is_active"], as_dict=True
+		"BOM",
+		bom_no,
+		[
+			"item",
+			"company",
+			"quantity",
+			"with_operations",
+			"docstatus",
+			"is_active",
+			"allow_alternative_item",
+		],
+		as_dict=True,
 	)
 	if (
 		bom.docstatus != 1
 		or not bom.is_active
+		or not bom.allow_alternative_item
 		or bom.company != company
 		or bom.item != recipe.production_item
 		or bom.with_operations
@@ -296,14 +428,21 @@ def _bom_matches(bom_no, recipe, company):
 		return False
 	if flt(bom.quantity, 6) != flt(recipe.output_qty, 6):
 		return False
-	bom_items = sorted(
-		(r.item_code, flt(r.qty, 6))
-		for r in frappe.get_all(
-			"BOM Item", filters={"parent": bom_no, "parenttype": "BOM"}, fields=["item_code", "qty"]
-		)
+	bom_items = frappe.get_all(
+		"BOM Item",
+		filters={"parent": bom_no, "parenttype": "BOM"},
+		fields=["item_code", "qty", "allow_alternative_item"],
 	)
-	ours = sorted((r.item_code, flt(r.qty, 6)) for r in recipe.items)
-	return bom_items == ours
+	if sorted((r.item_code, flt(r.qty, 6)) for r in bom_items) != sorted(
+		(r.item_code, flt(r.qty, 6)) for r in recipe.items
+	):
+		return False
+	flags = _item_flags([r.item_code for r in recipe.items])
+	for r in bom_items:
+		expected_allow = cint(flags.get(r.item_code, {}).get("allow_alternative_item"))
+		if cint(r.allow_alternative_item) != expected_allow:
+			return False
+	return True
 
 
 def _create_bom(recipe, company):
@@ -313,10 +452,16 @@ def _create_bom(recipe, company):
 	bom.quantity = flt(recipe.output_qty)
 	bom.with_operations = 0
 	bom.is_active = 1
+	bom.allow_alternative_item = 1
 	# WO carries bom_no explicitly, so this BOM never needs to be the default.
 	bom.is_default = 0
+	flags = _item_flags([row.item_code for row in recipe.items])
 	for row in recipe.items:
-		bom.append("items", {"item_code": row.item_code, "qty": flt(row.qty)})
+		item_allow = cint(flags.get(row.item_code, {}).get("allow_alternative_item"))
+		bom.append(
+			"items",
+			{"item_code": row.item_code, "qty": flt(row.qty), "allow_alternative_item": item_allow},
+		)
 	bom.flags.ignore_permissions = True
 	bom.insert()
 	bom.submit()
@@ -417,11 +562,15 @@ def _validate_materials(merged, warehouse, production_item):
 		if info.has_batch_no:
 			m["batch_no"] = _pick_batch(m["item_code"], warehouse, m["qty"])
 		elif _stock_qty(m["item_code"], warehouse) < m["qty"]:
-			frappe.throw(
-				_("Material {0} is short by {1} in {2}").format(
-					m["item_code"], m["qty"] - _stock_qty(m["item_code"], warehouse), warehouse
+			alt = _find_alternative_item(m["item_code"], warehouse, required_qty=m["qty"])
+			if alt:
+				m["alternative_item"] = alt["item_code"]
+			else:
+				frappe.throw(
+					_("Material {0} is short by {1} in {2}").format(
+						m["item_code"], m["qty"] - _stock_qty(m["item_code"], warehouse), warehouse
+					)
 				)
-			)
 	return flags, fg_info
 
 
@@ -436,7 +585,9 @@ def start_production(recipe, qty, pos_profile, notes=None):
 	qty = _validate_qty(qty, "Production quantity")
 
 	recipe_doc = _get_enabled_recipe(recipe, company)
-	if frappe.db.get_value("UOM", frappe.db.get_value("Item", recipe_doc.production_item, "stock_uom"), _uom_whole_field()) and qty != int(qty):
+	if frappe.db.get_value(
+		"UOM", frappe.db.get_value("Item", recipe_doc.production_item, "stock_uom"), _uom_whole_field()
+	) and qty != int(qty):
 		frappe.throw(
 			_("Quantity must be a whole number for UOM {0}").format(
 				frappe.db.get_value("Item", recipe_doc.production_item, "stock_uom")
@@ -457,6 +608,7 @@ def start_production(recipe, qty, pos_profile, notes=None):
 	wo.skip_transfer = 1
 	wo.source_warehouse = source_warehouse
 	wo.fg_warehouse = fg_warehouse
+	wo.allow_alternative_item = 1
 	# POS home data (D5): outlet, operator and recipe ride on native fields.
 	wo.posa_pos_profile = pos_profile
 	wo.posa_operator = frappe.session.user
@@ -517,6 +669,25 @@ def finish_production(work_order, good_qty, loss_qty=0, notes=None, batch_picks=
 			else:
 				row.batch_no = _pick_batch(row.item_code, row.s_warehouse, flt(row.transfer_qty))
 			row.use_serial_batch_fields = 1
+		elif row.s_warehouse and _stock_qty(row.item_code, row.s_warehouse) < flt(row.transfer_qty):
+			alt = _find_alternative_item(row.item_code, row.s_warehouse, required_qty=flt(row.transfer_qty))
+			if alt:
+				alt_info = frappe.get_cached_value(
+					"Item", alt["item_code"], ["item_name", "description", "stock_uom"], as_dict=True
+				)
+				row.original_item = row.item_code
+				row.item_code = alt["item_code"]
+				row.item_name = alt_info.item_name or alt["item_code"]
+				row.description = alt_info.description or alt_info.item_name or alt["item_code"]
+				row.stock_uom = alt_info.stock_uom
+				# the row may carry a BOM UOM; restate it in the alternative's stock units
+				row.qty = row.transfer_qty = flt(flt(row.transfer_qty) * alt["factor"], 9)
+				row.uom = alt_info.stock_uom
+				row.conversion_factor = 1.0
+				row.basic_rate = None
+				row.basic_amount = None
+				row.valuation_rate = None
+				row.amount = None
 
 	se.flags.ignore_permissions = True
 	se.insert()
