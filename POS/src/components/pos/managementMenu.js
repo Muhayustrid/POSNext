@@ -39,6 +39,13 @@ export const MANAGEMENT_MENU = [
 		group: "stock",
 	},
 	{
+		id: "spend",
+		icon: "credit-card",
+		label: __("Purchases & Expenses"),
+		group: "stock",
+		requiresOnline: true,
+	},
+	{
 		id: "purchase-order",
 		icon: "truck",
 		label: __("Purchase Order"),

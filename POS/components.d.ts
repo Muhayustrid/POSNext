@@ -66,6 +66,7 @@ declare module 'vue' {
     ShiftClosingDialog: typeof import('./src/components/ShiftClosingDialog.vue')['default']
     ShiftHistoryDialog: typeof import('./src/components/sale/ShiftHistoryDialog.vue')['default']
     ShiftOpeningDialog: typeof import('./src/components/ShiftOpeningDialog.vue')['default']
+    SpendDialog: typeof import('./src/components/spend/SpendDialog.vue')['default']
     StatusBadge: typeof import('./src/components/common/StatusBadge.vue')['default']
     StockOpnameDialog: typeof import('./src/components/pos/StockOpnameDialog.vue')['default']
     Toast: typeof import('./src/components/common/Toast.vue')['default']

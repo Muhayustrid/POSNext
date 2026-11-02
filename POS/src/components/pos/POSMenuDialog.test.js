@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { mount } from "@vue/test-utils"
+import { flushPromises, mount } from "@vue/test-utils"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { nextTick } from "vue"
 
@@ -30,9 +30,14 @@ vi.hoisted(() => {
 })
 
 import POSMenuDialog from "./POSMenuDialog.vue"
+import SpendDialog from "../spend/SpendDialog.vue"
 import { MANAGEMENT_MENU } from "./managementMenu"
 
 const viewStubs = {
+	SpendDialog: {
+		props: ["posProfile", "company"],
+		template: `<div data-testid="view-spend" :data-profile="posProfile" :data-company="company" />`,
+	},
 	PromotionManagement: { template: `<div data-testid="view-promotions" />` },
 	POSSettings: { template: `<div data-testid="view-settings" />` },
 	InvoiceManagement: {
@@ -111,6 +116,153 @@ beforeEach(() => {
 })
 
 describe("POSMenuDialog menu", () => {
+	it("menu shows spend item only online", async () => {
+		const wrapper = mountShell({
+			open: true,
+			initialView: "spend",
+			company: "Alpha",
+			posProfile: "Alpha POS",
+		})
+		expect(sidebarLabels(wrapper)).toContain("Purchases & Expenses")
+		expect(
+			wrapper.find('[data-testid="view-spend"]').attributes("data-company"),
+		).toBe("Alpha")
+		await wrapper.setProps({ isOffline: true })
+		expect(sidebarLabels(wrapper)).not.toContain("Purchases & Expenses")
+		expect(wrapper.find('[data-testid="view-spend"]').exists()).toBe(true)
+		wrapper.unmount()
+	})
+	it("retries the original spend after a lost response and offline/online transition", async () => {
+		const submissions = []
+		callMock.mockImplementation(async (method, args) => {
+			if (method.endsWith("get_spend_templates"))
+				return [
+					{
+						name: "electricity",
+						title: "Electricity",
+						category: "Utilities",
+						document_type: "Journal Entry",
+						payment_sources: [{ mode_of_payment: "Drawer", is_default: 1 }],
+					},
+				]
+			if (method.endsWith("submit_spend")) {
+				submissions.push(args.data)
+				if (submissions.length === 1)
+					throw new Error("Response lost after commit")
+				return { name: "JE-1" }
+			}
+			return null
+		})
+		const wrapper = mount(POSMenuDialog, {
+			props: {
+				open: true,
+				initialView: "spend",
+				company: "Alpha",
+				posProfile: "Alpha POS",
+			},
+			global: {
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { ...viewStubs, SpendDialog: false },
+			},
+		})
+		try {
+			await flushPromises()
+			await wrapper.get('[data-test="spend-template"]').setValue("electricity")
+			await wrapper
+				.get('[data-test="spend-description"]')
+				.setValue("Monthly bill")
+			await wrapper.get('[data-test="spend-amount"]').setValue(12345)
+			await wrapper.get('[data-test="spend-form"]').trigger("submit")
+			await flushPromises()
+			expect(submissions).toHaveLength(1)
+
+			await wrapper.setProps({ isOffline: true })
+			expect(wrapper.findComponent(SpendDialog).exists()).toBe(true)
+			expect(
+				wrapper.get('[data-test="spend-submit"]').attributes("disabled"),
+			).toBeDefined()
+			await wrapper.get('[data-test="spend-form"]').trigger("submit")
+			expect(submissions).toHaveLength(1)
+			await wrapper.setProps({ isOffline: false })
+			await flushPromises()
+			await wrapper.get('[data-test="spend-form"]').trigger("submit")
+			await flushPromises()
+			expect(submissions).toHaveLength(2)
+			expect(JSON.parse(submissions[0]).client_request_id).toBeTruthy()
+			expect(submissions[1]).toBe(submissions[0])
+		} finally {
+			wrapper.unmount()
+		}
+	})
+
+	it("keeps an uncertain spend across navigation, menu close and company changes", async () => {
+		const submissions = []
+		callMock.mockImplementation(async (method, args) => {
+			if (method.endsWith("get_spend_templates"))
+				return [
+					{
+						name: "electricity",
+						title: "Electricity",
+						category: "Utilities",
+						document_type: "Journal Entry",
+						payment_sources: [{ mode_of_payment: "Drawer", is_default: 1 }],
+					},
+				]
+			if (method.endsWith("submit_spend")) {
+				submissions.push(args.data)
+				if (submissions.length === 1)
+					throw new Error("Response lost after commit")
+				return { name: "JE-1" }
+			}
+			return null
+		})
+		const wrapper = mount(POSMenuDialog, {
+			props: {
+				open: true,
+				initialView: "spend",
+				company: "Alpha",
+				posProfile: "Alpha POS",
+			},
+			global: {
+				config: { globalProperties: { __: globalThis.__ } },
+				stubs: { ...viewStubs, SpendDialog: false },
+			},
+		})
+		try {
+			await flushPromises()
+			await wrapper.get('[data-test="spend-template"]').setValue("electricity")
+			await wrapper
+				.get('[data-test="spend-description"]')
+				.setValue("Monthly bill")
+			await wrapper.get('[data-test="spend-amount"]').setValue(12345)
+			await wrapper.get('[data-test="spend-form"]').trigger("submit")
+			await flushPromises()
+			await wrapper
+				.find('[data-testid="pos-menu-sidebar"]')
+				.findAll("button")
+				.find((button) => button.text() === "Settings")
+				.trigger("click")
+			await wrapper.setProps({ open: false })
+			await wrapper.setProps({
+				company: "Beta",
+				posProfile: "Beta POS",
+				open: true,
+			})
+			await flushPromises()
+			expect(wrapper.get('[data-test="spend-description"]').element.value).toBe(
+				"Monthly bill",
+			)
+			expect(wrapper.findComponent(SpendDialog).props("company")).toBe("Alpha")
+			await wrapper.get('[data-test="spend-form"]').trigger("submit")
+			await flushPromises()
+			expect(submissions).toHaveLength(2)
+			expect(submissions[1]).toBe(submissions[0])
+			expect(wrapper.findComponent(SpendDialog).props("company")).toBe("Beta")
+		} finally {
+			wrapper.unmount()
+		}
+	})
+
 	it("renders the same filtered items as MANAGEMENT_MENU rules", () => {
 		const wrapper = mountShell({
 			open: true,
@@ -444,38 +596,52 @@ describe("POSMenuDialog company choice without a shift", () => {
 		await nextTick()
 	}
 
-	it.each(["invoices", "sales-recap", "products", "production", "reject-request"])(
-		"a manager without a shift picks the company for %s",
-		async (view) => {
-			callMock.mockImplementation((method) =>
-				Promise.resolve(method.endsWith("get_purchase_companies") ? companies : null),
-			)
-			const wrapper = mountShell({ open: true, initialView: view, canProduction: true })
-			await flush()
-			const picker = wrapper.findComponent({ name: "CompanyPicker" })
-			expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(true)
-			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
-				"Alpha POS",
-			)
-			picker.vm.$emit("update:modelValue", "Beta")
-			await flush()
-			expect(wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile")).toBe(
-				"Beta POS",
-			)
-			// only the invoices view needs POSSale to reload its history
-			if (view === "invoices")
-				expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"])
-			else expect(wrapper.emitted("active-profile")).toBeUndefined()
-			wrapper.unmount()
-		},
-	)
+	it.each([
+		"invoices",
+		"sales-recap",
+		"products",
+		"production",
+		"reject-request",
+		"spend",
+	])("a manager without a shift picks the company for %s", async (view) => {
+		callMock.mockImplementation((method) =>
+			Promise.resolve(
+				method.endsWith("get_purchase_companies") ? companies : null,
+			),
+		)
+		const wrapper = mountShell({
+			open: true,
+			initialView: view,
+			canProduction: true,
+		})
+		await flush()
+		const picker = wrapper.findComponent({ name: "CompanyPicker" })
+		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(true)
+		expect(
+			wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile"),
+		).toBe("Alpha POS")
+		picker.vm.$emit("update:modelValue", "Beta")
+		await flush()
+		expect(
+			wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile"),
+		).toBe("Beta POS")
+		// only the invoices view needs POSSale to reload its history
+		if (view === "invoices")
+			expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"])
+		else expect(wrapper.emitted("active-profile")).toBeUndefined()
+		wrapper.unmount()
+	})
 
 	it("a manager with a shift still picks another company", async () => {
 		callMock.mockImplementation(() =>
 			Promise.resolve({
 				companies: [
 					...companies.companies,
-					{ company: "Shift Co", pos_profile: "Other Shift Co POS", warehouse: "WS" },
+					{
+						company: "Shift Co",
+						pos_profile: "Other Shift Co POS",
+						warehouse: "WS",
+					},
 				],
 				default: "Shift Co",
 			}),
@@ -489,21 +655,29 @@ describe("POSMenuDialog company choice without a shift", () => {
 		})
 		await flush()
 		// the shift's own company keeps the shift's profile
-		expect(wrapper.find('[data-testid="view-sales-recap"]').attributes("data-profile")).toBe(
-			"Shift POS",
-		)
-		wrapper.findComponent({ name: "CompanyPicker" }).vm.$emit("update:modelValue", "Beta")
+		expect(
+			wrapper
+				.find('[data-testid="view-sales-recap"]')
+				.attributes("data-profile"),
+		).toBe("Shift POS")
+		wrapper
+			.findComponent({ name: "CompanyPicker" })
+			.vm.$emit("update:modelValue", "Beta")
 		await flush()
-		expect(wrapper.find('[data-testid="view-sales-recap"]').attributes("data-profile")).toBe(
-			"Beta POS",
-		)
+		expect(
+			wrapper
+				.find('[data-testid="view-sales-recap"]')
+				.attributes("data-profile"),
+		).toBe("Beta POS")
 		wrapper.unmount()
 	})
 
 	it("a cashier with one company sees no picker", async () => {
 		callMock.mockImplementation(() =>
 			Promise.resolve({
-				companies: [{ company: "Shift Co", pos_profile: "Shift POS", warehouse: "WS" }],
+				companies: [
+					{ company: "Shift Co", pos_profile: "Shift POS", warehouse: "WS" },
+				],
 				default: "Shift Co",
 			}),
 		)
@@ -515,9 +689,9 @@ describe("POSMenuDialog company choice without a shift", () => {
 		})
 		await flush()
 		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(false)
-		expect(wrapper.find('[data-testid="view-invoices"]').attributes("data-profile")).toBe(
-			"Shift POS",
-		)
+		expect(
+			wrapper.find('[data-testid="view-invoices"]').attributes("data-profile"),
+		).toBe("Shift POS")
 		wrapper.unmount()
 	})
 
@@ -527,17 +701,27 @@ describe("POSMenuDialog company choice without a shift", () => {
 		expect(sidebarLabels(wrapper)).not.toContain("Refund Code")
 		wrapper.unmount()
 
-		wrapper = mountShell({ open: true, isManagement: true, initialView: "refund-code" })
+		wrapper = mountShell({
+			open: true,
+			isManagement: true,
+			initialView: "refund-code",
+		})
 		await flush()
 		expect(sidebarLabels(wrapper)).toContain("Refund Code")
-		expect(wrapper.find('[data-testid="view-refund-code"]').attributes("data-company")).toBe(
-			"Alpha",
-		)
-		wrapper.findComponent({ name: "CompanyPicker" }).vm.$emit("update:modelValue", "Beta")
+		expect(
+			wrapper
+				.find('[data-testid="view-refund-code"]')
+				.attributes("data-company"),
+		).toBe("Alpha")
+		wrapper
+			.findComponent({ name: "CompanyPicker" })
+			.vm.$emit("update:modelValue", "Beta")
 		await flush()
-		expect(wrapper.find('[data-testid="view-refund-code"]').attributes("data-company")).toBe(
-			"Beta",
-		)
+		expect(
+			wrapper
+				.find('[data-testid="view-refund-code"]')
+				.attributes("data-company"),
+		).toBe("Beta")
 		wrapper.unmount()
 	})
 })

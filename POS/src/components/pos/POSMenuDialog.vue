@@ -108,9 +108,11 @@
 						class="shrink-0 border-b border-gray-200 px-4 py-2 sm:px-6"
 					>
 						<CompanyPicker
-							v-model="companyChoice.company.value"
+							:model-value="activeView === 'spend' && spendAttempt ? spendAttempt.company : companyChoice.company.value"
+							@update:model-value="companyChoice.company.value = $event"
 							:options="companyChoice.options.value"
 							hide-label
+							:disabled="activeView === 'spend' && !!spendAttempt"
 						/>
 					</div>
 					<div class="flex-1 min-h-0">
@@ -206,6 +208,13 @@
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
 					/>
+					<SpendDialog
+						v-else-if="activeView === 'spend'"
+						v-model:attempt="spendAttempt"
+						:is-offline="isOffline"
+						:company="spendAttempt?.company || viewCompany"
+						:pos-profile="spendAttempt?.pos_profile || viewProfile"
+					/>
 					<RefundCodeView
 						v-else-if="activeView === 'refund-code'"
 						:company="viewCompany"
@@ -242,6 +251,7 @@ import StockOpnameDialog from "@/components/pos/StockOpnameDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
 import RefundCodeView from "@/components/pos/RefundCodeView.vue"
+import SpendDialog from "@/components/spend/SpendDialog.vue"
 import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
 import { useCompanyChoice } from "@/composables/useCompanyChoice"
 
@@ -267,6 +277,8 @@ const props = defineProps({
 
 const emit = defineEmits(["update:open", "menu-selected", "active-profile"])
 
+// Keep uncertain transactions when the embedded spend view is unmounted.
+const spendAttempt = ref(null)
 const activeView = ref(null)
 // One-shot deep link: ProductionDialog's "Submit report" jumps into the
 // reject view with a specific request; cleared on leave so the reject menu
@@ -336,6 +348,7 @@ const COMPANY_VIEWS = [
 	"production",
 	"reject-request",
 	"refund-code",
+	"spend",
 ]
 const companyChoice = useCompanyChoice(call, () => props.posProfile)
 const inCompanyView = computed(() => COMPANY_VIEWS.includes(activeView.value))

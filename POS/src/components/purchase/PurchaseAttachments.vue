@@ -163,7 +163,8 @@ function nameOf(row) {
 
 function isImage(row) {
 	if (row instanceof File) return row.type.startsWith("image/")
-	return IMAGE_EXT.test(row.file_url || row.file_name || "")
+	// file_url may be a download endpoint without an extension; file_name keeps it.
+	return IMAGE_EXT.test(row.file_name || row.file_url || "")
 }
 
 function srcOf(row) {
