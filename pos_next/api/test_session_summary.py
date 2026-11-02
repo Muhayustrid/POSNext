@@ -996,14 +996,14 @@ class TestSessionSummary(IntegrationTestCase):
 		# closed shift must NOT claim the profile's current group as history
 		self.assertIsNone(summary["shift_name"])
 
-	def test_expense_unsupported_and_cash_in_hand_is_estimate(self):
+	def test_expense_without_spend_is_zero_and_cash_in_hand_is_estimate(self):
 		shift = self._make_opening_shift(opening_cash=20000)
 		self._make_invoice_on(shift, [{"item": self.item_a, "qty": 1, "rate": 1000}], paid=1000)
 
 		summary = get_session_summary(shift)
-		# no shift-scoped expense ledger exists in this app: never a fake zero
-		self.assertIsNone(summary["expense"])
-		self.assertFalse(summary["expense_supported"])
+		# drawer spend is now tracked per shift (POS Spend); none recorded here
+		self.assertEqual(summary["expense"], 0)
+		self.assertTrue(summary["expense_supported"])
 		self.assertEqual(summary["opening_cash"], 20000)
 		self.assertEqual(summary["cash_collected"], 1000)
 		self.assertEqual(summary["cash_in_hand"], 21000)

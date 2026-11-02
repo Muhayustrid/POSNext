@@ -351,10 +351,16 @@ def get_sales_recap(doc) -> dict:
 	total_cash = total_non_cash = 0.0
 	opening_balance = cash_payment = cash_in_hand = 0.0
 
+	spend_by_mode = {}
+	for spend in closing_doc.get("spend_entries") or []:
+		mode = spend.get("mode_of_payment")
+		spend_by_mode[mode] = spend_by_mode.get(mode, 0) + flt(spend.get("amount"))
+
 	for row in closing_doc.get("payment_reconciliation") or []:
 		mode = row.get("mode_of_payment")
 		opening = flt(row.get("opening_amount"))
-		amount = flt(flt(row.get("expected_amount")) - opening, 2)
+		# Expected is net of spend; payment receipts remain gross of spend.
+		amount = flt(flt(row.get("expected_amount")) - opening + spend_by_mode.get(mode, 0), 2)
 		is_cash = _is_cash_mode(mode)
 
 		payment_methods.append({"mode_of_payment": mode, "amount": amount, "is_cash": is_cash})
@@ -388,7 +394,7 @@ def get_sales_recap(doc) -> dict:
 		"cash": {
 			"opening_balance": opening_balance,
 			"cash_payment": cash_payment,
-			"total_expense": 0.0,
+			"total_expense": flt(sum(amount for mode, amount in spend_by_mode.items() if _is_cash_mode(mode)), 2),
 			"cash_in_hand": cash_in_hand,
 		},
 		"payment_methods": payment_methods,

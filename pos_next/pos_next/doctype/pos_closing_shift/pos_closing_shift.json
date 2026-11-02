@@ -22,6 +22,7 @@
   "pos_transactions",
   "section_break_9",
   "pos_payments",
+  "spend_entries",
   "section_break_if3m1",
   "payment_reconciliation_details",
   "section_break_11",
@@ -36,6 +37,14 @@
   "amended_from"
  ],
  "fields": [
+  {
+   "fieldname": "spend_entries",
+   "fieldtype": "Table",
+   "label": "Spend Entries",
+   "options": "POS Closing Shift Spend",
+   "read_only": 1,
+   "no_copy": 1
+  },
   {
    "fetch_from": "pos_opening_shift.period_start_date",
    "fieldname": "period_start_date",

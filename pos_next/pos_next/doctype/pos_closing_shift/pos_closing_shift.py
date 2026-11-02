@@ -49,6 +49,8 @@ class POSClosingShift(Document):
 		apply_naming_series_setting(self)
 
 	def validate(self):
+		# Desk submits must serialize with spend too, before any snapshot reads.
+		frappe.db.get_value("POS Opening Shift", self.pos_opening_shift, "name", for_update=True)
 		# COR-BE-06: the duplicate check must be a locking read (SELECT ... FOR
 		# UPDATE). submit_closing_shift holds the opening row's lock while this
 		# runs, so a concurrent close that committed while we waited must be
@@ -100,6 +102,17 @@ class POSClosingShift(Document):
 		for dt in ("POS Invoice", "Sales Invoice"):
 			submit_printed_invoices(self.pos_opening_shift, dt)
 		self._merge_late_submitted_invoices()
+		from pos_next.services.spend_shift import shift_spend
+
+		# Replace the preview's spend delta without double-subtracting an API-built snapshot.
+		payments = [frappe._dict(row.as_dict()) for row in self.payment_reconciliation]
+		for spend in self.spend_entries:
+			_aggregate_payment(payments, spend.mode_of_payment, flt(spend.amount))
+		current_spend = shift_spend(self.pos_opening_shift, for_update=True)
+		for spend in current_spend:
+			_aggregate_payment(payments, spend.mode_of_payment, -spend.amount)
+		self.set("payment_reconciliation", payments)
+		self.set("spend_entries", current_spend)
 		self.update_payment_reconciliation()
 
 	def _merge_late_submitted_invoices(self):
@@ -770,7 +783,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 
 @frappe.whitelist()
-def make_closing_shift_from_opening(opening_shift):
+def make_closing_shift_from_opening(opening_shift, *, for_update=False):
 	opening_shift = json.loads(opening_shift)
 
 	opening_shift_name = opening_shift.get("name")
@@ -860,6 +873,13 @@ def make_closing_shift_from_opening(opening_shift):
 		amount = get_base_value(py, "paid_amount", "base_paid_amount")
 		_aggregate_payment(payments, py.mode_of_payment, amount)
 
+	from pos_next.services.spend_shift import shift_spend
+
+	spend_entries = shift_spend(opening_shift_name, for_update=for_update)
+	for spend in spend_entries:
+		_aggregate_payment(payments, spend.mode_of_payment, -spend.amount)
+	closing_shift.set("spend_entries", spend_entries)
+
 	# Update closing shift with totals
 	closing_shift.grand_total = summary["grand_total"]
 	closing_shift.net_total = summary["net_total"]
@@ -939,7 +959,9 @@ def _submit_closing(
 		# shift's real transactions so expected_amount, totals and taxes can never
 		# be forged. The client only contributes the physically counted
 		# closing_amount per mode of payment (rows for unknown modes are dropped).
-		server_data = make_closing_shift_from_opening(json.dumps(opening_shift.as_dict(), default=str))
+		server_data = make_closing_shift_from_opening(
+			json.dumps(opening_shift.as_dict(), default=str), for_update=True
+		)
 		if auto_balance:
 			for row in server_data.get("payment_reconciliation") or []:
 				row["closing_amount"] = row.get("expected_amount")

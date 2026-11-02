@@ -526,19 +526,22 @@ def _aggregate_payments(scope, cash_mode, pos_profile=None):
 	)
 	opening_cash = flt(sum(flt(row.amount) for row in opening_rows if is_cash(row.mode_of_payment)))
 
+	from pos_next.services.spend_shift import shift_spend
+
+	expense = flt(sum(
+		row.amount for shift in scope.shifts for row in shift_spend(shift)
+		if is_cash(row.mode_of_payment)
+	))
 	cash_collected = total_cash
-	cash_in_hand = flt(opening_cash + cash_collected)
+	cash_in_hand = flt(opening_cash + cash_collected - expense)
 	return {
 		"payments": rows,
 		"opening_cash": opening_cash,
 		"cash_collected": cash_collected,
 		"cash_expected": cash_in_hand,
 		"cash_in_hand": cash_in_hand,
-		# No shift-scoped expense ledger exists in this app (closing print also
-		# hardcodes 0): report None honestly instead of a fabricated zero —
-		# cash_in_hand is the balance BEFORE any cash expense.
-		"expense": None,
-		"expense_supported": False,
+		"expense": expense,
+		"expense_supported": True,
 		"total_cash": total_cash,
 		"total_non_cash": total_non_cash,
 		"methods_grand_total": flt(total_cash + total_non_cash),

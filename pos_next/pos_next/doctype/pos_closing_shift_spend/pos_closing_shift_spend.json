@@ -1,0 +1,17 @@
+{
+ "doctype": "DocType",
+ "name": "POS Closing Shift Spend",
+ "module": "POS Next",
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["voucher_type", "voucher_no", "mode_of_payment", "account", "amount"],
+ "fields": [
+  {"fieldname": "voucher_type", "fieldtype": "Link", "options": "DocType", "label": "Voucher Type", "in_list_view": 1},
+  {"fieldname": "voucher_no", "fieldtype": "Dynamic Link", "options": "voucher_type", "label": "Voucher No", "in_list_view": 1},
+  {"fieldname": "mode_of_payment", "fieldtype": "Link", "options": "Mode of Payment", "label": "Mode of Payment", "in_list_view": 1},
+  {"fieldname": "account", "fieldtype": "Link", "options": "Account", "label": "Account"},
+  {"fieldname": "amount", "fieldtype": "Currency", "label": "Amount", "in_list_view": 1}
+ ],
+ "permissions": []
+}

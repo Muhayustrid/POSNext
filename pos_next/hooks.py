@@ -162,6 +162,9 @@ has_permission = {
 # Hook on document methods and events
 
 doc_events = {
+	"Purchase Invoice": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
+	"Journal Entry": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
+	"Payment Entry": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
