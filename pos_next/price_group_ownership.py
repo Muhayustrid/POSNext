@@ -50,8 +50,8 @@ class ManagedState:
     currently_owned_profiles: tuple[str, ...]
     all_profiles: tuple[str, ...]
     managed_item_prices: tuple[str, ...]
-    outlet_profiles: Mapping[tuple[str, str], tuple[str, ...]]
-    """Every POS Profile name per outlet (company, warehouse) key, name-sorted."""
+    outlet_profiles: Mapping[str, tuple[str, ...]]
+    """Every POS Profile name per outlet company, name-sorted."""
 
 
 def managed_price_list_name(price_group_name: str) -> str:

@@ -2658,7 +2658,7 @@
 "Return period has expired. Invoice {0} was created {1} days ago. Returns are only allowed within {2} days of purchase.","Periode retur telah berakhir. Faktur {0} dibuat {1} hari lalu. Retur hanya diizinkan dalam {2} hari sejak pembelian.",""
 "Reward","Hadiah",""
 "Row {0}: Duplicate item {1}","Baris {0}: Item duplikat {1}",""
-"Row {0}: Duplicate outlet {1} / {2}","Baris {0}: Outlet duplikat {1} / {2}",""
+"Row {0}: Duplicate outlet {1}","Baris {0}: Outlet duplikat {1}",""
 "Row {0}: Group Key {1} does not match any choice group.","Baris {0}: Kunci Grup {1} tidak cocok dengan grup pilihan mana pun.",""
 "Row {0}: Group Key {1} is used more than once.","Baris {0}: Kunci Grup {1} dipakai lebih dari sekali.",""
 "Row {0}: Group Key {1} may only contain lowercase letters, digits and underscores.","Baris {0}: Kunci Grup {1} hanya boleh berisi huruf kecil, angka, dan garis bawah.",""
@@ -3662,3 +3662,4 @@ Shipping status,Status pengiriman
 "Failed to load invoices for the selected dates","Gagal memuat faktur untuk tanggal yang dipilih",""
 "Search company...","Cari perusahaan...",""
 "Cash handover moved from {0} to {1} by backdate entry","Serah terima kas dipindah dari {0} ke {1} oleh entri mundur",""
+"Linked","Tertaut",""

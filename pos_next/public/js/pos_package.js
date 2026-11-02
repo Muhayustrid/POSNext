@@ -5,7 +5,6 @@ frappe.ui.form.on("POS Package", {
 	refresh(frm) {
 		pn_update_group_options(frm);
 		pn_toggle_lifetime_fields(frm);
-		pn_filter_warehouse(frm);
 	},
 	is_lifetime(frm) {
 		pn_toggle_lifetime_fields(frm);
@@ -24,21 +23,8 @@ function pn_toggle_lifetime_fields(frm) {
 	frm.refresh_field("valid_upto");
 }
 
-function pn_filter_warehouse(frm) {
-	frm.fields_dict.outlets.grid.get_field("warehouse").get_query = (doc, cdt, cdn) => {
-		const row = locals[cdt][cdn];
-		return {
-			filters: {
-				company: row.company || frm.doc.company || "",
-				is_group: 0,
-			},
-		};
-	};
-}
-
 frappe.ui.form.on("POS Package Outlet", {
 	company(frm, cdt, cdn) {
-		frappe.model.set_value(cdt, cdn, "warehouse", "");
 		frappe.model.set_value(cdt, cdn, "status", "");
 	},
 });

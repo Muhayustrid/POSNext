@@ -60,21 +60,9 @@ class PriceGroup(Document):
 	def _validate_outlets(self) -> None:
 		seen = set()
 		for row in self.outlets:
-			key = (row.company, row.warehouse)
-			if key in seen:
-				frappe.throw(
-					_("Row {0}: Duplicate outlet {1} / {2}").format(row.idx, row.company, row.warehouse)
-				)
-			seen.add(key)
-
-			# Verify warehouse belongs to company
-			wh_company = frappe.db.get_value("Warehouse", row.warehouse, "company")
-			if wh_company != row.company:
-				frappe.throw(
-					_("Row {0}: Warehouse {1} belongs to company {2}, not {3}").format(
-						row.idx, row.warehouse, wh_company, row.company
-					)
-				)
+			if row.company in seen:
+				frappe.throw(_("Row {0}: Duplicate outlet {1}").format(row.idx, row.company))
+			seen.add(row.company)
 
 	def _set_uom(self) -> None:
 		# PERF-05: two bulk lookups replaced three queries per row; the row loop
@@ -120,13 +108,11 @@ class PriceGroup(Document):
 			frappe.db.get_value("Price Group", self.name, "modified", for_update=True)
 
 		# 2. Resolve desired profile names and per-outlet mapping deterministically.
-		# An outlet claims EVERY POS Profile of its company: an outlet is a company,
-		# and one outlet routinely runs several profiles (one per register). The row's
-		# warehouse identifies the outlet; it does not filter which profiles are claimed.
+		# An outlet is a company and claims EVERY POS Profile of it.
 		desired_set: set[str] = set()
-		outlet_profiles_dict: dict[tuple[str, str], tuple[str, ...]] = {}
+		outlet_profiles_dict: dict[str, tuple[str, ...]] = {}
 		for row in self.outlets:
-			key = (row.company, row.warehouse)
+			key = row.company
 			if key not in outlet_profiles_dict:
 				matching = tuple(
 					frappe.get_all(
@@ -436,7 +422,7 @@ class PriceGroup(Document):
 
 		# Update outlet child table statuses & linked-profile listing from the state snapshot
 		for row in self.outlets:
-			profiles = state.outlet_profiles.get((row.company, row.warehouse), ())
+			profiles = state.outlet_profiles.get(row.company, ())
 			if not profiles:
 				row.status = "No POS Profile"
 				row.pos_profile = None

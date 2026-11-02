@@ -256,34 +256,14 @@ class POSPackage(Document):
 	def validate_outlets(self):
 		seen = set()
 		for outlet in self.outlets or []:
-			key = (outlet.company, outlet.warehouse)
-			if key in seen:
+			if outlet.company in seen:
 				frappe.throw(
-					_("Row {0}: Duplicate outlet {1} / {2}").format(
-						outlet.idx, frappe.bold(outlet.company), frappe.bold(outlet.warehouse)
-					)
+					_("Row {0}: Duplicate outlet {1}").format(outlet.idx, frappe.bold(outlet.company))
 				)
-			seen.add(key)
-
-			wh_company = frappe.db.get_value("Warehouse", outlet.warehouse, "company")
-			if wh_company and wh_company != outlet.company:
-				frappe.throw(
-					_("Row {0}: Warehouse {1} belongs to company {2}, not {3}.").format(
-						outlet.idx,
-						frappe.bold(outlet.warehouse),
-						frappe.bold(wh_company),
-						frappe.bold(outlet.company),
-					)
-				)
+			seen.add(outlet.company)
 
 			matching = frappe.get_all(
-				"POS Profile",
-				filters={"company": outlet.company, "warehouse": outlet.warehouse},
-				pluck="name",
+				"POS Profile", filters={"company": outlet.company}, pluck="name", order_by="name asc"
 			)
-			if not matching:
-				outlet.status = "No POS Profile matches this warehouse"
-				outlet.pos_profile = None
-			else:
-				outlet.status = "Available on all profiles for this warehouse"
-				outlet.pos_profile = ", ".join(sorted(matching))
+			outlet.status = "Linked" if matching else "No POS Profile"
+			outlet.pos_profile = ", ".join(matching) or None

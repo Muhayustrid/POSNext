@@ -759,11 +759,11 @@ class TestPackageAccessControl(unittest.TestCase):
 
 
 class TestOutletScoping(unittest.TestCase):
-	"""Outlet rows scope a package by Company + Warehouse, nothing else.
+	"""Outlet rows scope a package by Company, nothing else.
 
 	The retired model let a row's ``pos_profile`` column grant availability to
-	one named profile; these tests pin the new rule: only the pair counts, and
-	the profile column is a read-only listing filled by the controller.
+	one named profile; these tests pin the new rule: only the company counts,
+	and the profile column is a read-only listing filled by the controller.
 	"""
 
 	@classmethod
@@ -773,7 +773,7 @@ class TestOutletScoping(unittest.TestCase):
 		_ensure_legacy_package()
 		frappe.db.commit()
 
-	def test_every_profile_sharing_the_pair_gets_the_package(self):
+	def test_every_profile_of_the_company_gets_the_package(self):
 		names = {pkg["name"] for pkg in get_packages(PROFILE_2)}
 		self.assertIn(PACKAGE, names)
 
@@ -811,13 +811,14 @@ class TestOutletScoping(unittest.TestCase):
 			)
 			frappe.db.commit()
 
-	def test_saving_the_package_lists_every_profile_of_the_outlet(self):
+	def test_saving_the_package_lists_every_profile_of_the_company(self):
 		pkg = frappe.get_doc("POS Package", PACKAGE)
 		pkg.save(ignore_permissions=True)
 
 		outlet = pkg.outlets[0]
-		self.assertEqual(outlet.status, "Available on all profiles for this warehouse")
-		self.assertEqual(outlet.pos_profile, ", ".join(sorted([PROFILE, PROFILE_2])))
+		self.assertEqual(outlet.status, "Linked")
+		listed = set(outlet.pos_profile.split(", "))
+		self.assertTrue({PROFILE, PROFILE_2} <= listed)
 
 
 class TestRandomGroupKeys(unittest.TestCase):

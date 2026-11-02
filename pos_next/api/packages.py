@@ -38,7 +38,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 from pos_next.api.items import _fetch_uom_prices_map
-from pos_next.price_group_ownership import PRICE_LIST_OWNER_FIELD
+from pos_next.price_group_ownership import PRICE_LIST_OWNER_FIELD, PROFILE_OWNER_FIELD
 
 PARENT_ROLE = "Package"
 COMPONENT_ROLE = "Package Item"
@@ -210,11 +210,14 @@ def _serialize_package(doc, pos_profile=None, on_date=None):
 def _eligible_package_names(pos_profile, on_date=None):
 	"""Names of enabled, in-date packages available on this POS Profile.
 
-	A package with no outlet rows is available to every profile of its package
-	company; otherwise it is scoped by outlet Company + Warehouse — an outlet
-	applies to every POS Profile sharing that pair.
+	An outlet is a company. A package reaches the profile's company when an enabled
+	outlet row names it, or when the enabled Price Group that owns this profile
+	prices the package's parent item. A disabled outlet row blocks the company even
+	then. A package with neither stays on the profiles of its own company.
 	"""
-	profile = frappe.db.get_value("POS Profile", pos_profile, ["name", "company", "warehouse"], as_dict=True)
+	profile = frappe.db.get_value(
+		"POS Profile", pos_profile, ["name", "company", PROFILE_OWNER_FIELD], as_dict=True
+	)
 	if not profile:
 		frappe.throw(_("POS Profile {0} not found.").format(frappe.bold(pos_profile)))
 
@@ -223,36 +226,40 @@ def _eligible_package_names(pos_profile, on_date=None):
 	packages = frappe.get_all(
 		"POS Package",
 		filters={"disabled": 0},
-		fields=["name", "company", "valid_from", "valid_upto", "is_lifetime"],
+		fields=["name", "company", "parent_item", "valid_from", "valid_upto", "is_lifetime"],
 	)
 	if not packages:
 		return []
 
-	names = [p.name for p in packages]
-	packages_by_name = {p.name: p for p in packages}
-
 	outlet_rows = frappe.get_all(
 		"POS Package Outlet",
-		filters={"parent": ["in", names], "parenttype": "POS Package"},
-		fields=["parent", "company", "warehouse", "enabled"],
+		filters={"parent": ["in", [p.name for p in packages]], "parenttype": "POS Package"},
+		fields=["parent", "company", "enabled"],
 	)
 	restricted = {row.parent for row in outlet_rows}
-	allowed = {
-		row.parent
-		for row in outlet_rows
-		if row.enabled
-		and row.company == profile.company
-		and (row.warehouse or "") == (profile.warehouse or "")
-	}
+	own_rows = {row.parent: row.enabled for row in outlet_rows if row.company == profile.company}
+
+	price_group = profile.get(PROFILE_OWNER_FIELD)
+	priced = set()
+	if price_group and frappe.db.get_value("Price Group", price_group, "enabled"):
+		priced = set(
+			frappe.get_all(
+				"Price Group Item",
+				filters={"parent": price_group, "parenttype": "Price Group"},
+				pluck="item_code",
+			)
+		)
 
 	def _is_available(p):
 		if _package_is_valid_on(p, on_date) is False:
 			return False
-		if p.name not in restricted:
-			return p.company == profile.company
-		return p.name in allowed
+		if p.name in own_rows:
+			return bool(own_rows[p.name])
+		if p.parent_item in priced:
+			return True
+		return p.name not in restricted and p.company == profile.company
 
-	return [p.name for p in packages if _is_available(packages_by_name[p.name])]
+	return [p.name for p in packages if _is_available(p)]
 
 
 def _get_packages(pos_profile, on_date=None):

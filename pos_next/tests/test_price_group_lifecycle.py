@@ -607,22 +607,6 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 			db_pos_profile, msg=f"Database outlet pos_profile should be empty, got '{db_pos_profile}'"
 		)
 
-	def test_warehouse_company_mismatch_is_rejected(self):
-		"""Warehouse company mismatch is rejected with ValidationError."""
-		comp_b = helpers.get_second_company()
-		wh_b = helpers.make_test_warehouse("life15", comp_b)
-
-		with self.assertRaisesRegex(
-			frappe.ValidationError,
-			r"belongs to company",
-			msg="Expected ValidationError for warehouse company mismatch",
-		):
-			helpers.make_price_group(
-				"PG-Life-15",
-				items=[{"item_code": helpers.make_test_item("life15", self.uom), "rate": 10000}],
-				outlets=[{"company": self.company, "warehouse": wh_b}],
-			)
-
 	def test_duplicate_item_is_rejected(self):
 		"""Duplicate item in child items table is rejected with ValidationError."""
 		item = helpers.make_test_item("life16", self.uom)
@@ -653,7 +637,7 @@ class TestPriceGroupLifecycle(IntegrationTestCase):
 			)
 
 	def test_duplicate_outlet_is_rejected(self):
-		"""Duplicate company/warehouse outlet row is rejected with ValidationError."""
+		"""Duplicate company outlet row is rejected with ValidationError."""
 		wh = helpers.make_test_warehouse("life18", self.company)
 		with self.assertRaisesRegex(
 			frappe.ValidationError,
