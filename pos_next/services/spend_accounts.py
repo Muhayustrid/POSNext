@@ -1,7 +1,9 @@
 import frappe
 from frappe import _
-from frappe.utils.nestedset import get_descendants_of
 
+from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import (
+	allowed_items as allowed_items,
+)
 from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import (
 	template_companies,
 	validate_debit_account,
@@ -187,23 +189,6 @@ def resolve_credit_to(supplier: str, company: str) -> str:
 	if account.account_type != "Payable":
 		_fail(_("Supplier payable account {0} must have type Payable.").format(name))
 	return name
-
-
-def allowed_items(template):
-	items = set()
-	for row in template.items:
-		if row.item_code:
-			items.add(row.item_code)
-		elif row.item_group:
-			groups = [row.item_group, *get_descendants_of("Item Group", row.item_group)]
-			items.update(
-				frappe.get_all(
-					"Item",
-					filters={"item_group": ["in", groups], "disabled": 0, "is_purchase_item": 1},
-					pluck="name",
-				)
-			)
-	return sorted(items)
 
 
 def check_readiness(template, company: str) -> dict:

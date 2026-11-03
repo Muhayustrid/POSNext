@@ -1,37 +1,46 @@
 /**
  * @vitest-environment jsdom
  */
-import { flushPromises, mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { nextTick } from "vue"
+import { flushPromises, mount } from "@vue/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 
 vi.mock("frappe-ui", async () => {
-	const { defineComponent } = await import("vue")
-	const stub = defineComponent({ name: "FeatherIconStub", render: () => null })
+	const { defineComponent } = await import("vue");
+	const stub = defineComponent({ name: "FeatherIconStub", render: () => null });
 	const Button = defineComponent({
 		name: "Button",
 		template: `<button v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
-	})
-	return { FeatherIcon: stub, Button, call: (...args) => callMock(...args) }
-})
+	});
+	return {
+		FeatherIcon: stub,
+		Button,
+		Dialog: defineComponent({
+			props: ["modelValue"],
+			template:
+				'<div v-if="modelValue"><slot name="body-content" /><slot name="actions" /></div>',
+		}),
+		call: (...args) => callMock(...args),
+	};
+});
 
-const callMock = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
+const callMock = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 
 // The app installs __() as a global property; some modules call it at
 // module-evaluation time, so this must be hoisted above the imports.
 vi.hoisted(() => {
 	globalThis.__ = (message, replacements = []) => {
-		if (!Array.isArray(replacements) || !replacements.length) return message
-		let out = message
+		if (!Array.isArray(replacements) || !replacements.length) return message;
+		let out = message;
 		for (const [i, v] of replacements.entries())
-			out = out.split(`{${i}}`).join(String(v))
-		return out
-	}
-})
+			out = out.split(`{${i}}`).join(String(v));
+		return out;
+	};
+});
 
-import POSMenuDialog from "./POSMenuDialog.vue"
-import SpendDialog from "../spend/SpendDialog.vue"
-import { MANAGEMENT_MENU } from "./managementMenu"
+import POSMenuDialog from "./POSMenuDialog.vue";
+import SpendDialog from "../spend/SpendDialog.vue";
+import { MANAGEMENT_MENU } from "./managementMenu";
 
 const viewStubs = {
 	SpendDialog: {
@@ -70,7 +79,7 @@ const viewStubs = {
 		template: `<div data-testid="view-purchase-order" />`,
 	},
 	StockOpnameDialog: { template: `<div data-testid="view-stock-opname" />` },
-}
+};
 
 function mountShell(props = {}) {
 	return mount(POSMenuDialog, {
@@ -83,14 +92,14 @@ function mountShell(props = {}) {
 			config: { globalProperties: { __: globalThis.__ } },
 			stubs: viewStubs,
 		},
-	})
+	});
 }
 
 function sidebarLabels(wrapper) {
 	return wrapper
 		.find('[data-testid="pos-menu-sidebar"]')
 		.findAll("button")
-		.map((b) => b.text())
+		.map((b) => b.text());
 }
 
 function availableLabels(
@@ -106,14 +115,14 @@ function availableLabels(
 			(!i.requiresStockOpname || (canStockOpname && !isOffline)) &&
 			!i.requiresManagement &&
 			(!i.requiresOnline || !isOffline),
-	).map((i) => i.label)
+	).map((i) => i.label);
 }
 
 beforeEach(() => {
-	document.body.innerHTML = ""
-	callMock.mockReset()
-	callMock.mockImplementation(() => Promise.resolve(null))
-})
+	document.body.innerHTML = "";
+	callMock.mockReset();
+	callMock.mockImplementation(() => Promise.resolve(null));
+});
 
 describe("POSMenuDialog menu", () => {
 	it("menu shows spend item only online", async () => {
@@ -122,18 +131,18 @@ describe("POSMenuDialog menu", () => {
 			initialView: "spend",
 			company: "Alpha",
 			posProfile: "Alpha POS",
-		})
-		expect(sidebarLabels(wrapper)).toContain("Purchases & Expenses")
+		});
+		expect(sidebarLabels(wrapper)).toContain("Purchases & Expenses");
 		expect(
 			wrapper.find('[data-testid="view-spend"]').attributes("data-company"),
-		).toBe("Alpha")
-		await wrapper.setProps({ isOffline: true })
-		expect(sidebarLabels(wrapper)).not.toContain("Purchases & Expenses")
-		expect(wrapper.find('[data-testid="view-spend"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
+		).toBe("Alpha");
+		await wrapper.setProps({ isOffline: true });
+		expect(sidebarLabels(wrapper)).not.toContain("Purchases & Expenses");
+		expect(wrapper.find('[data-testid="view-spend"]').exists()).toBe(true);
+		wrapper.unmount();
+	});
 	it("retries the original spend after a lost response and offline/online transition", async () => {
-		const submissions = []
+		const submissions = [];
 		callMock.mockImplementation(async (method, args) => {
 			if (method.endsWith("get_spend_templates"))
 				return [
@@ -144,15 +153,15 @@ describe("POSMenuDialog menu", () => {
 						document_type: "Journal Entry",
 						payment_sources: [{ mode_of_payment: "Drawer", is_default: 1 }],
 					},
-				]
+				];
 			if (method.endsWith("submit_spend")) {
-				submissions.push(args.data)
+				submissions.push(args.data);
 				if (submissions.length === 1)
-					throw new Error("Response lost after commit")
-				return { name: "JE-1" }
+					throw new Error("Response lost after commit");
+				return { name: "JE-1" };
 			}
-			return null
-		})
+			return null;
+		});
 		const wrapper = mount(POSMenuDialog, {
 			props: {
 				open: true,
@@ -164,39 +173,41 @@ describe("POSMenuDialog menu", () => {
 				config: { globalProperties: { __: globalThis.__ } },
 				stubs: { ...viewStubs, SpendDialog: false },
 			},
-		})
+		});
 		try {
-			await flushPromises()
-			await wrapper.get('[data-test="spend-template"]').setValue("electricity")
+			await flushPromises();
+			await wrapper.get('[data-test="spend-new-tab"]').trigger("click");
+			wrapper.findAllComponents({ name: "AutocompleteSelect" }).find((c) => c.attributes("data-test") === "spend-template").vm.$emit("update:modelValue", "electricity");
+			await flushPromises();
 			await wrapper
 				.get('[data-test="spend-description"]')
-				.setValue("Monthly bill")
-			await wrapper.get('[data-test="spend-amount"]').setValue(12345)
-			await wrapper.get('[data-test="spend-form"]').trigger("submit")
-			await flushPromises()
-			expect(submissions).toHaveLength(1)
+				.setValue("Monthly bill");
+			await wrapper.get('[data-test="spend-amount"]').setValue(12345);
+			await wrapper.get('[data-test="spend-form"]').trigger("submit");
+			await flushPromises();
+			expect(submissions).toHaveLength(1);
 
-			await wrapper.setProps({ isOffline: true })
-			expect(wrapper.findComponent(SpendDialog).exists()).toBe(true)
+			await wrapper.setProps({ isOffline: true });
+			expect(wrapper.findComponent(SpendDialog).exists()).toBe(true);
 			expect(
 				wrapper.get('[data-test="spend-submit"]').attributes("disabled"),
-			).toBeDefined()
-			await wrapper.get('[data-test="spend-form"]').trigger("submit")
-			expect(submissions).toHaveLength(1)
-			await wrapper.setProps({ isOffline: false })
-			await flushPromises()
-			await wrapper.get('[data-test="spend-form"]').trigger("submit")
-			await flushPromises()
-			expect(submissions).toHaveLength(2)
-			expect(JSON.parse(submissions[0]).client_request_id).toBeTruthy()
-			expect(submissions[1]).toBe(submissions[0])
+			).toBeDefined();
+			await wrapper.get('[data-test="spend-form"]').trigger("submit");
+			expect(submissions).toHaveLength(1);
+			await wrapper.setProps({ isOffline: false });
+			await flushPromises();
+			await wrapper.get('[data-test="spend-form"]').trigger("submit");
+			await flushPromises();
+			expect(submissions).toHaveLength(2);
+			expect(JSON.parse(submissions[0]).client_request_id).toBeTruthy();
+			expect(submissions[1]).toBe(submissions[0]);
 		} finally {
-			wrapper.unmount()
+			wrapper.unmount();
 		}
-	})
+	});
 
 	it("keeps an uncertain spend across navigation, menu close and company changes", async () => {
-		const submissions = []
+		const submissions = [];
 		callMock.mockImplementation(async (method, args) => {
 			if (method.endsWith("get_spend_templates"))
 				return [
@@ -207,15 +218,15 @@ describe("POSMenuDialog menu", () => {
 						document_type: "Journal Entry",
 						payment_sources: [{ mode_of_payment: "Drawer", is_default: 1 }],
 					},
-				]
+				];
 			if (method.endsWith("submit_spend")) {
-				submissions.push(args.data)
+				submissions.push(args.data);
 				if (submissions.length === 1)
-					throw new Error("Response lost after commit")
-				return { name: "JE-1" }
+					throw new Error("Response lost after commit");
+				return { name: "JE-1" };
 			}
-			return null
-		})
+			return null;
+		});
 		const wrapper = mount(POSMenuDialog, {
 			props: {
 				open: true,
@@ -227,66 +238,68 @@ describe("POSMenuDialog menu", () => {
 				config: { globalProperties: { __: globalThis.__ } },
 				stubs: { ...viewStubs, SpendDialog: false },
 			},
-		})
+		});
 		try {
-			await flushPromises()
-			await wrapper.get('[data-test="spend-template"]').setValue("electricity")
+			await flushPromises();
+			await wrapper.get('[data-test="spend-new-tab"]').trigger("click");
+			wrapper.findAllComponents({ name: "AutocompleteSelect" }).find((c) => c.attributes("data-test") === "spend-template").vm.$emit("update:modelValue", "electricity");
+			await flushPromises();
 			await wrapper
 				.get('[data-test="spend-description"]')
-				.setValue("Monthly bill")
-			await wrapper.get('[data-test="spend-amount"]').setValue(12345)
-			await wrapper.get('[data-test="spend-form"]').trigger("submit")
-			await flushPromises()
+				.setValue("Monthly bill");
+			await wrapper.get('[data-test="spend-amount"]').setValue(12345);
+			await wrapper.get('[data-test="spend-form"]').trigger("submit");
+			await flushPromises();
 			await wrapper
 				.find('[data-testid="pos-menu-sidebar"]')
 				.findAll("button")
 				.find((button) => button.text() === "Settings")
-				.trigger("click")
-			await wrapper.setProps({ open: false })
+				.trigger("click");
+			await wrapper.setProps({ open: false });
 			await wrapper.setProps({
 				company: "Beta",
 				posProfile: "Beta POS",
 				open: true,
-			})
-			await flushPromises()
+			});
+			await flushPromises();
 			expect(wrapper.get('[data-test="spend-description"]').element.value).toBe(
 				"Monthly bill",
-			)
-			expect(wrapper.findComponent(SpendDialog).props("company")).toBe("Alpha")
-			await wrapper.get('[data-test="spend-form"]').trigger("submit")
-			await flushPromises()
-			expect(submissions).toHaveLength(2)
-			expect(submissions[1]).toBe(submissions[0])
-			expect(wrapper.findComponent(SpendDialog).props("company")).toBe("Beta")
+			);
+			expect(wrapper.findComponent(SpendDialog).props("company")).toBe("Alpha");
+			await wrapper.get('[data-test="spend-form"]').trigger("submit");
+			await flushPromises();
+			expect(submissions).toHaveLength(2);
+			expect(submissions[1]).toBe(submissions[0]);
+			expect(wrapper.findComponent(SpendDialog).props("company")).toBe("Beta");
 		} finally {
-			wrapper.unmount()
+			wrapper.unmount();
 		}
-	})
+	});
 
 	it("renders the same filtered items as MANAGEMENT_MENU rules", () => {
 		const wrapper = mountShell({
 			open: true,
 			canProduction: true,
 			canPurchaseOrder: true,
-		})
-		expect(sidebarLabels(wrapper)).toEqual(availableLabels(true, true))
-		wrapper.unmount()
-	})
+		});
+		expect(sidebarLabels(wrapper)).toEqual(availableLabels(true, true));
+		wrapper.unmount();
+	});
 
 	it("hides production when the user lacks the permission", () => {
-		const wrapper = mountShell({ open: true, canProduction: false })
-		const labels = sidebarLabels(wrapper)
-		expect(labels).not.toContain("Production")
-		expect(labels).toEqual(availableLabels(false, false))
-		wrapper.unmount()
-	})
+		const wrapper = mountShell({ open: true, canProduction: false });
+		const labels = sidebarLabels(wrapper);
+		expect(labels).not.toContain("Production");
+		expect(labels).toEqual(availableLabels(false, false));
+		wrapper.unmount();
+	});
 
 	it("hides purchase order when the user lacks the permission", () => {
-		const wrapper = mountShell({ open: true, canPurchaseOrder: false })
-		const labels = sidebarLabels(wrapper)
-		expect(labels).not.toContain("Purchase Order")
-		wrapper.unmount()
-	})
+		const wrapper = mountShell({ open: true, canPurchaseOrder: false });
+		const labels = sidebarLabels(wrapper);
+		expect(labels).not.toContain("Purchase Order");
+		wrapper.unmount();
+	});
 
 	it("hides both gated items while offline even with permission", () => {
 		const wrapper = mountShell({
@@ -294,98 +307,104 @@ describe("POSMenuDialog menu", () => {
 			canProduction: true,
 			canPurchaseOrder: true,
 			isOffline: true,
-		})
-		const labels = sidebarLabels(wrapper)
-		expect(labels).not.toContain("Production")
-		expect(labels).not.toContain("Purchase Order")
-		expect(labels).toEqual(availableLabels(true, true, true))
-		wrapper.unmount()
-	})
+		});
+		const labels = sidebarLabels(wrapper);
+		expect(labels).not.toContain("Production");
+		expect(labels).not.toContain("Purchase Order");
+		expect(labels).toEqual(availableLabels(true, true, true));
+		wrapper.unmount();
+	});
 
 	it("hides stock opname without permission or while offline", () => {
-		let wrapper = mountShell({ open: true, canStockOpname: false })
-		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname")
-		wrapper.unmount()
+		let wrapper = mountShell({ open: true, canStockOpname: false });
+		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname");
+		wrapper.unmount();
 
-		wrapper = mountShell({ open: true, canStockOpname: true })
-		expect(sidebarLabels(wrapper)).toContain("Stock Opname")
+		wrapper = mountShell({ open: true, canStockOpname: true });
+		expect(sidebarLabels(wrapper)).toContain("Stock Opname");
 		expect(sidebarLabels(wrapper)).toEqual(
 			availableLabels(false, false, false, true),
-		)
-		wrapper.unmount()
+		);
+		wrapper.unmount();
 
-		wrapper = mountShell({ open: true, canStockOpname: true, isOffline: true })
-		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname")
-		wrapper.unmount()
-	})
+		wrapper = mountShell({ open: true, canStockOpname: true, isOffline: true });
+		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname");
+		wrapper.unmount();
+	});
 
 	it("leads with invoice management and the sales recap, with no dashboard", async () => {
-		const wrapper = mountShell({ open: true, openingShift: "OS-1" })
-		const labels = sidebarLabels(wrapper)
+		const wrapper = mountShell({ open: true, openingShift: "OS-1" });
+		const labels = sidebarLabels(wrapper);
 		// the dashboard is gone: invoices is the first entry, the recap follows
-		expect(labels[0]).toBe("Invoice Management")
-		expect(labels[1]).toBe("Sales Recap")
-		expect(labels).not.toContain("Dashboard")
-		expect(labels).toEqual(availableLabels(false, false))
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
+		expect(labels[0]).toBe("Invoice Management");
+		expect(labels[1]).toBe("Sales Recap");
+		expect(labels).not.toContain("Dashboard");
+		expect(labels).toEqual(availableLabels(false, false));
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true);
 
-		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]')
+		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]');
 		await sidebar
 			.findAll("button")
 			.find((b) => b.text() === "Sales Recap")
-			.trigger("click")
-		await nextTick()
-		expect(wrapper.find('[data-testid="view-sales-recap"]').exists()).toBe(true)
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(false)
-		wrapper.unmount()
-	})
+			.trigger("click");
+		await nextTick();
+		expect(wrapper.find('[data-testid="view-sales-recap"]').exists()).toBe(
+			true,
+		);
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(false);
+		wrapper.unmount();
+	});
 
 	it("mounts the recap when initialView is explicitly sales-recap", async () => {
 		const wrapper = mountShell({
 			open: true,
 			openingShift: "OS-1",
 			initialView: "sales-recap",
-		})
-		expect(wrapper.find('[data-testid="view-sales-recap"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
+		});
+		expect(wrapper.find('[data-testid="view-sales-recap"]').exists()).toBe(
+			true,
+		);
+		wrapper.unmount();
+	});
 
 	it("open-reject-request from production switches to the reject view with the request", async () => {
 		const wrapper = mountShell({
 			open: true,
 			initialView: "production",
 			canProduction: true,
-		})
-		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(true)
+		});
+		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(true);
 
-		const production = wrapper.findComponent({ name: "ProductionDialog" })
-		await production.vm.$emit("open-reject-request", "PRJ-2601-0001")
-		await nextTick()
-		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(false)
+		const production = wrapper.findComponent({ name: "ProductionDialog" });
+		await production.vm.$emit("open-reject-request", "PRJ-2601-0001");
+		await nextTick();
+		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(
+			false,
+		);
 		expect(wrapper.find('[data-testid="view-reject-request"]').exists()).toBe(
 			true,
-		)
-		const reject = wrapper.findComponent({ name: "RejectRequestDialog" })
-		expect(reject.props("initialRequest")).toBe("PRJ-2601-0001")
+		);
+		const reject = wrapper.findComponent({ name: "RejectRequestDialog" });
+		expect(reject.props("initialRequest")).toBe("PRJ-2601-0001");
 
 		// leaving the reject view clears the one-shot deep link
 		await wrapper
 			.find('[data-testid="pos-menu-sidebar"]')
 			.findAll("button")
 			.find((b) => b.text() === "Invoice Management")
-			.trigger("click")
-		await nextTick()
+			.trigger("click");
+		await nextTick();
 		await wrapper
 			.find('[data-testid="pos-menu-sidebar"]')
 			.findAll("button")
 			.find((b) => b.text() === "Reject Requests")
-			.trigger("click")
-		await nextTick()
-		const reopened = wrapper.findComponent({ name: "RejectRequestDialog" })
-		expect(reopened.props("initialRequest")).toBeNull()
-		wrapper.unmount()
-	})
-})
+			.trigger("click");
+		await nextTick();
+		const reopened = wrapper.findComponent({ name: "RejectRequestDialog" });
+		expect(reopened.props("initialRequest")).toBeNull();
+		wrapper.unmount();
+	});
+});
 
 describe("POSMenuDialog views", () => {
 	it("opens on the first available item by default", async () => {
@@ -393,110 +412,114 @@ describe("POSMenuDialog views", () => {
 			open: true,
 			canProduction: false,
 			canPurchaseOrder: false,
-		})
+		});
 		// First item of the Sales group is Invoice Management
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true);
+		wrapper.unmount();
+	});
 
 	it("marks only the active sidebar item with aria-current", async () => {
-		const wrapper = mountShell({ open: true })
+		const wrapper = mountShell({ open: true });
 		const current = () =>
 			wrapper
 				.find('[data-testid="pos-menu-sidebar"]')
 				.findAll('button[aria-current="page"]')
-				.map((b) => b.text())
-		expect(current()).toEqual(["Invoice Management"])
+				.map((b) => b.text());
+		expect(current()).toEqual(["Invoice Management"]);
 		await wrapper
 			.find('[data-testid="pos-menu-sidebar"]')
 			.findAll("button")
 			.find((b) => b.text() === "Settings")
-			.trigger("click")
-		expect(current()).toEqual(["Settings"])
-		wrapper.unmount()
-	})
+			.trigger("click");
+		expect(current()).toEqual(["Settings"]);
+		wrapper.unmount();
+	});
 
 	it("burger opens the mobile menu list; back steps view -> list -> POS", async () => {
-		const mm = window.matchMedia
-		window.matchMedia = () => ({ matches: false }) // phone width
-		const wrapper = mountShell({ open: true })
-		const list = () => wrapper.find('[data-testid="pos-menu-list"]')
-		expect(list().exists()).toBe(true)
+		const mm = window.matchMedia;
+		window.matchMedia = () => ({ matches: false }); // phone width
+		const wrapper = mountShell({ open: true });
+		const list = () => wrapper.find('[data-testid="pos-menu-list"]');
+		expect(list().exists()).toBe(true);
 
 		await list()
 			.findAll("button")
 			.find((b) => b.text() === "Settings")
-			.trigger("click")
-		expect(list().exists()).toBe(false)
-		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true)
-		expect(wrapper.emitted("menu-selected")).toEqual([["settings"]])
+			.trigger("click");
+		expect(list().exists()).toBe(false);
+		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true);
+		expect(wrapper.emitted("menu-selected")).toEqual([["settings"]]);
 
-		await wrapper.find('button[aria-label="Close menu"]').trigger("click")
-		expect(list().exists()).toBe(true)
-		expect(wrapper.emitted("update:open")).toBeUndefined()
+		await wrapper.find('button[aria-label="Close menu"]').trigger("click");
+		expect(list().exists()).toBe(true);
+		expect(wrapper.emitted("update:open")).toBeUndefined();
 
-		await wrapper.find('button[aria-label="Close menu"]').trigger("click")
-		expect(wrapper.emitted("update:open")).toEqual([[false]])
-		window.matchMedia = mm
-		wrapper.unmount()
-	})
+		await wrapper.find('button[aria-label="Close menu"]').trigger("click");
+		expect(wrapper.emitted("update:open")).toEqual([[false]]);
+		window.matchMedia = mm;
+		wrapper.unmount();
+	});
 
 	it("skips the mobile list when initialView is given", () => {
-		const wrapper = mountShell({ open: true, initialView: "settings" })
-		expect(wrapper.find('[data-testid="pos-menu-list"]').exists()).toBe(false)
-		wrapper.unmount()
-	})
+		const wrapper = mountShell({ open: true, initialView: "settings" });
+		expect(wrapper.find('[data-testid="pos-menu-list"]').exists()).toBe(false);
+		wrapper.unmount();
+	});
 
 	it("switches the mounted view and emits menu-selected on item click", async () => {
-		const wrapper = mountShell({ open: true })
-		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]')
+		const wrapper = mountShell({ open: true });
+		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]');
 		const settingsBtn = sidebar
 			.findAll("button")
-			.find((b) => b.text() === "Settings")
-		await settingsBtn.trigger("click")
-		await nextTick()
+			.find((b) => b.text() === "Settings");
+		await settingsBtn.trigger("click");
+		await nextTick();
 
-		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true)
-		expect(wrapper.find('[data-testid="view-promotions"]').exists()).toBe(false)
-		expect(wrapper.emitted("menu-selected")).toEqual([["settings"]])
-		wrapper.unmount()
-	})
+		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true);
+		expect(wrapper.find('[data-testid="view-promotions"]').exists()).toBe(
+			false,
+		);
+		expect(wrapper.emitted("menu-selected")).toEqual([["settings"]]);
+		wrapper.unmount();
+	});
 
 	it("selects initialView on open and stays one-shot per open", async () => {
-		const wrapper = mountShell({ open: false, initialView: "settings" })
-		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(false)
+		const wrapper = mountShell({ open: false, initialView: "settings" });
+		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(false);
 
-		await wrapper.setProps({ open: true })
-		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true)
+		await wrapper.setProps({ open: true });
+		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(true);
 
 		// One-shot: closing and reopening without initialView falls back to default
-		await wrapper.setProps({ open: false, initialView: null })
-		await wrapper.setProps({ open: true })
-		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(false)
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
+		await wrapper.setProps({ open: false, initialView: null });
+		await wrapper.setProps({ open: true });
+		expect(wrapper.find('[data-testid="view-settings"]').exists()).toBe(false);
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true);
+		wrapper.unmount();
+	});
 
 	it("falls back to the first available item when initialView is unavailable", async () => {
 		const wrapper = mountShell({
 			open: false,
 			initialView: "production",
 			canProduction: false,
-		})
-		await wrapper.setProps({ open: true })
-		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(false)
-		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true)
-		wrapper.unmount()
-	})
+		});
+		await wrapper.setProps({ open: true });
+		expect(wrapper.find('[data-testid="view-production"]').exists()).toBe(
+			false,
+		);
+		expect(wrapper.find('[data-testid="view-invoices"]').exists()).toBe(true);
+		wrapper.unmount();
+	});
 
 	it("forwards listeners from $attrs onto the active view", async () => {
-		const onRefreshHistory = vi.fn()
+		const onRefreshHistory = vi.fn();
 		const wrapper = mount(
 			{
 				components: { POSMenuDialog },
 				template: `<POSMenuDialog open :history-invoices="[]" @refresh-history="onRefreshHistory" />`,
 				setup() {
-					return { onRefreshHistory }
+					return { onRefreshHistory };
 				},
 			},
 			{
@@ -511,27 +534,27 @@ describe("POSMenuDialog views", () => {
 					},
 				},
 			},
-		)
+		);
 		// invoices is the third item; select it so InvoiceManagement mounts
-		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]')
+		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]');
 		const invoicesBtn = sidebar
 			.findAll("button")
-			.find((b) => b.text() === "Invoice Management")
-		await invoicesBtn.trigger("click")
+			.find((b) => b.text() === "Invoice Management");
+		await invoicesBtn.trigger("click");
 
-		await wrapper.find('[data-testid="emit-refresh"]').trigger("click")
-		expect(onRefreshHistory).toHaveBeenCalledTimes(1)
-		wrapper.unmount()
-	})
+		await wrapper.find('[data-testid="emit-refresh"]').trigger("click");
+		expect(onRefreshHistory).toHaveBeenCalledTimes(1);
+		wrapper.unmount();
+	});
 
 	it("closes the shell when an embedded dialog view closes itself", async () => {
-		const onClose = vi.fn()
+		const onClose = vi.fn();
 		const wrapper = mount(
 			{
 				components: { POSMenuDialog },
 				template: `<POSMenuDialog open initial-view="purchase-order" :can-purchase-order="true" @update:open="onClose" />`,
 				setup() {
-					return { onClose }
+					return { onClose };
 				},
 			},
 			{
@@ -546,40 +569,40 @@ describe("POSMenuDialog views", () => {
 					},
 				},
 			},
-		)
-		expect(wrapper.find('[data-testid="emit-close"]').exists()).toBe(true)
-		await wrapper.find('[data-testid="emit-close"]').trigger("click")
-		expect(onClose).toHaveBeenCalledWith(false)
-		wrapper.unmount()
-	})
-})
+		);
+		expect(wrapper.find('[data-testid="emit-close"]').exists()).toBe(true);
+		await wrapper.find('[data-testid="emit-close"]').trigger("click");
+		expect(onClose).toHaveBeenCalledWith(false);
+		wrapper.unmount();
+	});
+});
 
 describe("POSMenuDialog chrome", () => {
 	it("is a modal dialog with aria semantics", () => {
-		const wrapper = mountShell({ open: true })
-		const panel = wrapper.find('[role="dialog"]')
-		expect(panel.exists()).toBe(true)
-		expect(panel.attributes("aria-modal")).toBe("true")
-		expect(panel.attributes("aria-label")).toBe("Invoice Management")
-		wrapper.unmount()
-	})
+		const wrapper = mountShell({ open: true });
+		const panel = wrapper.find('[role="dialog"]');
+		expect(panel.exists()).toBe(true);
+		expect(panel.attributes("aria-modal")).toBe("true");
+		expect(panel.attributes("aria-label")).toBe("Invoice Management");
+		wrapper.unmount();
+	});
 
 	it("emits update:open false from the header back button", async () => {
-		const wrapper = mountShell({ open: true })
-		await wrapper.find('button[aria-label="Close menu"]').trigger("click")
-		expect(wrapper.emitted("update:open")).toEqual([[false]])
-		wrapper.unmount()
-	})
+		const wrapper = mountShell({ open: true });
+		await wrapper.find('button[aria-label="Close menu"]').trigger("click");
+		expect(wrapper.emitted("update:open")).toEqual([[false]]);
+		wrapper.unmount();
+	});
 
 	it("renders the back-to-POS button that closes the shell", async () => {
-		const wrapper = mountShell({ open: true })
-		const back = wrapper.find('button[title="Back to POS"]')
-		expect(back.exists()).toBe(true)
-		await back.trigger("click")
-		expect(wrapper.emitted("update:open")).toEqual([[false]])
-		wrapper.unmount()
-	})
-})
+		const wrapper = mountShell({ open: true });
+		const back = wrapper.find('button[title="Back to POS"]');
+		expect(back.exists()).toBe(true);
+		await back.trigger("click");
+		expect(wrapper.emitted("update:open")).toEqual([[false]]);
+		wrapper.unmount();
+	});
+});
 
 describe("POSMenuDialog company choice without a shift", () => {
 	const companies = {
@@ -588,12 +611,12 @@ describe("POSMenuDialog company choice without a shift", () => {
 			{ company: "Beta", pos_profile: "Beta POS", warehouse: "WB" },
 		],
 		default: null,
-	}
+	};
 
 	async function flush() {
-		for (let i = 0; i < 4; i++) await nextTick()
-		await new Promise((r) => setTimeout(r))
-		await nextTick()
+		for (let i = 0; i < 4; i++) await nextTick();
+		await new Promise((r) => setTimeout(r));
+		await nextTick();
 	}
 
 	it.each([
@@ -608,29 +631,29 @@ describe("POSMenuDialog company choice without a shift", () => {
 			Promise.resolve(
 				method.endsWith("get_purchase_companies") ? companies : null,
 			),
-		)
+		);
 		const wrapper = mountShell({
 			open: true,
 			initialView: view,
 			canProduction: true,
-		})
-		await flush()
-		const picker = wrapper.findComponent({ name: "CompanyPicker" })
-		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(true)
+		});
+		await flush();
+		const picker = wrapper.findComponent({ name: "CompanyPicker" });
+		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(true);
 		expect(
 			wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile"),
-		).toBe("Alpha POS")
-		picker.vm.$emit("update:modelValue", "Beta")
-		await flush()
+		).toBe("Alpha POS");
+		picker.vm.$emit("update:modelValue", "Beta");
+		await flush();
 		expect(
 			wrapper.find(`[data-testid="view-${view}"]`).attributes("data-profile"),
-		).toBe("Beta POS")
+		).toBe("Beta POS");
 		// only the invoices view needs POSSale to reload its history
 		if (view === "invoices")
-			expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"])
-		else expect(wrapper.emitted("active-profile")).toBeUndefined()
-		wrapper.unmount()
-	})
+			expect(wrapper.emitted("active-profile").at(-1)).toEqual(["Beta POS"]);
+		else expect(wrapper.emitted("active-profile")).toBeUndefined();
+		wrapper.unmount();
+	});
 
 	it("a manager with a shift still picks another company", async () => {
 		callMock.mockImplementation(() =>
@@ -645,32 +668,32 @@ describe("POSMenuDialog company choice without a shift", () => {
 				],
 				default: "Shift Co",
 			}),
-		)
+		);
 		const wrapper = mountShell({
 			open: true,
 			initialView: "sales-recap",
 			posProfile: "Shift POS",
 			company: "Shift Co",
 			openingShift: "SHIFT-1",
-		})
-		await flush()
+		});
+		await flush();
 		// the shift's own company keeps the shift's profile
 		expect(
 			wrapper
 				.find('[data-testid="view-sales-recap"]')
 				.attributes("data-profile"),
-		).toBe("Shift POS")
+		).toBe("Shift POS");
 		wrapper
 			.findComponent({ name: "CompanyPicker" })
-			.vm.$emit("update:modelValue", "Beta")
-		await flush()
+			.vm.$emit("update:modelValue", "Beta");
+		await flush();
 		expect(
 			wrapper
 				.find('[data-testid="view-sales-recap"]')
 				.attributes("data-profile"),
-		).toBe("Beta POS")
-		wrapper.unmount()
-	})
+		).toBe("Beta POS");
+		wrapper.unmount();
+	});
 
 	it("a cashier with one company sees no picker", async () => {
 		callMock.mockImplementation(() =>
@@ -680,48 +703,48 @@ describe("POSMenuDialog company choice without a shift", () => {
 				],
 				default: "Shift Co",
 			}),
-		)
+		);
 		const wrapper = mountShell({
 			open: true,
 			initialView: "invoices",
 			posProfile: "Shift POS",
 			company: "Shift Co",
-		})
-		await flush()
-		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(false)
+		});
+		await flush();
+		expect(wrapper.find('[data-test="company-picker"]').exists()).toBe(false);
 		expect(
 			wrapper.find('[data-testid="view-invoices"]').attributes("data-profile"),
-		).toBe("Shift POS")
-		wrapper.unmount()
-	})
+		).toBe("Shift POS");
+		wrapper.unmount();
+	});
 
 	it("shows Refund Code to management only, for the picked company", async () => {
-		callMock.mockImplementation(() => Promise.resolve(companies))
-		let wrapper = mountShell({ open: true })
-		expect(sidebarLabels(wrapper)).not.toContain("Refund Code")
-		wrapper.unmount()
+		callMock.mockImplementation(() => Promise.resolve(companies));
+		let wrapper = mountShell({ open: true });
+		expect(sidebarLabels(wrapper)).not.toContain("Refund Code");
+		wrapper.unmount();
 
 		wrapper = mountShell({
 			open: true,
 			isManagement: true,
 			initialView: "refund-code",
-		})
-		await flush()
-		expect(sidebarLabels(wrapper)).toContain("Refund Code")
+		});
+		await flush();
+		expect(sidebarLabels(wrapper)).toContain("Refund Code");
 		expect(
 			wrapper
 				.find('[data-testid="view-refund-code"]')
 				.attributes("data-company"),
-		).toBe("Alpha")
+		).toBe("Alpha");
 		wrapper
 			.findComponent({ name: "CompanyPicker" })
-			.vm.$emit("update:modelValue", "Beta")
-		await flush()
+			.vm.$emit("update:modelValue", "Beta");
+		await flush();
 		expect(
 			wrapper
 				.find('[data-testid="view-refund-code"]')
 				.attributes("data-company"),
-		).toBe("Beta")
-		wrapper.unmount()
-	})
-})
+		).toBe("Beta");
+		wrapper.unmount();
+	});
+});

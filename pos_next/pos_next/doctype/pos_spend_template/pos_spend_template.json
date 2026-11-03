@@ -22,6 +22,7 @@
   "over_limit_policy",
   "items",
   "payment_sources",
+  "company_scope",
   "companies",
   "roles"
  ],
@@ -134,6 +135,14 @@
    "label": "Payment Sources",
    "fieldtype": "Table",
    "options": "POS Spend Template Payment Source"
+  },
+  {
+   "fieldname": "company_scope",
+   "label": "Company Scope",
+   "fieldtype": "Select",
+   "options": "Selected Companies\nAll Companies",
+   "default": "Selected Companies",
+   "reqd": 1
   },
   {
    "fieldname": "companies",

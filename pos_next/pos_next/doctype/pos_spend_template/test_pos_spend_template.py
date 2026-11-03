@@ -4,6 +4,50 @@ from pos_next.tests.spend_helpers import SpendTestCase
 
 
 class TestSpendTemplate(SpendTestCase):
+	def test_company_scope_selected_and_legacy_empty_remain_empty(self):
+		from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import template_companies
+
+		for scope in (None, "", "Selected Companies"):
+			with self.subTest(scope=scope):
+				doc = self.template(company_scope=scope, companies=[])
+				self.assertEqual(template_companies(doc), [])
+				doc.validate()
+				self.assertEqual(doc.company_scope, "Selected Companies")
+
+	def test_all_company_scope_contains_only_live_leaf_companies(self):
+		from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import template_companies
+
+		doc = self.template(company_scope="All Companies", companies=[]).insert()
+		self.assertEqual(
+			template_companies(doc), sorted(frappe.get_all("Company", filters={"is_group": 0}, pluck="name"))
+		)
+		self.assertNotIn(self.group, template_companies(doc))
+		tag = frappe.generate_hash(length=6)
+		new_company = self.company(f"Spend Later {tag}", f"SL{tag}", parent_company=self.group)
+		self.assertIn(new_company, template_companies(doc.name))
+
+	def test_invalid_company_scope_is_rejected(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "Company Scope"):
+			self.template(company_scope="Everything").validate()
+
+	def test_all_company_scope_requires_complete_overrides_without_reference(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "override for every company"):
+			self.template(company_scope="All Companies", reference_debit_account=None).validate()
+
+	def test_switching_company_scope_preserves_company_rows(self):
+		from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import template_companies
+
+		doc = self.template(companies=[{"company": self.a, "debit_account": self.expense[self.a]}]).insert()
+		rows = [(row.name, row.company, row.debit_account) for row in doc.companies]
+		doc.company_scope = "All Companies"
+		doc.save()
+		doc.reload()
+		self.assertEqual([(row.name, row.company, row.debit_account) for row in doc.companies], rows)
+		self.assertIn(self.b, template_companies(doc))
+		doc.company_scope = "Selected Companies"
+		doc.save()
+		self.assertEqual(template_companies(doc), [self.a])
+
 	def test_je_template_rejects_items_tax_and_pay_later(self):
 		for values in (
 			{"items": [{"item_group": "All Item Groups"}]},

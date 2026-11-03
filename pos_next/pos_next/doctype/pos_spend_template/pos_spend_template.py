@@ -23,6 +23,11 @@ def validate_debit_account(account, company):
 def template_companies(template):
 	if isinstance(template, str):
 		template = frappe.get_doc("POS Spend Template", template)
+	scope = template.get("company_scope") or "Selected Companies"
+	if scope not in ("Selected Companies", "All Companies"):
+		frappe.throw(_("Company Scope must be Selected Companies or All Companies."))
+	if scope == "All Companies":
+		return sorted(frappe.get_all("Company", filters={"is_group": 0}, pluck="name"))
 	companies = set()
 	for row in template.companies:
 		if frappe.db.get_value("Company", row.company, "is_group"):
@@ -38,8 +43,27 @@ def template_companies(template):
 	return sorted(companies)
 
 
+def allowed_items(template):
+	items = set()
+	for row in template.items:
+		if row.item_code:
+			items.add(row.item_code)
+		elif row.item_group:
+			groups = [row.item_group, *get_descendants_of("Item Group", row.item_group)]
+			items.update(
+				frappe.get_all(
+					"Item",
+					filters={"item_group": ["in", groups], "disabled": 0, "is_purchase_item": 1},
+					pluck="name",
+				)
+			)
+	return sorted(items)
+
+
 class POSSpendTemplate(Document):
 	def validate(self):
+		self.company_scope = self.get("company_scope") or "Selected Companies"
+		companies = template_companies(self)
 		if not self.reference_company:
 			self.reference_company = frappe.db.get_single_value(
 				"POS Next Global Settings", "spend_reference_company"
@@ -81,15 +105,13 @@ class POSSpendTemplate(Document):
 					)
 		if self.debit_account_strategy == "Template Account" and not self.reference_debit_account:
 			overrides = {row.company for row in self.companies if row.debit_account}
-			if not template_companies(self) or set(template_companies(self)) - overrides:
+			if not companies or set(companies) - overrides:
 				frappe.throw(
 					_("Template Account requires a reference debit account or an override for every company.")
 				)
 		if self.update_stock and self.debit_account_strategy != "Item Default":
 			frappe.throw(_("Stock purchases require the Item Default strategy."))
 		if self.document_type == "Purchase Invoice":
-			from pos_next.services.spend_accounts import allowed_items
-
 			for item in allowed_items(self):
 				is_stock_item = frappe.db.get_value("Item", item, "is_stock_item")
 				if self.update_stock and not is_stock_item:

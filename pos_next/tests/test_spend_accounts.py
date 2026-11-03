@@ -9,6 +9,55 @@ class TestSpendAccounts(SpendTestCase):
 
 		return spend_accounts
 
+	def test_allowed_items_has_one_template_owner(self):
+		from pos_next.pos_next.doctype.pos_spend_template import pos_spend_template
+
+		self.assertIs(self.resolver().allowed_items, getattr(pos_spend_template, "allowed_items", None))
+
+	def test_allowed_items_preserves_expansion_and_direct_rows(self):
+		first, second, disabled, not_purchase = [self.item() for _ in range(4)]
+		child = frappe.get_doc("Item Group", second.item_group)
+		child.parent_item_group = first.item_group
+		child.save()
+		for item in (disabled, not_purchase):
+			frappe.db.set_value("Item", item.name, "item_group", first.item_group)
+		frappe.db.set_value("Item", disabled.name, "disabled", 1)
+		frappe.db.set_value("Item", not_purchase.name, "is_purchase_item", 0)
+		template = self.template(
+			items=[
+				{"item_group": first.item_group},
+				{"item_code": first.name},
+				{"item_code": disabled.name},
+			]
+		)
+		self.assertEqual(
+			self.resolver().allowed_items(template), sorted([first.name, second.name, disabled.name])
+		)
+
+	def test_readiness_keeps_reference_company_default(self):
+		before = frappe.db.get_single_value("POS Next Global Settings", "spend_reference_company")
+		try:
+			frappe.db.set_single_value("POS Next Global Settings", "spend_reference_company", self.reference)
+			doc = self.template(reference_company=None)
+			result = self.resolver().check_readiness(doc, self.a)
+			self.assertTrue(result["ready"], result)
+			self.assertEqual(doc.reference_company, self.reference)
+		finally:
+			frappe.db.set_single_value("POS Next Global Settings", "spend_reference_company", before)
+
+	def test_all_scope_keeps_leaf_overrides_and_reports_unready_company(self):
+		doc = self.template(
+			company_scope="All Companies",
+			companies=[{"company": self.a, "debit_account": self.expense[self.a]}],
+		)
+		frappe.db.set_value("Account", self.expense[self.a], "account_number", "OVERRIDE-ONLY")
+		ready = self.resolver().check_readiness(doc, self.a)
+		self.assertTrue(ready["ready"], ready)
+		self.assertEqual(ready["accounts"]["debit"], self.expense[self.a])
+		unready = self.resolver().check_readiness(doc, self.b)
+		self.assertFalse(unready["ready"], unready)
+		self.assertFalse(any("outside the template scope" in reason for reason in unready["reasons"]))
+
 	def test_resolve_by_number_ignores_name(self):
 		frappe.db.set_value("Account", self.expense[self.reference], "account_name", "Biaya Listrik")
 		frappe.db.set_value("Account", self.expense[self.a], "account_name", "Biaya PLN Kantor")

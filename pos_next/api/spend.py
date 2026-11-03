@@ -5,9 +5,8 @@ from frappe import _
 from frappe.utils import flt, nowdate
 
 from pos_next.api.purchase_orders import ATTACHMENT_MAX_BYTES, _purchase_company_options
-from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import template_companies
+from pos_next.pos_next.doctype.pos_spend_template.pos_spend_template import allowed_items, template_companies
 from pos_next.services.spend_accounts import (
-	allowed_items,
 	check_readiness,
 	resolve_cost_center,
 	resolve_credit_to,
@@ -134,8 +133,45 @@ def get_spend_templates(company: str, pos_profile: str | None = None) -> list[di
 			for s in template.payment_sources
 		]
 		row["items"] = allowed_items(template)
+		row["item_details"] = (
+			frappe.get_all(
+				"Item",
+				filters={"name": ["in", row["items"]]},
+				fields=["name as item_code", "item_name", "stock_uom"],
+				order_by="name",
+			)
+			if row["items"]
+			else []
+		)
+		row["default_supplier_name"] = (
+			frappe.db.get_value("Supplier", template.default_supplier, "supplier_name")
+			if template.default_supplier
+			else None
+		)
 		result.append(row)
 	return result
+
+
+@frappe.whitelist()
+def search_spend_suppliers(company, pos_profile, template, search_term=None):
+	_scope(company, pos_profile)
+	_name(template)
+	doc = frappe.get_doc("POS Spend Template", template)
+	_authorize(doc, company)
+	if doc.document_type != "Purchase Invoice" or not doc.allow_supplier_change:
+		frappe.throw(_("Supplier changes are not allowed by this spend template."))
+	if search_term is not None and not isinstance(search_term, str):
+		frappe.throw(_("Supplier search must be text."))
+	term = f"%{(search_term or '').strip()}%"
+	# Spend authorizes supplier selection without granting cashier Desk access.
+	return frappe.get_all(
+		"Supplier",
+		filters={"disabled": 0},
+		or_filters=[["name", "like", term], ["supplier_name", "like", term]],
+		fields=["name", "supplier_name"],
+		order_by="supplier_name, name",
+		limit_page_length=20,
+	)
 
 
 def _existing(request_id, data):
@@ -416,6 +452,72 @@ def get_spend_history(
 		for key in ("company", "creation", "posa_spend_template", "posa_pos_opening_shift"):
 			row.pop(key)
 	return rows
+
+
+@frappe.whitelist()
+def get_spend_detail(doctype: str, name: str) -> dict:
+	from urllib.parse import urlencode
+
+	from pos_next.api.purchase_orders import _attachments_summary
+
+	if doctype not in ("Purchase Invoice", "Journal Entry", "Payment Entry"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	companies = {row["company"] for row in _purchase_company_options()}
+	doc = frappe.get_doc(doctype, _name(name))
+	if doc.company not in companies or not doc.get("posa_spend_template"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	is_pi = doctype == "Purchase Invoice"
+	items = (
+		[
+			{
+				"item_code": r.item_code,
+				"item_name": r.item_name,
+				"qty": r.qty,
+				"uom": r.uom,
+				"rate": r.rate,
+				"amount": r.amount,
+			}
+			for r in doc.items
+		]
+		if is_pi
+		else [
+			{
+				"description": r.user_remark or doc.get("user_remark") or _("Expense"),
+				"amount": flt(r.debit_in_account_currency),
+			}
+			for r in doc.get("accounts", [])
+			if r.debit_in_account_currency
+		]
+	)
+	attachments = _attachments_summary(doctype, name)
+	for attachment in attachments:
+		attachment.file_url = "/api/method/pos_next.api.spend.download_spend_attachment?" + urlencode(
+			{"file": attachment.name}
+		)
+	return {
+		"doctype": doctype,
+		"name": name,
+		"company": doc.company,
+		"template": doc.posa_spend_template,
+		"posting_date": doc.posting_date,
+		"status": ("Cancelled" if doc.docstatus == 2 else "Submitted" if doc.docstatus == 1 else "Draft")
+		if doctype == "Journal Entry"
+		else doc.status,
+		"docstatus": doc.docstatus,
+		"amount": flt(
+			doc.grand_total if is_pi else doc.total_debit if doctype == "Journal Entry" else doc.paid_amount
+		),
+		"mode_of_payment": doc.mode_of_payment,
+		"shift": doc.posa_pos_opening_shift,
+		"vendor_name": doc.posa_vendor_name,
+		"supplier_name": doc.get("supplier_name"),
+		"bill_no": doc.get("bill_no") or doc.get("reference_no"),
+		"bill_date": doc.get("bill_date"),
+		"remarks": doc.get("remarks") if is_pi else doc.get("user_remark"),
+		"items": items,
+		"attachments": attachments,
+		"can_cancel": _can_cancel(doc, companies),
+	}
 
 
 @frappe.whitelist(methods=["GET"])

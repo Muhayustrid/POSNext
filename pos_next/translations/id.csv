@@ -3816,3 +3816,21 @@ POS Profile must belong to the spend company.,Profil POS harus milik perusahaan 
 "Spending recorded: {0}","Pengeluaran tercatat: {0}",""
 "Submitting...","Mengirim...",""
 "Vendor name","Nama toko",""
+Selected Companies,Perusahaan Terpilih
+All Companies,Semua Perusahaan
+"Applies to all non-group companies, including new ones. Company rows are optional overrides.","Berlaku untuk semua perusahaan non-grup, termasuk yang baru. Baris perusahaan bersifat opsional untuk pengaturan khusus."
+Select companies or a group company to include its descendants.,Pilih perusahaan atau perusahaan grup untuk menyertakan seluruh turunannya.
+Company Scope must be Selected Companies or All Companies.,Cakupan Perusahaan harus Perusahaan Terpilih atau Semua Perusahaan.
+New purchase or expense,Pembelian atau Pengeluaran Baru
+The result is uncertain. Retry sends the original transaction; do not record it again.,Hasil pencatatan belum pasti. Coba lagi akan mengirim transaksi yang sama; jangan mencatat ulang.
+Store or vendor name,Nama Toko atau Penyedia
+Expense lines,Rincian Pengeluaran
+Search item by name or code...,Cari barang berdasarkan nama atau kode...
+Unit price,Harga Satuan
+Search recent transactions...,Cari transaksi terbaru...
+Search recent transactions,Cari transaksi terbaru
+No matching transactions.,Tidak ada transaksi yang cocok.
+The unsaved spending details will be discarded.,Rincian pengeluaran yang belum disimpan akan dibuang.
+Choose a template to see the required details.,Pilih template untuk melihat rincian yang perlu diisi.
+Supplier search must be text.,Pencarian pemasok harus berupa teks.
+Transaction Information,Informasi Transaksi

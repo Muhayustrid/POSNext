@@ -4,6 +4,43 @@ from pos_next.tests.spend_transaction_helpers import SpendTransactionTestCase
 
 
 class TestSpend(SpendTransactionTestCase):
+	def test_all_scope_allows_ready_company_but_keeps_user_company_guard(self):
+		from pos_next.api.spend import get_spend_templates
+
+		self.je_template.company_scope = "All Companies"
+		self.je_template.set("companies", [])
+		self.je_template.save()
+		self.assertIn(
+			self.je_template.name, [row["name"] for row in get_spend_templates(self.a, self.profile.name)]
+		)
+		result = self.spend()
+		self.assertEqual(self.gl(result)[self.expense[self.a]], 30000)
+		manager = self.user("POSNext Manager")
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": manager, "allow": "Company", "for_value": self.b}
+		).insert()
+		frappe.set_user(manager)
+		with self.assertRaises(frappe.PermissionError):
+			get_spend_templates(self.a, self.profile.name)
+		with self.assertRaises(frappe.PermissionError):
+			self.spend()
+
+	def test_spend_detail_returns_named_lines_and_rejects_foreign_company(self):
+		from pos_next.api.spend import get_spend_detail
+
+		result = self.pi_spend()
+		detail = get_spend_detail(result["doctype"], result["name"])
+		self.assertEqual(detail["items"][0]["item_name"], self.item.item_name)
+		self.assertEqual(detail["amount"], 12345)
+		self.assertEqual(detail["supplier_name"], self.supplier.supplier_name)
+		manager = self.user("POSNext Manager")
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": manager, "allow": "Company", "for_value": self.b}
+		).insert()
+		frappe.set_user(manager)
+		with self.assertRaises(frappe.PermissionError):
+			get_spend_detail(result["doctype"], result["name"])
+
 	def history(self, **values):
 		from pos_next.api.spend import get_spend_history
 
@@ -404,6 +441,52 @@ class TestSpend(SpendTransactionTestCase):
 		self.assertTrue(row["payment_sources"][0]["is_shift_source"])
 		pi = next(r for r in rows if r["name"] == self.pi_template.name)
 		self.assertIn(self.item.name, pi["items"])
+		self.assertEqual(
+			pi["item_details"],
+			[
+				{
+					"item_code": self.item.name,
+					"item_name": self.item.item_name,
+					"stock_uom": self.item.stock_uom,
+				}
+			],
+		)
+		self.assertEqual(pi["default_supplier_name"], self.supplier.supplier_name)
+
+	def test_spend_supplier_search_names_external_and_disabled(self):
+		from pos_next.api import spend
+
+		frappe.db.set_value("POS Spend Template", self.pi_template.name, "allow_supplier_change", 1)
+		rows = spend.search_spend_suppliers(
+			self.a, self.profile.name, self.pi_template.name, self.supplier.supplier_name
+		)
+		self.assertEqual(rows, [{"name": self.supplier.name, "supplier_name": self.supplier.supplier_name}])
+		frappe.db.set_value("Supplier", self.supplier.name, "disabled", 1)
+		self.assertEqual(
+			spend.search_spend_suppliers(
+				self.a, self.profile.name, self.pi_template.name, self.supplier.name
+			),
+			[],
+		)
+
+	def test_spend_supplier_search_guards(self):
+		from pos_next.api import spend
+
+		with self.assertRaises(frappe.ValidationError):
+			spend.search_spend_suppliers(self.a, self.profile.name, self.pi_template.name)
+		with self.assertRaises(frappe.ValidationError):
+			spend.search_spend_suppliers(self.a, self.profile.name, self.je_template.name)
+		frappe.db.set_value("POS Spend Template", self.pi_template.name, "allow_supplier_change", 1)
+		with self.assertRaises(frappe.ValidationError):
+			spend.search_spend_suppliers(self.a, self.profile.name, self.pi_template.name, ["!=", ""])
+		with self.assertRaises(frappe.ValidationError):
+			spend.search_spend_suppliers(self.b, self.profile.name, self.pi_template.name)
+		frappe.db.set_value("POS Spend Template", self.pi_template.name, "enabled", 0)
+		with self.assertRaises(frappe.PermissionError):
+			spend.search_spend_suppliers(self.a, self.profile.name, self.pi_template.name)
+		frappe.set_user("Guest")
+		with self.assertRaises(frappe.AuthenticationError):
+			spend.search_spend_suppliers(self.a, self.profile.name, self.pi_template.name)
 
 	def test_invalid_amounts_and_unallowed_items(self):
 		for amount in (0, -10, "nan", "inf"):

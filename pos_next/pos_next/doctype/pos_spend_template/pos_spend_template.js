@@ -4,7 +4,13 @@ frappe.ui.form.on("POS Spend Template", {
 			filters: { company: frm.doc.reference_company, is_group: 0 },
 		}));
 	},
+	company_scope(frm) {
+		frm.set_df_property("companies", "description", frm.doc.company_scope === "All Companies"
+			? __("Applies to all non-group companies, including new ones. Company rows are optional overrides.")
+			: __("Select companies or a group company to include its descendants."));
+	},
 	refresh(frm) {
+		frm.trigger("company_scope");
 		if (frm.is_new()) return;
 		frm.add_custom_button(__("Check Readiness"), async () => {
 			if (frm.is_dirty()) {
