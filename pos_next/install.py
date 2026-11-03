@@ -25,7 +25,7 @@ from pos_next.price_group_ownership import (
 	PROFILE_PREVIOUS_PRICE_LIST_FIELD,
 )
 from pos_next.reject_request_setup import ensure_reject_request_workflow
-from pos_next.stock_opname_setup import ensure_stock_opname_workflow
+from pos_next.stock_opname_setup import ensure_stock_opname_data_permissions, ensure_stock_opname_workflow
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -596,6 +596,7 @@ def after_install():
 		ensure_price_group_custom_fields()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
 		ensure_stock_opname_workflow(quiet=True)
+		ensure_stock_opname_data_permissions(quiet=True)
 		ensure_reject_request_workflow(quiet=True)
 		ensure_reject_purposes()
 		ensure_site_indexes()
@@ -630,6 +631,7 @@ def after_migrate():
 		restore_persona_docperms()
 		mirror_standard_perms_for_custom_doctypes(quiet=True)
 		ensure_stock_opname_workflow(quiet=True)
+		ensure_stock_opname_data_permissions(quiet=True)
 		ensure_reject_request_workflow(quiet=True)
 		ensure_reject_purposes()
 		ensure_site_indexes()
@@ -1041,13 +1043,13 @@ def mirror_standard_perms_for_custom_doctypes(quiet=False):
 	frappe.db.delete("Custom DocPerm", {"name": ("like", f"{MIRROR_NAME_PREFIX}%")})
 
 	covered = {
-		(d.parent, d.role)
-		for d in frappe.get_all("Custom DocPerm", fields=["parent", "role"], filters={"parent": ["in", parents]})
+		(d.parent, d.role, cint(d.permlevel))
+		for d in frappe.get_all("Custom DocPerm", fields=["parent", "role", "permlevel"], filters={"parent": ["in", parents]})
 	}
 
 	inserted = 0
 	for std in frappe.get_all("DocPerm", fields="*", filters={"parent": ["in", parents]}):
-		if (std.parent, std.role) in covered:
+		if (std.parent, std.role, cint(std.permlevel)) in covered:
 			continue
 
 		row = dict(std)

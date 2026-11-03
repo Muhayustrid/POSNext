@@ -21,7 +21,6 @@ from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import (
 	StockReconciliation,
 )
 from frappe import _
-from frappe.utils import flt
 
 from pos_next.api.stock_opname import _initial_state, _workflow, get_editable_open_opname
 from pos_next.services.production import _resolve_profile
@@ -31,6 +30,55 @@ DOCTYPE = "Stock Reconciliation"
 
 
 class CustomStockReconciliation(StockReconciliation):
+	def apply_fieldlevel_read_permissions(self):
+		super().apply_fieldlevel_read_permissions()
+		# Frappe as_dict reconstructs deleted numeric fields with zero defaults.
+		self.flags.opname_filtered_read = True
+
+	def as_dict(self, *args, **kwargs):
+		result = super().as_dict(*args, **kwargs)
+		if self.flags.opname_filtered_read and not is_hq_user():
+			result.pop("difference_amount", None)
+			for row in result.get("items", []):
+				for field in (
+					"valuation_rate", "amount", "current_qty", "current_valuation_rate",
+					"current_amount", "quantity_difference", "amount_difference",
+					"custom_qty_before", "custom_qty_difference_per_uom", "custom_valuation_rate_per_uom",
+					"current_serial_and_batch_bundle", "current_serial_no",
+				):
+					row.pop(field, None)
+		return result
+
+	def before_print(self, settings=None):
+		if not is_hq_user():
+			frappe.throw(_("Outlet stock counts cannot be printed."), frappe.PermissionError)
+		return super().before_print(settings)
+
+	def validate_higher_perm_levels(self):
+		# Inspect outlet input before native reset discards unauthorized values.
+		self._validate_outlet_valuation_input()
+		return super().validate_higher_perm_levels()
+
+	def before_validate(self):
+		self._validate_outlet_valuation_input()
+
+	def _validate_outlet_valuation_input(self):
+		if is_hq_user():
+			return
+		before = self.get_doc_before_save()
+		previous = {row.name: row for row in before.items} if before else {}
+		for row in self.items:
+			old = previous.get(row.name)
+			for field in ("valuation_rate", "custom_valuation_rate_per_uom", "allow_zero_valuation_rate"):
+				value = row.get(field)
+				if value not in (None, "", 0, 0.0) and (not old or value != old.get(field)):
+					frappe.throw(_("Outlet stock counts cannot set valuation rates."), frappe.PermissionError)
+				if old:
+					row.set(field, old.get(field))
+				elif field == "valuation_rate":
+					# Native valuation lookup treats zero as explicit, not missing.
+					row.set(field, None)
+
 	def remove_items_with_no_change(self):
 		# Drafts keep every counted row (blind count); filter only on submit.
 		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
@@ -65,20 +113,13 @@ class CustomStockReconciliation(StockReconciliation):
 					frappe.throw(
 						_("Warehouse {0} already has an open stock opname: {1}").format(self.set_warehouse, open_name)
 					)
-		# Blind count: the warehouse_app hook fills system-derived custom_qty_before
-		# and custom_qty_difference_per_uom in before_validate; on a draft they would
-		# leak the system qty to the outlet. Clear them — the hook recomputes both on
-		# the submit that posts stock (HQ still reads system qty via get_system_qty).
-		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
-			for row in self.items:
-				row.custom_qty_before = 0
-				row.custom_qty_difference_per_uom = 0
 		super().validate()
-		self._fill_per_uom_valuation_rate()
 		# Draft rows have no live current qty yet, so ERPNext's differences read
 		# as "counted vs zero"; blank them (HQ Desk shows live values instead).
 		if self.docstatus == 0 and getattr(self, "_action", None) != "submit":
 			for row in self.items:
+				row.custom_qty_before = 0
+				row.custom_qty_difference_per_uom = 0
 				# HQ's Desk fills current_* on screen; never persist them from a save
 				if not row.current_serial_and_batch_bundle:
 					row.current_qty = 0
@@ -87,22 +128,6 @@ class CustomStockReconciliation(StockReconciliation):
 				row.quantity_difference = 0
 				row.amount_difference = 0
 			self.difference_amount = 0
-
-	def _fill_per_uom_valuation_rate(self):
-		"""Mirror ERPNext's default valuation_rate into warehouse_app's
-		`custom_valuation_rate_per_uom` (outlet counts never send a rate), so the
-		Desk row shows both. An explicit rate, or an allowed zero, is kept."""
-		if not frappe.get_meta("Stock Reconciliation Item").has_field("custom_valuation_rate_per_uom"):
-			return
-		for row in self.items:
-			rate = row.get("custom_valuation_rate_per_uom")
-			if rate not in (None, "") and (flt(rate) or row.get("allow_zero_valuation_rate")):
-				continue
-			if flt(row.valuation_rate):
-				factor = flt(row.get("custom_conversion_factor")) or 1
-				row.custom_valuation_rate_per_uom = flt(
-					flt(row.valuation_rate) * factor, row.precision("custom_valuation_rate_per_uom")
-				)
 
 	def submit(self):
 		# The background worker reloads from DB, losing the in-memory
@@ -142,6 +167,56 @@ def is_hq_user(user=None):
 	return bool(set(frappe.get_roles(user)) & set(HQ_ROLES))
 
 
+def assert_system_stock_access(warehouse=None, company=None, user=None):
+	"""Check HQ membership, then native read scope when a warehouse is supplied."""
+	user = user or frappe.session.user
+	if (
+		user == "Guest"
+		or not frappe.db.exists("User", {"name": user, "enabled": 1})
+		or not is_hq_user(user)
+		or not frappe.has_permission(DOCTYPE, "read", user=user)
+	):
+		frappe.throw(_("Not permitted to read system stock."), frappe.PermissionError)
+	if warehouse is None and company is None:
+		return
+	if not warehouse or not frappe.db.exists("Warehouse", warehouse):
+		frappe.throw(_("A permitted warehouse is required."), frappe.PermissionError)
+	warehouse_doc = frappe.get_doc("Warehouse", warehouse)
+	if not warehouse_doc.company or (company and company != warehouse_doc.company):
+		frappe.throw(_("Warehouse and company do not match."), frappe.PermissionError)
+	if not warehouse_doc.has_permission("read", user=user) or not frappe.get_doc(
+		"Company", warehouse_doc.company
+	).has_permission("read", user=user):
+		frappe.throw(_("Not permitted to read this warehouse or company."), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def get_stock_balance_for(
+	item_code: str, warehouse: str, posting_date, posting_time,
+	batch_no: str | None = None, with_valuation_rate: bool = True,
+	inventory_dimensions_dict=None, row=None, company=None,
+):
+	from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import (
+		get_stock_balance_for as native_get_stock_balance_for,
+	)
+
+	assert_system_stock_access(warehouse or "", company)
+	return native_get_stock_balance_for(
+		item_code, warehouse, posting_date, posting_time, batch_no,
+		with_valuation_rate, inventory_dimensions_dict, row, company,
+	)
+
+
+@frappe.whitelist()
+def get_items(warehouse, posting_date, posting_time, company, item_code=None, ignore_empty_stock=False):
+	assert_system_stock_access(warehouse or "", company)
+	if "warehouse_app" in frappe.get_installed_apps():
+		from warehouse_app.warehouse_app.stock_reconciliation import get_items as delegate
+	else:
+		from erpnext.stock.doctype.stock_reconciliation.stock_reconciliation import get_items as delegate
+	return delegate(warehouse, posting_date, posting_time, company, item_code, ignore_empty_stock)
+
+
 def get_permission_query_conditions(user):
 	if is_hq_user(user):
 		return ""
@@ -161,6 +236,4 @@ def has_permission(doc, ptype=None, user=None):
 	if is_hq_user(user):
 		return True
 	warehouse = doc.get("set_warehouse")
-	if not warehouse:
-		return True
-	return bool(warehouse in outlet_warehouses(user)) or False
+	return bool(warehouse and warehouse in outlet_warehouses(user))

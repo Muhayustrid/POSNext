@@ -56,6 +56,37 @@ TRANSITIONS = (
 ACCOUNTS_MANAGER = "Accounts Manager"
 
 
+def ensure_stock_opname_data_permissions(quiet=False):
+	"""Hide system-derived SR fields through native field-level permissions."""
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	fields = {
+		DOCUMENT_TYPE: ("difference_amount",),
+		"Stock Reconciliation Item": (
+			"valuation_rate", "amount", "current_qty", "current_valuation_rate",
+			"current_amount", "quantity_difference", "amount_difference",
+			"custom_qty_before", "custom_qty_difference_per_uom", "custom_valuation_rate_per_uom",
+			"current_serial_and_batch_bundle", "current_serial_no",
+		),
+	}
+	for doctype, names in fields.items():
+		meta = frappe.get_meta(doctype)
+		for name in names:
+			if meta.has_field(name):
+				make_property_setter(doctype, name, "permlevel", 1, "Int")
+		frappe.clear_cache(doctype=doctype)
+	for role in HQ_ROLES:
+		if role == "Administrator":
+			continue
+		frappe.permissions.add_permission(DOCUMENT_TYPE, role, 1)
+		for action in ("read", "write"):
+			frappe.permissions.update_permission_property(DOCUMENT_TYPE, role, 1, action, 1)
+	for role in OUTLET_ROLES:
+		for action in ("print", "export", "report"):
+			frappe.permissions.update_permission_property(DOCUMENT_TYPE, role, 0, action, 0)
+	frappe.clear_cache(doctype=DOCUMENT_TYPE)
+
+
 def _ensure_masters():
 	"""Create the Workflow States and Action Masters the workflow links to."""
 	for state, _doc_status, _roles in STATES:

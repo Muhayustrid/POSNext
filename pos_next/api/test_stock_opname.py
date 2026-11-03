@@ -1148,6 +1148,26 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		got = get_opname(self.profile, draft["name"])
 		self.assertEqual({r["item_code"]: r["qty"] for r in got["items"]}, {self.plain: 3, self.other_plain: 4})
 
+	def test_import_equal_and_unequal_counts_have_same_outlet_summary(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template
+
+		_seed_stock(self.plain, self.warehouse, 17)
+		self._cashier()
+		summaries = []
+		name = None
+		for count in (17, 16):
+			url = self._attach([TEMPLATE_HEADER, [self.plain, "", "", "", "", count]])
+			result = import_opname_template(self.profile, url, name=name)
+			name = result["name"]
+			summaries.append({key: value for key, value in result.items() if key != "name"})
+			rows = get_opname(self.profile, name)["items"]
+			self.assertEqual(len(rows), 1)
+			self.assertEqual(rows[0]["qty"], count)
+			for field in ("current_qty", "valuation_rate", "quantity_difference", "custom_qty_before"):
+				self.assertNotIn(field, rows[0])
+		self.assertEqual(summaries[0], summaries[1])
+		self.assertEqual(summaries[0], {"applied": 1, "skipped": 0, "errors": []})
+
 	def test_import_zero_means_counted_none(self):
 		from pos_next.api.stock_opname import TEMPLATE_HEADER, get_opname, import_opname_template
 
@@ -1366,10 +1386,10 @@ class TestStockOpnameUom(_StockOpnameFixture):
 		row = _validated_rows(
 			[{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}], self.warehouse
 		)[0]
-		self.assertEqual(row["qty"], 24)
+		self.assertNotIn("qty", row)
 		self.assertEqual(row["custom_uom"], "Pack")
 		self.assertEqual(row["custom_qty_after"], 2)
-		self.assertEqual(row["custom_conversion_factor"], 12)
+		self.assertNotIn("custom_conversion_factor", row)
 		# The warehouse_app hook recomputes qty from the stored custom fields on
 		# save; the persisted native qty must stay 2 Pack x 12.
 		self._cashier()
@@ -1469,6 +1489,28 @@ class TestStockOpnameUom(_StockOpnameFixture):
 		self.assertNotIn("custom_uom", row)
 		self.assertNotIn("custom_qty_after", row)
 		self.assertNotIn("custom_conversion_factor", row)
+
+	def test_partial_uom_fields_reject_nonstock_count(self):
+		from unittest import mock
+		from pos_next.api.stock_opname import _validated_rows
+
+		real_meta = frappe.get_meta("Stock Reconciliation Item")
+		real_get_meta = frappe.get_meta
+
+		class PartialMeta:
+			def has_field(self, fieldname):
+				return fieldname != "custom_qty_after" and real_meta.has_field(fieldname)
+
+		def get_meta(doctype, *args, **kwargs):
+			return PartialMeta() if doctype == "Stock Reconciliation Item" else real_get_meta(doctype, *args, **kwargs)
+
+		with mock.patch.object(frappe, "get_meta", get_meta):
+			with self.assertRaises(frappe.ValidationError):
+				_validated_rows([{"item_code": self.uom_item, "custom_uom": "Pack", "custom_qty_after": 2}], self.warehouse)
+			stock_uom = frappe.db.get_value("Item", self.uom_item, "stock_uom")
+			row = _validated_rows([{"item_code": self.uom_item, "custom_uom": stock_uom, "custom_qty_after": 2}], self.warehouse)[0]
+			self.assertEqual(row["qty"], 2)
+			self.assertNotIn("custom_uom", row)
 
 	def test_payload_roundtrips_uom(self):
 		from pos_next.api.stock_opname import get_opname, save_opname

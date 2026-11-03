@@ -271,9 +271,12 @@ scheduler_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "pos_next.event.get_events"
-# }
+override_whitelisted_methods = {
+	"erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_stock_balance_for":
+		"pos_next.overrides.stock_reconciliation.get_stock_balance_for",
+	"erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_items":
+		"pos_next.overrides.stock_reconciliation.get_items",
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
@@ -295,7 +298,7 @@ scheduler_events = {
 # ----------------
 # POS cashiers stay in the SPA: Desk page loads redirect to /pos
 before_request = ["pos_next.utils.desk_guard.block_desk_for_cashiers"]
-# after_request = ["pos_next.utils.after_request"]
+after_request = ["pos_next.overrides.stock_reconciliation_response.filter_stock_reconciliation_response"]
 
 # Job Events
 # ----------
