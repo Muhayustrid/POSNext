@@ -20,9 +20,10 @@ Setiap lembar (salinan + crew slip) diakhiri feed dan cut (kalau
 `imin_cut_paper` aktif), dan semuanya dikirim dalam satu job. Mode teks butuh
 data dokumen. Cetakan tanpa dokumen (misalnya fallback HTML server) tetap
 memakai gambar, sama seperti aturan di iMin.
-- Bitmap diserahkan ke aplikasi RawBT (`ru.a402d.rawbtprinter`). RawBT yang
-  meneruskan ke printer yang dipilih di aplikasinya: printer bawaan (kalau
-  modelnya didukung), Bluetooth, USB, atau LAN.
+
+Job ESC/POS diserahkan ke aplikasi RawBT (`ru.a402d.rawbtprinter`). RawBT yang
+meneruskan ke printer yang dipilih di aplikasinya: printer bawaan (kalau
+modelnya didukung), Bluetooth, USB, atau LAN.
 
 Ada dua mode pengiriman (diatur per device):
 
