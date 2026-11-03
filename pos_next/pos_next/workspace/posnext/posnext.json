@@ -16,7 +16,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Reports",
-   "link_count": 11,
+   "link_count": 12,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -133,9 +133,19 @@
   },
   {
    "hidden": 0,
+   "is_query_report": 1,
+   "label": "Spend Template Readiness",
+   "link_count": 0,
+   "link_to": "Spend Template Readiness",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
    "is_query_report": 0,
    "label": "Configuration",
-   "link_count": 5,
+   "link_count": 6,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -196,6 +206,16 @@
    "label": "POS Reject Purpose",
    "link_count": 0,
    "link_to": "POS Reject Purpose",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "POS Spend Template",
+   "link_count": 0,
+   "link_to": "POS Spend Template",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -375,7 +395,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-11-01 10:00:00.000000",
+ "modified": "2026-11-03 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POSNext",
