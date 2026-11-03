@@ -23,7 +23,7 @@
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
-				:qz-connected="posSettingsStore.printDriver === 'imin' ? iminReady : qzConnected"
+				:qz-connected="activePrintDriver === 'rawbt' ? true : activePrintDriver === 'imin' ? iminReady : qzConnected"
 				:printer-connecting="printerReconnecting"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
@@ -1098,6 +1098,7 @@ import {
 } from "@/utils/printInvoice";
 import { printEODReport } from "@/utils/printEod";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+import { loadDeviceConfig } from "@/utils/print/receipt_layout";
 import { ensureIminSdk, getTransport } from "@/utils/print/transport";
 
 import { Button, Dialog, createResource } from "frappe-ui";
@@ -1136,6 +1137,20 @@ const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();
 const posSettingsStore = usePOSSettingsStore();
+// The driver this till prints with: a per-device override set on the Direct
+// Print page (e.g. RawBT where the iMin service does not answer) beats the
+// POS Profile's driver. Read once per page load; printing itself re-reads it
+// per job, so only this header icon waits for a reload.
+const deviceDriverOverride = (() => {
+	try {
+		return loadDeviceConfig().driverOverride || null;
+	} catch {
+		return null;
+	}
+})();
+const activePrintDriver = computed(
+	() => deviceDriverOverride || posSettingsStore.printDriver
+);
 const packagesStore = usePOSPackagesStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
@@ -1332,7 +1347,7 @@ function stopIminWarmup() {
 
 const probeImin = async () => {
 	stopIminWarmup();
-	if (posSettingsStore.printDriver !== "imin") return;
+	if (activePrintDriver.value !== "imin") return;
 	let ok = false;
 	try {
 		await ensureIminSdk();
@@ -1347,7 +1362,7 @@ const probeImin = async () => {
 	iminReady.value = ok;
 	// A visibility probe may overlap a timer probe; never leave two loops.
 	stopIminWarmup();
-	if (posSettingsStore.printDriver === "imin") {
+	if (activePrintDriver.value === "imin") {
 		iminWarmupTimer = setTimeout(
 			probeImin,
 			ok ? IMIN_PROBE_KEEPALIVE_MS : IMIN_PROBE_RETRY_MS
@@ -1356,7 +1371,7 @@ const probeImin = async () => {
 };
 
 const handleIminVisibility = () => {
-	if (document.visibilityState === "visible" && posSettingsStore.printDriver === "imin") {
+	if (document.visibilityState === "visible" && activePrintDriver.value === "imin") {
 		probeImin();
 	}
 };
@@ -1366,7 +1381,7 @@ if (typeof document !== "undefined") {
 
 // iMin warm-up — lazy connect & prompt origin permission; keep socket warm
 watch(
-	() => posSettingsStore.printDriver,
+	() => activePrintDriver.value,
 	(driver) => {
 		stopIminWarmup();
 		if (driver !== "imin") {
@@ -2914,7 +2929,13 @@ async function handlePrinterClick() {
 		return;
 	}
 
-	const isImin = posSettingsStore.printDriver === "imin";
+	if (activePrintDriver.value === "rawbt") {
+		// RawBT is fire-and-forget (Android intent / its websocket server):
+		// there is no connection to test from here.
+		showSuccess(__("RawBT is used on this device"));
+		return;
+	}
+	const isImin = activePrintDriver.value === "imin";
 	// iMin: never trust the cached state. The keepalive only re-probes every
 	// 30 s, so a device that died in between leaves the icon green and a tap
 	// would echo "connected" without ever testing the socket.

@@ -269,6 +269,8 @@ export async function renderHTMLToBitmap(html, opts) {
 			dataURL: out.toDataURL("image/png"),
 			width: out.width,
 			height: out.height,
+			// Binarized pixels for drivers that send raw raster (RawBT).
+			imageData,
 		}
 	} finally {
 		host.remove()

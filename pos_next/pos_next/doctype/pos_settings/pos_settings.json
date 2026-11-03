@@ -601,7 +601,7 @@
    "fieldname": "print_driver",
    "fieldtype": "Select",
    "label": "Print Driver",
-   "options": "browser\nqz\nimin"
+   "options": "browser\nqz\nimin\nrawbt"
   },
   {
    "default": "Manual",
@@ -638,7 +638,7 @@
   },
   {
    "default": "1",
-   "description": "On failure, fall back down the chain (iMin → QZ → Browser)",
+   "description": "On failure, fall back down the chain (iMin → QZ → Browser; RawBT → Browser)",
    "fieldname": "print_fallback_enabled",
    "fieldtype": "Check",
    "label": "Enable Print Fallback"
@@ -654,11 +654,11 @@
    "fieldname": "section_break_imin",
    "fieldtype": "Section Break",
    "label": "iMin Receipt",
-   "depends_on": "eval:doc.print_driver==='imin'"
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)"
   },
   {
    "default": "58mm",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "fieldname": "imin_paper_width",
    "fieldtype": "Select",
    "label": "iMin Paper Width",
@@ -674,14 +674,14 @@
   },
   {
    "default": "1",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "fieldname": "imin_cut_paper",
    "fieldtype": "Check",
    "label": "Cut Paper After Print"
   },
   {
    "default": "1",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Copies printed per transaction (customer copy first, then crew/outlet copy)",
    "fieldname": "imin_print_copies",
    "fieldtype": "Int",
@@ -689,7 +689,7 @@
   },
   {
    "default": "800",
-   "depends_on": "eval:doc.print_driver==='imin' && (doc.imin_print_copies||1)>1",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver) && (doc.imin_print_copies||1)>1",
    "description": "Pause between copies so the cashier can tear the first copy off (ms); configurable per POS Profile and overridable per-device (default 800)",
    "fieldname": "imin_copy_delay_ms",
    "fieldtype": "Int",
@@ -697,7 +697,7 @@
   },
   {
    "default": "0",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Print one crew slip after the customer copies, independent of the copy count.",
    "fieldname": "imin_crew_slip_enabled",
    "fieldtype": "Check",
@@ -705,7 +705,7 @@
   },
   {
    "default": "2000",
-   "depends_on": "eval:doc.print_driver==='imin' && doc.imin_crew_slip_enabled",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver) && doc.imin_crew_slip_enabled",
    "description": "Pause before the crew slip so the receipt can be torn off (ms), added on top of the estimated time the receipt needs to print. Raise it if the slip comes out with no gap. 0-10000.",
    "fieldname": "imin_crew_delay_ms",
    "fieldtype": "Int",
@@ -713,7 +713,7 @@
   },
   {
    "default": "40",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Gap between the queue number and the content below it, in dots (dots = mm x 8, e.g. 40 = 5 mm). Applies to the customer receipt and the crew slip alike. 0-128.",
    "fieldname": "imin_queue_gap",
    "fieldtype": "Int",
@@ -721,7 +721,7 @@
   },
   {
    "default": "bitmap",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "bitmap = receipt is drawn as an image (exact print-format look, slower). text = receipt is sent as printer text commands with only the logo as an image (much faster, uses the printer's own monospace font). Text mode needs the invoice data, so it applies to the POS receipt and crew slip; closing reports stay bitmap.",
    "fieldname": "imin_print_mode",
    "fieldtype": "Select",
@@ -730,7 +730,7 @@
   },
   {
    "default": "400",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "How fast the iMin head pushes paper, in dots per second (8 dots = 1 mm). Used only to wait for one sheet to finish before the next sheet (copy / crew slip) starts. Too low = idle wait between sheets; too high = the tear-off pause gets swallowed. 100-2000.",
    "fieldname": "imin_print_speed",
    "fieldtype": "Int",
@@ -742,7 +742,7 @@
   },
   {
    "default": "100",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Font scale for bitmap printing (percent). Receipt CSS is authored at 96 DPI and translated to the 205 DPI head; 100 = as authored. Raise if text still prints small. VERIFY ON DEVICE.",
    "fieldname": "imin_font_scale",
    "fieldtype": "Int",
@@ -750,7 +750,7 @@
   },
   {
    "default": "100",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Font scale for the crew copy only (percent) — the short order slip the outlet keeps. Default 100 = the same size as the customer receipt; raise if the crew wants it chunkier. 60–250.",
    "fieldname": "imin_crew_font_scale",
    "fieldtype": "Int",
@@ -758,7 +758,7 @@
   },
   {
    "default": "100",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Vertical density of the printed receipt and crew copy (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50–150.",
    "fieldname": "imin_line_spacing",
    "fieldtype": "Int",
@@ -766,7 +766,7 @@
   },
   {
    "default": "160",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Paper advance after each copy so the receipt clears the tear bar (dots = mm×8, e.g. 100≈12mm)",
    "fieldname": "imin_feed_dots",
    "fieldtype": "Int",
@@ -774,7 +774,7 @@
   },
   {
    "default": "24",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "White space appended inside the bitmap so the last line clears the tear bar (dots = mm×8, e.g. 24≈3mm). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
    "fieldname": "imin_tail_dots",
    "fieldtype": "Int",
@@ -782,7 +782,7 @@
   },
   {
    "default": "16",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Left and right print margin in dots (dots = mm×8, e.g. 16≈2mm). Overrides the padding the receipt format's own CSS sets on either side, so text uses more of the paper width. 0–64. VERIFY ON DEVICE.",
    "fieldname": "imin_side_margin",
    "fieldtype": "Int",
@@ -790,7 +790,7 @@
   },
   {
    "default": "0",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Blank space above the receipt content, in dots (dots = mm x 8, e.g. 16 = 2 mm). 0 keeps the format's own top padding.",
    "fieldname": "imin_top_margin",
    "fieldtype": "Int",
@@ -800,11 +800,11 @@
    "fieldname": "section_break_imin_eod",
    "fieldtype": "Section Break",
    "label": "iMin End of Day",
-   "depends_on": "eval:doc.print_driver==='imin'"
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)"
   },
   {
    "default": "bitmap",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "bitmap = closing report is drawn as an image. text = closing report is sent as printer text commands (faster, monospace).",
    "fieldname": "imin_eod_print_mode",
    "fieldtype": "Select",
@@ -813,7 +813,7 @@
   },
   {
    "default": "1",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Copies printed for the Closing/EOD receipt — a separate print lane from the per-transaction copies. 1 = the report goes to the manager only. 1–5.",
    "fieldname": "imin_eod_print_copies",
    "fieldtype": "Int",
@@ -821,7 +821,7 @@
   },
   {
    "default": "800",
-   "depends_on": "eval:doc.print_driver==='imin' && (doc.imin_eod_print_copies||1)>1",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver) && (doc.imin_eod_print_copies||1)>1",
    "description": "Pause between EOD copies so the cashier can tear the first one off (ms); overridable per-device. 0–10000.",
    "fieldname": "imin_eod_copy_delay_ms",
    "fieldtype": "Int",
@@ -829,7 +829,7 @@
   },
   {
    "default": "100",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Font scale for the EOD receipt (percent), same 96 DPI authoring as the sales receipt; 100 = as authored. The EOD list is longer, so lower values fit more lines per page. 60–250.",
    "fieldname": "imin_eod_font_scale",
    "fieldtype": "Int",
@@ -837,7 +837,7 @@
   },
   {
    "default": "100",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Vertical density of the printed EOD receipt (percent). 100 = as authored; lower (e.g. 80) tightens the line spacing without shrinking the text. 50–150.",
    "fieldname": "imin_eod_line_spacing",
    "fieldtype": "Int",
@@ -849,7 +849,7 @@
   },
   {
    "default": "160",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Paper advance after the EOD receipt so it clears the tear bar (dots = mm×8, e.g. 160≈20mm). 8–500.",
    "fieldname": "imin_eod_feed_dots",
    "fieldtype": "Int",
@@ -857,7 +857,7 @@
   },
   {
    "default": "24",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "White space appended inside the EOD bitmap so the last line clears the tear bar (dots = mm×8). Added to the feed advance; not clamped by the SDK's 0..255 limit. VERIFY ON DEVICE.",
    "fieldname": "imin_eod_tail_dots",
    "fieldtype": "Int",
@@ -865,7 +865,7 @@
   },
   {
    "default": "16",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Left and right print margin for the EOD receipt in dots (dots = mm×8, e.g. 16≈2mm). 0 is edge-to-edge. 0–64. VERIFY ON DEVICE.",
    "fieldname": "imin_eod_side_margin",
    "fieldtype": "Int",
@@ -873,7 +873,7 @@
   },
   {
    "default": "0",
-   "depends_on": "eval:doc.print_driver==='imin'",
+   "depends_on": "eval:['imin','rawbt'].includes(doc.print_driver)",
    "description": "Blank space above the EOD report content, in dots (dots = mm x 8). 0 keeps the format's own top padding.",
    "fieldname": "imin_eod_top_margin",
    "fieldtype": "Int",
@@ -1024,7 +1024,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-30 14:00:00.000000",
+ "modified": "2026-11-03 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

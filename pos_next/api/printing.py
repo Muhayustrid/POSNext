@@ -101,7 +101,7 @@ _INT_KNOBS = {
 _OR_DEFAULT_KNOBS = {"imin_print_copies", "imin_eod_print_copies"}
 
 _SELECT_KNOBS = {
-	"print_driver": ("browser", "qz", "imin"),
+	"print_driver": ("browser", "qz", "imin", "rawbt"),
 	"imin_paper_width": ("58mm", "80mm", "custom"),
 	"imin_print_mode": ("bitmap", "text"),
 	"imin_eod_print_mode": ("bitmap", "text"),

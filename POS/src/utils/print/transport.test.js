@@ -413,3 +413,60 @@ it("retries the SDK load after a failed script load", async () => {
 		vi.resetModules()
 	}
 })
+
+describe("per-device driver override", () => {
+	it("prints with the device override instead of the server driver", async () => {
+		const imin = okDriver("imin")
+		const rawbt = okDriver("rawbt")
+		const t = createTransport({
+			drivers: { imin, rawbt, qz: okDriver("qz"), browser: okDriver("browser") },
+			config: { driver: "imin" },
+			logSink: log,
+			deviceDriver: () => "rawbt",
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "rawbt" })
+		expect(imin.printHTML).not.toHaveBeenCalled()
+		expect(t.effectiveDriver()).toBe("rawbt")
+		expect(t.getDriver().id).toBe("rawbt")
+	})
+
+	it("ignores an override naming an unknown driver", async () => {
+		const imin = okDriver("imin")
+		const t = createTransport({
+			drivers: { imin, browser: okDriver("browser") },
+			config: { driver: "imin" },
+			logSink: log,
+			deviceDriver: () => "bogus",
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "imin" })
+	})
+
+	it("falls back from rawbt straight to the browser", async () => {
+		const qz = okDriver("qz")
+		const browser = okDriver("browser")
+		const t = createTransport({
+			drivers: { rawbt: failDriver("rawbt", "ws down"), qz, browser },
+			config: { driver: "rawbt", fallback_enabled: true },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
+		expect(qz.printHTML).not.toHaveBeenCalled()
+		expect(log.attempts[0].error_message).toContain("rawbt: ws down")
+	})
+
+	it("never hops from imin to rawbt", async () => {
+		const rawbt = okDriver("rawbt")
+		const t = createTransport({
+			drivers: {
+				imin: failDriver("imin", "no service"),
+				rawbt,
+				qz: failDriver("qz", "no qz"),
+				browser: okDriver("browser"),
+			},
+			config: { driver: "imin", fallback_enabled: true },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
+		expect(rawbt.printHTML).not.toHaveBeenCalled()
+	})
+})

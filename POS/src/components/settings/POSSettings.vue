@@ -1239,7 +1239,7 @@
 												:options="printDriverOptions"
 												:description="
 													__(
-														'Jalur cetak tanpa dialog: browser, QZ Tray, atau servis printer iMin.'
+														'Jalur cetak tanpa dialog: browser, QZ Tray, servis printer iMin, atau aplikasi RawBT.'
 													)
 												"
 											/>
@@ -1247,7 +1247,7 @@
 													v-model="settings.print_fallback_enabled"
 													:label="__('Aktifkan Print Fallback')"
 													:description="
-														__('Bila gagal, turun ke jalur berikutnya (iMin → QZ → Browser).')
+														__('Bila gagal, turun ke jalur berikutnya (iMin → QZ → Browser; RawBT → Browser).')
 													"
 												/>
 
@@ -1308,7 +1308,7 @@
 										</div>
 									<!-- iMin Sales Receipt -->
 									<div
-										v-if="settings.print_driver === 'imin'"
+										v-if="['imin', 'rawbt'].includes(settings.print_driver)"
 										:class="iminSubsectionClasses.container"
 									>
 										<div class="flex items-center gap-2 mb-4">
@@ -1326,7 +1326,7 @@
 													/>
 											</svg>
 											<h4 class="text-sm font-semibold text-gray-900">
-												{{ __('Struk Penjualan — iMin') }}
+												{{ settings.print_driver === 'rawbt' ? __('Struk Penjualan — RawBT') : __('Struk Penjualan — iMin') }}
 											</h4>
 										</div>
 										<div class="space-y-5">
@@ -1345,6 +1345,7 @@
 														"
 													/>
 													<SelectField
+														v-if="settings.print_driver === 'imin'"
 														v-model="settings.imin_print_mode"
 														:label="__('Mode Cetak iMin')"
 														:options="iminPrintModeOptions"
@@ -1353,6 +1354,7 @@
 														"
 													/>
 													<NumberField
+														v-if="settings.print_driver === 'imin'"
 														v-model="settings.imin_print_speed"
 														:label="__('Kecepatan Printer (dots/detik)')"
 														:description="
@@ -1547,7 +1549,7 @@
 									</div>
 									<!-- iMin Closing / EOD -->
 									<div
-										v-if="settings.print_driver === 'imin'"
+										v-if="['imin', 'rawbt'].includes(settings.print_driver)"
 										:class="eodSubsectionClasses.container"
 									>
 										<div class="flex items-center gap-2 mb-4">
@@ -1565,7 +1567,7 @@
 													/>
 											</svg>
 											<h4 class="text-sm font-semibold text-gray-900">
-												{{ __('Tutup Kasir / EOD — iMin') }}
+												{{ settings.print_driver === 'rawbt' ? __('Tutup Kasir / EOD — RawBT') : __('Tutup Kasir / EOD — iMin') }}
 											</h4>
 										</div>
 										<div class="space-y-5">
@@ -1576,6 +1578,7 @@
 												</h5>
 												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
 													<SelectField
+														v-if="settings.print_driver === 'imin'"
 														v-model="settings.imin_eod_print_mode"
 														:label="__('Mode Cetak EOD')"
 														:options="iminPrintModeOptions"
@@ -1926,6 +1929,7 @@ const printDriverOptions = [
 	{ label: __("Browser"), value: "browser" },
 	{ label: __("QZ Tray"), value: "qz" },
 	{ label: __("iMin"), value: "imin" },
+	{ label: __("RawBT (Android)"), value: "rawbt" },
 ];
 const printModeOptions = [
 	{ label: __("Off"), value: "Off" },

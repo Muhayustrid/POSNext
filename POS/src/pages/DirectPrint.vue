@@ -170,7 +170,7 @@
 				<p class="mt-1 text-xs text-gray-500">
 					{{
 						__(
-							"Only the printer address lives on this device; the print layout is saved on the server for the POS Profile.",
+							"Only how this device reaches its printer lives here; the print layout is saved on the server for the POS Profile.",
 						)
 					}}
 				</p>
@@ -187,6 +187,40 @@
 						/>
 						<p class="mt-1 text-xs text-gray-400">
 							{{ __("Hostname or IP for the iMin service. Port is fixed to 8081.") }}
+						</p>
+					</div>
+					<div>
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-driver-override">
+							{{ __("Printer on this device") }}
+						</label>
+						<Select
+							id="direct-print-driver-override"
+							v-model="cfg.driverOverride"
+							:options="driverOverrideOptions"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Use RawBT on a till where the iMin service does not answer. Other tills keep the POS Profile driver.",
+								)
+							}}
+						</p>
+					</div>
+					<div v-if="cfg.driverOverride === 'rawbt' || serverDriver === 'rawbt'">
+						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-rawbt-mode">
+							{{ __("RawBT connection") }}
+						</label>
+						<Select
+							id="direct-print-rawbt-mode"
+							v-model="cfg.rawbtMode"
+							:options="rawbtModeOptions"
+						/>
+						<p class="mt-1 text-xs text-gray-400">
+							{{
+								__(
+									"Install the RawBT app and pick the printer in it (built-in, Bluetooth, USB or LAN). Websocket mode also needs the RawBT websocket server app.",
+								)
+							}}
 						</p>
 					</div>
 				</div>
@@ -1004,6 +1038,7 @@ import { buildReceiptPreviewSet } from "@/utils/print/receipt_preview"
 import {
 	DEFAULT_FEED_DOTS,
 	DEFAULT_TAIL_DOTS,
+	DEVICE_ATTACHMENT_KEYS,
 	parseNumericField,
 	resolvePrintConfig,
 } from "@/utils/print/receipt_layout"
@@ -1056,7 +1091,7 @@ const legacyDeviceLayout = ref("")
 function captureLegacyDeviceConfig() {
 	const stored = loadDeviceConfig() || {}
 	const summary = Object.keys(stored)
-		.filter((k) => k !== "host" && k !== "_v")
+		.filter((k) => !DEVICE_ATTACHMENT_KEYS.includes(k) && k !== "_v")
 		.map((k) => `${k}: ${String(stored[k])}`)
 		.join(", ")
 	if (!summary) return
@@ -1098,6 +1133,17 @@ const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
 	value: n,
 }))
 
+const driverOverrideOptions = [
+	{ label: __("Follow POS Profile"), value: "" },
+	{ label: __("RawBT (Bluetooth / built-in / USB / LAN)"), value: "rawbt" },
+]
+const rawbtModeOptions = [
+	{ label: __("Android intent (recommended)"), value: "intent" },
+	{ label: __("Websocket server (127.0.0.1:40213)"), value: "websocket" },
+]
+// The POS Profile's driver, shown next to the per-device override.
+const serverDriver = ref("")
+
 const crewOptions = [
 	{ label: __("Server default"), value: "" },
 	{ label: __("On"), value: "1" },
@@ -1109,6 +1155,8 @@ const crewSlipChoice = ref("") // "" | "1" | "0"
 // lanes (Select-driven, so no text parsing).
 const cfg = reactive({
 	host: "",
+	driverOverride: "",
+	rawbtMode: "intent",
 	paper: "58mm",
 	cut: false,
 	copies: 1,
@@ -1143,6 +1191,8 @@ const eodTopMarginDotsText = ref("0")
 function readHostIntoForm() {
 	const stored = loadDeviceConfig() || {}
 	cfg.host = typeof stored.host === "string" ? stored.host : ""
+	cfg.driverOverride = stored.driverOverride === "rawbt" ? "rawbt" : ""
+	cfg.rawbtMode = stored.rawbtMode === "websocket" ? "websocket" : "intent"
 }
 
 function readPaperIntoForm(stored) {
@@ -1259,6 +1309,7 @@ function transportSnapshot() {
 		currentDriver.value = d ? d.describe() : null
 		const c = t.getConfig ? t.getConfig() : {}
 		transportPaperLabel.value = c.paper || "-"
+		serverDriver.value = c.driver || ""
 		fallbackEnabled.value = c.fallback_enabled !== false
 	} catch (e) {
 		currentDriver.value = null
@@ -1325,8 +1376,15 @@ function onSaveDeviceConfig() {
 	try {
 		// The host is a device attachment; it is the only thing still saved
 		// here. Layout knobs go to the server (update_print_config below).
-		saveDeviceConfig({ host: (cfg.host || "").trim() || undefined })
-		showSuccess(__("Printer host saved to this device."))
+		saveDeviceConfig({
+			host: (cfg.host || "").trim() || undefined,
+			driverOverride: cfg.driverOverride || undefined,
+			rawbtMode: cfg.rawbtMode === "websocket" ? "websocket" : undefined,
+		})
+		// The override changes which driver the status card describes.
+		transportSnapshot()
+		pollStatus()
+		showSuccess(__("Printer settings saved to this device."))
 	} catch (e) {
 		showError(e?.message || String(e))
 	} finally {

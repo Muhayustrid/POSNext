@@ -14,12 +14,18 @@ import { __ } from "@/utils/translation"
 import { createBrowserDriver } from "./browser_client"
 import { createIminDriver } from "./imin_client"
 import { createQzDriver } from "./qz_client"
+import { createRawbtDriver } from "./rawbt_client"
+import { loadDeviceConfig } from "./receipt_layout"
 
 const log = logger.create("PrintTransport")
 
 const FALLBACK_ORDER = {
 	imin: ["imin", "qz", "browser"],
 	qz: ["qz", "browser"],
+	// RawBT is never reached from the iMin chain: on a till without RawBT the
+	// intent would bounce the cashier to the Play Store. It is chosen
+	// explicitly (POS Settings, or per device on the Direct Print page).
+	rawbt: ["rawbt", "browser"],
 	browser: ["browser"],
 }
 
@@ -46,8 +52,28 @@ function isPostPrintError(err) {
  * Build a transport. `drivers` and `config` are injectable so unit tests need
  * no network or sockets. The production singleton below wires the real ones.
  */
-export function createTransport({ drivers, config = {}, logSink } = {}) {
+export function createTransport({
+	drivers,
+	config = {},
+	logSink,
+	deviceDriver = () => null,
+} = {}) {
 	let current = { ...config }
+
+	/**
+	 * The driver this device prints with: a per-device override (a till
+	 * whose iMin service is broken switches to RawBT without touching the
+	 * POS Profile the other tills share), else the server's choice.
+	 */
+	function effectiveDriver() {
+		let override = null
+		try {
+			override = deviceDriver()
+		} catch {
+			override = null
+		}
+		return override && drivers[override] ? override : current.driver
+	}
 
 	async function logAttempt(attempt) {
 		if (logSink) {
@@ -62,8 +88,9 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 	}
 
 	function chain() {
-		if (current.fallback_enabled === false) return [current.driver]
-		return FALLBACK_ORDER[current.driver] || [current.driver]
+		const driver = effectiveDriver()
+		if (current.fallback_enabled === false) return [driver]
+		return FALLBACK_ORDER[driver] || [driver]
 	}
 
 	async function printHTML(html, opts = {}) {
@@ -159,7 +186,7 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 		}
 		await logAttempt({
 			...opts.logContext,
-			driver: current.driver,
+			driver: effectiveDriver(),
 			status: "Failed",
 			error_message: errors.join(" | "),
 			paper_width: current.paper,
@@ -176,8 +203,9 @@ export function createTransport({ drivers, config = {}, logSink } = {}) {
 		getConfig() {
 			return { ...current }
 		},
+		effectiveDriver,
 		getDriver(id) {
-			return drivers[id || current.driver]
+			return drivers[id || effectiveDriver()]
 		},
 	}
 }
@@ -232,8 +260,10 @@ export function getTransport() {
 		drivers: {
 			imin: createIminDriver({ factory: iminFactory }),
 			qz: createQzDriver(),
+			rawbt: createRawbtDriver(),
 			browser: createBrowserDriver(),
 		},
+		deviceDriver: () => loadDeviceConfig().driverOverride || null,
 	})
 	return _singleton
 }
