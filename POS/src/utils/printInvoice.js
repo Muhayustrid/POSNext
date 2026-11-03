@@ -893,6 +893,10 @@ export async function silentPrintInvoice(
  * The driver this device actually prints with: a per-device override (Direct
  * Print, e.g. RawBT on a till whose iMin service is broken) beats the server's.
  */
+// Drivers that lay receipts out as printer text from the doc (iMin SDK text
+// commands, RawBT ESC/POS text).
+const TEXT_MODE_DRIVERS = ["imin", "rawbt"]
+
 function driverOf(c) {
 	const t = getTransport()
 	return typeof t.effectiveDriver === "function" ? t.effectiveDriver() : c.driver
@@ -902,7 +906,7 @@ function driverOf(c) {
 export function isIminTextMode() {
 	try {
 		const c = getTransport().getConfig() || {}
-		return driverOf(c) === "imin" && c.print_mode === "text"
+		return TEXT_MODE_DRIVERS.includes(driverOf(c)) && c.print_mode === "text"
 	} catch {
 		return false
 	}
@@ -912,7 +916,7 @@ export function isIminTextMode() {
 export function isIminEodTextMode() {
 	try {
 		const c = getTransport().getConfig() || {}
-		return driverOf(c) === "imin" && c.eod_print_mode === "text"
+		return TEXT_MODE_DRIVERS.includes(driverOf(c)) && c.eod_print_mode === "text"
 	} catch {
 		return false
 	}

@@ -13,7 +13,10 @@ vi.mock("@/utils/logger", () => ({
 
 import {
 	RAWBT_PACKAGE,
+	asciiBytes,
 	buildEscPosJob,
+	encodeTextOps,
+	escposCols,
 	bytesToBase64,
 	createRawbtDriver,
 	escFeed,
@@ -177,5 +180,94 @@ describe("createRawbtDriver", () => {
 		expect(createRawbtDriver().describe().detail).toContain("40213")
 		localStorage.clear()
 		expect(createRawbtDriver().describe().detail).not.toContain("40213")
+	})
+})
+
+describe("text mode", () => {
+	const doc = {
+		company: "Toko Énak",
+		name: "SINV-1",
+		currency: "IDR",
+		grand_total: 15000,
+		items: [{ item_name: "Kopi", qty: 1, rate: 15000, amount: 15000 }],
+		payments: [{ mode_of_payment: "Cash", amount: 15000 }],
+	}
+
+	it("folds non-ASCII text to single bytes", () => {
+		expect(asciiBytes("Énak – ok")).toEqual(
+			Array.from("Enak - ok", (c) => c.charCodeAt(0)),
+		)
+		expect(asciiBytes("日")).toEqual([0x3f])
+	})
+
+	it("sizes columns from the font A cell and the side margin", () => {
+		expect(escposCols(384, 0).cols).toEqual({ base: 32, big: 32, queue: 16 })
+		expect(escposCols(576, 0).cols.base).toBe(48)
+		const m = escposCols(384, 24)
+		expect(m.cols.base).toBe(28)
+		expect(m.padSpaces).toBe(2)
+	})
+
+	it("encodes styles only when they change and resets them at the end", () => {
+		const bytes = encodeTextOps(
+			[
+				{ op: "text", text: "A", align: 1, size: "queue", bold: true },
+				{ op: "text", text: "B", align: 1, size: "queue", bold: true },
+				{ op: "text", text: "C", align: 0, size: "base", bold: false },
+			],
+			{ padSpaces: 1 },
+		)
+		expect(bytes).toEqual([
+			0x1b, 0x74, 0x00, 0x1b, 0x33, 30, 0x1b, 0x61, 1, 0x1d, 0x21, 0x11, 0x1b,
+			0x45, 1, 0x41, 0x0a, 0x42, 0x0a, 0x1b, 0x61, 0, 0x1d, 0x21, 0x00, 0x1b,
+			0x45, 0, 0x20, 0x43, 0x0a, 0x1b, 0x32, 0x1b, 0x61, 0, 0x1d, 0x21, 0, 0x1b,
+			0x45, 0,
+		])
+	})
+
+	it("prints the doc as text, without rendering a bitmap", async () => {
+		const launch = vi.fn()
+		const render = vi.fn()
+		const loadLogo = vi.fn().mockResolvedValue(null)
+		const d = createRawbtDriver({
+			mode: () => "intent",
+			launch,
+			render,
+			loadLogo,
+		})
+		const out = await d.printHTML("<html/>", {
+			receiptDoc: doc,
+			config: { printMode: "text", copies: 1, crewSlipEnabled: true },
+		})
+		expect(render).not.toHaveBeenCalled()
+		expect(out.copies).toBe(2)
+		const url = launch.mock.calls[0][0]
+		const b64 = url.slice("intent:base64,".length, url.indexOf("#Intent"))
+		const text = atob(b64)
+		expect(text).toContain("Toko Enak")
+		expect(text).toContain("Kopi")
+		// Far lighter than a bitmap sheet (tens of KB).
+		expect(text.length).toBeLessThan(4000)
+	})
+
+	it("falls back to the bitmap when no doc came with the print", async () => {
+		const launch = vi.fn()
+		const render = vi.fn(async () => ({ imageData: image(8, 1), height: 1 }))
+		const d = createRawbtDriver({ mode: () => "intent", launch, render })
+		await d.printHTML("<html/>", { config: { printMode: "text" } })
+		expect(render).toHaveBeenCalledTimes(1)
+	})
+
+	it("prints the closing report as text on the EOD lane", async () => {
+		const launch = vi.fn()
+		const render = vi.fn()
+		const d = createRawbtDriver({ mode: () => "intent", launch, render })
+		const out = await d.printHTML("", {
+			kind: "eod",
+			eodDoc: { name: "CLS-1", company: "Toko" },
+			config: { eodPrintMode: "text", eodCopies: 2 },
+		})
+		expect(render).not.toHaveBeenCalled()
+		expect(out.copies).toBe(2)
 	})
 })

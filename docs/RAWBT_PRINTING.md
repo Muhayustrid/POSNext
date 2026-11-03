@@ -8,11 +8,18 @@ menjadi default.
 
 ## Cara kerja
 
-- Struk dirender jadi bitmap dengan renderer yang sama dengan mode gambar iMin,
-  jadi hasil cetaknya sama.
-- Bitmap dikodekan ke ESC/POS (`GS v 0` raster), lalu ditambah feed dan cut
-  (kalau `imin_cut_paper` aktif). Semua lembar (salinan + crew slip) dikirim
-  dalam satu job.
+Mode cetak memakai setelan yang sama dengan iMin: POS Settings → **Mode cetak**
+(struk) dan **Mode cetak EOD** (`imin_print_mode` / `imin_eod_print_mode`).
+
+| Mode | Isi job | Ukuran | Catatan |
+| --- | --- | --- | --- |
+| **Teks (cepat)**, disarankan | Teks ESC/POS dengan font bawaan printer (font A 12x24 dot: 32 kolom di 58mm, 48 kolom di 80mm). Layout-nya sama dengan mode teks iMin (`receipt_text.js`). | Beberapa KB | Tanpa html2canvas. Hanya logo kecil yang dikirim sebagai gambar. Knob skala font tidak berlaku; line spacing serta margin kiri/atas tetap berlaku. Huruf non-ASCII dilipat (é → e), sisanya jadi `?`. |
+| Gambar | Struk dirender jadi bitmap (renderer yang sama dengan mode gambar iMin), lalu dikodekan ke raster `GS v 0`. | Puluhan KB per lembar | Tampilan persis format cetak, tapi berat. |
+
+Setiap lembar (salinan + crew slip) diakhiri feed dan cut (kalau
+`imin_cut_paper` aktif), dan semuanya dikirim dalam satu job. Mode teks butuh
+data dokumen. Cetakan tanpa dokumen (misalnya fallback HTML server) tetap
+memakai gambar, sama seperti aturan di iMin.
 - Bitmap diserahkan ke aplikasi RawBT (`ru.a402d.rawbtprinter`). RawBT yang
   meneruskan ke printer yang dipilih di aplikasinya: printer bawaan (kalau
   modelnya didukung), Bluetooth, USB, atau LAN.
@@ -25,7 +32,6 @@ Ada dua mode pengiriman (diatur per device):
 | Websocket server | `ws://127.0.0.1:40213/` | Butuh aplikasi "RawBT websocket server" (RawBT 7+). Tidak pindah aplikasi, tapi tetap koneksi loopback, jadi izin Chrome berlaku. |
 
 Batasan:
-- Mode teks iMin tidak berlaku. RawBT selalu mencetak gambar.
 - Tidak ada jeda sobek antar salinan. Aktifkan cut kalau mencetak lebih dari satu lembar.
 - Mode intent bersifat fire-and-forget. POS tidak tahu apakah kertas benar-benar
   keluar, jadi `POS Print Log` mencatat `Success` begitu intent dikirim.

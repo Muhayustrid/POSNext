@@ -1345,7 +1345,6 @@
 														"
 													/>
 													<SelectField
-														v-if="settings.print_driver === 'imin'"
 														v-model="settings.imin_print_mode"
 														:label="__('Mode Cetak iMin')"
 														:options="iminPrintModeOptions"
@@ -1578,7 +1577,6 @@
 												</h5>
 												<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-3">
 													<SelectField
-														v-if="settings.print_driver === 'imin'"
 														v-model="settings.imin_eod_print_mode"
 														:label="__('Mode Cetak EOD')"
 														:options="iminPrintModeOptions"

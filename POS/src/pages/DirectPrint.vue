@@ -1720,6 +1720,10 @@ async function onTestPrint() {
 		const bundle = await getSampleBundle({ refresh: true })
 		await transportPrint(sampleReceiptHTML(bundle), {
 			crewHTML: sampleCrewHTML(bundle),
+			// Text print mode (iMin / RawBT) lays the sheet out from the doc;
+			// without it the test page would always print as a bitmap and not
+			// show what a real sale prints.
+			receiptDoc: bundle.invoiceDoc,
 			// Still "TEST": the log row must stay recognisable as a test print
 			// and must not look like a real sale of that invoice.
 			logContext: {

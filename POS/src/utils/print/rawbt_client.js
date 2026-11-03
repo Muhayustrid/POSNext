@@ -8,10 +8,18 @@
  * a till where the iMin service on ws://127.0.0.1:8081 does not answer
  * (plugin missing, service version mismatch, Chrome local-network block).
  *
- * The receipt is the same bitmap the iMin bitmap lane prints (one renderer,
- * so the paper looks the same), encoded as ESC/POS raster (GS v 0), followed
- * by the feed and the optional cut. Text mode is iMin-only; RawBT always
- * prints the bitmap.
+ * Two print modes, from the same POS Settings knob as iMin (imin_print_mode /
+ * imin_eod_print_mode):
+ *   - "bitmap": the same bitmap the iMin bitmap lane prints (one renderer,
+ *     so the paper looks the same), encoded as ESC/POS raster (GS v 0).
+ *     Heavy: an html2canvas render plus tens of KB per sheet.
+ *   - "text": the receipt_text layout (the one iMin text mode uses) sent as
+ *     plain ESC/POS text in the printer's own font A (12x24 dots). No
+ *     html2canvas and a few KB per job; only the small logo is a raster. The
+ *     printer font is fixed, so the font-scale knobs do not apply; line
+ *     spacing and the side/top margins do.
+ * Text mode needs the invoice / closing doc; a print without one (test page,
+ * server-HTML fallback) stays bitmap, the same rule as the iMin driver.
  *
  * Two ways to hand the bytes over (per device, Direct Print page):
  *   - "intent" (default): navigate to
@@ -24,15 +32,23 @@
  *     but it is a loopback connection, so Chrome's local-network permission
  *     applies just like the iMin service.
  *
- * Every sheet (copies, then the crew slip) travels in ONE job, separated by
- * feed (+ cut). There is no tear-off pause between sheets: RawBT prints the
- * job in one go, so enable the cut when printing more than one sheet.
+ * Every sheet (copies, then the crew slip) travels in ONE job, each followed
+ * by the feed (+ cut). There is no tear-off pause between sheets: RawBT
+ * prints the job in one go, so enable the cut when printing more than one.
  */
 import { logger } from "@/utils/logger"
 import { __ } from "@/utils/translation"
 
+import { DOTS_PER_MM } from "./paper"
 import { loadDeviceConfig, resolvePrintConfig } from "./receipt_layout"
-import { renderHTMLToBitmap } from "./receipt_renderer"
+import { binarize, renderHTMLToBitmap } from "./receipt_renderer"
+import {
+	RECEIPT_LOGO_MM,
+	RECEIPT_LOGO_URL,
+	buildCrewSlipTextJob,
+	buildEodTextJob,
+	buildReceiptTextJob,
+} from "./receipt_text"
 
 const log = logger.create("RawbtClient")
 
@@ -116,19 +132,188 @@ export function escRaster(image) {
 }
 
 /**
- * One ESC/POS job for every sheet: init, then per sheet raster + feed
+ * One ESC/POS job for every sheet: init, then per sheet its bytes + feed
  * (+ cut). The feed is what pushes the receipt past the tear bar, exactly as
  * on the iMin lane.
+ *
+ * @param {number[][]} sheets - encoded sheet bodies
  */
-export function buildEscPosJob(images, { feedDots = 0, cut = false } = {}) {
-	const out = [...escInit()]
-	for (const img of images) {
-		out.push(...escRaster(img))
+export function buildEscPosSheets(sheets, { feedDots = 0, cut = false } = {}) {
+	const out = escInit()
+	for (const body of sheets) {
+		for (const b of body) out.push(b)
 		out.push(...escFeed(feedDots))
 		if (cut) out.push(...escCut())
 	}
 	return Uint8Array.from(out)
 }
+
+/** Bitmap job: one raster sheet per image. */
+export function buildEscPosJob(images, opts = {}) {
+	return buildEscPosSheets(images.map(escRaster), opts)
+}
+
+// ---------------------------------------------------------------------------
+// Text mode
+// ---------------------------------------------------------------------------
+
+/** Font A cell width in dots: 32 columns on 58mm, 48 on 80mm. */
+export const FONT_A_DOTS = 12
+/** Default ESC/POS line pitch (ESC 2) for font A, in dots. */
+const DEFAULT_LINE_DOTS = 30
+
+// GS ! n per size key: base normal; big double height (same columns, so the
+// crew slip's item lines keep the receipt's width); queue double both ways.
+const SIZE_MODE = { base: 0x00, big: 0x01, queue: 0x11 }
+
+const ASCII_FOLD = {
+	"‘": "'",
+	"’": "'",
+	"“": '"',
+	"”": '"',
+	"–": "-",
+	"—": "-",
+	"…": "...",
+	" ": " ",
+}
+const FOLD_RE = /[‘’“”–—… ]/g
+// Combining diacritical marks left behind by NFD ("É" -> "E" + U+0301).
+const COMBINING_RE = /\p{M}/gu
+
+/**
+ * Text as single-byte ASCII: the job selects code page 437 (ESC t 0), so
+ * accents are folded and anything else becomes "?" instead of mojibake.
+ */
+export function asciiBytes(text) {
+	const folded = String(text ?? "")
+		.replace(FOLD_RE, (c) => ASCII_FOLD[c])
+		.normalize("NFD")
+		.replace(COMBINING_RE, "")
+	const out = []
+	for (const ch of folded) {
+		const code = ch.codePointAt(0)
+		out.push(code >= 0x20 && code < 0x7f ? code : 0x3f)
+	}
+	return out
+}
+
+/** Columns per size key for the usable width (paper minus both margins). */
+export function escposCols(dots, sideMarginDots = 0) {
+	const side = Math.max(0, sideMarginDots || 0)
+	const usable = Math.max(120, dots - 2 * side)
+	const base = Math.max(16, Math.floor(usable / FONT_A_DOTS))
+	return {
+		cols: { base, big: base, queue: Math.max(8, Math.floor(base / 2)) },
+		padSpaces: Math.round(side / FONT_A_DOTS),
+	}
+}
+
+/**
+ * Encode receipt_text ops as ESC/POS. Style commands are only sent when they
+ * change; every setting is reset at the end of the sheet.
+ *
+ * @param {object[]} ops - from buildReceiptTextJob / buildCrewSlipTextJob / buildEodTextJob
+ * @param {object} [o]
+ * @param {number} [o.padSpaces] - left padding of left-aligned lines (side margin)
+ * @param {number} [o.lineSpacing] - percent of the default line pitch
+ * @param {{width:number,height:number,data:Uint8ClampedArray}|null} [o.logo]
+ * @returns {number[]}
+ */
+export function encodeTextOps(
+	ops,
+	{ padSpaces = 0, lineSpacing = 100, logo = null } = {},
+) {
+	const pitch = Math.max(
+		1,
+		Math.min(
+			255,
+			Math.round((DEFAULT_LINE_DOTS * (Number(lineSpacing) || 100)) / 100),
+		),
+	)
+	// ESC t 0: code page 437; ESC 3 n: line pitch.
+	const out = [ESC, 0x74, 0x00, ESC, 0x33, pitch]
+	const pad = padSpaces > 0 ? " ".repeat(padSpaces) : ""
+	let align = 0
+	let size = 0
+	let bold = 0
+	for (const o of ops) {
+		if (o.op === "text") {
+			const a = Number(o.align) || 0
+			if (a !== align) {
+				align = a
+				out.push(ESC, 0x61, a)
+			}
+			const sz = SIZE_MODE[o.size] ?? 0
+			if (sz !== size) {
+				size = sz
+				out.push(GS, 0x21, sz)
+			}
+			const b = o.bold ? 1 : 0
+			if (b !== bold) {
+				bold = b
+				out.push(ESC, 0x45, b)
+			}
+			const line = a === 0 && pad && o.text ? pad + o.text : o.text
+			for (const byte of asciiBytes(line)) out.push(byte)
+			out.push(0x0a)
+		} else if (o.op === "feed") {
+			out.push(...escFeed(o.dots))
+		} else if (o.op === "logo" && logo) {
+			// Already centred on a full-width canvas: GS v 0 ignores ESC a on
+			// many heads, so alignment is baked into the raster instead.
+			for (const byte of escRaster(logo)) out.push(byte)
+		}
+	}
+	// ESC 2 default pitch, left align, normal size, bold off.
+	out.push(ESC, 0x32, ESC, 0x61, 0, GS, 0x21, 0, ESC, 0x45, 0)
+	return out
+}
+
+/**
+ * The receipt logo as a binarized raster, centred on a full-width canvas.
+ * Cached per size for the session; null when the image cannot be loaded (the
+ * receipt then prints without it, as on the iMin text lane).
+ */
+const _logoCache = new Map()
+function defaultLoadLogo(widthDots, paperDots) {
+	const key = `${widthDots}:${paperDots}`
+	if (_logoCache.has(key)) return _logoCache.get(key)
+	const job = (async () => {
+		const img = new Image()
+		img.src = RECEIPT_LOGO_URL
+		await img.decode()
+		const height = Math.max(
+			1,
+			Math.round((img.naturalHeight / img.naturalWidth) * widthDots),
+		)
+		const canvas = document.createElement("canvas")
+		canvas.width = Math.max(widthDots, paperDots)
+		canvas.height = height
+		const ctx = canvas.getContext("2d")
+		ctx.fillStyle = "#ffffff"
+		ctx.fillRect(0, 0, canvas.width, height)
+		ctx.drawImage(
+			img,
+			Math.floor((canvas.width - widthDots) / 2),
+			0,
+			widthDots,
+			height,
+		)
+		const data = ctx.getImageData(0, 0, canvas.width, height)
+		binarize(data)
+		return data
+	})().catch((err) => {
+		log.warn("receipt logo unavailable, printing without it:", err?.message)
+		_logoCache.delete(key)
+		return null
+	})
+	_logoCache.set(key, job)
+	return job
+}
+
+// ---------------------------------------------------------------------------
+// Hand-over to RawBT
+// ---------------------------------------------------------------------------
 
 /** Base64 of raw bytes, chunked so large receipts do not blow the stack. */
 export function bytesToBase64(bytes) {
@@ -226,6 +411,7 @@ function defaultSendWs(
  * @param {(bytes:Uint8Array) => Promise<any>} [deps.sendWs] - websocket send
  * @param {() => boolean} [deps.isAndroid]
  * @param {(html, opts) => Promise<{imageData:ImageData, height:number}>} [deps.render]
+ * @param {(widthDots:number, paperDots:number) => Promise<ImageData|null>} [deps.loadLogo]
  */
 export function createRawbtDriver(deps = {}) {
 	const mode = deps.mode || loadMode
@@ -233,11 +419,85 @@ export function createRawbtDriver(deps = {}) {
 	const sendWs = deps.sendWs || defaultSendWs
 	const android = deps.isAndroid || isAndroid
 	const render = deps.render || ((h, o) => renderHTMLToBitmap(h, o))
+	const loadLogo = deps.loadLogo || defaultLoadLogo
 
 	async function available() {
 		// The intent only resolves on Android; the websocket server is
 		// reachable from any OS, so its failure surfaces at send time.
 		return mode() === "websocket" ? true : android()
+	}
+
+	async function bitmapSheets(html, opts, r, isEod) {
+		if (!html) throw new Error(__("Nothing to print"))
+		const renderOpts = {
+			paper: r.paper,
+			customDots: r.customDots,
+			tailDots: r.tailDots,
+			fontScale: r.fontScale,
+			lineSpacing: r.lineSpacing,
+			sideMarginDots: r.sideMarginDots,
+			topMarginDots: r.topMarginDots,
+			queueGapDots: r.queueGapDots,
+		}
+		const crewApplies = !isEod && r.crewSlipEnabled && Boolean(opts.crewHTML)
+		const [receipt, crew] = await Promise.all([
+			render(html, renderOpts),
+			crewApplies
+				? render(opts.crewHTML, { ...renderOpts, fontScale: r.crewFontScale })
+				: null,
+		])
+		const body = escRaster(receipt.imageData)
+		const sheets = Array.from({ length: r.copies }, () => body)
+		if (crew) sheets.push(escRaster(crew.imageData))
+		return sheets
+	}
+
+	async function textSheets(r, { isEod, eodDoc, receiptDoc }) {
+		const { cols, padSpaces } = escposCols(r.dots, r.sideMarginDots)
+		const wrap = (ops) => {
+			let out = ops
+			if (r.topMarginDots > 0) {
+				out = [{ op: "feed", dots: r.topMarginDots }, ...out]
+			}
+			// The tail is white space inside a bitmap; text has no raster, so
+			// it becomes a feed at the end of the sheet (as on iMin).
+			if (r.tailDots > 0) out = [...out, { op: "feed", dots: r.tailDots }]
+			return out
+		}
+		const enc = { padSpaces, lineSpacing: r.lineSpacing }
+		if (isEod) {
+			const body = encodeTextOps(
+				wrap(buildEodTextJob(eodDoc, { cols: cols.base })),
+				enc,
+			)
+			return Array.from({ length: r.copies }, () => body)
+		}
+		const logoWidth = Math.min(r.dots, RECEIPT_LOGO_MM * DOTS_PER_MM)
+		const logo = await loadLogo(logoWidth, r.dots)
+		const receipt = encodeTextOps(
+			wrap(
+				buildReceiptTextJob(receiptDoc, {
+					cols,
+					queueGapDots: r.queueGapDots,
+				}),
+			),
+			{ ...enc, logo },
+		)
+		const sheets = Array.from({ length: r.copies }, () => receipt)
+		if (r.crewSlipEnabled) {
+			sheets.push(
+				encodeTextOps(
+					wrap(
+						buildCrewSlipTextJob(receiptDoc, {
+							cols,
+							queueGapDots: r.queueGapDots,
+						}),
+					),
+					enc,
+				),
+			)
+		}
+		return sheets
 	}
 
 	return {
@@ -261,47 +521,39 @@ export function createRawbtDriver(deps = {}) {
 		 */
 		async printHTML(html, opts = {}) {
 			const r = resolvePrintConfig({}, opts.config || {}, { kind: opts.kind })
-			const renderOpts = {
-				paper: r.paper,
-				customDots: r.customDots,
-				tailDots: r.tailDots,
-				fontScale: r.fontScale,
-				lineSpacing: r.lineSpacing,
-				sideMarginDots: r.sideMarginDots,
-				topMarginDots: r.topMarginDots,
-				queueGapDots: r.queueGapDots,
-			}
-			const crewApplies =
-				opts.kind !== "eod" && r.crewSlipEnabled && Boolean(opts.crewHTML)
-			if (!html) throw new Error(__("Nothing to print"))
-			const [receipt, crew] = await Promise.all([
-				render(html, renderOpts),
-				crewApplies
-					? render(opts.crewHTML, { ...renderOpts, fontScale: r.crewFontScale })
-					: null,
-			])
-			const images = Array.from({ length: r.copies }, () => receipt.imageData)
-			if (crew) images.push(crew.imageData)
-			const bytes = buildEscPosJob(images, { feedDots: r.feedDots, cut: r.cut })
+			const isEod = opts.kind === "eod"
+			const eodDoc = opts.eodDoc || (isEod ? opts.doc : null)
+			const receiptDoc = opts.receiptDoc || (!isEod ? opts.doc : null)
+			const textMode =
+				r.printMode === "text" && Boolean(isEod ? eodDoc : receiptDoc)
+
+			const sheets = textMode
+				? await textSheets(r, { isEod, eodDoc, receiptDoc })
+				: await bitmapSheets(html, opts, r, isEod)
+			const bytes = buildEscPosSheets(sheets, {
+				feedDots: r.feedDots,
+				cut: r.cut,
+			})
 
 			const m = mode()
 			log.info("rawbt job", {
 				mode: m,
+				printMode: textMode ? "text" : "bitmap",
 				bytes: bytes.length,
-				sheets: images.length,
+				sheets: sheets.length,
 			})
 			if (m === "websocket") {
 				await sendWs(bytes)
 			} else {
 				if (bytes.length > INTENT_WARN_BYTES) {
 					log.warn(
-						"RawBT intent payload is large; enable websocket mode if it does not print",
+						"RawBT intent payload is large; switch to text mode or websocket if it does not print",
 						bytes.length,
 					)
 				}
 				launch(rawbtIntentURL(bytes))
 			}
-			return { paper: r.paper, dots: r.dots, copies: images.length }
+			return { paper: r.paper, dots: r.dots, copies: sheets.length }
 		},
 
 		describe() {
