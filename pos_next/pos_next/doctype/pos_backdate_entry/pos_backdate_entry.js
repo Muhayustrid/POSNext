@@ -514,29 +514,36 @@ function render_shift_invoices(frm) {
 			let entry_badge = ""
 			let row_style = ""
 			if (entry_row) {
-				const is_ret = entry_row.entry_type === "Return"
-				const label = is_ret ? __("Return") : __("Correct")
-				entry_badge = ` <span class="indicator-pill ${is_ret ? "orange" : "blue"}" style="white-space: nowrap;">${label} #${cint(entry_row.invoice_no)}</span>`
-				row_style = ` style="background-color: var(${is_ret ? "--bg-orange" : "--bg-blue"});"`
+				const kind = { Return: ["Return", "orange"], Cancel: ["Cancel", "red"] }[
+					entry_row.entry_type
+				] || ["Correct", "blue"]
+				entry_badge = ` <span class="indicator-pill ${kind[1]}" style="white-space: nowrap;">${__(kind[0])} #${cint(entry_row.invoice_no)}</span>`
+				row_style = ` style="background-color: var(--bg-${kind[1]});"`
 			}
 
 			let actions = `<span class="text-muted">-</span>`
 			if (frm.doc.docstatus === 0) {
-				if (!inv.is_return) {
-					const used_title = entry_row
-						? __("Already added in this entry as Invoice No. {0}", [
-								cint(entry_row.invoice_no),
-							])
-						: ""
-					const return_attr = entry_row ? `disabled title="${used_title}"` : ""
+				const used_title = entry_row
+					? __("Already added in this entry as Invoice No. {0}", [
+							cint(entry_row.invoice_no),
+						])
+					: ""
+				const used_attr = entry_row ? `disabled title="${used_title}"` : ""
+				const name_attr = `data-invoice="${frappe.utils.escape_html(inv.name)}"`
+				const cancel_btn = `<button type="button" class="btn btn-xs btn-default btn-cancel-inv" ${name_attr} ${used_attr}>${__("Cancel")}</button>`
+				if (inv.is_return) {
+					actions = `<div class="btn-group">${cancel_btn}</div>`
+				} else {
+					const live_return = has_live_return(frm, inv.name)
 					const correct_attr =
-						entry_row || inv.has_return
-							? `disabled title="${used_title || __("Cannot correct an invoice with submitted returns")}"`
+						entry_row || live_return
+							? `disabled title="${used_title || __("Cancel its returns in this entry first")}"`
 							: ""
 					actions = `
 					<div class="btn-group">
-						<button type="button" class="btn btn-xs btn-default btn-return" data-invoice="${frappe.utils.escape_html(inv.name)}" ${return_attr}>${__("Return")}</button>
-						<button type="button" class="btn btn-xs btn-default btn-correct" data-invoice="${frappe.utils.escape_html(inv.name)}" ${correct_attr}>${__("Correct")}</button>
+						<button type="button" class="btn btn-xs btn-default btn-return" ${name_attr} ${used_attr}>${__("Return")}</button>
+						<button type="button" class="btn btn-xs btn-default btn-correct" ${name_attr} ${correct_attr}>${__("Correct")}</button>
+						${cancel_btn}
 					</div>
 				`
 				}
@@ -589,6 +596,50 @@ function render_shift_invoices(frm) {
 		e.preventDefault()
 		const inv_name = $(this).attr("data-invoice")
 		handle_correct(frm, inv_name)
+	})
+
+	$wrapper.find(".btn-cancel-inv").on("click", function (e) {
+		e.preventDefault()
+		handle_cancel(frm, $(this).attr("data-invoice"))
+	})
+}
+
+// a shift return against invoice_name not yet cancelled in this entry
+function has_live_return(frm, invoice_name) {
+	const cancelled = new Set(
+		(frm.doc.invoices || [])
+			.filter((r) => r.entry_type === "Cancel")
+			.map((r) => r.against_invoice),
+	)
+	return (frm._shift_context?.shift_invoices || []).some(
+		(i) => i.is_return && i.return_against === invoice_name && !cancelled.has(i.name),
+	)
+}
+
+function handle_cancel(frm, invoice_name) {
+	const inv = (frm._shift_context?.shift_invoices || []).find(
+		(i) => i.name === invoice_name,
+	)
+	if (!inv) return
+	if (!inv.is_return && has_live_return(frm, inv.name)) {
+		frappe.msgprint(__("Cancel its returns in this entry first"))
+		return
+	}
+	const next_no = get_next_invoice_no(frm)
+	frm.add_child("invoices", {
+		invoice_no: next_no,
+		entry_type: "Cancel",
+		against_invoice: inv.name,
+		against_doctype: inv.doctype || "POS Invoice",
+		customer: inv.customer,
+		posting_date: inv.posting_date,
+		posting_time: inv.posting_time,
+	})
+	frm.refresh_fields(["invoices"])
+	recompute_all(frm)
+	frappe.show_alert({
+		message: __("Invoice {0} will be cancelled (Invoice No. {1}).", [inv.name, next_no]),
+		indicator: "orange",
 	})
 }
 
@@ -748,10 +799,10 @@ function handle_correct(frm, invoice_name) {
 		)
 		return
 	}
-	if (inv.has_return) {
+	if (has_live_return(frm, inv.name)) {
 		frappe.msgprint(
 			__(
-				"Cannot correct invoice {0} because a submitted return exists against it. Use Return + new Sale instead.",
+				"Cannot correct invoice {0} because a submitted return exists against it. Cancel the return in this entry, or use Return + new Sale instead.",
 				[invoice_name],
 			),
 		)
@@ -1013,6 +1064,7 @@ function recompute_closing_payments(frm) {
 	const all_modes = new Set(Object.keys(counts_by_mode))
 	;(frm._shift_context.payment_modes || []).forEach((m) => all_modes.add(m))
 
+	const cash_mode = frm._cash_mode_of_payment || "Cash"
 	const sale_corr_payments = {}
 	const return_refunds = {}
 	const corrected_orig_payments = {}
@@ -1032,20 +1084,24 @@ function recompute_closing_payments(frm) {
 			})
 		}
 
-		if (inv.entry_type === "Correction" && inv.against_invoice) {
+		if (
+			(inv.entry_type === "Correction" || inv.entry_type === "Cancel") &&
+			inv.against_invoice
+		) {
 			const orig_inv = (frm._shift_context.shift_invoices || []).find(
 				(i) => i.name === inv.against_invoice,
 			)
-			if (orig_inv?.payments) {
-				orig_inv.payments.forEach((p) => {
-					corrected_orig_payments[p.mode_of_payment] =
-						(corrected_orig_payments[p.mode_of_payment] || 0) + flt(p.amount)
-				})
+			;(orig_inv?.payments || []).forEach((p) => {
+				corrected_orig_payments[p.mode_of_payment] =
+					(corrected_orig_payments[p.mode_of_payment] || 0) + flt(p.amount)
+			})
+			// the voided invoice's change had left the cash drawer; voiding gives it back
+			if (flt(orig_inv?.change_amount)) {
+				corrected_orig_payments[cash_mode] =
+					(corrected_orig_payments[cash_mode] || 0) - flt(orig_inv.change_amount)
 			}
 		}
 	})
-
-	const cash_mode = frm._cash_mode_of_payment || "Cash"
 	const existing_rows = {}
 	;(frm.doc.closing_payments || []).forEach((row) => {
 		existing_rows[row.mode_of_payment] = row

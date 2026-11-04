@@ -114,7 +114,16 @@ class POSBackdateEntry(Document):
 
 		if not self.invoices:
 			frappe.throw(_("At least one invoice is required"), title=_("Backdate Entry"))
-		if not self.items:
+
+		# Cancel only voids an existing shift invoice: it creates nothing, so it carries no lines
+		cancel_nos = {inv.invoice_no for inv in self.invoices if inv.entry_type == "Cancel"}
+		for row in [*self.items, *(self.payments or [])]:
+			if row.invoice_no in cancel_nos:
+				frappe.throw(
+					_("Invoice No. {0}: Cancel entries cannot have items or payments").format(row.invoice_no),
+					title=_("Backdate Entry"),
+				)
+		if not self.items and not cancel_nos:
 			frappe.throw(_("At least one item is required"), title=_("Backdate Entry"))
 
 		inv_numbers = [inv.invoice_no for inv in self.invoices]
@@ -144,7 +153,7 @@ class POSBackdateEntry(Document):
 
 		# Every invoice must have >=1 item
 		for inv in self.invoices:
-			if inv.invoice_no not in item_inv_numbers:
+			if inv.invoice_no not in item_inv_numbers and inv.entry_type != "Cancel":
 				frappe.throw(
 					_("Invoice No. {0}: Must have at least one item").format(inv.invoice_no),
 					title=_("Backdate Entry"),
@@ -251,8 +260,10 @@ class POSBackdateEntry(Document):
 			)
 
 	def _validate_invoices(self):
+		# returns cancelled in this entry are gone before any Correction/Cancel of their original runs
+		cancelled_here = {inv.against_invoice for inv in self.invoices if inv.entry_type == "Cancel"}
 		for inv in self.invoices:
-			if inv.entry_type in ("Return", "Correction"):
+			if inv.entry_type in ("Return", "Correction", "Cancel"):
 				if not inv.against_invoice:
 					frappe.throw(
 						_("Invoice No. {0}: Against Invoice is required for {1}").format(
@@ -293,7 +304,7 @@ class POSBackdateEntry(Document):
 						),
 						title=_("Backdate Entry"),
 					)
-				if against_info.is_return:
+				if against_info.is_return and inv.entry_type != "Cancel":
 					action_verb = "correct" if inv.entry_type == "Correction" else "return"
 					frappe.throw(
 						_("Invoice No. {0}: Cannot {1} a return invoice {2}. Use Return + new Sale instead.").format(
@@ -302,27 +313,32 @@ class POSBackdateEntry(Document):
 						title=_("Backdate Entry"),
 					)
 
-				if inv.entry_type == "Correction":
+				if inv.entry_type in ("Correction", "Cancel"):
 					# R10: Corrections blocked when unsafe
-					already_amended = (
-						frappe.db.exists("POS Invoice", {"amended_from": inv.against_invoice, "docstatus": 1})
-						or frappe.db.exists("Sales Invoice", {"amended_from": inv.against_invoice, "docstatus": 1})
-					)
-					if already_amended:
-						frappe.throw(
-							_("Invoice No. {0}: Invoice {1} has already been corrected.").format(
-								inv.invoice_no, inv.against_invoice
-							),
-							title=_("Backdate Entry"),
+					if inv.entry_type == "Correction":
+						already_amended = (
+							frappe.db.exists("POS Invoice", {"amended_from": inv.against_invoice, "docstatus": 1})
+							or frappe.db.exists("Sales Invoice", {"amended_from": inv.against_invoice, "docstatus": 1})
 						)
+						if already_amended:
+							frappe.throw(
+								_("Invoice No. {0}: Invoice {1} has already been corrected.").format(
+									inv.invoice_no, inv.against_invoice
+								),
+								title=_("Backdate Entry"),
+							)
 
-					has_return = (
-						frappe.db.exists("POS Invoice", {"return_against": inv.against_invoice, "docstatus": 1})
-						or frappe.db.exists("Sales Invoice", {"return_against": inv.against_invoice, "docstatus": 1})
-					)
-					if has_return:
+					live_returns = [
+						name
+						for dt in ("POS Invoice", "Sales Invoice")
+						for name in frappe.get_all(
+							dt, {"return_against": inv.against_invoice, "docstatus": 1}, pluck="name"
+						)
+						if name not in cancelled_here
+					]
+					if live_returns:
 						frappe.throw(
-							_("Invoice No. {0}: Cannot correct invoice {1} because a submitted return exists against it. Use Return + new Sale instead.").format(
+							_("Invoice No. {0}: Cannot correct invoice {1} because a submitted return exists against it. Cancel the return in this entry, or use Return + new Sale instead.").format(
 								inv.invoice_no, inv.against_invoice
 							),
 							title=_("Backdate Entry"),
@@ -430,7 +446,29 @@ class POSBackdateEntry(Document):
 
 		# 3. Submit backdated invoices in order of invoice_no
 		site_doctype = get_pos_invoice_doctype()
-		sorted_invoices = sorted(self.invoices, key=lambda x: x.invoice_no)
+
+		# Cancels first so a Correction can follow its cancelled return; returns before their originals
+		cancels = [inv for inv in self.invoices if inv.entry_type == "Cancel"]
+		for inv in sorted(
+			cancels,
+			key=lambda x: (-cint(frappe.db.get_value(x.against_doctype, x.against_invoice, "is_return")), x.invoice_no),
+		):
+			doc = frappe.get_doc(inv.against_doctype, inv.against_invoice)
+			doc.flags.ignore_permissions = True
+			doc.cancel()
+			frappe.get_doc(
+				{
+					"doctype": "Comment",
+					"comment_type": "Info",
+					"reference_doctype": inv.against_doctype,
+					"reference_name": inv.against_invoice,
+					"content": _("Cancelled via {0}").format(self.name),
+				}
+			).insert(ignore_permissions=True)
+
+		sorted_invoices = sorted(
+			(inv for inv in self.invoices if inv.entry_type != "Cancel"), key=lambda x: x.invoice_no
+		)
 
 		for inv in sorted_invoices:
 			inv_doctype = site_doctype

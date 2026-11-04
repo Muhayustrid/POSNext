@@ -32,7 +32,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Entry Type",
-   "options": "Sale\nReturn\nCorrection",
+   "options": "Sale\nReturn\nCorrection\nCancel",
    "reqd": 1
   },
   {

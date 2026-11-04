@@ -127,8 +127,7 @@
    "fieldname": "items",
    "fieldtype": "Table",
    "label": "Items",
-   "options": "POS Backdate Entry Item",
-   "reqd": 1
+   "options": "POS Backdate Entry Item"
   },
   {
    "fieldname": "section_break_payments",

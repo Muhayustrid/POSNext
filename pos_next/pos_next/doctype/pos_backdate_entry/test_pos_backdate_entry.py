@@ -53,6 +53,7 @@ from pos_next.api.test_packages import (
 	_option_id,
 )
 from pos_next.invoice_type import POS_INVOICE, SALES_INVOICE, get_pos_invoice_doctype
+from pos_next.services.cash_mode import get_cash_mode_of_payment as _get_cash_mode
 from pos_next.services.cash_mode import get_modal_awal_modes
 from pos_next.services.confirmation_code import generate_codes_for
 from pos_next.tests._posi_test_utils import _set_invoice_type
@@ -1497,6 +1498,142 @@ class TestPOSBackdateEntry(FrappeTestCase):
 			with self.assertRaises(frappe.ValidationError) as ctx:
 				bde_with_pe.insert()
 			self.assertIn("linked Payment Entries", str(ctx.exception))
+
+	# ---------------------------------------------------------------------------
+	# Scenario 10b: Cancel entry type undoes a wrong return + overpaid sale
+	# ---------------------------------------------------------------------------
+	def test_scenario_10b_cancel_return_then_correct_overpaid_sale(self):
+		cash_mode = _get_cash_mode(self.profile.name)
+		# Cash-type non-drawer mode like E-Wallet on site (change needs a Cash-type row); Bank-type like QRIS
+		wrong, right = "_SESSUM Cash 2", "Wire Transfer"
+		for mop in (wrong, right):
+			if not frappe.db.exists("Mode of Payment Account", {"parent": mop, "company": self.profile.company}):
+				self.skipTest(f"{mop} has no account for {self.profile.company}")
+			if not frappe.db.exists("POS Payment Method", {"parent": self.profile.name, "mode_of_payment": mop}):
+				prof = frappe.get_doc("POS Profile", self.profile.name)
+				prof.append("payments", {"mode_of_payment": mop, "default": 0})
+				prof.save(ignore_permissions=True)
+				self.addCleanup(
+					frappe.db.delete, "POS Payment Method", {"parent": self.profile.name, "mode_of_payment": mop}
+				)
+		# 100 sale paid 150 on the wrong non-cash mode: 50 change leaves the cash drawer
+		orig_sale, orig_doc = self._submit_original_sale(
+			qty=1, rate=100.0, payments=[{"mode_of_payment": wrong, "amount": 150.0}]
+		)
+		self.assertEqual(flt(orig_doc.change_amount), 50.0)
+		ret_item_field = "sales_invoice_item" if self.doctype == "Sales Invoice" else "pos_invoice_item"
+		frappe.flags.pos_next_backdate_entry = True
+		try:
+			ret_inv = submit_invoice(
+				invoice=json.dumps(
+					{
+						"pos_profile": self.profile.name,
+						"posa_pos_opening_shift": self.shift.name,
+						"customer": self.customer,
+						"is_return": 1,
+						"return_against": orig_sale["name"],
+						"posting_date": add_days(nowdate(), -2),
+						"posting_time": "09:30:00",
+						"set_posting_time": 1,
+						"items": [
+							{
+								"item_code": self.item,
+								"qty": -1,
+								"rate": 100.0,
+								"warehouse": self.profile.warehouse,
+								ret_item_field: orig_doc.items[0].name,
+							}
+						],
+						"payments": [{"mode_of_payment": wrong, "amount": -100.0}],
+					}
+				),
+				data="{}",
+			)
+		finally:
+			frappe.flags.pos_next_backdate_entry = None
+		self._close_shift()
+
+		posting_date = add_days(nowdate(), -1)
+		cancel_row = {
+			"invoice_no": 1,
+			"entry_type": "Cancel",
+			"against_invoice": ret_inv["name"],
+			"against_doctype": self.doctype,
+			"customer": self.customer,
+			"posting_date": posting_date,
+			"posting_time": "10:00:00",
+		}
+		correct_row = {
+			"invoice_no": 2,
+			"entry_type": "Correction",
+			"against_invoice": orig_sale["name"],
+			"against_doctype": self.doctype,
+			"customer": self.customer,
+			"posting_date": posting_date,
+			"posting_time": "10:00:00",
+		}
+		item_row = {"invoice_no": 2, "item_code": self.item, "qty": 1, "rate": 100.0, "warehouse": self.profile.warehouse}
+		pay_row = {"invoice_no": 2, "mode_of_payment": right, "amount": 100.0}
+
+		# A. Correction alone stays blocked while the return is live
+		bde = self._make_bde(invoices=[correct_row], items=[item_row], payments=[pay_row])
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			bde.insert()
+		self.assertIn("submitted return exists against it", str(ctx.exception))
+
+		# B. Cancel rows carry no items or payments
+		bde = self._make_bde(
+			invoices=[cancel_row, correct_row],
+			items=[item_row, {**item_row, "invoice_no": 1}],
+			payments=[pay_row],
+		)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			bde.insert()
+		self.assertIn("Cancel entries cannot have items or payments", str(ctx.exception))
+
+		# C. Cancel the return + correct the sale in one entry
+		bde = self._make_bde(invoices=[cancel_row, correct_row], items=[item_row], payments=[pay_row])
+		bde.insert()
+		bde.submit()
+
+		self.assertEqual(frappe.db.get_value(self.doctype, ret_inv["name"], "docstatus"), 2)
+		self.assertEqual(frappe.db.get_value(self.doctype, orig_sale["name"], "docstatus"), 2)
+		self.assertFalse(bde.invoices[0].created_invoice)
+		new_inv = frappe.get_doc(self.doctype, bde.invoices[1].created_invoice)
+		self.assertEqual(flt(new_inv.change_amount), 0.0)
+
+		recon = {
+			r.mode_of_payment: flt(r.expected_amount)
+			for r in frappe.get_doc("POS Closing Shift", bde.new_closing_shift).payment_reconciliation
+		}
+		self.assertEqual(recon.get(wrong, 0.0), 0.0)
+		self.assertEqual(recon.get(right, 0.0), 100.0)
+		if right != cash_mode:
+			self.assertEqual(recon.get(cash_mode, 0.0), 0.0)
+
+	def test_scenario_10c_cancel_only_entry(self):
+		orig_sale, _ = self._submit_original_sale(qty=1, rate=100.0)
+		self._close_shift()
+		bde = self._make_bde(
+			invoices=[
+				{
+					"invoice_no": 1,
+					"entry_type": "Cancel",
+					"against_invoice": orig_sale["name"],
+					"against_doctype": self.doctype,
+					"customer": self.customer,
+					"posting_date": add_days(nowdate(), -1),
+					"posting_time": "10:00:00",
+				}
+			],
+			items=[],
+			payments=[],
+		)
+		bde.insert()
+		bde.submit()
+		self.assertEqual(frappe.db.get_value(self.doctype, orig_sale["name"], "docstatus"), 2)
+		recon = frappe.get_doc("POS Closing Shift", bde.new_closing_shift).payment_reconciliation
+		self.assertTrue(all(flt(r.expected_amount) == 0.0 for r in recon))
 
 	# ---------------------------------------------------------------------------
 	# Scenario 11: Cancel prohibited

@@ -450,4 +450,39 @@ describe("pos_backdate_entry Desk form shift context", () => {
 		assert.equal(bank.closing_amount, 200);
 		assert.equal(bank.expected_amount, 200);
 	});
+
+	test("cancelling a return and correcting its overpaid sale restores wallet and cash expected", () => {
+		// sale 25 paid 50 on E-Wallet (25 change from Cash), return refunded 25 on E-Wallet
+		const frm = make_frm(true, {
+			invoices: [
+				{ invoice_no: 1, entry_type: "Cancel", against_invoice: "RET-1" },
+				{ invoice_no: 2, entry_type: "Correction", against_invoice: "SALE-1" },
+			],
+			payments: [{ invoice_no: 2, mode_of_payment: "QRIS", amount: 25 }],
+		});
+		frm._shift_context = {
+			currency: "IDR",
+			closing_counts: [
+				{ mode_of_payment: "Cash", opening_amount: 0, expected_amount: 75, closing_amount: 75 },
+				{ mode_of_payment: "E-Wallet", opening_amount: 0, expected_amount: 25, closing_amount: 25 },
+				{ mode_of_payment: "QRIS", opening_amount: 0, expected_amount: 0, closing_amount: 0 },
+			],
+			payment_modes: ["Cash", "E-Wallet", "QRIS"],
+			shift_invoices: [
+				{ name: "SALE-1", change_amount: 25, payments: [{ mode_of_payment: "E-Wallet", amount: 50 }] },
+				{
+					name: "RET-1",
+					is_return: 1,
+					return_against: "SALE-1",
+					change_amount: 0,
+					payments: [{ mode_of_payment: "E-Wallet", amount: -25 }],
+				},
+			],
+		};
+		recompute_closing_payments(frm);
+		const exp = Object.fromEntries(
+			frm.doc.closing_payments.map((r) => [r.mode_of_payment, r.expected_amount]),
+		);
+		assert.deepEqual(exp, { Cash: 100, "E-Wallet": 0, QRIS: 25 });
+	});
 });

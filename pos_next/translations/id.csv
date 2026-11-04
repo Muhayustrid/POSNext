@@ -3834,3 +3834,9 @@ The unsaved spending details will be discarded.,Rincian pengeluaran yang belum d
 Choose a template to see the required details.,Pilih template untuk melihat rincian yang perlu diisi.
 Supplier search must be text.,Pencarian pemasok harus berupa teks.
 Transaction Information,Informasi Transaksi
+"Invoice No. {0}: Cancel entries cannot have items or payments","Faktur No. {0}: Entri Batal tidak boleh memiliki item atau pembayaran",""
+"Invoice No. {0}: Cannot correct invoice {1} because a submitted return exists against it. Cancel the return in this entry, or use Return + new Sale instead.","Faktur No. {0}: Tidak dapat mengoreksi faktur {1} karena sudah ada retur yang disubmit atas faktur tersebut. Batalkan retur tersebut di entri ini, atau gunakan Retur + Penjualan baru.",""
+"Cannot correct invoice {0} because a submitted return exists against it. Cancel the return in this entry, or use Return + new Sale instead.","Tidak dapat mengoreksi faktur {0} karena sudah ada retur yang disubmit atas faktur tersebut. Batalkan retur tersebut di entri ini, atau gunakan Retur + Penjualan baru.",""
+"Cancel its returns in this entry first","Batalkan dulu returnya di entri ini",""
+"Invoice {0} will be cancelled (Invoice No. {1}).","Faktur {0} akan dibatalkan (Invoice No. {1}).",""
+"Cancelled via {0}","Dibatalkan melalui {0}",""
