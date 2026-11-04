@@ -2553,6 +2553,11 @@ def get_item_stock_ledger(item_code, pos_profile, from_date, to_date, start=0, l
 		frappe.throw(_("Item {0} is not available in this outlet").format(item_code))
 	rows = _outlet_stock_rows([item_code], warehouses, from_date, to_date)
 	balances, entries = _stock_balances(rows, [item_code], include_entries=True)
+	from pos_next.overrides.stock_reconciliation import is_hq_user
+	from pos_next.stock_opname_setup import OUTLET_ROLES
+
+	if not is_hq_user() and set(frappe.get_roles()) & set(OUTLET_ROLES):
+		entries = [row for row in entries if row["voucher_type"] != "Stock Reconciliation"]
 	offset, page_size = max(cint(start), 0), max(1, min(cint(limit) or 50, 200))
 	return {
 		"item_code": item_code,

@@ -272,6 +272,8 @@ scheduler_events = {
 # ------------------------------
 #
 override_whitelisted_methods = {
+	"frappe.desk.form.utils.get_next": "pos_next.overrides.stock_reconciliation.get_next",
+	"erpnext.stock.utils.get_stock_balance": "pos_next.overrides.stock_reconciliation.get_stock_balance",
 	"erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_stock_balance_for":
 		"pos_next.overrides.stock_reconciliation.get_stock_balance_for",
 	"erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_items":
@@ -297,7 +299,10 @@ override_whitelisted_methods = {
 # Request Events
 # ----------------
 # POS cashiers stay in the SPA: Desk page loads redirect to /pos
-before_request = ["pos_next.utils.desk_guard.block_desk_for_cashiers"]
+before_request = [
+	"pos_next.utils.desk_guard.block_desk_for_cashiers",
+	"pos_next.overrides.stock_reconciliation.route_stock_valuation_rpc",
+]
 after_request = ["pos_next.overrides.stock_reconciliation_response.filter_stock_reconciliation_response"]
 
 # Job Events

@@ -16,6 +16,73 @@ class TestStockOpnameDataPermissions(IntegrationTestCase):
         frappe.clear_cache(doctype='Stock Reconciliation Item')
         super().tearDown()
 
+    def test_bin_valuation_is_private_but_quantities_and_native_roles_are_preserved(self):
+        from pos_next.api.test_stock_opname import _make_user
+        setup.ensure_stock_opname_data_permissions(quiet=True)
+        mirror_standard_perms_for_custom_doctypes(quiet=True)
+        meta = frappe.get_meta('Bin')
+        for field in ('valuation_rate', 'stock_value'):
+            self.assertEqual(meta.get_field(field).permlevel, 1)
+        for field in ('actual_qty', 'reserved_qty', 'projected_qty', 'ordered_qty'):
+            self.assertEqual(meta.get_field(field).permlevel, 0)
+        for role in setup.OUTLET_ROLES:
+            user = _make_user(role)
+            permitted = meta.get_permitted_fieldnames(user=user)
+            self.assertIn('actual_qty', permitted)
+            self.assertNotIn('valuation_rate', permitted)
+            self.assertNotIn('stock_value', permitted)
+        readers = frappe.get_all('Custom DocPerm', filters={
+            'parent': 'Bin', 'permlevel': 0, 'read': 1,
+            'role': ['not in', setup.OUTLET_ROLES]}, fields=['role', 'if_owner'])
+        self.assertTrue(readers)
+        for row in readers:
+            self.assertTrue(frappe.db.exists('Custom DocPerm', {
+                'parent': 'Bin', 'role': row.role, 'if_owner': row.if_owner,
+                'permlevel': 1, 'read': 1}))
+
+    def test_existing_non_pos_level_one_row_keeps_valuation_read(self):
+        setup.ensure_stock_opname_data_permissions(quiet=True)
+        frappe.db.set_value('Custom DocPerm', {
+            'parent': 'Bin', 'role': 'Sales User', 'permlevel': 1,
+        }, 'read', 0)
+        frappe.clear_cache(doctype='Bin')
+        setup.ensure_stock_opname_data_permissions(quiet=True)
+        row = frappe.db.get_value('Custom DocPerm', {
+            'parent': 'Bin', 'role': 'Sales User', 'permlevel': 1,
+        }, ['read', 'write'], as_dict=True)
+        self.assertEqual((row.read, row.write), (1, 0))
+
+    def test_bundle_valuation_is_private_including_entry_stock_queue(self):
+        from pos_next.api.test_stock_opname import _make_user
+        setup.ensure_stock_opname_data_permissions(quiet=True)
+        mirror_standard_perms_for_custom_doctypes(quiet=True)
+        parent = 'Serial and Batch Bundle'
+        child = 'Serial and Batch Entry'
+        for doctype, fields in ((parent, ('avg_rate', 'total_amount')),
+                                (child, ('incoming_rate', 'outgoing_rate', 'stock_value_difference', 'stock_queue'))):
+            for field in fields:
+                self.assertEqual(frappe.get_meta(doctype).get_field(field).permlevel, 1)
+        for doctype, fields in ((parent, ('total_qty', 'entries', 'item_code')),
+                                (child, ('qty', 'serial_no', 'batch_no', 'delivered_qty'))):
+            for field in fields:
+                self.assertEqual(frappe.get_meta(doctype).get_field(field).permlevel, 0)
+        for role in setup.OUTLET_ROLES:
+            user = _make_user(role)
+            fields = frappe.get_meta(child).get_permitted_fieldnames(parenttype=parent, user=user)
+            self.assertIn('qty', fields)
+            self.assertIn('serial_no', fields)
+            self.assertNotIn('incoming_rate', fields)
+            self.assertNotIn('outgoing_rate', fields)
+            self.assertNotIn('stock_queue', fields)
+        for row in frappe.get_all('Custom DocPerm', filters={
+            'parent': parent, 'permlevel': 0, 'read': 1,
+            'role': ['not in', setup.OUTLET_ROLES]}, fields=['role', 'if_owner', 'write']):
+            permissions = frappe.db.get_value('Custom DocPerm', {
+                'parent': parent, 'role': row.role, 'if_owner': row.if_owner,
+                'permlevel': 1}, ['read', 'write'], as_dict=True)
+            self.assertIsNotNone(permissions)
+            self.assertEqual((permissions.read, permissions.write), (1, row.write))
+
     def test_sensitive_fields_are_level_one_and_counts_remain_public(self):
         setup.ensure_stock_opname_data_permissions(quiet=True)
         self.assertEqual(frappe.get_meta('Stock Reconciliation').get_field('difference_amount').permlevel, 1)

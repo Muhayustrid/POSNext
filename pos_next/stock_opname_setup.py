@@ -57,10 +57,13 @@ ACCOUNTS_MANAGER = "Accounts Manager"
 
 
 def ensure_stock_opname_data_permissions(quiet=False):
-	"""Hide system-derived SR fields through native field-level permissions."""
+	"""Hide SR system fields and stock valuation through native field permissions."""
 	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 	fields = {
+		"Bin": ("valuation_rate", "stock_value"),
+		"Serial and Batch Bundle": ("avg_rate", "total_amount"),
+		"Serial and Batch Entry": ("incoming_rate", "outgoing_rate", "stock_value_difference", "stock_queue"),
 		DOCUMENT_TYPE: ("difference_amount",),
 		"Stock Reconciliation Item": (
 			"valuation_rate", "amount", "current_qty", "current_valuation_rate",
@@ -74,6 +77,19 @@ def ensure_stock_opname_data_permissions(quiet=False):
 		for name in names:
 			if meta.has_field(name):
 				make_property_setter(doctype, name, "permlevel", 1, "Int")
+		frappe.clear_cache(doctype=doctype)
+	for doctype in ("Bin", "Serial and Batch Bundle"):
+		for row in frappe.get_meta(doctype).permissions:
+			if row.permlevel or not row.read or row.role in OUTLET_ROLES:
+				continue
+			filters = {"parent": doctype, "role": row.role, "permlevel": 1, "if_owner": row.if_owner}
+			if frappe.db.exists("Custom DocPerm", filters):
+				frappe.db.set_value("Custom DocPerm", filters, "read", 1)
+			else:
+				frappe.get_doc({
+					"doctype": "Custom DocPerm", "parenttype": "DocType", "parentfield": "permissions",
+					**filters, "read": 1, "write": row.write,
+				}).insert(ignore_permissions=True)
 		frappe.clear_cache(doctype=doctype)
 	for role in HQ_ROLES:
 		if role == "Administrator":

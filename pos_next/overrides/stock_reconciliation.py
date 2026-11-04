@@ -190,6 +190,148 @@ def assert_system_stock_access(warehouse=None, company=None, user=None):
 		frappe.throw(_("Not permitted to read this warehouse or company."), frappe.PermissionError)
 
 
+def route_stock_valuation_rpc():
+	"""Route imported aliases by identity, without patching process-global functions."""
+	from frappe.api import API_URL_MAP, v1, v2
+	from frappe.handler import get_attr
+	from werkzeug.exceptions import HTTPException
+
+	request = frappe.request
+	try:
+		endpoint, arguments = API_URL_MAP.bind_to_environ(request.environ).match()
+	except HTTPException:
+		endpoint, arguments = None, {}
+	if frappe.form_dict.get('cmd'):
+		endpoint = None  # app.application dispatches cmd before the URL map.
+		method = frappe.form_dict.cmd
+	elif endpoint in (v1.handle_rpc_call, v2.handle_rpc_call):
+		method = arguments['method']
+		if endpoint == v1.handle_rpc_call:
+			method = method.split('/')[0]
+		elif arguments.get('doctype'):
+			from frappe.modules.utils import load_doctype_module
+			method = load_doctype_module(arguments['doctype']).__name__ + '.' + method
+	else:
+		return
+	try:
+		resolved = get_attr(frappe.override_whitelisted_method(method))
+	except (ImportError, AttributeError, KeyError):
+		return  # Native dispatch reports invalid methods; nothing has executed.
+	for native, wrapper in (
+		('frappe.desk.form.utils.get_next', 'get_next'),
+		('erpnext.stock.utils.get_stock_balance', 'get_stock_balance'),
+		('erpnext.stock.utils.get_incoming_rate', 'get_incoming_rate'),
+		('erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_stock_balance_for', 'get_stock_balance_for'),
+		('erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_items', 'get_items'),
+		('erpnext.stock.get_item_details.get_valuation_rate', 'get_valuation_rate'),
+		('erpnext.stock.dashboard.item_dashboard.get_data', 'get_item_dashboard_data'),
+		('erpnext.stock.doctype.quick_stock_balance.quick_stock_balance.get_stock_item_details', 'get_quick_stock_balance'),
+		('erpnext.stock.doctype.stock_entry.stock_entry.get_warehouse_details', 'get_warehouse_details'),
+		('erpnext.stock.dashboard_chart_source.stock_value_by_item_group.stock_value_by_item_group.get', 'get_stock_value_by_item_group'),
+	):
+		if resolved is frappe.get_attr(native):
+			target = __name__ + '.' + wrapper
+			if endpoint in (v1.handle_rpc_call, v2.handle_rpc_call):
+				prefix = '/api/v2/method/' if endpoint == v2.handle_rpc_call else (
+					'/api/v1/method/' if request.path.startswith('/api/v1/') else '/api/method/')
+				request.environ['PATH_INFO'] = prefix + target
+			else:
+				frappe.form_dict.cmd = target
+			return
+
+
+def _is_blind_stock_caller():
+	from pos_next.stock_opname_setup import OUTLET_ROLES
+
+	roles = set(frappe.get_roles())
+	return bool(roles.intersection(OUTLET_ROLES)) and 'Stock User' not in roles and not is_hq_user()
+
+
+@frappe.whitelist()
+def get_incoming_rate(**kwargs):
+	from erpnext.stock.utils import get_incoming_rate as native
+
+	if _is_blind_stock_caller():
+		frappe.throw(_('Not permitted to read stock valuation.'), frappe.PermissionError)
+	return frappe.call(native, **kwargs)
+
+
+@frappe.whitelist()
+def get_valuation_rate(**kwargs):
+	from erpnext.stock.get_item_details import get_valuation_rate as native
+
+	if _is_blind_stock_caller():
+		frappe.throw(_('Not permitted to read stock valuation.'), frappe.PermissionError)
+	return frappe.call(native, **kwargs)
+
+
+@frappe.whitelist()
+def get_stock_value_by_item_group(**kwargs):
+	from erpnext.stock.dashboard_chart_source.stock_value_by_item_group.stock_value_by_item_group import get as native
+
+	if _is_blind_stock_caller():
+		frappe.throw(_('Not permitted to read stock valuation.'), frappe.PermissionError)
+	return frappe.call(native, **kwargs)
+
+
+@frappe.whitelist()
+def get_item_dashboard_data(**kwargs):
+	from erpnext.stock.dashboard.item_dashboard import get_data as native
+
+	result = frappe.call(native, **kwargs)
+	if _is_blind_stock_caller():
+		return [{key: value for key, value in row.items() if key != 'valuation_rate'} for row in result]
+	return result
+
+
+@frappe.whitelist()
+def get_quick_stock_balance(**kwargs):
+	from erpnext.stock.doctype.quick_stock_balance.quick_stock_balance import get_stock_item_details as native
+
+	result = frappe.call(native, **kwargs)
+	if _is_blind_stock_caller():
+		return {key: value for key, value in result.items() if key != 'value'}
+	return result
+
+
+@frappe.whitelist()
+def get_warehouse_details(**kwargs):
+	from erpnext.stock.doctype.stock_entry.stock_entry import get_warehouse_details as native
+
+	result = frappe.call(native, **kwargs)
+	if _is_blind_stock_caller():
+		return {key: value for key, value in result.items() if key != 'basic_rate'}
+	return result
+
+
+@frappe.whitelist()
+def get_next(doctype, value, prev, filters=None, sort_order="desc", sort_field="creation"):
+	from frappe.desk.form.utils import get_next as native_get_next
+	from frappe.model import default_fields
+
+	if doctype == DOCTYPE and not is_hq_user():
+		permitted = frappe.get_meta(doctype).get_permitted_fieldnames()
+		if sort_field not in default_fields and sort_field not in permitted:
+			frappe.throw(_("Not permitted to sort by this field."), frappe.PermissionError)
+	return native_get_next(doctype, value, prev, filters, sort_order, sort_field)
+
+
+@frappe.whitelist()
+def get_stock_balance(
+	item_code, warehouse, posting_date=None, posting_time=None,
+	with_valuation_rate=False, with_serial_no=False, inventory_dimensions_dict=None,
+):
+	from erpnext.stock.utils import get_stock_balance as native_get_stock_balance
+
+	result = native_get_stock_balance(
+		item_code, warehouse, posting_date, posting_time,
+		with_valuation_rate, with_serial_no, inventory_dimensions_dict,
+	)
+	if isinstance(result, (tuple, list)) and not is_hq_user():
+		return (result[0], None, *result[2:])
+	return result
+
+
 @frappe.whitelist()
 def get_stock_balance_for(
 	item_code: str, warehouse: str, posting_date, posting_time,
