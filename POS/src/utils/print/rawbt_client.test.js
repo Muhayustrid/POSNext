@@ -166,6 +166,51 @@ describe("createRawbtDriver", () => {
 		expect(sendWs.mock.calls[0][0]).toBeInstanceOf(Uint8Array)
 	})
 
+	it("websocket: one send per sheet with head time + copy/crew delay between", async () => {
+		const sendWs = vi.fn().mockResolvedValue(true)
+		const sleep = vi.fn().mockResolvedValue()
+		const d = createRawbtDriver({
+			mode: () => "websocket",
+			sendWs,
+			sleep,
+			render,
+		})
+		const out = await d.printHTML("receipt", {
+			crewHTML: "crew",
+			config: {
+				copies: 2,
+				crewSlipEnabled: true,
+				copyDelayMs: 800,
+				crewDelayMs: 1500,
+				printSpeed: 400,
+			},
+		})
+		expect(out.copies).toBe(3)
+		expect(sendWs).toHaveBeenCalledTimes(3)
+		const h = (await render.mock.results[0].value).imageData.height
+		const headMs = Math.round((h / 400) * 1000)
+		expect(sleep.mock.calls.map((c) => c[0])).toEqual([
+			headMs + 800,
+			headMs + 1500,
+		])
+	})
+
+	it("websocket: a failure after the first sheet is postPrint (no fallback)", async () => {
+		const sendWs = vi
+			.fn()
+			.mockResolvedValueOnce(true)
+			.mockRejectedValueOnce(new Error("down"))
+		const d = createRawbtDriver({
+			mode: () => "websocket",
+			sendWs,
+			sleep: async () => {},
+			render,
+		})
+		await expect(
+			d.printHTML("receipt", { config: { copies: 2 } }),
+		).rejects.toMatchObject({ postPrint: true })
+	})
+
 	it("rejects (so the transport can fall back) when the websocket fails", async () => {
 		const sendWs = vi.fn().mockRejectedValue(new Error("down"))
 		const d = createRawbtDriver({ mode: () => "websocket", sendWs, render })

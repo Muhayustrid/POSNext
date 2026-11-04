@@ -1364,7 +1364,7 @@
 														"
 													/>
 													<NumberField
-														v-if="settings.print_driver === 'imin'"
+														v-if="settings.print_driver === 'imin' || (settings.print_driver === 'rawbt' && deviceRawbtMode === 'websocket')"
 														v-model="settings.imin_print_speed"
 														:label="__('Kecepatan Printer (dots/detik)')"
 														:description="

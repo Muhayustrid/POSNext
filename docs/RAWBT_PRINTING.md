@@ -33,7 +33,11 @@ Ada dua mode pengiriman (diatur per device):
 | Websocket server | `ws://127.0.0.1:40213/` | Butuh aplikasi "RawBT websocket server" (RawBT 7+). Tidak pindah aplikasi, tapi tetap koneksi loopback, jadi izin Chrome berlaku. |
 
 Batasan:
-- Tidak ada jeda sobek antar salinan. Aktifkan cut kalau mencetak lebih dari satu lembar.
+- Jeda sobek antar lembar (Copy delay / Crew delay) hanya ada di mode websocket:
+  tiap lembar dikirim terpisah, lalu POS menunggu perkiraan waktu cetak
+  (Print speed) ditambah delay-nya. Mode intent mengirim semua lembar sekaligus
+  tanpa jeda (tiap intent berarti pindah aplikasi), jadi aktifkan cut kalau
+  mencetak lebih dari satu lembar.
 - Mode intent bersifat fire-and-forget. POS tidak tahu apakah kertas benar-benar
   keluar, jadi `POS Print Log` mencatat `Success` begitu intent dikirim.
 - Chrome bisa memblokir intent yang tidak dipicu oleh tap (misalnya auto-print

@@ -314,9 +314,32 @@ async function bitmapSheets(html, opts, r, isEod, render) {
 			: null,
 	])
 	const body = escRaster(receipt.imageData)
-	const sheets = Array.from({ length: r.copies }, () => body)
-	if (crew) sheets.push(escRaster(crew.imageData))
+	const h = receipt.imageData?.height || 0
+	const sheets = Array.from({ length: r.copies }, () => ({
+		body,
+		kind: "receipt",
+		heightDots: h,
+	}))
+	if (crew) {
+		sheets.push({
+			body: escRaster(crew.imageData),
+			kind: "crew",
+			heightDots: crew.imageData?.height || 0,
+		})
+	}
 	return sheets
+}
+
+/** Paper a text sheet uses, for the inter-sheet pause estimate only. */
+function textHeightDots(ops, lineSpacing, logo) {
+	const pitch = (DEFAULT_LINE_DOTS * (Number(lineSpacing) || 100)) / 100
+	let h = 0
+	for (const o of ops) {
+		if (o.op === "text") h += o.size === "base" ? pitch : pitch * 2
+		else if (o.op === "feed") h += Number(o.dots) || 0
+		else if (o.op === "logo" && logo) h += logo.height || 0
+	}
+	return Math.round(h)
 }
 
 async function textSheets(r, { isEod, eodDoc, receiptDoc }, loadLogo) {
@@ -332,35 +355,38 @@ async function textSheets(r, { isEod, eodDoc, receiptDoc }, loadLogo) {
 		return out
 	}
 	const enc = { padSpaces, lineSpacing: r.lineSpacing }
+	const sheet = (ops, kind, logo = null) => ({
+		body: encodeTextOps(ops, { ...enc, logo }),
+		kind,
+		heightDots: textHeightDots(ops, r.lineSpacing, logo),
+	})
 	if (isEod) {
-		const body = encodeTextOps(
-			wrap(buildEodTextJob(eodDoc, { cols: cols.base })),
-			enc,
-		)
-		return Array.from({ length: r.copies }, () => body)
+		const eod = sheet(wrap(buildEodTextJob(eodDoc, { cols: cols.base })), "eod")
+		return Array.from({ length: r.copies }, () => eod)
 	}
 	const logoWidth = Math.min(r.dots, RECEIPT_LOGO_MM * DOTS_PER_MM)
 	const logo = await loadLogo(logoWidth, r.dots)
-	const receipt = encodeTextOps(
+	const receipt = sheet(
 		wrap(
 			buildReceiptTextJob(receiptDoc, {
 				cols,
 				queueGapDots: r.queueGapDots,
 			}),
 		),
-		{ ...enc, logo },
+		"receipt",
+		logo,
 	)
 	const sheets = Array.from({ length: r.copies }, () => receipt)
 	if (r.crewSlipEnabled) {
 		sheets.push(
-			encodeTextOps(
+			sheet(
 				wrap(
 					buildCrewSlipTextJob(receiptDoc, {
 						cols,
 						queueGapDots: r.queueGapDots,
 					}),
 				),
-				enc,
+				"crew",
 			),
 		)
 	}
@@ -376,7 +402,10 @@ async function textSheets(r, { isEod, eodDoc, receiptDoc }, loadLogo) {
  * @param {object} [deps]
  * @param {(html, opts) => Promise<{imageData:ImageData}>} [deps.render]
  * @param {(widthDots:number, paperDots:number) => Promise<ImageData|null>} [deps.loadLogo]
- * @returns {Promise<{bytes:Uint8Array, r:object, textMode:boolean, sheets:number}>}
+ * @returns {Promise<{bytes:Uint8Array, r:object, textMode:boolean, sheets:number,
+ *   parts:{bytes:Uint8Array, kind:string, heightDots:number}[]}>}
+ *   `bytes` is the whole job; `parts` is the same job split per sheet (each
+ *   a standalone job) for drivers that pause between sheets.
  */
 export async function buildEscPosPrint(html, opts = {}, deps = {}) {
 	const render = deps.render || ((h, o) => renderHTMLToBitmap(h, o))
@@ -391,9 +420,15 @@ export async function buildEscPosPrint(html, opts = {}, deps = {}) {
 	const sheets = textMode
 		? await textSheets(r, { isEod, eodDoc, receiptDoc }, loadLogo)
 		: await bitmapSheets(html, opts, r, isEod, render)
-	const bytes = buildEscPosSheets(sheets, {
-		feedDots: r.feedDots,
-		cut: r.cut,
-	})
-	return { bytes, r, textMode, sheets: sheets.length }
+	const tail = { feedDots: r.feedDots, cut: r.cut }
+	const bytes = buildEscPosSheets(
+		sheets.map((s) => s.body),
+		tail,
+	)
+	const parts = sheets.map((s) => ({
+		bytes: buildEscPosSheets([s.body], tail),
+		kind: s.kind,
+		heightDots: s.heightDots,
+	}))
+	return { bytes, r, textMode, sheets: sheets.length, parts }
 }
