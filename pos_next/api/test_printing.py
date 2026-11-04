@@ -75,7 +75,7 @@ class TestPrintingAPI(FrappeTestCase):
 		# Settings field names.
 		for key in ("driver", "paper", "custom_dots", "cut", "fallback_enabled"):
 			self.assertIn(key, cfg)
-		self.assertIn(cfg["driver"], ("imin", "qz", "browser"))
+		self.assertIn(cfg["driver"], ("imin", "rawbt", "imin2", "qz", "browser"))
 		self.assertIn(cfg["paper"], ("58mm", "80mm", "custom"))
 
 	def test_get_print_config_without_profile_falls_back_to_first_enabled_row(self):

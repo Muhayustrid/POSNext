@@ -1233,21 +1233,32 @@
 											</h4>
 										</div>
 										<div class="flex flex-col gap-3">
+											<!-- One driver choice. Picking one also drops a per-device
+												 override left by the Direct Print page, so the two never
+												 disagree. -->
 											<SelectField
 												v-model="settings.print_driver"
 												:label="__('Driver Cetak')"
 												:options="printDriverOptions"
 												:description="
-													__(
-														'Jalur cetak tanpa dialog: browser, QZ Tray, atau servis printer iMin.'
-													)
+													deviceOverride
+														? __('Device ini sedang memakai {0} (diatur di halaman Direct Print). Pilih driver di sini untuk menggantinya.', [deviceOverrideLabel])
+														: __('Jalur cetak tanpa dialog: browser, QZ Tray, servis printer iMin, atau aplikasi RawBT.')
 												"
+												@update:modelValue="clearDeviceOverride"
+											/>
+											<SelectField
+												v-if="(deviceOverride || settings.print_driver) === 'rawbt'"
+												v-model="deviceRawbtMode"
+												:label="__('Koneksi RawBT')"
+												:options="rawbtModeOptions"
+												:description="__('Disimpan di device ini.')"
 											/>
 												<CheckboxField
 													v-model="settings.print_fallback_enabled"
 													:label="__('Aktifkan Print Fallback')"
 													:description="
-														__('Bila gagal, turun ke jalur berikutnya (iMin → QZ → Browser).')
+														__('Bila gagal, turun ke jalur berikutnya (iMin → QZ → Browser; RawBT → Browser).')
 													"
 												/>
 
@@ -1308,7 +1319,7 @@
 										</div>
 									<!-- iMin Sales Receipt -->
 									<div
-										v-if="settings.print_driver === 'imin'"
+										v-if="['imin', 'rawbt', 'imin2'].includes(settings.print_driver)"
 										:class="iminSubsectionClasses.container"
 									>
 										<div class="flex items-center gap-2 mb-4">
@@ -1326,7 +1337,7 @@
 													/>
 											</svg>
 											<h4 class="text-sm font-semibold text-gray-900">
-												{{ __('Struk Penjualan — iMin') }}
+												{{ settings.print_driver === 'rawbt' ? __('Struk Penjualan — RawBT') : settings.print_driver === 'imin2' ? __('Struk Penjualan — iMin 2.0') : __('Struk Penjualan — iMin') }}
 											</h4>
 										</div>
 										<div class="space-y-5">
@@ -1353,6 +1364,7 @@
 														"
 													/>
 													<NumberField
+														v-if="settings.print_driver === 'imin'"
 														v-model="settings.imin_print_speed"
 														:label="__('Kecepatan Printer (dots/detik)')"
 														:description="
@@ -1547,7 +1559,7 @@
 									</div>
 									<!-- iMin Closing / EOD -->
 									<div
-										v-if="settings.print_driver === 'imin'"
+										v-if="['imin', 'rawbt', 'imin2'].includes(settings.print_driver)"
 										:class="eodSubsectionClasses.container"
 									>
 										<div class="flex items-center gap-2 mb-4">
@@ -1565,7 +1577,7 @@
 													/>
 											</svg>
 											<h4 class="text-sm font-semibold text-gray-900">
-												{{ __('Tutup Kasir / EOD — iMin') }}
+												{{ settings.print_driver === 'rawbt' ? __('Tutup Kasir / EOD — RawBT') : settings.print_driver === 'imin2' ? __('Tutup Kasir / EOD — iMin 2.0') : __('Tutup Kasir / EOD — iMin') }}
 											</h4>
 										</div>
 										<div class="space-y-5">
@@ -1775,6 +1787,7 @@ import { usePOSEvents } from "@/composables/usePOSEvents";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 import { useQzTray } from "@/composables/useQzTray";
 import { ensureIminSdk, getTransport, initTransportFromServer } from "@/utils/print/transport";
+import { loadDeviceConfig, saveDeviceConfig } from "@/utils/print/receipt_layout";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 
@@ -1926,7 +1939,32 @@ const printDriverOptions = [
 	{ label: __("Browser"), value: "browser" },
 	{ label: __("QZ Tray"), value: "qz" },
 	{ label: __("iMin"), value: "imin" },
+	{ label: __("RawBT (Android)"), value: "rawbt" },
+	{ label: __("iMin SDK 2.0 (POSNext app)"), value: "imin2" },
 ];
+// Per-device override written by the Direct Print page (same localStorage record).
+const rawbtModeOptions = [
+	{ label: __("Android intent (recommended)"), value: "intent" },
+	{ label: __("Websocket server (127.0.0.1:40213)"), value: "websocket" },
+];
+const deviceConfig = ref(loadDeviceConfig());
+const deviceOverride = computed(() =>
+	["rawbt", "imin2"].includes(deviceConfig.value.driverOverride) ? deviceConfig.value.driverOverride : "",
+);
+const deviceOverrideLabel = computed(
+	() => printDriverOptions.find((o) => o.value === deviceOverride.value)?.label || "",
+);
+function clearDeviceOverride() {
+	if (deviceOverride.value) deviceConfig.value = saveDeviceConfig({ driverOverride: undefined });
+}
+const deviceRawbtMode = computed({
+	get: () => (deviceConfig.value.rawbtMode === "websocket" ? "websocket" : "intent"),
+	set: (v) => {
+		deviceConfig.value = saveDeviceConfig({
+			rawbtMode: v === "websocket" ? "websocket" : undefined,
+		});
+	},
+});
 const printModeOptions = [
 	{ label: __("Off"), value: "Off" },
 	{ label: __("Manual"), value: "Manual" },

@@ -51,6 +51,9 @@ export function loadDeviceConfig() {
 	}
 }
 
+/** Fired on window after saveDeviceConfig, so open pages pick up the change. */
+export const DEVICE_CONFIG_EVENT = "pos-device-config-changed"
+
 export function saveDeviceConfig(patch) {
 	const next = {
 		...loadDeviceConfig(),
@@ -58,19 +61,33 @@ export function saveDeviceConfig(patch) {
 		_v: DEVICE_CONFIG_VERSION,
 	}
 	localStorage.setItem(DEVICE_CONFIG_KEY, JSON.stringify(next))
+	if (typeof window !== "undefined") {
+		window.dispatchEvent(new Event(DEVICE_CONFIG_EVENT))
+	}
 	return next
 }
+
+/**
+ * Keys that describe how THIS device reaches its printer, not the layout:
+ * the iMin host, a per-device driver override (e.g. "rawbt" on a till whose
+ * iMin service does not answer) and the RawBT hand-over mode.
+ */
+export const DEVICE_ATTACHMENT_KEYS = ["host", "driverOverride", "rawbtMode"]
 
 /**
  * One-time migration (Direct Print): layout knobs moved to the server config,
  * so the per-device record shrinks to its device-attachment half {host, _v}.
  */
 export function stripDeviceLayoutKeys() {
-	const { host } = loadDeviceConfig()
+	const stored = loadDeviceConfig()
+	const keep = {}
+	for (const k of DEVICE_ATTACHMENT_KEYS) {
+		if (stored[k] !== undefined) keep[k] = stored[k]
+	}
 	try {
 		localStorage.setItem(
 			DEVICE_CONFIG_KEY,
-			JSON.stringify({ host, _v: DEVICE_CONFIG_VERSION }),
+			JSON.stringify({ ...keep, _v: DEVICE_CONFIG_VERSION }),
 		)
 	} catch {
 		// localStorage write failed (private mode etc.) — nothing to strip.

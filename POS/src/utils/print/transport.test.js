@@ -413,3 +413,114 @@ it("retries the SDK load after a failed script load", async () => {
 		vi.resetModules()
 	}
 })
+
+describe("per-device driver override", () => {
+	it("prints with the device override instead of the server driver", async () => {
+		const imin = okDriver("imin")
+		const rawbt = okDriver("rawbt")
+		const t = createTransport({
+			drivers: {
+				imin,
+				rawbt,
+				qz: okDriver("qz"),
+				browser: okDriver("browser"),
+			},
+			config: { driver: "imin" },
+			logSink: log,
+			deviceDriver: () => "rawbt",
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "rawbt" })
+		expect(imin.printHTML).not.toHaveBeenCalled()
+		expect(t.effectiveDriver()).toBe("rawbt")
+		expect(t.getDriver().id).toBe("rawbt")
+	})
+
+	it("ignores an override naming an unknown driver", async () => {
+		const imin = okDriver("imin")
+		const t = createTransport({
+			drivers: { imin, browser: okDriver("browser") },
+			config: { driver: "imin" },
+			logSink: log,
+			deviceDriver: () => "bogus",
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "imin" })
+	})
+
+	it("falls back from rawbt straight to the browser", async () => {
+		const qz = okDriver("qz")
+		const browser = okDriver("browser")
+		const t = createTransport({
+			drivers: { rawbt: failDriver("rawbt", "ws down"), qz, browser },
+			config: { driver: "rawbt", fallback_enabled: true },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
+		expect(qz.printHTML).not.toHaveBeenCalled()
+		expect(log.attempts[0].error_message).toContain("rawbt: ws down")
+	})
+
+	it("never hops from imin to rawbt", async () => {
+		const rawbt = okDriver("rawbt")
+		const t = createTransport({
+			drivers: {
+				imin: failDriver("imin", "no service"),
+				rawbt,
+				qz: failDriver("qz", "no qz"),
+				browser: okDriver("browser"),
+			},
+			config: { driver: "imin", fallback_enabled: true },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
+		expect(rawbt.printHTML).not.toHaveBeenCalled()
+	})
+})
+
+describe("imin2 driver (iMin SDK 2.0 app)", () => {
+	const drivers = () => ({
+		imin2: okDriver("imin2"),
+		imin: okDriver("imin"),
+		rawbt: okDriver("rawbt"),
+		qz: okDriver("qz"),
+		browser: okDriver("browser"),
+	})
+
+	it("prints with imin2 when the POS Profile picks it", async () => {
+		const t = createTransport({
+			drivers: drivers(),
+			config: { driver: "imin2" },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "imin2" })
+	})
+
+	it("is a per-device override like rawbt", () => {
+		const t = createTransport({
+			drivers: drivers(),
+			config: { driver: "imin" },
+			deviceDriver: () => "imin2",
+		})
+		expect(t.effectiveDriver()).toBe("imin2")
+	})
+
+	it("falls back imin2 -> imin -> browser, never to rawbt or qz", async () => {
+		const d = drivers()
+		d.imin2 = failDriver("imin2", "app down")
+		d.imin = failDriver("imin", "no service")
+		const t = createTransport({
+			drivers: d,
+			config: { driver: "imin2", fallback_enabled: true },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
+		expect(d.rawbt.printHTML).not.toHaveBeenCalled()
+		expect(d.qz.printHTML).not.toHaveBeenCalled()
+		expect(log.attempts[0].error_message).toContain("imin2: app down")
+		expect(log.attempts[0].error_message).toContain("imin: no service")
+	})
+
+	it("the production singleton registers imin2", async () => {
+		const { getTransport } = await import("./transport")
+		expect(getTransport().getDriver("imin2")?.id).toBe("imin2")
+	})
+})

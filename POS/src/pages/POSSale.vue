@@ -23,7 +23,8 @@
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
-				:qz-connected="posSettingsStore.printDriver === 'imin' ? iminReady : qzConnected"
+				:qz-connected="activePrintDriver === 'imin2' ? nativeReady : activePrintDriver === 'imin' ? iminReady : activePrintDriver === 'rawbt' ? false : qzConnected"
+				:printer-status-unknown="activePrintDriver === 'rawbt'"
 				:printer-connecting="printerReconnecting"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
@@ -1098,6 +1099,7 @@ import {
 } from "@/utils/printInvoice";
 import { printEODReport } from "@/utils/printEod";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+import { DEVICE_CONFIG_EVENT, loadDeviceConfig } from "@/utils/print/receipt_layout";
 import { ensureIminSdk, getTransport } from "@/utils/print/transport";
 
 import { Button, Dialog, createResource } from "frappe-ui";
@@ -1136,6 +1138,27 @@ const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();
 const posSettingsStore = usePOSSettingsStore();
+// The driver this till prints with: a per-device override set on the Direct
+// Print page (e.g. RawBT where the iMin service does not answer) beats the
+// POS Profile's driver. Re-read when Settings saves the device config, so the
+// header icon follows without a reload.
+function readDeviceDriverOverride() {
+	try {
+		return loadDeviceConfig().driverOverride || null;
+	} catch {
+		return null;
+	}
+}
+const deviceDriverOverride = ref(readDeviceDriverOverride());
+const syncDeviceDriverOverride = () => {
+	deviceDriverOverride.value = readDeviceDriverOverride();
+};
+if (typeof window !== "undefined") {
+	window.addEventListener(DEVICE_CONFIG_EVENT, syncDeviceDriverOverride);
+}
+const activePrintDriver = computed(
+	() => deviceDriverOverride.value || posSettingsStore.printDriver
+);
 const packagesStore = usePOSPackagesStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
@@ -1203,6 +1226,16 @@ const selectedPackage = ref(null); // POS Package awaiting option selection
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
 const iminReady = ref(false);
+const nativeReady = ref(false);
+async function probeNative() {
+	try {
+		const s = await getTransport().getDriver("imin2").getStatus();
+		nativeReady.value = Boolean(s?.ok);
+	} catch {
+		nativeReady.value = false;
+	}
+	return nativeReady.value;
+}
 
 // Debounce timer for offer reapplication
 const offerReapplyTimer = ref(null);
@@ -1332,7 +1365,7 @@ function stopIminWarmup() {
 
 const probeImin = async () => {
 	stopIminWarmup();
-	if (posSettingsStore.printDriver !== "imin") return;
+	if (activePrintDriver.value !== "imin") return;
 	let ok = false;
 	try {
 		await ensureIminSdk();
@@ -1347,7 +1380,7 @@ const probeImin = async () => {
 	iminReady.value = ok;
 	// A visibility probe may overlap a timer probe; never leave two loops.
 	stopIminWarmup();
-	if (posSettingsStore.printDriver === "imin") {
+	if (activePrintDriver.value === "imin") {
 		iminWarmupTimer = setTimeout(
 			probeImin,
 			ok ? IMIN_PROBE_KEEPALIVE_MS : IMIN_PROBE_RETRY_MS
@@ -1356,7 +1389,7 @@ const probeImin = async () => {
 };
 
 const handleIminVisibility = () => {
-	if (document.visibilityState === "visible" && posSettingsStore.printDriver === "imin") {
+	if (document.visibilityState === "visible" && activePrintDriver.value === "imin") {
 		probeImin();
 	}
 };
@@ -1366,9 +1399,10 @@ if (typeof document !== "undefined") {
 
 // iMin warm-up — lazy connect & prompt origin permission; keep socket warm
 watch(
-	() => posSettingsStore.printDriver,
+	() => activePrintDriver.value,
 	(driver) => {
 		stopIminWarmup();
+		if (driver === "imin2") probeNative();
 		if (driver !== "imin") {
 			iminReady.value = false;
 			return;
@@ -1384,6 +1418,9 @@ watch(
 onUnmounted(() => {
 	if (typeof document !== "undefined") {
 		document.removeEventListener("visibilitychange", handleIminVisibility);
+	}
+	if (typeof window !== "undefined") {
+		window.removeEventListener(DEVICE_CONFIG_EVENT, syncDeviceDriverOverride);
 	}
 	stopIminWarmup();
 	cleanup();
@@ -2914,7 +2951,21 @@ async function handlePrinterClick() {
 		return;
 	}
 
-	const isImin = posSettingsStore.printDriver === "imin";
+	if (activePrintDriver.value === "imin2") {
+		if (await probeNative()) {
+			showSuccess(__("Printer connected"));
+		} else {
+			showError(__("Printer not connected. Open Print Settings to configure it."));
+		}
+		return;
+	}
+	if (activePrintDriver.value === "rawbt") {
+		// RawBT is fire-and-forget (Android intent / its websocket server):
+		// there is no connection to test from here.
+		showSuccess(__("RawBT is used on this device"));
+		return;
+	}
+	const isImin = activePrintDriver.value === "imin";
 	// iMin: never trust the cached state. The keepalive only re-probes every
 	// 30 s, so a device that died in between leaves the icon green and a tap
 	// would echo "connected" without ever testing the socket.
@@ -2934,6 +2985,8 @@ async function handlePrinterClick() {
 	}
 	try {
 		if (isImin) {
+			// A tap is the cashier asking for a fresh test: forget the last failed print.
+			getTransport().getDriver("imin")?.clearPrintFailure?.();
 			await probeImin();
 			ok = iminReady.value;
 		} else {
@@ -3754,6 +3807,9 @@ async function runPrintInvoice(invoiceData) {
 		} else {
 			uiStore.showError(__("Error"), __("Failed to print invoice"), reason);
 		}
+	} finally {
+		// The icon follows the print that just ran, not a 30 s old probe.
+		if (activePrintDriver.value === "imin") probeImin();
 	}
 }
 
