@@ -32,9 +32,10 @@
  *     but it is a loopback connection, so Chrome's local-network permission
  *     applies just like the iMin service.
  *
- * Every sheet (copies, then the crew slip) travels in ONE job, each followed
- * by the feed (+ cut). There is no tear-off pause between sheets: RawBT
- * prints the job in one go, so enable the cut when printing more than one.
+ * Every sheet (copies, then the crew slip) is followed by the feed (+ cut).
+ * Intent mode sends them as ONE job (each intent is an app switch), so there
+ * is no tear-off pause. Websocket mode sends one message per sheet and waits
+ * the estimated head time plus copyDelayMs / crewDelayMs in between.
  */
 import { logger } from "@/utils/logger"
 import { __ } from "@/utils/translation"
@@ -160,6 +161,8 @@ export function createRawbtDriver(deps = {}) {
 	const launch = deps.launch || defaultLaunch
 	const sendWs = deps.sendWs || defaultSendWs
 	const android = deps.isAndroid || isAndroid
+	const sleep =
+		deps.sleep || ((ms) => new Promise((res) => setTimeout(res, ms)))
 	const encodeDeps = { render: deps.render, loadLogo: deps.loadLogo }
 
 	async function available() {
@@ -188,7 +191,7 @@ export function createRawbtDriver(deps = {}) {
 		 * @returns {Promise<{paper:string, dots:number, copies:number}>}
 		 */
 		async printHTML(html, opts = {}) {
-			const { bytes, r, textMode, sheets } = await buildEscPosPrint(
+			const { bytes, r, textMode, sheets, parts } = await buildEscPosPrint(
 				html,
 				opts,
 				encodeDeps,
@@ -202,7 +205,23 @@ export function createRawbtDriver(deps = {}) {
 				sheets,
 			})
 			if (m === "websocket") {
-				await sendWs(bytes)
+				// One message per sheet with the tear-off pause in between. RawBT
+				// reports no "printed" event, so the pause runs from the send:
+				// estimated head time (printSpeed) + the copy / crew delay.
+				for (let i = 0; i < parts.length; i++) {
+					try {
+						await sendWs(parts[i].bytes)
+					} catch (err) {
+						// COR-FE-10: earlier sheets already went to paper.
+						if (i > 0 && err && typeof err === "object") err.postPrint = true
+						throw err
+					}
+					const next = parts[i + 1]
+					if (!next) break
+					const delay = next.kind === "crew" ? r.crewDelayMs : r.copyDelayMs
+					const headMs = Math.round((parts[i].heightDots / r.printSpeed) * 1000)
+					await sleep(headMs + delay)
+				}
 			} else {
 				if (bytes.length > INTENT_WARN_BYTES) {
 					log.warn(
