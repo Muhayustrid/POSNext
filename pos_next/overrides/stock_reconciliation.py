@@ -24,7 +24,7 @@ from frappe import _
 
 from pos_next.api.stock_opname import _initial_state, _workflow, get_editable_open_opname
 from pos_next.services.production import _resolve_profile
-from pos_next.stock_opname_setup import HQ_ROLES
+from pos_next.stock_opname_setup import HQ_ROLES, OUTLET_ROLES, SYSTEM_STOCK_READER
 
 DOCTYPE = "Stock Reconciliation"
 
@@ -63,21 +63,25 @@ class CustomStockReconciliation(StockReconciliation):
 		self._validate_outlet_valuation_input()
 
 	def _validate_outlet_valuation_input(self):
-		if is_hq_user():
+		if set(frappe.get_roles()) & set(HQ_ROLES):
 			return
+		# Desk stock readers see rates (Fetch Items fills them) but never set them.
+		reader = is_hq_user()
 		before = self.get_doc_before_save()
 		previous = {row.name: row for row in before.items} if before else {}
 		for row in self.items:
 			old = previous.get(row.name)
 			for field in ("valuation_rate", "custom_valuation_rate_per_uom", "allow_zero_valuation_rate"):
 				value = row.get(field)
-				if value not in (None, "", 0, 0.0) and (not old or value != old.get(field)):
+				if not reader and value not in (None, "", 0, 0.0) and (not old or value != old.get(field)):
 					frappe.throw(_("Outlet stock counts cannot set valuation rates."), frappe.PermissionError)
 				if old:
 					row.set(field, old.get(field))
 				elif field == "valuation_rate":
 					# Native valuation lookup treats zero as explicit, not missing.
 					row.set(field, None)
+				elif reader:
+					row.set(field, 0)
 
 	def remove_items_with_no_change(self):
 		# Drafts keep every counted row (blind count); filter only on submit.
@@ -163,8 +167,11 @@ def outlet_warehouses(user=None):
 
 def is_hq_user(user=None):
 	"""True when `user` holds any HQ role (four-eyes for everyone, spec W1)."""
-	user = user or frappe.session.user
-	return bool(set(frappe.get_roles(user)) & set(HQ_ROLES))
+	roles = set(frappe.get_roles(user or frappe.session.user))
+	if roles & set(HQ_ROLES):
+		return True
+	# A stale reader role never unblinds an outlet user.
+	return SYSTEM_STOCK_READER in roles and not roles & set(OUTLET_ROLES)
 
 
 def assert_system_stock_access(warehouse=None, company=None, user=None):

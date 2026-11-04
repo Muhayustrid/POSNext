@@ -144,6 +144,23 @@ class TestStockOpnameDataPermissions(IntegrationTestCase):
         finally:
             frappe.set_user('Administrator')
 
+    def test_desk_stock_reader_valuation_input_is_neutralized_not_trusted(self):
+        from pos_next.api.test_stock_opname import _make_user
+        setup.ensure_stock_opname_data_permissions(quiet=True)
+        doc = frappe.get_doc({'doctype': 'Stock Reconciliation', 'company': '_Test Company',
+                              'items': [{'item_code': '_Test Item', 'qty': 1, 'valuation_rate': 999,
+                                         'custom_valuation_rate_per_uom': 999,
+                                         'allow_zero_valuation_rate': 1}]})
+        frappe.set_user(_make_user('Stock User'))
+        try:
+            doc.run_method('before_validate')  # Desk Fetch Items fills rates; never an error
+        finally:
+            frappe.set_user('Administrator')
+        row = doc.items[0]
+        self.assertIsNone(row.valuation_rate)
+        self.assertFalse(row.custom_valuation_rate_per_uom)
+        self.assertFalse(row.allow_zero_valuation_rate)
+
     def test_existing_native_document_rejects_changed_rate_and_restores_omitted_rate(self):
         from pos_next.api.test_stock_opname import _make_user
         from unittest.mock import patch

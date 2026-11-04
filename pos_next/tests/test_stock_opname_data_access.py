@@ -36,6 +36,69 @@ class TestSystemStockAccess(IntegrationTestCase):
         access.assert_system_stock_access(user=self.manager)
         access.assert_system_stock_access(user='Administrator')
 
+    def test_desk_stock_user_reads_system_stock_but_outlet_stock_user_stays_blind(self):
+        from pos_next.stock_opname_setup import SYSTEM_STOCK_READER, ensure_stock_opname_data_permissions
+
+        ensure_stock_opname_data_permissions(quiet=True)
+        desk = _make_user('Employee')
+        frappe.get_doc('User', desk).add_roles('Stock User')
+        self.assertIn(SYSTEM_STOCK_READER, frappe.get_roles(desk))
+        access.assert_system_stock_access(user=desk)
+        access.assert_system_stock_access(self.warehouse, '_Test Company', user=desk)
+        fields = frappe.get_meta('Stock Reconciliation Item').get_permitted_fieldnames(
+            parenttype='Stock Reconciliation', user=desk)
+        self.assertIn('current_qty', fields)
+        self.assertIn('valuation_rate', fields)
+
+        mixed = _make_user('POSNext Cashier')
+        frappe.get_doc('User', mixed).add_roles('Stock User')
+        frappe.get_doc('User', desk).add_roles('POSNext Cashier')
+        for user in (mixed, desk):
+            with self.subTest(user=user):
+                self.assertNotIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+                self.assertFalse(access.is_hq_user(user))
+                with self.assertRaises(frappe.PermissionError):
+                    access.assert_system_stock_access(user=user)
+                fields = frappe.get_meta('Stock Reconciliation Item').get_permitted_fieldnames(
+                    parenttype='Stock Reconciliation', user=user)
+                self.assertNotIn('current_qty', fields)
+
+    def test_stale_reader_role_with_outlet_role_is_not_hq(self):
+        from pos_next.stock_opname_setup import SYSTEM_STOCK_READER, ensure_stock_opname_data_permissions
+
+        ensure_stock_opname_data_permissions(quiet=True)
+        user = _make_user('POSNext Cashier')
+        frappe.get_doc({'doctype': 'Has Role', 'parent': user, 'parenttype': 'User',
+                        'parentfield': 'roles', 'role': SYSTEM_STOCK_READER}).insert(ignore_permissions=True)
+        frappe.clear_cache(user=user)
+        self.assertFalse(access.is_hq_user(user))
+        ensure_stock_opname_data_permissions(quiet=True)
+        self.assertNotIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+
+    def test_direct_has_role_insert_resyncs_reader_immediately(self):
+        from pos_next.stock_opname_setup import SYSTEM_STOCK_READER, ensure_stock_opname_data_permissions
+
+        ensure_stock_opname_data_permissions(quiet=True)
+        user = _make_user('Stock User')
+        self.assertIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+        frappe.get_doc({'doctype': 'Has Role', 'parent': user, 'parenttype': 'User',
+                        'parentfield': 'roles', 'role': 'POSNext Cashier'}).insert(ignore_permissions=True)
+        self.assertNotIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+        frappe.get_doc({'doctype': 'Has Role', 'parent': user, 'parenttype': 'User',
+                        'parentfield': 'roles', 'role': SYSTEM_STOCK_READER}).insert(ignore_permissions=True)
+        self.assertNotIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+
+    def test_migrate_grants_reader_to_existing_desk_stock_user(self):
+        from pos_next.stock_opname_setup import SYSTEM_STOCK_READER, ensure_stock_opname_data_permissions
+
+        user = _make_user('Stock User')
+        frappe.db.delete('Has Role', {'parent': user, 'role': SYSTEM_STOCK_READER})  # e.g. pre-upgrade user
+        frappe.clear_cache(user=user)
+        self.assertNotIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+        ensure_stock_opname_data_permissions(quiet=True)
+        self.assertIn(SYSTEM_STOCK_READER, frappe.get_roles(user))
+        self.assertTrue(frappe.has_permission('Stock Reconciliation', 'create', user=user))
+
     def test_contextual_access_accepts_hq_with_native_scope(self):
         access.assert_system_stock_access(self.warehouse, '_Test Company', user=self.manager)
 

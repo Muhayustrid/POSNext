@@ -162,6 +162,11 @@ has_permission = {
 # Hook on document methods and events
 
 doc_events = {
+	"User": {"validate": "pos_next.stock_opname_setup.sync_user_system_stock_reader"},
+	"Has Role": {
+		"after_insert": "pos_next.stock_opname_setup.sync_has_role_system_stock_reader",
+		"after_delete": "pos_next.stock_opname_setup.sync_has_role_system_stock_reader",
+	},
 	"Purchase Invoice": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
 	"Journal Entry": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
 	"Payment Entry": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
