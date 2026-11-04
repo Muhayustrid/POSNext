@@ -1308,7 +1308,7 @@
 										</div>
 									<!-- iMin Sales Receipt -->
 									<div
-										v-if="['imin', 'rawbt'].includes(settings.print_driver)"
+										v-if="['imin', 'rawbt', 'imin2'].includes(settings.print_driver)"
 										:class="iminSubsectionClasses.container"
 									>
 										<div class="flex items-center gap-2 mb-4">
@@ -1326,7 +1326,7 @@
 													/>
 											</svg>
 											<h4 class="text-sm font-semibold text-gray-900">
-												{{ settings.print_driver === 'rawbt' ? __('Struk Penjualan — RawBT') : __('Struk Penjualan — iMin') }}
+												{{ settings.print_driver === 'rawbt' ? __('Struk Penjualan — RawBT') : settings.print_driver === 'imin2' ? __('Struk Penjualan — iMin 2.0') : __('Struk Penjualan — iMin') }}
 											</h4>
 										</div>
 										<div class="space-y-5">
@@ -1548,7 +1548,7 @@
 									</div>
 									<!-- iMin Closing / EOD -->
 									<div
-										v-if="['imin', 'rawbt'].includes(settings.print_driver)"
+										v-if="['imin', 'rawbt', 'imin2'].includes(settings.print_driver)"
 										:class="eodSubsectionClasses.container"
 									>
 										<div class="flex items-center gap-2 mb-4">
@@ -1566,7 +1566,7 @@
 													/>
 											</svg>
 											<h4 class="text-sm font-semibold text-gray-900">
-												{{ settings.print_driver === 'rawbt' ? __('Tutup Kasir / EOD — RawBT') : __('Tutup Kasir / EOD — iMin') }}
+												{{ settings.print_driver === 'rawbt' ? __('Tutup Kasir / EOD — RawBT') : settings.print_driver === 'imin2' ? __('Tutup Kasir / EOD — iMin 2.0') : __('Tutup Kasir / EOD — iMin') }}
 											</h4>
 										</div>
 										<div class="space-y-5">
@@ -1928,6 +1928,7 @@ const printDriverOptions = [
 	{ label: __("QZ Tray"), value: "qz" },
 	{ label: __("iMin"), value: "imin" },
 	{ label: __("RawBT (Android)"), value: "rawbt" },
+	{ label: __("iMin SDK 2.0 (POSNext app)"), value: "imin2" },
 ];
 const printModeOptions = [
 	{ label: __("Off"), value: "Off" },

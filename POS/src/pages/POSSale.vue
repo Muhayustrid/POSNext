@@ -23,7 +23,7 @@
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
-				:qz-connected="activePrintDriver === 'rawbt' ? true : activePrintDriver === 'imin' ? iminReady : qzConnected"
+				:qz-connected="activePrintDriver === 'rawbt' ? true : activePrintDriver === 'imin2' ? nativeReady : activePrintDriver === 'imin' ? iminReady : qzConnected"
 				:printer-connecting="printerReconnecting"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
@@ -1218,6 +1218,16 @@ const selectedPackage = ref(null); // POS Package awaiting option selection
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
 const iminReady = ref(false);
+const nativeReady = ref(false);
+async function probeNative() {
+	try {
+		const s = await getTransport().getDriver("imin2").getStatus();
+		nativeReady.value = Boolean(s?.ok);
+	} catch {
+		nativeReady.value = false;
+	}
+	return nativeReady.value;
+}
 
 // Debounce timer for offer reapplication
 const offerReapplyTimer = ref(null);
@@ -1384,6 +1394,7 @@ watch(
 	() => activePrintDriver.value,
 	(driver) => {
 		stopIminWarmup();
+		if (driver === "imin2") probeNative();
 		if (driver !== "imin") {
 			iminReady.value = false;
 			return;
@@ -2929,6 +2940,14 @@ async function handlePrinterClick() {
 		return;
 	}
 
+	if (activePrintDriver.value === "imin2") {
+		if (await probeNative()) {
+			showSuccess(__("Printer connected"));
+		} else {
+			showError(__("Printer not connected. Open Print Settings to configure it."));
+		}
+		return;
+	}
 	if (activePrintDriver.value === "rawbt") {
 		// RawBT is fire-and-forget (Android intent / its websocket server):
 		// there is no connection to test from here.

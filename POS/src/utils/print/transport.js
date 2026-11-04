@@ -13,6 +13,7 @@ import { __ } from "@/utils/translation"
 
 import { createBrowserDriver } from "./browser_client"
 import { createIminDriver } from "./imin_client"
+import { createNativeDriver } from "./native_client"
 import { createQzDriver } from "./qz_client"
 import { createRawbtDriver } from "./rawbt_client"
 import { loadDeviceConfig } from "./receipt_layout"
@@ -26,6 +27,9 @@ const FALLBACK_ORDER = {
 	// intent would bounce the cashier to the Play Store. It is chosen
 	// explicitly (POS Settings, or per device on the Direct Print page).
 	rawbt: ["rawbt", "browser"],
+	// iMin SDK 2.0 through the POSNext Shell app (android-shell/); falls back
+	// to the iMin JS service (SDK 1.0), then the dialog.
+	imin2: ["imin2", "imin", "browser"],
 	browser: ["browser"],
 }
 
@@ -261,6 +265,7 @@ export function getTransport() {
 			imin: createIminDriver({ factory: iminFactory }),
 			qz: createQzDriver(),
 			rawbt: createRawbtDriver(),
+			imin2: createNativeDriver(),
 			browser: createBrowserDriver(),
 		},
 		deviceDriver: () => loadDeviceConfig().driverOverride || null,

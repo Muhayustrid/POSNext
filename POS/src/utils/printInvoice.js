@@ -894,8 +894,8 @@ export async function silentPrintInvoice(
  * Print, e.g. RawBT on a till whose iMin service is broken) beats the server's.
  */
 // Drivers that lay receipts out as printer text from the doc (iMin SDK text
-// commands, RawBT ESC/POS text).
-const TEXT_MODE_DRIVERS = ["imin", "rawbt"]
+// commands, RawBT / iMin 2.0 ESC/POS text).
+const TEXT_MODE_DRIVERS = ["imin", "rawbt", "imin2"]
 
 function driverOf(c) {
 	const t = getTransport()

@@ -419,7 +419,12 @@ describe("per-device driver override", () => {
 		const imin = okDriver("imin")
 		const rawbt = okDriver("rawbt")
 		const t = createTransport({
-			drivers: { imin, rawbt, qz: okDriver("qz"), browser: okDriver("browser") },
+			drivers: {
+				imin,
+				rawbt,
+				qz: okDriver("qz"),
+				browser: okDriver("browser"),
+			},
 			config: { driver: "imin" },
 			logSink: log,
 			deviceDriver: () => "rawbt",
@@ -468,5 +473,54 @@ describe("per-device driver override", () => {
 		})
 		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
 		expect(rawbt.printHTML).not.toHaveBeenCalled()
+	})
+})
+
+describe("imin2 driver (iMin SDK 2.0 app)", () => {
+	const drivers = () => ({
+		imin2: okDriver("imin2"),
+		imin: okDriver("imin"),
+		rawbt: okDriver("rawbt"),
+		qz: okDriver("qz"),
+		browser: okDriver("browser"),
+	})
+
+	it("prints with imin2 when the POS Profile picks it", async () => {
+		const t = createTransport({
+			drivers: drivers(),
+			config: { driver: "imin2" },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "imin2" })
+	})
+
+	it("is a per-device override like rawbt", () => {
+		const t = createTransport({
+			drivers: drivers(),
+			config: { driver: "imin" },
+			deviceDriver: () => "imin2",
+		})
+		expect(t.effectiveDriver()).toBe("imin2")
+	})
+
+	it("falls back imin2 -> imin -> browser, never to rawbt or qz", async () => {
+		const d = drivers()
+		d.imin2 = failDriver("imin2", "app down")
+		d.imin = failDriver("imin", "no service")
+		const t = createTransport({
+			drivers: d,
+			config: { driver: "imin2", fallback_enabled: true },
+			logSink: log,
+		})
+		await expect(t.printHTML("<p/>")).resolves.toEqual({ driver: "browser" })
+		expect(d.rawbt.printHTML).not.toHaveBeenCalled()
+		expect(d.qz.printHTML).not.toHaveBeenCalled()
+		expect(log.attempts[0].error_message).toContain("imin2: app down")
+		expect(log.attempts[0].error_message).toContain("imin: no service")
+	})
+
+	it("the production singleton registers imin2", async () => {
+		const { getTransport } = await import("./transport")
+		expect(getTransport().getDriver("imin2")?.id).toBe("imin2")
 	})
 })

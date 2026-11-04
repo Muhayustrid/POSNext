@@ -206,6 +206,12 @@
 							}}
 						</p>
 					</div>
+					<div v-if="nativeApp" class="text-xs text-gray-600">
+						<p class="font-medium text-gray-700">{{ __("POSNext app detected") }}</p>
+						<p>
+							{{ __("App {0} · SDK {1} · {2} · Android {3}", [nativeApp.version || "-", nativeApp.sdk || "-", nativeApp.model || "-", nativeApp.android || "-"]) }}
+						</p>
+					</div>
 					<div v-if="cfg.driverOverride === 'rawbt' || serverDriver === 'rawbt'">
 						<label class="mb-1 block text-xs font-medium text-gray-700" for="direct-print-rawbt-mode">
 							{{ __("RawBT connection") }}
@@ -1136,6 +1142,7 @@ const copiesOptions = [1, 2, 3, 4, 5].map((n) => ({
 const driverOverrideOptions = [
 	{ label: __("Follow POS Profile"), value: "" },
 	{ label: __("RawBT (Bluetooth / built-in / USB / LAN)"), value: "rawbt" },
+	{ label: __("iMin SDK 2.0 (POSNext app)"), value: "imin2" },
 ]
 const rawbtModeOptions = [
 	{ label: __("Android intent (recommended)"), value: "intent" },
@@ -1143,6 +1150,16 @@ const rawbtModeOptions = [
 ]
 // The POS Profile's driver, shown next to the per-device override.
 const serverDriver = ref("")
+// hello reply of the POSNext Shell app (iMin SDK 2.0), null outside it.
+const nativeApp = ref(null)
+async function probeNativeApp() {
+	try {
+		const d = getTransport().getDriver("imin2")
+		nativeApp.value = (await d?.isAvailable()) ? d.info() : null
+	} catch {
+		nativeApp.value = null
+	}
+}
 
 const crewOptions = [
 	{ label: __("Server default"), value: "" },
@@ -1191,7 +1208,9 @@ const eodTopMarginDotsText = ref("0")
 function readHostIntoForm() {
 	const stored = loadDeviceConfig() || {}
 	cfg.host = typeof stored.host === "string" ? stored.host : ""
-	cfg.driverOverride = stored.driverOverride === "rawbt" ? "rawbt" : ""
+	cfg.driverOverride = ["rawbt", "imin2"].includes(stored.driverOverride)
+		? stored.driverOverride
+		: ""
 	cfg.rawbtMode = stored.rawbtMode === "websocket" ? "websocket" : "intent"
 }
 
@@ -2047,6 +2066,7 @@ async function autoprintEod(closingName, posProfile) {
 onMounted(async () => {
 	captureLegacyDeviceConfig()
 	readHostIntoForm()
+	probeNativeApp()
 	// Load the server print config before anything reads transport state.
 	// Test Print calls the module-level transportPrint, which relies on the
 	// singleton config populated here; without it the chain is empty and no
