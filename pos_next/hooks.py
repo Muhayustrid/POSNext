@@ -162,6 +162,11 @@ has_permission = {
 # Hook on document methods and events
 
 doc_events = {
+	"User": {"validate": "pos_next.stock_opname_setup.sync_user_system_stock_reader"},
+	"Has Role": {
+		"after_insert": "pos_next.stock_opname_setup.sync_has_role_system_stock_reader",
+		"after_delete": "pos_next.stock_opname_setup.sync_has_role_system_stock_reader",
+	},
 	"Purchase Invoice": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
 	"Journal Entry": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
 	"Payment Entry": {"before_cancel": "pos_next.overrides.spend_guard.before_cancel"},
@@ -271,9 +276,14 @@ scheduler_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "pos_next.event.get_events"
-# }
+override_whitelisted_methods = {
+	"frappe.desk.form.utils.get_next": "pos_next.overrides.stock_reconciliation.get_next",
+	"erpnext.stock.utils.get_stock_balance": "pos_next.overrides.stock_reconciliation.get_stock_balance",
+	"erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_stock_balance_for":
+		"pos_next.overrides.stock_reconciliation.get_stock_balance_for",
+	"erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_items":
+		"pos_next.overrides.stock_reconciliation.get_items",
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
@@ -294,8 +304,11 @@ scheduler_events = {
 # Request Events
 # ----------------
 # POS cashiers stay in the SPA: Desk page loads redirect to /pos
-before_request = ["pos_next.utils.desk_guard.block_desk_for_cashiers"]
-# after_request = ["pos_next.utils.after_request"]
+before_request = [
+	"pos_next.utils.desk_guard.block_desk_for_cashiers",
+	"pos_next.overrides.stock_reconciliation.route_stock_valuation_rpc",
+]
+after_request = ["pos_next.overrides.stock_reconciliation_response.filter_stock_reconciliation_response"]
 
 # Job Events
 # ----------

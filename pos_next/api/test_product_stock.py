@@ -142,6 +142,39 @@ class TestProductStock(unittest.TestCase):
 			[(e["in_qty"], e["out_qty"], e["balance"]) for e in ledger["entries"]], [(15, 0, 25), (0, 5, 20)]
 		)
 
+	def test_outlet_ledger_hides_reconciliations_before_paging_but_keeps_balances(self):
+		from pos_next.api.test_stock_opname import _make_user
+
+		self._entry("OPEN", "2026-10-01 08:00:00", 10, 10)
+		self._entry("COUNT", "2026-10-02 09:00:00", 0, 25, voucher_type="Stock Reconciliation")
+		self._entry("OUT", "2026-10-03 09:00:00", -5, 20)
+		self._entry("IN", "2026-10-03 10:00:00", 2, 22)
+		for role, extra, blind in (
+			("POSNext Cashier", None, True),
+			("POSNext Manager", "Stock User", True),
+			("POSNext Cashier", "Stock User", True),
+			("Stock User", None, False),
+			("POSNext Cashier", "Stock Manager", False),
+		):
+			frappe.set_user("Administrator")
+			user = _make_user(role)
+			if extra:
+				frappe.get_doc("User", user).add_roles(extra)
+			frappe.get_doc({
+				"doctype": "POS Profile User", "parent": self.profile,
+				"parenttype": "POS Profile", "parentfield": "applicable_for_users", "user": user,
+			}).db_insert()
+			frappe.set_user(user)
+			with self.subTest(role=role, extra=extra):
+				ledger = self._ledger(limit=1)
+				self.assertEqual((ledger["opening_qty"], ledger["closing_qty"]), (10, 22))
+				self.assertEqual(ledger["entries"][0]["voucher_type"], "Stock Entry" if blind else "Stock Reconciliation")
+				self.assertEqual(ledger["entries"][0]["balance"], 20 if blind else 25)
+				self.assertTrue(ledger["has_more"])
+				page = self._ledger(start=1, limit=1)
+				self.assertEqual(page["entries"][0]["balance"], 22 if blind else 20)
+				self.assertEqual(page["has_more"], not blind)
+
 	def test_group_warehouse_ledger_shows_outlet_running_balance(self):
 		frappe.db.set_value("POS Profile", self.profile, "warehouse", self.root)
 		frappe.clear_document_cache("POS Profile", self.profile)

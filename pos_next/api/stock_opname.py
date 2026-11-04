@@ -330,52 +330,23 @@ def _counted_qty(value, item_code):
 	return qty
 
 
-def _uom_factor(item_code, custom_uom, stock_uom, has_uom_field):
-	"""Factor from `custom_uom` to the stock UOM (1 when equal), else reject the row.
-
-	Mirrors warehouse_app `apply_sr_inventory_uom`: the stock UOM is factor 1,
-	any other UOM must be on the item's UOM Conversion table. Without the
-	warehouse_app custom fields a non-stock UOM cannot be recorded, so it is
-	rejected per row rather than posted as a stock-UOM count.
-	"""
-	if custom_uom == stock_uom:
-		return 1
-	if not has_uom_field:
-		frappe.throw(
-			_("UOM {0} for {1} needs the warehouse_app UOM fields, which are missing on this site").format(
-				custom_uom, item_code
-			),
-			ValidationError,
-		)
-	factor = frappe.db.get_value("UOM Conversion Detail", {"parent": item_code, "uom": custom_uom}, "conversion_factor")
-	if not factor:
-		frappe.throw(
-			_("UOM {0} for {1} is invalid: use the stock UOM or add it to the item's UOM Conversion table").format(
-				custom_uom, item_code
-			),
-			ValidationError,
-		)
-	return factor
-
-
 def _validated_rows(items, warehouse, doc_name=None):
 	"""Validate outlet count rows; return ERPNext row dicts ready to append.
 
 	Raises ValidationError with a per-row message (item code named, unknown
 	serials listed) so Task 4 (Excel import) can report them per row.
 
-	A row counted in a non-stock UOM (`custom_uom` + `custom_qty_after`) is
-	converted to native qty here with the same factor the warehouse_app hook
-	`apply_sr_inventory_uom` recomputes on save; the `custom_*` fields are only
-	written when the Stock Reconciliation Item meta has them (warehouse_app
-	installed), otherwise a non-stock UOM is rejected per row.
+	Custom-UOM rows delegate conversion to warehouse_app document validation.
+	Without its engine and fields, only native stock-UOM counts are accepted.
 	"""
 	if not isinstance(items, list) or not items:
 		frappe.throw(_("At least one counted item is required"), ValidationError)
 	sr_meta = frappe.get_meta("Stock Reconciliation Item")
-	has_uom_field = sr_meta.has_field("custom_uom")
+	has_uom_field = all(sr_meta.has_field(field) for field in (
+		"custom_uom", "custom_qty_after", "custom_conversion_factor",
+	))
 	has_photo_field = sr_meta.has_field("pos_opname_photo")
-	qty_precision = sr_meta.get_field("qty").precision
+	has_uom_engine = has_uom_field and "warehouse_app" in frappe.get_installed_apps()
 	seen = set()
 	rows = []
 	for entry in items:
@@ -400,11 +371,9 @@ def _validated_rows(items, warehouse, doc_name=None):
 		# Dedupe within the row: a scan box double-Enter (or crafted payload)
 		# must not inflate qty or write the same serial twice.
 		serial_nos = list(dict.fromkeys(serial_nos))
-		# Count UOM self-conversion: native qty = custom_qty_after * factor.
-		# Serial rows count serials, never a UOM.
+		# Serial rows count serials; other UOM conversion belongs to warehouse_app.
 		custom_uom = (entry.get("custom_uom") or "").strip()
 		custom_after = None
-		factor = 1
 		if custom_uom:
 			if has_serial:
 				frappe.throw(
@@ -412,7 +381,17 @@ def _validated_rows(items, warehouse, doc_name=None):
 					ValidationError,
 				)
 			custom_after = _counted_qty(entry.get("custom_qty_after", entry.get("qty")), item_code)
-			factor = _uom_factor(item_code, custom_uom, meta.stock_uom, has_uom_field)
+			if has_uom_engine:
+				from warehouse_app.sr_uom import resolve_factors
+
+				factor = resolve_factors([(item_code, custom_uom, meta.stock_uom)]).get((item_code, custom_uom))
+				if factor is None or not math.isfinite(factor) or factor <= 0:
+					frappe.throw(_("UOM {0} for {1} is invalid").format(custom_uom, item_code), ValidationError)
+			elif custom_uom != meta.stock_uom:
+				frappe.throw(
+					_("UOM {0} for {1} needs the warehouse_app UOM fields, which are missing on this site").format(custom_uom, item_code),
+					ValidationError,
+				)
 		photo = (entry.get("pos_opname_photo") or "").strip()
 		if photo:
 			if not doc_name:
@@ -434,7 +413,7 @@ def _validated_rows(items, warehouse, doc_name=None):
 				frappe.throw(_("Batch {0} does not belong to {1}").format(batch_no, item_code), ValidationError)
 			if frappe.db.get_value("Batch", batch_no, "disabled"):
 				frappe.throw(_("Batch {0} is disabled").format(batch_no), ValidationError)
-			qty = flt(custom_after * factor, qty_precision) if custom_after is not None else _counted_qty(entry.get("qty"), item_code)
+			qty = custom_after if custom_after is not None else _counted_qty(entry.get("qty"), item_code)
 		elif has_serial:
 			unknown = [
 				s
@@ -461,7 +440,7 @@ def _validated_rows(items, warehouse, doc_name=None):
 		else:
 			if batch_no or serial_nos:
 				frappe.throw(_("{0} has no batch or serial; send only qty").format(item_code), ValidationError)
-			qty = flt(custom_after * factor, qty_precision) if custom_after is not None else _counted_qty(entry.get("qty"), item_code)
+			qty = custom_after if custom_after is not None else _counted_qty(entry.get("qty"), item_code)
 		key = (item_code, batch_no)
 		if key in seen:
 			frappe.throw(_("Duplicate row for {0}").format(item_code), ValidationError)
@@ -473,10 +452,10 @@ def _validated_rows(items, warehouse, doc_name=None):
 			"batch_no": batch_no,
 			"use_serial_batch_fields": 1,
 		}
-		if custom_uom and has_uom_field:
+		if custom_uom and has_uom_engine:
+			row.pop("qty")
 			row["custom_uom"] = custom_uom
 			row["custom_qty_after"] = custom_after
-			row["custom_conversion_factor"] = factor
 		if has_photo_field:
 			row["pos_opname_photo"] = photo or None
 		if has_serial:

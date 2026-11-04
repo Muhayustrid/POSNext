@@ -211,9 +211,28 @@ class TestStockOpnameOverride(FrappeTestCase):
 			(0, 0, 0, 0),
 		)
 
-	def test_draft_fills_per_uom_valuation_rate(self):
-		# warehouse_app shows "Valuation Rate (as per UOM)" next to the native
-		# rate; an outlet count never sends a rate, so it must mirror the native one.
+	def test_unchanged_uom_roundtrip_preserves_native_qty_and_rate(self):
+		item = _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": 3}])
+		_seed_stock(item, self.warehouse, 17)
+		doc = self._make_sr(self.warehouse, [(item, 10)])
+		doc.items[0].valuation_rate = 123.456789
+		doc.items[0].custom_uom = "Pack"
+		from frappe.utils import flt
+		doc.items[0].custom_qty_after = flt(10 / 3, 3)
+		doc.insert(ignore_permissions=True)
+		for _ in range(3):
+			doc.reload()
+			doc.save()
+			self.assertEqual(doc.items[0].qty, 10)
+			self.assertEqual(doc.items[0].valuation_rate, 123.456789)
+			self.assertEqual(doc.items[0].custom_conversion_factor, 3)
+		doc.items[0].custom_qty_after = 4
+		doc.save()
+		self.assertEqual(doc.items[0].qty, 12)
+		self.assertEqual(doc.items[0].valuation_rate, 123.456789)
+
+	def test_draft_preserves_empty_per_uom_rate_and_native_valuation(self):
+		# Empty custom rates must not create a second source of accounting valuation.
 		if not frappe.get_meta("Stock Reconciliation Item").has_field("custom_valuation_rate_per_uom"):
 			self.skipTest("warehouse_app per-UOM fields not installed")
 		item = _make_test_item(uoms=[{"uom": "Box", "conversion_factor": 6}])
@@ -233,7 +252,29 @@ class TestStockOpnameOverride(FrappeTestCase):
 		doc.insert(ignore_permissions=True)
 		row = doc.items[0]
 		self.assertTrue(row.valuation_rate)
-		self.assertAlmostEqual(row.custom_valuation_rate_per_uom, row.valuation_rate * 6, places=2)
+		self.assertIn(row.custom_valuation_rate_per_uom, (None, ""))
+		self.assertEqual(row.qty, 6)
+
+	def test_outlet_new_document_without_before_image_gets_native_valuation(self):
+		item = _make_test_item()
+		_seed_stock(item, self.warehouse, 17)
+		doc = frappe.get_doc({
+			"doctype": DOCTYPE, "company": self.company, "purpose": "Stock Reconciliation",
+			"set_warehouse": self.warehouse, "items": [{
+				"item_code": item, "warehouse": self.warehouse, "qty": 3, "valuation_rate": 0,
+				"amount": 999999999,
+			}],
+		})
+		self.addCleanup(self._delete_sr, None, doc)
+		self.assertIsNone(doc.get_doc_before_save())
+		frappe.set_user(self.cashier)
+		try:
+			doc.insert()
+		finally:
+			frappe.set_user(ADMIN)
+		doc.reload()
+		self.assertEqual(doc.items[0].valuation_rate, 10)
+		self.assertEqual(doc.items[0].amount, 30)
 
 	def test_submit_with_all_rows_equal_raises_clear_message(self):
 		item = _make_test_item()
