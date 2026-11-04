@@ -486,18 +486,24 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	// Fire-and-forget drivers (RawBT) cannot report a connection: gray, never green.
+	printerStatusUnknown: {
+		type: Boolean,
+		default: false,
+	},
 });
 
 // Printer indicator: green when connected, red when disconnected.
 // Print-off keeps the neutral gray look since indicator isn't relevant then.
 const printerVariant = computed(() => {
-	if (!props.printEnabled) return "gray";
+	if (!props.printEnabled || props.printerStatusUnknown) return "gray";
 	return props.qzConnected ? "green" : "red";
 });
 
 const printerTitle = computed(() => {
 	if (props.printerConnecting) return __("Connecting printer…");
 	if (!props.printEnabled) return __("Printing off — click to open Settings");
+	if (props.printerStatusUnknown) return __("Printer: RawBT (status not checkable)");
 	return props.qzConnected
 		? __("Printer: Connected")
 		: __("Printer: Disconnected — click to connect");

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
 	clampFontScale,
+	DEVICE_CONFIG_EVENT,
 	loadDeviceConfig,
 	parseNumericField,
 	saveDeviceConfig,
@@ -654,5 +655,14 @@ describe("device config migration (corrupted delay 0 from v1)", () => {
 		expect(JSON.parse(localStorage.getItem("pos_imin_device_config"))._v).toBe(
 			2,
 		)
+	})
+
+	it("announces every save so open pages re-read the driver override", () => {
+		const seen = vi.fn()
+		window.addEventListener(DEVICE_CONFIG_EVENT, seen)
+		saveDeviceConfig({ driverOverride: "rawbt" })
+		window.removeEventListener(DEVICE_CONFIG_EVENT, seen)
+		expect(seen).toHaveBeenCalledTimes(1)
+		expect(loadDeviceConfig().driverOverride).toBe("rawbt")
 	})
 })

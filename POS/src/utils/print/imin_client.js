@@ -200,10 +200,16 @@ export function createIminDriver(deps = {}) {
 	const statusReplyMs = deps.statusReplyMs ?? STATUS_REPLY_TIMEOUT_MS
 	const sendTimeoutMs = deps.sendTimeoutMs ?? SEND_TIMEOUT_MS
 	const loadLogo = deps.loadLogo || defaultLoadLogo
+	const connectRetryMs = deps.connectRetryMs ?? 500
 	let printer = null
 	let connecting = null
 	let statusChain = Promise.resolve()
 	let printing = 0
+	// Why the last print through this driver failed; null after a good print.
+	// The status probe only proves the socket opens, which stayed green while
+	// prints failed — so a failed print keeps the status red until the next
+	// good print or an explicit reconnect (clearPrintFailure).
+	let lastPrintFailure = null
 
 	// The SDK auto-reconnects every 4s by replacing this.ws without re-sending
 	// initPrinter, and close() sets ws=null so send() throws in the gap.
@@ -342,13 +348,26 @@ export function createIminDriver(deps = {}) {
 		return run
 	}
 
-	async function waitIdle(p) {
+	// Returns the printer to keep using: a status query that gets no reply means
+	// the socket died under the job (prod log: "status -1 after the receipt
+	// printed"), so reconnect ONCE and keep polling on the fresh socket instead
+	// of failing a receipt that already came out.
+	async function waitIdle(sheetPrinter) {
+		let p = sheetPrinter
 		const deadline = Date.now() + statusTimeoutMs
 		let faultSince = 0
+		let reconnected = false
 		for (;;) {
 			const status = await callStatus(p)
 			const code = Number(status?.value)
-			if (code === 0) return
+			if (code === 0) return p
+			if (status?.timedOut && !reconnected) {
+				reconnected = true
+				log.warn("no status reply mid-print, reconnecting")
+				dropPrinter(p)
+				p = await ensurePrinter()
+				continue
+			}
 			const fault = FAULT_MESSAGES[code]
 			faultSince = fault ? faultSince || Date.now() : 0
 			if (fault && Date.now() - faultSince >= faultConfirmMs)
@@ -364,16 +383,30 @@ export function createIminDriver(deps = {}) {
 	return {
 		id: "imin",
 
+		// One retry: prod logs show the service often refuses a single connect
+		// ("skipped imin (unavailable)") and answers the next one.
 		async isAvailable() {
-			try {
-				await ensurePrinter()
-				return true
-			} catch {
-				return false
+			for (let attempt = 0; attempt < 2; attempt++) {
+				try {
+					await ensurePrinter()
+					return true
+				} catch (err) {
+					log.warn("iMin connect failed", { attempt: attempt + 1, error: err?.message })
+					if (attempt === 0) await new Promise((r) => setTimeout(r, connectRetryMs))
+					else lastPrintFailure = err?.message || String(err)
+				}
 			}
+			return false
+		},
+
+		clearPrintFailure() {
+			lastPrintFailure = null
 		},
 
 		async getStatus() {
+			if (lastPrintFailure) {
+				return { ok: false, code: -1, message: lastPrintFailure, printFailed: true }
+			}
 			try {
 				const p = await ensurePrinter()
 				const status = await callStatus(p)
@@ -420,7 +453,12 @@ export function createIminDriver(deps = {}) {
 		async printHTML(html, opts = {}) {
 			printing++
 			try {
-				return await printSheets(html, opts)
+				const result = await printSheets(html, opts)
+				lastPrintFailure = null
+				return result
+			} catch (err) {
+				lastPrintFailure = err?.message || String(err)
+				throw err
 			} finally {
 				printing--
 			}
@@ -493,7 +531,7 @@ export function createIminDriver(deps = {}) {
 			crewSlipEnabled &&
 			(textMode ? true : Boolean(opts.crewHTML))
 
-		const p = await ensurePrinter()
+		let p = await ensurePrinter()
 		const tConnected = Date.now()
 		p.setPageFormat(pageFormatFor(paper, dots))
 
@@ -574,7 +612,11 @@ export function createIminDriver(deps = {}) {
 				p.printAndFeedPaper(feedDots)
 				if (cut) p.partialCut()
 
-				await waitIdle(p)
+				const live = await waitIdle(p)
+				if (live !== p) {
+					p = live
+					p.setPageFormat(pageFormatFor(paper, dots))
+				}
 
 				// Tear-off pause before the next SHEET (receipt or slip alike);
 				// never after the final one.

@@ -23,7 +23,8 @@
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
 				:print-enabled="!posSettingsStore.isPrintOff"
-				:qz-connected="activePrintDriver === 'rawbt' ? true : activePrintDriver === 'imin2' ? nativeReady : activePrintDriver === 'imin' ? iminReady : qzConnected"
+				:qz-connected="activePrintDriver === 'imin2' ? nativeReady : activePrintDriver === 'imin' ? iminReady : activePrintDriver === 'rawbt' ? false : qzConnected"
+				:printer-status-unknown="activePrintDriver === 'rawbt'"
 				:printer-connecting="printerReconnecting"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
@@ -1098,7 +1099,7 @@ import {
 } from "@/utils/printInvoice";
 import { printEODReport } from "@/utils/printEod";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
-import { loadDeviceConfig } from "@/utils/print/receipt_layout";
+import { DEVICE_CONFIG_EVENT, loadDeviceConfig } from "@/utils/print/receipt_layout";
 import { ensureIminSdk, getTransport } from "@/utils/print/transport";
 
 import { Button, Dialog, createResource } from "frappe-ui";
@@ -1139,17 +1140,24 @@ const draftsStore = usePOSDraftsStore();
 const posSettingsStore = usePOSSettingsStore();
 // The driver this till prints with: a per-device override set on the Direct
 // Print page (e.g. RawBT where the iMin service does not answer) beats the
-// POS Profile's driver. Read once per page load; printing itself re-reads it
-// per job, so only this header icon waits for a reload.
-const deviceDriverOverride = (() => {
+// POS Profile's driver. Re-read when Settings saves the device config, so the
+// header icon follows without a reload.
+function readDeviceDriverOverride() {
 	try {
 		return loadDeviceConfig().driverOverride || null;
 	} catch {
 		return null;
 	}
-})();
+}
+const deviceDriverOverride = ref(readDeviceDriverOverride());
+const syncDeviceDriverOverride = () => {
+	deviceDriverOverride.value = readDeviceDriverOverride();
+};
+if (typeof window !== "undefined") {
+	window.addEventListener(DEVICE_CONFIG_EVENT, syncDeviceDriverOverride);
+}
 const activePrintDriver = computed(
-	() => deviceDriverOverride || posSettingsStore.printDriver
+	() => deviceDriverOverride.value || posSettingsStore.printDriver
 );
 const packagesStore = usePOSPackagesStore();
 const itemStore = useItemSearchStore();
@@ -1410,6 +1418,9 @@ watch(
 onUnmounted(() => {
 	if (typeof document !== "undefined") {
 		document.removeEventListener("visibilitychange", handleIminVisibility);
+	}
+	if (typeof window !== "undefined") {
+		window.removeEventListener(DEVICE_CONFIG_EVENT, syncDeviceDriverOverride);
 	}
 	stopIminWarmup();
 	cleanup();
@@ -2974,6 +2985,8 @@ async function handlePrinterClick() {
 	}
 	try {
 		if (isImin) {
+			// A tap is the cashier asking for a fresh test: forget the last failed print.
+			getTransport().getDriver("imin")?.clearPrintFailure?.();
 			await probeImin();
 			ok = iminReady.value;
 		} else {
@@ -3794,6 +3807,9 @@ async function runPrintInvoice(invoiceData) {
 		} else {
 			uiStore.showError(__("Error"), __("Failed to print invoice"), reason);
 		}
+	} finally {
+		// The icon follows the print that just ran, not a 30 s old probe.
+		if (activePrintDriver.value === "imin") probeImin();
 	}
 }
 

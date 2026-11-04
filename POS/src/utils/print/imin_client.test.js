@@ -930,6 +930,54 @@ describe("createIminDriver", () => {
 			expect(s2).toEqual({ ok: true, code: 0 })
 		})
 
+		it("isAvailable retries a refused connect once", async () => {
+			const refused = makeFakePrinter({ connect: vi.fn().mockResolvedValue(false) })
+			const healthy = makeFakePrinter()
+			const factory = vi.fn().mockReturnValueOnce(refused).mockReturnValueOnce(healthy)
+			const d = createIminDriver({ factory, connectRetryMs: 0 })
+			expect(await d.isAvailable()).toBe(true)
+			expect(factory).toHaveBeenCalledTimes(2)
+		})
+
+		it("reconnects when status goes silent after the sheet printed, instead of failing", async () => {
+			const silent = makeFakePrinter({
+				getPrinterStatus: vi.fn(() => new Promise(() => {})),
+			})
+			const healthy = makeFakePrinter()
+			const factory = vi.fn().mockReturnValueOnce(silent).mockReturnValueOnce(healthy)
+			const d = createIminDriver({
+				factory,
+				statusReplyMs: 20,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			await d.printHTML("<div/>", {
+				render: async () => ({ dataURL: "x", width: 384 }),
+			})
+			expect(silent.close).toHaveBeenCalled()
+			expect(healthy.setPageFormat).toHaveBeenCalled()
+			expect(healthy.getPrinterStatus).toHaveBeenCalled()
+		})
+
+		it("getStatus stays not-ok after a failed print until a good print or clearPrintFailure", async () => {
+			const p = makeFakePrinter({
+				printSingleBitmap: vi
+					.fn()
+					.mockRejectedValueOnce(new Error("upload failed"))
+					.mockResolvedValue(1),
+			})
+			const d = createIminDriver({
+				factory: () => p,
+				loadConfig: () => ({ paper: "58mm", cut: false }),
+			})
+			const job = () => d.printHTML("<div/>", { render: async () => ({ dataURL: "x", width: 384 }) })
+			await expect(job()).rejects.toThrow("upload failed")
+			expect(await d.getStatus()).toMatchObject({ ok: false, message: "upload failed" })
+			d.clearPrintFailure()
+			expect((await d.getStatus()).ok).toBe(true)
+			await expect(job()).resolves.toBeTruthy()
+			expect((await d.getStatus()).ok).toBe(true)
+		})
+
 		it("deduplicates concurrent ensurePrinter calls so factory is called once", async () => {
 			const factory = vi.fn(() => makeFakePrinter())
 			const d = createIminDriver({

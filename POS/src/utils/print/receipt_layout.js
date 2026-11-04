@@ -51,6 +51,9 @@ export function loadDeviceConfig() {
 	}
 }
 
+/** Fired on window after saveDeviceConfig, so open pages pick up the change. */
+export const DEVICE_CONFIG_EVENT = "pos-device-config-changed"
+
 export function saveDeviceConfig(patch) {
 	const next = {
 		...loadDeviceConfig(),
@@ -58,6 +61,9 @@ export function saveDeviceConfig(patch) {
 		_v: DEVICE_CONFIG_VERSION,
 	}
 	localStorage.setItem(DEVICE_CONFIG_KEY, JSON.stringify(next))
+	if (typeof window !== "undefined") {
+		window.dispatchEvent(new Event(DEVICE_CONFIG_EVENT))
+	}
 	return next
 }
 
