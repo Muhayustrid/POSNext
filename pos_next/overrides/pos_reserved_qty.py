@@ -25,25 +25,39 @@ def patch_pos_reserved_qty(pos_invoice_module):
 
 	original = pos_invoice_module.get_pos_reserved_qty_from_table
 
-	def get_pos_reserved_qty_from_table(child_table, item_code, warehouse):
+	def get_pos_reserved_qty_from_table(child_table, *args):
 		if not frappe.get_meta("POS Invoice").has_field("posa_pos_opening_shift"):
-			return original(child_table, item_code, warehouse)
+			return original(child_table, *args)
 
 		p_inv = frappe.qb.DocType("POS Invoice")
 		p_item = frappe.qb.DocType(child_table)
-		qty_column = "qty" if child_table == "Packed Item" else "stock_qty"
-
-		reserved_qty = (
+		query = (
 			frappe.qb.from_(p_inv)
 			.from_(p_item)
-			.select(Sum(p_item[qty_column]).as_("stock_qty"))
 			.where(
 				(p_inv.name == p_item.parent)
 				& (IfNull(p_inv.consolidated_invoice, "") == "")
 				& (IfNull(p_inv.posa_pos_opening_shift, "") == "")
 				& (p_item.docstatus == 1)
-				& (p_item.item_code == item_code)
-				& (p_item.warehouse == warehouse)
+			)
+		)
+
+		# ERPNext version-16 since 2026-11 (44c675875d): (child_table, qty_column,
+		# item_codes, warehouses) -> rows of item_code, warehouse, qty
+		if len(args) == 3:
+			qty_column, item_codes, warehouses = args
+			return (
+				query.select(p_item.item_code, p_item.warehouse, Sum(p_item[qty_column]).as_("qty"))
+				.where(p_item.item_code.isin(list(item_codes)) & p_item.warehouse.isin(list(warehouses)))
+				.groupby(p_item.item_code, p_item.warehouse)
+			).run(as_dict=True)
+
+		# older ERPNext: (child_table, item_code, warehouse) -> scalar
+		item_code, warehouse = args
+		qty_column = "qty" if child_table == "Packed Item" else "stock_qty"
+		reserved_qty = (
+			query.select(Sum(p_item[qty_column]).as_("stock_qty")).where(
+				(p_item.item_code == item_code) & (p_item.warehouse == warehouse)
 			)
 		).run(as_dict=True)
 
