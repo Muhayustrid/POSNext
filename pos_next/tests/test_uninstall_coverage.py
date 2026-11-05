@@ -134,3 +134,8 @@ class TestUninstallCoverage(unittest.TestCase):
         with open(fixture_path, encoding="utf-8") as handle:
             names = {entry["role_name"] for entry in json.load(handle)}
         self.assertEqual(names, set(uninstall.UNINSTALL_FIXTURE_ROLES))
+
+    def test_reviewer_role_in_uninstall_fixture_roles(self):
+        from pos_next.outlet_monitoring_setup import REVIEWER_ROLE
+
+        self.assertIn(REVIEWER_ROLE, uninstall.UNINSTALL_FIXTURE_ROLES)

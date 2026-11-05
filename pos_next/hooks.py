@@ -99,7 +99,7 @@ jinja = {
 # Fixtures
 # --------
 fixtures = [
-	{"dt": "Role", "filters": [["role_name", "in", ["POSNext Cashier", "POSNext Manager", "POSNext Reject Approver"]]]},
+	{"dt": "Role", "filters": [["role_name", "in", ["POSNext Cashier", "POSNext Manager", "POSNext Reject Approver", "POSNext Monitoring Reviewer"]]]},
 	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier", "POSNext Manager"]]]},
 ]
 
@@ -146,15 +146,18 @@ override_doctype_class = {
 	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice",
 	"POS Invoice": "pos_next.overrides.sales_invoice.CustomPOSInvoice",
 	"Stock Reconciliation": "pos_next.overrides.stock_reconciliation.CustomStockReconciliation",
+	"File": "pos_next.overrides.file.CustomFile",
 }
 
 # Outlet users see only their POS Profile warehouse (HQ roles see everything).
 permission_query_conditions = {
 	"Stock Reconciliation": "pos_next.overrides.stock_reconciliation.get_permission_query_conditions",
+	"POS Monitoring Report": "pos_next.services.outlet_monitoring_access.get_permission_query_conditions",
 }
 
 has_permission = {
 	"Stock Reconciliation": "pos_next.overrides.stock_reconciliation.has_permission",
+	"POS Monitoring Report": "pos_next.services.outlet_monitoring_access.has_permission",
 }
 
 # Document Events
@@ -260,11 +263,13 @@ scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
 			"pos_next.tasks.auto_close_shifts.auto_close_expired_shifts",
+			"pos_next.tasks.outlet_monitoring.run_cron",
 		],
 	},
 	"daily": [
 		"pos_next.tasks.cleanup_expired_promotions.cleanup_expired_promotions",
 		"pos_next.tasks.reject_overdue.notify_overdue_drafts",
+		"pos_next.tasks.outlet_monitoring.run_daily",
 	],
 }
 

@@ -18,6 +18,7 @@ import os
 import frappe
 from frappe.utils import cint, now_datetime
 
+from pos_next.outlet_monitoring_setup import ensure_outlet_monitoring_setup
 from pos_next.price_group_ownership import (
 	ITEM_PRICE_OWNER_FIELD,
 	PRICE_LIST_OWNER_FIELD,
@@ -599,6 +600,7 @@ def after_install():
 		ensure_stock_opname_data_permissions(quiet=True)
 		ensure_reject_request_workflow(quiet=True)
 		ensure_reject_purposes()
+		ensure_outlet_monitoring_setup(quiet=True)
 		ensure_site_indexes()
 		register_default_log_clearing()
 
@@ -634,6 +636,7 @@ def after_migrate():
 		ensure_stock_opname_data_permissions(quiet=True)
 		ensure_reject_request_workflow(quiet=True)
 		ensure_reject_purposes()
+		ensure_outlet_monitoring_setup(quiet=True)
 		ensure_site_indexes()
 		register_default_log_clearing(quiet=True)
 

@@ -47,3 +47,4 @@ pos_next.patches.v2_33_0.shift_slots_to_shift_type
 pos_next.patches.v2_34_0.seed_opname_default_items
 pos_next.patches.v2_35_0.outlets_by_company
 pos_next.patches.v2_36_0.spend_custom_fields
+pos_next.patches.v2_36_0.outlet_monitoring_workspace

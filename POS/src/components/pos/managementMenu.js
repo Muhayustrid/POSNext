@@ -88,6 +88,14 @@ export const MANAGEMENT_MENU = [
 		group: "marketing",
 	},
 	{
+		id: "outlet-monitoring",
+		icon: "camera",
+		label: __("Outlet Monitoring"),
+		group: "system",
+		requiresOnline: true,
+		requiresOutletMonitoring: true,
+	},
+	{
 		id: "settings",
 		icon: "settings",
 		label: __("Settings"),

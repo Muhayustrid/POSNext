@@ -17,9 +17,12 @@ import frappe
 
 from pos_next.install import (
 	CUSTOM_FIELDS as INSTALL_CUSTOM_FIELDS,
+)
+from pos_next.install import (
 	MIRROR_NAME_PREFIX,
 	PRICE_GROUP_CUSTOM_FIELDS,
 )
+from pos_next.outlet_monitoring_setup import REVIEWER_ROLE
 from pos_next.price_group_ownership import (
 	ITEM_PRICE_OWNER_FIELD,
 	PRICE_LIST_OWNER_FIELD,
@@ -34,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Roles shipped by the app (hooks.py:fixtures) and their Custom DocPerms
 UNINSTALL_ROLES = ("POSNext Cashier", "POSNext Manager")
 # Every role in fixtures/role.json; UNINSTALL_ROLES stays the Custom DocPerm set
-UNINSTALL_FIXTURE_ROLES = (*UNINSTALL_ROLES, "POSNext Reject Approver")
+UNINSTALL_FIXTURE_ROLES = (*UNINSTALL_ROLES, "POSNext Reject Approver", REVIEWER_ROLE)
 UNINSTALL_WORKSPACES = ("POSNext",)
 UNINSTALL_WORKSPACE_SIDEBARS = ("POSNext",)
 # Workflows created by install.after_install / after_migrate (stock_opname_setup)

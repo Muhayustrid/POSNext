@@ -1,0 +1,282 @@
+{
+ "actions": [],
+ "autoname": "format:OMR-{YY}{MM}{DD}-{####}",
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "template",
+  "cadence",
+  "company",
+  "pos_profile",
+  "opening_shift",
+  "operational_date",
+  "due_at",
+  "submitted_at",
+  "submitted_by",
+  "timeliness",
+  "status",
+  "obligation_key",
+  "revision",
+  "correction_of",
+  "review_section",
+  "review_result",
+  "correction_requested",
+  "review_note",
+  "reviewed_by",
+  "reviewed_at",
+  "waive_reason",
+  "checkpoints_section",
+  "checkpoints",
+  "media_section",
+  "media"
+ ],
+ "fields": [
+  {
+   "fieldname": "template",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Template",
+   "options": "POS Monitoring Template",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cadence",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Cadence",
+   "options": "Per Shift\nPer Hari",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pos_profile",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "POS Profile",
+   "options": "POS Profile"
+  },
+  {
+   "fieldname": "opening_shift",
+   "fieldtype": "Link",
+   "label": "Opening Shift",
+   "options": "POS Opening Shift"
+  },
+  {
+   "fieldname": "operational_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Operational Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "due_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Due At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted At"
+  },
+  {
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "label": "Submitted By",
+   "options": "User"
+  },
+  {
+   "fieldname": "timeliness",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Timeliness",
+   "options": "\nOn Time\nLate"
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSubmitted\nReviewed\nMissed\nWaived",
+   "read_only": 1
+  },
+  {
+   "fieldname": "obligation_key",
+   "fieldtype": "Data",
+   "label": "Obligation Key",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "revision",
+   "fieldtype": "Int",
+   "label": "Revision",
+   "reqd": 1
+  },
+  {
+   "fieldname": "correction_of",
+   "fieldtype": "Link",
+   "label": "Correction Of",
+   "options": "POS Monitoring Report"
+  },
+  {
+   "fieldname": "review_section",
+   "fieldtype": "Section Break",
+   "label": "Review"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "review_result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Review Result",
+   "options": "\nPass\nFail",
+   "permlevel": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "0",
+   "fieldname": "correction_requested",
+   "fieldtype": "Check",
+   "label": "Correction Requested",
+   "permlevel": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "review_note",
+   "fieldtype": "Small Text",
+   "label": "Review Note",
+   "permlevel": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed By",
+   "options": "User",
+   "permlevel": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "reviewed_at",
+   "fieldtype": "Datetime",
+   "label": "Reviewed At",
+   "permlevel": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "waive_reason",
+   "fieldtype": "Small Text",
+   "label": "Waive Reason",
+   "permlevel": 1
+  },
+  {
+   "fieldname": "checkpoints_section",
+   "fieldtype": "Section Break",
+   "label": "Checkpoints"
+  },
+  {
+   "fieldname": "checkpoints",
+   "fieldtype": "Table",
+   "label": "Checkpoints",
+   "options": "POS Monitoring Report Checkpoint"
+  },
+  {
+   "fieldname": "media_section",
+   "fieldtype": "Section Break",
+   "label": "Media"
+  },
+  {
+   "fieldname": "media",
+   "fieldtype": "Table",
+   "label": "Media",
+   "options": "POS Monitoring Report Media"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Report",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "permlevel": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "permlevel": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "POSNext Monitoring Reviewer",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "POSNext Monitoring Reviewer",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "permlevel": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "POSNext Cashier",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "POSNext Cashier"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

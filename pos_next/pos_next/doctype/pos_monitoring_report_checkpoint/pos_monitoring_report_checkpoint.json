@@ -1,0 +1,132 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "checkpoint",
+  "checkpoint_name",
+  "category",
+  "instruction",
+  "media_type",
+  "min_count",
+  "max_count",
+  "video_max_seconds",
+  "required",
+  "pass_label",
+  "fail_label",
+  "na_label",
+  "evidence_complete",
+  "assessment",
+  "assessment_note"
+ ],
+ "fields": [
+  {
+   "fieldname": "checkpoint",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Checkpoint",
+   "options": "POS Monitoring Checkpoint"
+  },
+  {
+   "fieldname": "checkpoint_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Checkpoint Name"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "label": "Category",
+   "options": "POS Monitoring Category"
+  },
+  {
+   "fieldname": "instruction",
+   "fieldtype": "Small Text",
+   "label": "Instruction"
+  },
+  {
+   "fieldname": "media_type",
+   "fieldtype": "Select",
+   "label": "Media Type",
+   "options": "Photo\nVideo\nPhoto or Video"
+  },
+  {
+   "default": "1",
+   "fieldname": "min_count",
+   "fieldtype": "Int",
+   "label": "Min Count"
+  },
+  {
+   "default": "3",
+   "fieldname": "max_count",
+   "fieldtype": "Int",
+   "label": "Max Count"
+  },
+  {
+   "default": "0",
+   "fieldname": "video_max_seconds",
+   "fieldtype": "Int",
+   "label": "Video Max Seconds"
+  },
+  {
+   "default": "1",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Required"
+  },
+  {
+   "fieldname": "pass_label",
+   "fieldtype": "Data",
+   "label": "Pass Label"
+  },
+  {
+   "fieldname": "fail_label",
+   "fieldtype": "Data",
+   "label": "Fail Label"
+  },
+  {
+   "fieldname": "na_label",
+   "fieldtype": "Data",
+   "label": "N/A Label"
+  },
+  {
+   "default": "0",
+   "fieldname": "evidence_complete",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Evidence Complete",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "Pending",
+   "fieldname": "assessment",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Assessment",
+   "options": "Pending\nPass\nFail\nN/A",
+   "permlevel": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "assessment_note",
+   "fieldtype": "Small Text",
+   "label": "Assessment Note",
+   "permlevel": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Report Checkpoint",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

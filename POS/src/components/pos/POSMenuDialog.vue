@@ -60,6 +60,12 @@
 						>
 							<FeatherIcon :name="item.icon" class="w-5 h-5 shrink-0 text-gray-500" />
 							<span class="flex-1 truncate">{{ __(item.label) }}</span>
+							<span
+								v-if="item.badge > 0"
+								class="min-w-5 h-5 px-1.5 flex items-center justify-center text-[10px] font-bold rounded-full bg-orange-600 text-white shadow-sm"
+							>
+								{{ item.badge }}
+							</span>
 							<FeatherIcon name="chevron-right" class="w-5 h-5 shrink-0 text-gray-300" />
 						</button>
 					</template>
@@ -90,7 +96,13 @@
 							@click="selectItem(item.id)"
 						>
 							<FeatherIcon :name="item.icon" class="w-4 h-4 shrink-0" />
-							<span class="truncate">{{ __(item.label) }}</span>
+							<span class="truncate flex-1">{{ __(item.label) }}</span>
+							<span
+								v-if="item.badge > 0"
+								class="min-w-5 h-5 px-1.5 flex items-center justify-center text-[10px] font-bold rounded-full bg-orange-600 text-white shadow-sm"
+							>
+								{{ item.badge }}
+							</span>
 						</button>
 					</template>
 				</div>
@@ -228,6 +240,15 @@
 						v-bind="$attrs"
 						@update:model-value="closeIfHidden"
 					/>
+					<OutletMonitoringDialog
+						v-else-if="activeView === 'outlet-monitoring'"
+						embedded
+						:model-value="true"
+						:pos-profile="posProfile"
+						class="h-full"
+						v-bind="$attrs"
+						@update:model-value="closeIfHidden"
+					/>
 					</div>
 				</div>
 			</div>
@@ -250,6 +271,7 @@ import RejectRequestDialog from "@/components/pos/RejectRequestDialog.vue"
 import StockOpnameDialog from "@/components/pos/StockOpnameDialog.vue"
 import PurchaseOrderDialog from "@/components/purchase/PurchaseOrderDialog.vue"
 import PurchaseReceiptDialog from "@/components/purchase/PurchaseReceiptDialog.vue"
+import OutletMonitoringDialog from "@/components/pos/OutletMonitoringDialog.vue"
 import RefundCodeView from "@/components/pos/RefundCodeView.vue"
 import SpendDialog from "@/components/spend/SpendDialog.vue"
 import CompanyPicker from "@/components/purchase/CompanyPicker.vue"
@@ -271,6 +293,9 @@ const props = defineProps({
 	canPurchaseOrder: { type: Boolean, default: false },
 	canProduction: { type: Boolean, default: false },
 	canStockOpname: { type: Boolean, default: false },
+	canOutletMonitoring: { type: Boolean, default: false },
+	monitoringBadgeCount: { type: Number, default: 0 },
+	showMenuBadge: { type: Boolean, default: true },
 	isManagement: { type: Boolean, default: false },
 	isOffline: { type: Boolean, default: false },
 })
@@ -296,9 +321,20 @@ const visibleItems = computed(() =>
 				(props.canPurchaseOrder && !props.isOffline)) &&
 			(!item.requiresStockOpname ||
 				(props.canStockOpname && !props.isOffline)) &&
+			(!item.requiresOutletMonitoring ||
+				(props.canOutletMonitoring && !props.isOffline)) &&
 			(!item.requiresManagement || (props.isManagement && !props.isOffline)) &&
 			(!item.requiresOnline || !props.isOffline),
-	),
+	).map((item) => {
+		if (item.id === "outlet-monitoring") {
+			const badge =
+				props.showMenuBadge && props.monitoringBadgeCount > 0
+					? props.monitoringBadgeCount
+					: 0
+			return { ...item, badge }
+		}
+		return item
+	}),
 )
 
 // Sidebar and the mobile menu list render items grouped (and ordered) by workflow.

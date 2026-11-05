@@ -109,6 +109,7 @@ def main(module_names, sync=False):
 	frappe.connect()
 	_disable_client_cache_persistence()
 	frappe.flags.in_test = True
+	frappe.conf.throttle_user_limit = 10000
 
 	if sync:
 		from frappe.model.sync import sync_for

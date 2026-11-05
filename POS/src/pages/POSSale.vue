@@ -26,6 +26,7 @@
 				:qz-connected="activePrintDriver === 'imin2' ? nativeReady : activePrintDriver === 'imin' ? iminReady : activePrintDriver === 'rawbt' ? false : qzConnected"
 				:printer-status-unknown="activePrintDriver === 'rawbt'"
 				:printer-connecting="printerReconnecting"
+				:menu-badge-count="monitoringBadgeCount"
 				@menu-click="openPOSMenu()"
 				@sync-click="handleSyncClick"
 				@printer-click="handlePrinterClick"
@@ -709,6 +710,8 @@
 				:can-purchase-order="canPurchaseOrder"
 				:can-production="canProduction"
 				:can-stock-opname="canStockOpname"
+				:can-outlet-monitoring="canOutletMonitoring"
+				:monitoring-badge-count="monitoringBadgeCount"
 				:is-management="Boolean(bootstrapStore.data?.is_management)"
 				:is-offline="offlineStore.isOffline"
 				@menu-selected="handlePOSMenuSelected"
@@ -1127,6 +1130,7 @@ import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
+import { useOutletMonitoringStore } from "@/stores/outletMonitoring";
 import { logger } from "@/utils/logger";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 import { acquireQueueNumber } from "@/utils/queue/queueNumber";
@@ -1138,6 +1142,7 @@ const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();
 const posSettingsStore = usePOSSettingsStore();
+const outletMonitoringStore = useOutletMonitoringStore();
 // The driver this till prints with: a per-device override set on the Direct
 // Print page (e.g. RawBT where the iMin service does not answer) beats the
 // POS Profile's driver. Re-read when Settings saves the device config, so the
@@ -1423,6 +1428,7 @@ onUnmounted(() => {
 		window.removeEventListener(DEVICE_CONFIG_EVENT, syncDeviceDriverOverride);
 	}
 	stopIminWarmup();
+	outletMonitoringStore.unbindRealtime();
 	cleanup();
 	stopActivityTracking();
 	qzDisconnect();
@@ -1433,6 +1439,11 @@ onUnmounted(() => {
 let cleanup = () => {};
 
 onMounted(async () => {
+	outletMonitoringStore.bindRealtime();
+	if (shiftStore.profileName) {
+		outletMonitoringStore.refresh(shiftStore.profileName);
+	}
+
 	// Window resize listeners (passive for better performance)
 	window.addEventListener("resize", handleWindowResize, { passive: true });
 
@@ -1702,6 +1713,7 @@ onMounted(async () => {
 				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 			draftsStore.updateDraftsCount(),
 			packagesStore.ensurePackagesFetched(shiftStore.profileName),
+			outletMonitoringStore.refresh(shiftStore.profileName),
 		]);
 
 		// Wait for settings (required for tax rules) + all background ops
@@ -2191,6 +2203,7 @@ async function handleShiftOpened() {
 			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 		draftsStore.updateDraftsCount(),
 		packagesStore.ensurePackagesFetched(shiftStore.profileName),
+		outletMonitoringStore.refresh(shiftStore.profileName),
 	]);
 
 	// Wait for settings (required for tax rules) + all background ops
@@ -3621,6 +3634,9 @@ function openPOSMenu(view = null) {
 	// pre-shell behavior of the old direct dialogs.
 	if (view === null && uiStore.isAnyDialogOpen) return;
 	posMenuInitialView.value = view;
+	if (shiftStore.profileName) {
+		outletMonitoringStore.refresh(shiftStore.profileName);
+	}
 	if (view === "invoices") {
 		// Same fresh-data contract as the old direct invoices path.
 		loadInvoiceHistoryData();
@@ -3653,6 +3669,15 @@ const canPurchaseOrder = computed(
 
 // Stock Opname (count sheet → HQ approval)
 const { hasPermission: canStockOpname } = usePermissionCheck("Stock Reconciliation", "create");
+
+// Outlet Monitoring (checklist / evidence)
+const { hasPermission: canWriteMonitoringReport } = usePermissionCheck("POS Monitoring Report", "write");
+const canOutletMonitoring = computed(
+	() => Boolean(outletMonitoringStore.enabled && canWriteMonitoringReport.value),
+);
+const monitoringBadgeCount = computed(() =>
+	outletMonitoringStore.config?.show_menu_badge ? outletMonitoringStore.count : 0,
+);
 
 // Stock moved on finish/close/cancel — refresh the catalog quietly; the
 // Production dialog already shows its own per-action toast.

@@ -4,11 +4,17 @@
 			<!-- Hamburger - opens the management menu shell (all sizes) -->
 			<button
 				type="button"
-				class="ms-1 h-11 w-11 self-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 transition-colors flex-shrink-0 touch-manipulation inline-flex items-center"
+				class="relative ms-1 h-11 w-11 self-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 transition-colors flex-shrink-0 touch-manipulation inline-flex items-center"
 				:aria-label="__('Open menu')"
 				@click="emit('menu-click')"
 			>
 				<FeatherIcon name="menu" class="w-5 h-5" />
+				<span
+					v-if="menuBadgeCount > 0"
+					class="absolute -top-1 -end-1 bg-orange-600 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shadow-md"
+				>
+					{{ menuBadgeCount }}
+				</span>
 			</button>
 
 			<!-- POS Icon - Aligned with Management Sidebar (64px) -->
@@ -490,6 +496,10 @@ const props = defineProps({
 	printerStatusUnknown: {
 		type: Boolean,
 		default: false,
+	},
+	menuBadgeCount: {
+		type: Number,
+		default: 0,
 	},
 });
 

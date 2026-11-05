@@ -1,0 +1,71 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "checkpoint_row",
+  "file_url",
+  "thumbnail_url",
+  "media_type",
+  "file_size",
+  "uploaded_at",
+  "purged"
+ ],
+ "fields": [
+  {
+   "fieldname": "checkpoint_row",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Checkpoint Row"
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "File URL"
+  },
+  {
+   "fieldname": "thumbnail_url",
+   "fieldtype": "Data",
+   "label": "Thumbnail URL"
+  },
+  {
+   "fieldname": "media_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Media Type",
+   "options": "Photo\nVideo"
+  },
+  {
+   "fieldname": "file_size",
+   "fieldtype": "Int",
+   "label": "File Size"
+  },
+  {
+   "fieldname": "uploaded_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Uploaded At"
+  },
+  {
+   "default": "0",
+   "fieldname": "purged",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Purged"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Report Media",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

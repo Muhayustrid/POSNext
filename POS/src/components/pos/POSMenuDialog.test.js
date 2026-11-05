@@ -79,6 +79,9 @@ const viewStubs = {
 		template: `<div data-testid="view-purchase-order" />`,
 	},
 	StockOpnameDialog: { template: `<div data-testid="view-stock-opname" />` },
+	OutletMonitoringDialog: {
+		template: `<div data-testid="view-outlet-monitoring" />`,
+	},
 };
 
 function mountShell(props = {}) {
@@ -107,12 +110,14 @@ function availableLabels(
 	canPurchaseOrder,
 	isOffline = false,
 	canStockOpname = false,
+	canOutletMonitoring = false,
 ) {
 	return MANAGEMENT_MENU.filter(
 		(i) =>
 			(!i.requiresProduction || (canProduction && !isOffline)) &&
 			(!i.requiresPurchaseOrder || (canPurchaseOrder && !isOffline)) &&
 			(!i.requiresStockOpname || (canStockOpname && !isOffline)) &&
+			(!i.requiresOutletMonitoring || (canOutletMonitoring && !isOffline)) &&
 			!i.requiresManagement &&
 			(!i.requiresOnline || !isOffline),
 	).map((i) => i.label);
@@ -329,6 +334,48 @@ describe("POSMenuDialog menu", () => {
 
 		wrapper = mountShell({ open: true, canStockOpname: true, isOffline: true });
 		expect(sidebarLabels(wrapper)).not.toContain("Stock Opname");
+		wrapper.unmount();
+	});
+
+	it("menu hides outlet-monitoring when offline or not permitted", () => {
+		let wrapper = mountShell({ open: true, canOutletMonitoring: false });
+		expect(sidebarLabels(wrapper)).not.toContain("Outlet Monitoring");
+		wrapper.unmount();
+
+		wrapper = mountShell({ open: true, canOutletMonitoring: true, isOffline: true });
+		expect(sidebarLabels(wrapper)).not.toContain("Outlet Monitoring");
+		wrapper.unmount();
+
+		wrapper = mountShell({ open: true, canOutletMonitoring: true, isOffline: false });
+		expect(sidebarLabels(wrapper)).toContain("Outlet Monitoring");
+		wrapper.unmount();
+	});
+
+	it("menu item shows badge only when show_menu_badge and count > 0", () => {
+		let wrapper = mountShell({
+			open: true,
+			canOutletMonitoring: true,
+			showMenuBadge: false,
+			monitoringBadgeCount: 3,
+		});
+		const sidebar = wrapper.find('[data-testid="pos-menu-sidebar"]');
+		const omButtonWithoutBadge = sidebar
+			.findAll("button")
+			.find((b) => b.text().includes("Outlet Monitoring"));
+		expect(omButtonWithoutBadge.text()).not.toContain("3");
+		wrapper.unmount();
+
+		wrapper = mountShell({
+			open: true,
+			canOutletMonitoring: true,
+			showMenuBadge: true,
+			monitoringBadgeCount: 3,
+		});
+		const sidebarWithBadge = wrapper.find('[data-testid="pos-menu-sidebar"]');
+		const omButtonWithBadge = sidebarWithBadge
+			.findAll("button")
+			.find((b) => b.text().includes("Outlet Monitoring"));
+		expect(omButtonWithBadge.text()).toContain("3");
 		wrapper.unmount();
 	});
 

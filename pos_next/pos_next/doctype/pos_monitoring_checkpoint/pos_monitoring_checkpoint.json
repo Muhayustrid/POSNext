@@ -1,0 +1,128 @@
+{
+ "actions": [],
+ "autoname": "field:checkpoint_name",
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "checkpoint_name",
+  "category",
+  "instruction",
+  "media_type",
+  "min_count",
+  "max_count",
+  "reference_image",
+  "video_max_seconds",
+  "disabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "checkpoint_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Checkpoint Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "POS Monitoring Category",
+   "reqd": 1
+  },
+  {
+   "fieldname": "instruction",
+   "fieldtype": "Small Text",
+   "label": "Instruction"
+  },
+  {
+   "default": "Photo",
+   "fieldname": "media_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Media Type",
+   "options": "Photo\nVideo\nPhoto or Video",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "min_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Min Count",
+   "reqd": 1
+  },
+  {
+   "default": "3",
+   "fieldname": "max_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Max Count",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_image",
+   "fieldtype": "Attach Image",
+   "label": "Reference Image"
+  },
+  {
+   "default": "0",
+   "description": "0 = use settings",
+   "fieldname": "video_max_seconds",
+   "fieldtype": "Int",
+   "label": "Video Max Seconds"
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Disabled"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Checkpoint",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "POSNext Monitoring Reviewer",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "POSNext Cashier"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

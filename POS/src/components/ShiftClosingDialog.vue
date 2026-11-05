@@ -51,6 +51,36 @@
 						</p>
 					</div>
 
+					<!-- Outlet Monitoring Warning -->
+					<div
+						v-if="unsubmittedMonitoringReports.length > 0"
+						data-testid="outlet-monitoring-warning"
+						class="rounded-lg bg-amber-50 border border-amber-300 p-3 flex flex-col gap-1.5"
+					>
+						<div class="flex items-center gap-2">
+							<FeatherIcon
+								name="alert-triangle"
+								class="w-5 h-5 text-amber-600 flex-shrink-0"
+							/>
+							<p class="text-xs md:text-sm text-amber-800 font-medium">
+								{{
+									__(
+										"{0} outlet monitoring report(s) not submitted for this shift",
+										[unsubmittedMonitoringReports.length]
+									)
+								}}
+							</p>
+						</div>
+						<ul class="text-xs text-amber-700 list-disc list-inside ps-7 space-y-0.5">
+							<li
+								v-for="rep in unsubmittedMonitoringReports"
+								:key="rep.name"
+							>
+								{{ rep.template || rep.name }}
+							</li>
+						</ul>
+					</div>
+
 					<!-- Printed drafts pending auto-submit (COR-BE-15): informational,
 					     one calm accent, no badges -->
 					<div
@@ -798,7 +828,8 @@ import { usePOSSyncStore } from "../stores/posSync"
 import { usePOSCartStore } from "../stores/posCart"
 import { printEODReport, downloadEodPDF } from "../utils/printEod"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
-import { serverErrorMessage } from "@/utils/apiWrapper"
+import { call, serverErrorMessage } from "@/utils/apiWrapper"
+import { useOutletMonitoringStore } from "../stores/outletMonitoring"
 
 const props = defineProps({
 	modelValue: {
@@ -816,7 +847,11 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(["update:modelValue", "shift-closed", "auto-close-failed"])
+const emit = defineEmits([
+	"update:modelValue",
+	"shift-closed",
+	"auto-close-failed",
+])
 
 const open = computed({
 	get: () => props.modelValue,
@@ -833,6 +868,8 @@ const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 const shiftStore = usePOSShiftStore()
 const syncStore = usePOSSyncStore()
 const cartStore = usePOSCartStore()
+const outletMonitoringStore = useOutletMonitoringStore()
+const unsubmittedMonitoringReports = ref([])
 
 // Closing must not race transactions that have not landed on the server yet:
 // pending offline invoices are missing from the expected amounts, and an
@@ -909,11 +946,31 @@ onMounted(async () => {
 	}
 })
 
+async function loadMonitoringWarnings() {
+	unsubmittedMonitoringReports.value = []
+	if (!props.openingShift) return
+	if (!outletMonitoringStore.enabled) return
+	if (!outletMonitoringStore.config?.warn_on_shift_close) return
+	try {
+		const res = await call("pos_next.api.outlet_monitoring.get_shift_tasks", {
+			opening_shift: props.openingShift,
+		})
+		if (Array.isArray(res?.items)) {
+			unsubmittedMonitoringReports.value = res.items
+		}
+	} catch {
+		unsubmittedMonitoringReports.value = []
+	}
+}
+
 async function loadClosingData() {
 	try {
 		errorMessage.value = "" // Clear any previous errors
 
 		await syncStore.updatePendingCount?.()
+
+		// Decouple monitoring warnings: fire without blocking closing data load
+		loadMonitoringWarnings()
 
 		const data = await closingDataResource.submit({
 			opening_shift: props.openingShift,
@@ -921,8 +978,8 @@ async function loadClosingData() {
 
 		// Make payment_reconciliation reactive
 		if (data.payment_reconciliation) {
-			data.payment_reconciliation = data.payment_reconciliation.map(
-				(payment) => reactive({ ...payment }),
+			data.payment_reconciliation = data.payment_reconciliation.map((payment) =>
+				reactive({ ...payment }),
 			)
 		}
 
@@ -975,8 +1032,11 @@ async function submitClosing() {
 		// Submit to server without counted amounts
 		const payload = {
 			...closingData.value,
-			payment_reconciliation: (closingData.value.payment_reconciliation || []).map(
-				({ closing_amount, closing_text, difference, _touched, ...rest }) => rest,
+			payment_reconciliation: (
+				closingData.value.payment_reconciliation || []
+			).map(
+				({ closing_amount, closing_text, difference, _touched, ...rest }) =>
+					rest,
 			),
 		}
 
@@ -1016,9 +1076,7 @@ async function submitClosing() {
 		errorMessage.value =
 			error?.messages?.join(" ") ||
 			error?.message ||
-			__(
-				"Failed to close shift. Please verify all amounts and try again.",
-			)
+			__("Failed to close shift. Please verify all amounts and try again.")
 		if (props.autoClose) {
 			emit("auto-close-failed", error)
 		}
@@ -1083,9 +1141,7 @@ function closeDialog() {
 }
 
 // UI State Computed Properties
-const shouldShowSummary = computed(
-	() => true,
-)
+const shouldShowSummary = computed(() => true)
 
 // Final state after "Close Shift" succeeded but the EOD print failed: the
 // shift IS closed, so show a compact panel instead of the reconciliation form.

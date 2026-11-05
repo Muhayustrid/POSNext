@@ -23,6 +23,27 @@ const submitClosingShift = vi.hoisted(() => ({
 	data: null,
 	error: null,
 }))
+const callMock = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
+const monitoringStoreRefs = vi.hoisted(() => ({
+	enabled: true,
+	config: { warn_on_shift_close: 1 },
+}))
+
+vi.mock("@/utils/apiWrapper", () => ({
+	call: (...args) => callMock(...args),
+	serverErrorMessage: (err) => err?.message || String(err),
+}))
+
+vi.mock("../stores/outletMonitoring", async () => {
+	const { defineStore } = await import("pinia")
+	const { computed } = await import("vue")
+	return {
+		useOutletMonitoringStore: defineStore("outletMonitoring", () => ({
+			enabled: computed(() => monitoringStoreRefs.enabled),
+			config: computed(() => monitoringStoreRefs.config),
+		})),
+	}
+})
 
 vi.mock("frappe-ui", async () => {
 	const { defineComponent } = await import("vue")
@@ -148,6 +169,26 @@ function mountDialog() {
 /** Open the dialog so the watch loads closing data (and closingData.pos_profile). */
 async function mountOpenDialog() {
 	const wrapper = mountDialog()
+	await wrapper.setProps({ modelValue: true })
+	await flushPromises()
+	return wrapper
+}
+
+async function mountOpenDialogWithSlots() {
+	const wrapper = mount(ShiftClosingDialog, {
+		props: { modelValue: false, openingShift: "POS-OPEN-0001" },
+		global: {
+			plugins: [createPinia()],
+			config: { globalProperties: { __: globalThis.__ } },
+			stubs: {
+				FrappeUIStub: {
+					template:
+						"<div><slot name='body-content' /><slot name='actions' /><slot /></div>",
+				},
+			},
+		},
+		shallow: true,
+	})
 	await wrapper.setProps({ modelValue: true })
 	await flushPromises()
 	return wrapper
@@ -521,5 +562,62 @@ describe("ShiftClosingDialog autoClose mode", () => {
 		expect(rendered.emitted("shift-closed")).toBeFalsy()
 		expect(rendered.emitted("auto-close-failed")).toBeTruthy()
 		expect(rendered.vm.open).toBe(true)
+	})
+
+	describe("ShiftClosingDialog outlet monitoring warning", () => {
+		it("shows outlet monitoring warning when shift has unsubmitted reports", async () => {
+			monitoringStoreRefs.enabled = true
+			monitoringStoreRefs.config = { warn_on_shift_close: 1 }
+			callMock.mockResolvedValueOnce({
+				items: [{ name: "OM-REP-001", template: "Daily Opening Check" }],
+			})
+
+			const wrapper = await mountOpenDialogWithSlots()
+			await flushPromises()
+
+			expect(callMock).toHaveBeenCalledWith(
+				"pos_next.api.outlet_monitoring.get_shift_tasks",
+				{ opening_shift: "POS-OPEN-0001" },
+			)
+			const warning = wrapper.find('[data-testid="outlet-monitoring-warning"]')
+			expect(warning.exists()).toBe(true)
+			expect(warning.text()).toContain(
+				"1 outlet monitoring report(s) not submitted for this shift",
+			)
+			expect(warning.text()).toContain("Daily Opening Check")
+		})
+
+		it("close button stays enabled while the warning is shown", async () => {
+			monitoringStoreRefs.enabled = true
+			monitoringStoreRefs.config = { warn_on_shift_close: 1 }
+			callMock.mockResolvedValueOnce({
+				items: [{ name: "OM-REP-001", template: "Daily Opening Check" }],
+			})
+
+			const wrapper = await mountOpenDialog()
+			await flushPromises()
+
+			expect(wrapper.vm.canSubmit).toBe(true)
+		})
+
+		it("hides warning when warn_on_shift_close is off or API fails", async () => {
+			monitoringStoreRefs.config = { warn_on_shift_close: 0 }
+			let wrapper = await mountOpenDialogWithSlots()
+			await flushPromises()
+			expect(
+				wrapper.find('[data-testid="outlet-monitoring-warning"]').exists(),
+			).toBe(false)
+			wrapper.unmount()
+
+			monitoringStoreRefs.config = { warn_on_shift_close: 1 }
+			callMock.mockRejectedValueOnce(new Error("Network error"))
+			wrapper = await mountOpenDialogWithSlots()
+			await flushPromises()
+			expect(
+				wrapper.find('[data-testid="outlet-monitoring-warning"]').exists(),
+			).toBe(false)
+			expect(wrapper.vm.errorMessage).toBe("")
+			wrapper.unmount()
+		})
 	})
 })

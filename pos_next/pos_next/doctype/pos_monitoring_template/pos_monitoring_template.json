@@ -1,0 +1,135 @@
+{
+ "actions": [],
+ "autoname": "field:template_name",
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "cadence",
+  "enabled",
+  "due_minutes_after_open",
+  "due_time",
+  "checkpoints_section",
+  "checkpoints",
+  "targets_section",
+  "companies",
+  "shift_types",
+  "pos_profiles"
+ ],
+ "fields": [
+  {
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "cadence",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Cadence",
+   "options": "Per Shift\nPer Hari",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "depends_on": "eval:doc.cadence=='Per Shift'",
+   "fieldname": "due_minutes_after_open",
+   "fieldtype": "Int",
+   "label": "Due Minutes After Open"
+  },
+  {
+   "depends_on": "eval:doc.cadence=='Per Hari'",
+   "fieldname": "due_time",
+   "fieldtype": "Time",
+   "label": "Due Time"
+  },
+  {
+   "fieldname": "checkpoints_section",
+   "fieldtype": "Section Break",
+   "label": "Checkpoints"
+  },
+  {
+   "fieldname": "checkpoints",
+   "fieldtype": "Table",
+   "label": "Checkpoints",
+   "options": "POS Monitoring Template Checkpoint",
+   "reqd": 1
+  },
+  {
+   "fieldname": "targets_section",
+   "fieldtype": "Section Break",
+   "label": "Targets"
+  },
+  {
+   "fieldname": "companies",
+   "fieldtype": "Table",
+   "label": "Companies",
+   "options": "POS Monitoring Template Company"
+  },
+  {
+   "fieldname": "shift_types",
+   "fieldtype": "Table",
+   "label": "Shift Types",
+   "options": "POS Monitoring Template Shift Type"
+  },
+  {
+   "fieldname": "pos_profiles",
+   "fieldtype": "Table",
+   "label": "POS Profiles",
+   "options": "POS Monitoring Template POS Profile"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "POSNext Monitoring Reviewer",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "POSNext Cashier"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

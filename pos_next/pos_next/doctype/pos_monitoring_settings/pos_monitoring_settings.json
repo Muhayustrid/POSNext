@@ -1,0 +1,270 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "assessment_section",
+  "default_pass_label",
+  "default_fail_label",
+  "default_na_label",
+  "allow_na",
+  "require_note_on_fail",
+  "require_note_on_na",
+  "prevent_self_review",
+  "allow_correction",
+  "max_revisions",
+  "timing_section",
+  "allow_late_submission",
+  "shift_missed_grace_hours",
+  "day_missed_next_day_time",
+  "photo_section",
+  "photo_max_edge",
+  "thumbnail_max_edge",
+  "photo_quality",
+  "photo_max_mb",
+  "video_section",
+  "video_max_mb",
+  "video_max_seconds",
+  "allow_webm",
+  "retention_section",
+  "media_retention_days",
+  "notifications_section",
+  "show_menu_badge",
+  "warn_on_shift_close",
+  "notify_reviewers_on_submit",
+  "notify_reporter_on_review",
+  "gallery_section",
+  "gallery_page_size",
+  "gallery_default_period"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "assessment_section",
+   "fieldtype": "Section Break",
+   "label": "Assessment"
+  },
+  {
+   "default": "Sesuai SOP",
+   "fieldname": "default_pass_label",
+   "fieldtype": "Data",
+   "label": "Default Pass Label"
+  },
+  {
+   "default": "Tidak Sesuai SOP",
+   "fieldname": "default_fail_label",
+   "fieldtype": "Data",
+   "label": "Default Fail Label"
+  },
+  {
+   "default": "Tidak Berlaku",
+   "fieldname": "default_na_label",
+   "fieldtype": "Data",
+   "label": "Default N/A Label"
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_na",
+   "fieldtype": "Check",
+   "label": "Allow N/A"
+  },
+  {
+   "default": "1",
+   "fieldname": "require_note_on_fail",
+   "fieldtype": "Check",
+   "label": "Require Note on Fail"
+  },
+  {
+   "default": "1",
+   "fieldname": "require_note_on_na",
+   "fieldtype": "Check",
+   "label": "Require Note on N/A"
+  },
+  {
+   "default": "1",
+   "fieldname": "prevent_self_review",
+   "fieldtype": "Check",
+   "label": "Prevent Self Review"
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_correction",
+   "fieldtype": "Check",
+   "label": "Allow Correction"
+  },
+  {
+   "default": "3",
+   "fieldname": "max_revisions",
+   "fieldtype": "Int",
+   "label": "Max Revisions"
+  },
+  {
+   "fieldname": "timing_section",
+   "fieldtype": "Section Break",
+   "label": "Timing"
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_late_submission",
+   "fieldtype": "Check",
+   "label": "Allow Late Submission"
+  },
+  {
+   "default": "12",
+   "fieldname": "shift_missed_grace_hours",
+   "fieldtype": "Int",
+   "label": "Shift Missed Grace Hours"
+  },
+  {
+   "default": "02:00:00",
+   "fieldname": "day_missed_next_day_time",
+   "fieldtype": "Time",
+   "label": "Day Missed Next Day Time"
+  },
+  {
+   "fieldname": "photo_section",
+   "fieldtype": "Section Break",
+   "label": "Photo"
+  },
+  {
+   "default": "1600",
+   "fieldname": "photo_max_edge",
+   "fieldtype": "Int",
+   "label": "Photo Max Edge"
+  },
+  {
+   "default": "400",
+   "fieldname": "thumbnail_max_edge",
+   "fieldtype": "Int",
+   "label": "Thumbnail Max Edge"
+  },
+  {
+   "default": "80",
+   "fieldname": "photo_quality",
+   "fieldtype": "Percent",
+   "label": "Photo Quality"
+  },
+  {
+   "default": "5",
+   "fieldname": "photo_max_mb",
+   "fieldtype": "Float",
+   "label": "Photo Max MB"
+  },
+  {
+   "fieldname": "video_section",
+   "fieldtype": "Section Break",
+   "label": "Video"
+  },
+  {
+   "default": "20",
+   "fieldname": "video_max_mb",
+   "fieldtype": "Float",
+   "label": "Video Max MB"
+  },
+  {
+   "default": "30",
+   "fieldname": "video_max_seconds",
+   "fieldtype": "Int",
+   "label": "Video Max Seconds"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_webm",
+   "fieldtype": "Check",
+   "label": "Allow WebM"
+  },
+  {
+   "fieldname": "retention_section",
+   "fieldtype": "Section Break",
+   "label": "Retention"
+  },
+  {
+   "default": "90",
+   "fieldname": "media_retention_days",
+   "fieldtype": "Int",
+   "label": "Media Retention Days"
+  },
+  {
+   "fieldname": "notifications_section",
+   "fieldtype": "Section Break",
+   "label": "Notifications & Reminders"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_menu_badge",
+   "fieldtype": "Check",
+   "label": "Show Menu Badge"
+  },
+  {
+   "default": "1",
+   "fieldname": "warn_on_shift_close",
+   "fieldtype": "Check",
+   "label": "Warn on Shift Close"
+  },
+  {
+   "default": "1",
+   "fieldname": "notify_reviewers_on_submit",
+   "fieldtype": "Check",
+   "label": "Notify Reviewers on Submit"
+  },
+  {
+   "default": "1",
+   "fieldname": "notify_reporter_on_review",
+   "fieldtype": "Check",
+   "label": "Notify Reporter on Review"
+  },
+  {
+   "fieldname": "gallery_section",
+   "fieldtype": "Section Break",
+   "label": "Gallery"
+  },
+  {
+   "default": "40",
+   "fieldname": "gallery_page_size",
+   "fieldtype": "Int",
+   "label": "Gallery Page Size"
+  },
+  {
+   "fieldname": "gallery_default_period",
+   "fieldtype": "Select",
+   "label": "Gallery Default Period",
+   "options": "Today\nYesterday\nThis Week\nLast Week\nThis Month\nLast Month\nCustom"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "POSNext Monitoring Reviewer",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "POSNext Cashier"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
