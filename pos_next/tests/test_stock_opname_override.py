@@ -29,6 +29,7 @@ from frappe.model.document import Document, execute_action
 from frappe.model.workflow import apply_workflow
 from frappe.tests.utils import FrappeTestCase
 
+from pos_next.api.stock_opname import _confirm_counts
 from pos_next.api.test_production import _make_test_item, _seed_stock
 from pos_next.stock_opname_setup import (
 	STATE_APPROVED,
@@ -212,23 +213,24 @@ class TestStockOpnameOverride(FrappeTestCase):
 		)
 
 	def test_unchanged_uom_roundtrip_preserves_native_qty_and_rate(self):
-		item = _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": 3}])
+		item = _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": 4}])
 		_seed_stock(item, self.warehouse, 17)
 		doc = self._make_sr(self.warehouse, [(item, 10)])
 		doc.items[0].valuation_rate = 123.456789
 		doc.items[0].custom_uom = "Pack"
-		from frappe.utils import flt
-		doc.items[0].custom_qty_after = flt(10 / 3, 3)
+		# warehouse_app H1 rejects Qty After beyond field precision, so use an exact 10 / 4.
+		doc.items[0].custom_qty_after = 2.5
+		_confirm_counts(doc)  # warehouse_app count protection, as the outlet adapter does
 		doc.insert(ignore_permissions=True)
 		for _ in range(3):
 			doc.reload()
 			doc.save()
 			self.assertEqual(doc.items[0].qty, 10)
 			self.assertEqual(doc.items[0].valuation_rate, 123.456789)
-			self.assertEqual(doc.items[0].custom_conversion_factor, 3)
+			self.assertEqual(doc.items[0].custom_conversion_factor, 4)
 		doc.items[0].custom_qty_after = 4
 		doc.save()
-		self.assertEqual(doc.items[0].qty, 12)
+		self.assertEqual(doc.items[0].qty, 16)
 		self.assertEqual(doc.items[0].valuation_rate, 123.456789)
 
 	def test_draft_preserves_empty_per_uom_rate_and_native_valuation(self):
@@ -249,6 +251,7 @@ class TestStockOpnameOverride(FrappeTestCase):
 			}
 		)
 		self.addCleanup(self._delete_sr, None, doc)
+		_confirm_counts(doc)
 		doc.insert(ignore_permissions=True)
 		row = doc.items[0]
 		self.assertTrue(row.valuation_rate)

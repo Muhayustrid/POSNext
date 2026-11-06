@@ -1382,6 +1382,28 @@ describe("StockOpnameDialog item grid", () => {
 		expect(item.custom_qty_after).toBe(2)
 	})
 
+	it("sends an over-precise count unrounded and shows the server precision error", async () => {
+		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
+		mockCall(GET_URL, () =>
+			Promise.resolve({
+				...DRAFT_DOC,
+				items: [{ ...PLAIN_ITEM, custom_uom: "Pack", custom_qty_after: 2, uoms: [{ uom: "Pack", conversion_factor: 12 }] }],
+			}),
+		)
+		const serverText =
+			"Baris 1 (ITEM-A): Qty After 1.234 tidak dapat disimpan tepat pada presisi 2 desimal."
+		const saveCall = mockCall(SAVE_URL, () => Promise.reject({ messages: [serverText] }))
+		const wrapper = await mountOpenDialog()
+		await openSavedDoc(wrapper)
+		await wrapper.find('[data-testid="qty-input"]').setValue(1.234)
+		await wrapper.find('[data-testid="primary-action"]').trigger("click")
+		await flushPromises()
+		const item = saveCall.mock.calls[0][0].data.items[0]
+		expect(item.custom_qty_after).toBe(1.234)
+		expect(item).not.toHaveProperty("stock_uom")
+		expect(toasts.log).toContain(serverText)
+	})
+
 	it("a reloaded alt-UOM row can still switch UOM", async () => {
 		mockCall(LIST_URL, () => Promise.resolve([ROW_DRAFT]))
 		mockCall(GET_URL, () =>

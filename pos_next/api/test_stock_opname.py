@@ -1305,6 +1305,25 @@ class TestStockOpnameExcel(_StockOpnameFixture):
 		self.assertEqual(row["custom_qty_after"], 2)
 		self.assertEqual(row["qty"], 24)  # 2 Pack x 12
 
+	def test_import_pack_row_confirmed_new_and_existing_draft(self):
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
+
+		self._cashier()
+		result = import_opname_template(self.profile, self._attach([TEMPLATE_HEADER, [self.uom_item, "", "Pack", "", "", 2]]))
+		self.assertEqual((result["errors"], result["applied"]), ([], 1))
+		_doc, row, expected = _confirmed_row(result["name"], self.uom_item)
+		self.assertEqual((row.custom_qty_after, row.qty, row.custom_conversion_factor), (2, 24, 12))
+		self.assertEqual(row.custom_count_confirmation, expected)
+
+		self._cashier()
+		again = import_opname_template(
+			self.profile, self._attach([TEMPLATE_HEADER, [self.uom_item, "", "Pack", "", "", 3]]), name=result["name"]
+		)
+		self.assertEqual((again["name"], again["errors"], again["applied"]), (result["name"], [], 1))
+		_doc, row, expected = _confirmed_row(result["name"], self.uom_item)
+		self.assertEqual((row.custom_qty_after, row.qty, row.custom_conversion_factor), (3, 36, 12))
+		self.assertEqual(row.custom_count_confirmation, expected)
+
 	def test_import_rejects_unknown_uom_per_row(self):
 		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
 
@@ -1543,6 +1562,302 @@ class TestStockOpnameUom(_StockOpnameFixture):
 		row = frappe.get_doc(DOCTYPE, payload["name"]).items[0]
 		self.assertEqual(flt(row.custom_qty_before), 0)
 		self.assertEqual(flt(row.custom_qty_difference_per_uom), 0)
+
+
+def _confirmed_row(name, item_code):
+	"""Stored doc + row, and the fingerprint warehouse_app expects for that row now."""
+	from warehouse_app.sr_uom import count_confirmation, resolve_factors
+
+	frappe.set_user(ADMIN)
+	doc = frappe.get_doc(DOCTYPE, name)
+	row = next(r for r in doc.items if r.item_code == item_code)
+	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
+	factor = resolve_factors([(item_code, row.custom_uom, stock_uom)])[(item_code, row.custom_uom)]
+	expected = count_confirmation(
+		company=doc.company,
+		item_code=item_code,
+		warehouse=row.warehouse,
+		posting_date=doc.posting_date,
+		posting_time=doc.posting_time,
+		set_posting_time=doc.set_posting_time,
+		uom=row.custom_uom,
+		factor=factor,
+		batch_no=row.batch_no,
+	)
+	return doc, row, expected
+
+
+def _set_pack_factor(item_code, factor):
+	frappe.db.set_value("UOM Conversion Detail", {"parent": item_code, "uom": "Pack"}, "conversion_factor", factor)
+
+
+class TestStockOpnameCountConfirmation(_StockOpnameFixture):
+	"""warehouse_app SR count protection: the outlet adapter fingerprints custom-UOM rows.
+
+	Fresh items per test (Pack on a whole-number ``Nos`` stock UOM), so a
+	master factor change never leaks into another test.
+	"""
+
+	def tearDown(self):
+		frappe.set_user(ADMIN)
+		for name in frappe.get_all(DOCTYPE, {"docstatus": 1, "set_warehouse": self.warehouse}, pluck="name"):
+			frappe.get_doc(DOCTYPE, name).cancel()
+		super().tearDown()
+
+	def _pack_item(self, factor=12):
+		frappe.set_user(ADMIN)
+		return _make_test_item(uoms=[{"uom": "Pack", "conversion_factor": factor}])
+
+	def _save_pack(self, item, after, **extra):
+		from pos_next.api.stock_opname import save_opname
+
+		self._cashier()
+		row = {"item_code": item, "custom_uom": "Pack", "custom_qty_after": after}
+		row.update(extra.pop("row", {}))
+		return save_opname(self.profile, {"items": [row], **extra})
+
+	def _assert_count(self, name, item, after, qty, factor):
+		doc, row, expected = _confirmed_row(name, item)
+		self.assertEqual((row.custom_uom, row.custom_qty_after, row.qty, row.custom_conversion_factor), ("Pack", after, qty, factor))
+		self.assertTrue(row.custom_count_confirmation)
+		self.assertEqual(row.custom_count_confirmation, expected)
+		return doc, row
+
+	def test_save_new_pack_row_is_confirmed(self):
+		item = self._pack_item()
+		payload = self._save_pack(item, 2)
+		self._assert_count(payload["name"], item, 2, 24, 12)
+
+	def test_save_new_explicit_zero_stays_zero(self):
+		item = self._pack_item()
+		payload = self._save_pack(item, 0)
+		self._assert_count(payload["name"], item, 0, 0, 12)
+
+	def test_resave_existing_same_and_changed_count(self):
+		from pos_next.api.stock_opname import save_opname
+
+		item = self._pack_item()
+		first = self._save_pack(item, 2)
+		self._cashier()
+		same = save_opname(
+			self.profile,
+			{"name": first["name"], "modified": first["modified"], "items": [{"item_code": item, "custom_uom": "Pack", "custom_qty_after": 2}]},
+		)
+		self._assert_count(first["name"], item, 2, 24, 12)
+		self._cashier()
+		save_opname(
+			self.profile,
+			{"name": first["name"], "modified": same["modified"], "items": [{"item_code": item, "custom_uom": "Pack", "custom_qty_after": 3}]},
+		)
+		self._assert_count(first["name"], item, 3, 36, 12)
+
+	def test_submit_without_backdate_confirms_now_posting(self):
+		from pos_next.api.stock_opname import submit_opname
+
+		item = self._pack_item()
+		payload = self._save_pack(item, 2)
+		self._give_photos(payload["name"])
+		self._cashier()
+		result = submit_opname(self.profile, payload["name"])
+		self.assertEqual(result["workflow_state"], STATE_PENDING_SM)
+		doc, _row = self._assert_count(payload["name"], item, 2, 24, 12)
+		self.assertEqual(doc.set_posting_time, 1)
+		self.assertEqual(str(doc.posting_date), nowdate())
+
+	def test_submit_with_backdate_keeps_it_and_confirms(self):
+		from pos_next.api.stock_opname import submit_opname
+
+		item = self._pack_item()
+		yesterday = add_days(nowdate(), -1)
+		payload = self._save_pack(item, 2, posting_date=yesterday, posting_time="08:30:00")
+		self._give_photos(payload["name"])
+		self._cashier()
+		submit_opname(self.profile, payload["name"])
+		doc, _row = self._assert_count(payload["name"], item, 2, 24, 12)
+		self.assertEqual((str(doc.posting_date), get_time(doc.posting_time), doc.set_posting_time), (yesterday, get_time("08:30:00"), 1))
+
+	def _submitted(self, item, after):
+		from pos_next.api.stock_opname import submit_opname
+
+		payload = self._save_pack(item, after)
+		self._give_photos(payload["name"])
+		self._cashier()
+		submit_opname(self.profile, payload["name"])
+		return payload["name"]
+
+	def test_hq_never_reconfirms_after_factor_change(self):
+		item = self._pack_item(12)
+		name = self._submitted(item, 2)
+		_doc, row, _expected = _confirmed_row(name, item)
+		token = row.custom_count_confirmation
+		_set_pack_factor(item, 24)
+		frappe.set_user(self.stock_manager)
+		with self.assertRaisesRegex(frappe.ValidationError, "tidak cocok dengan konteks"):
+			apply_workflow(frappe.get_doc(DOCTYPE, name), "Approve")
+		frappe.set_user(ADMIN)
+		with self.assertRaisesRegex(frappe.ValidationError, "tidak cocok dengan konteks"):
+			frappe.get_doc(DOCTYPE, name).submit()
+		self.assertEqual(frappe.db.get_value("Stock Reconciliation Item", row.name, "custom_count_confirmation"), token)
+		self.assertEqual(frappe.db.get_value(DOCTYPE, name, ["workflow_state", "docstatus"]), (STATE_PENDING_SM, 0))
+
+	def test_final_submit_posts_ledger_after_x_factor(self):
+		# 1056-style evidence: 1056 Pack x 6 = 6336 Nos, seeded at basic_rate 10.
+		item = self._pack_item(6)
+		_seed_stock(item, self.warehouse, 100)
+		frappe.db.commit()
+		name = self._submitted(item, 1056)
+		frappe.set_user(self.stock_manager)
+		apply_workflow(frappe.get_doc(DOCTYPE, name), "Approve")  # -> Accounts Manager stage, no ledger yet
+		self.assertFalse(frappe.db.exists("Stock Ledger Entry", {"voucher_no": name}))
+		# Final approval submits; Administrator stands in for the single-role
+		# Accounts Manager, which has no Item read (see test_stock_opname_override).
+		frappe.set_user(ADMIN)
+		apply_workflow(frappe.get_doc(DOCTYPE, name), "Approve")
+		doc, _row = self._assert_count(name, item, 1056, 6336, 6)
+		self.assertEqual((doc.docstatus, doc.workflow_state), (1, STATE_APPROVED))
+		sle = frappe.get_all(
+			"Stock Ledger Entry",
+			{"voucher_no": name, "item_code": item, "is_cancelled": 0},
+			["qty_after_transaction", "valuation_rate", "stock_value", "actual_qty"],
+		)
+		self.assertEqual(len(sle), 1)
+		self.assertEqual((sle[0].qty_after_transaction, sle[0].valuation_rate, sle[0].stock_value), (6336, 10, 63360))
+
+	def test_after_beyond_precision_rejected_unrounded(self):
+		from pos_next.api.stock_opname import save_opname
+
+		item = self._pack_item()
+		with self.assertRaisesRegex(frappe.ValidationError, "tidak dapat disimpan tepat pada presisi"):
+			self._save_pack(item, 1.234)
+		frappe.set_user(ADMIN)
+		self.assertFalse(frappe.get_all(DOCTYPE, {"set_warehouse": self.warehouse}))
+		# on an existing draft the stored count stays as it was
+		draft = self._save_pack(item, 2)
+		self._cashier()
+		with self.assertRaisesRegex(frappe.ValidationError, "tidak dapat disimpan tepat pada presisi"):
+			save_opname(
+				self.profile,
+				{"name": draft["name"], "modified": draft["modified"], "items": [{"item_code": item, "custom_uom": "Pack", "custom_qty_after": 1.234}]},
+			)
+		self._assert_count(draft["name"], item, 2, 24, 12)
+
+	def test_row_stock_uom_and_extra_fields_do_not_change_factor(self):
+		from pos_next.api.stock_opname import _validated_rows
+
+		item = self._pack_item()
+		forged = {"stock_uom": "Pack", "custom_conversion_factor": 1, "conversion_factor": 1}
+		row = _validated_rows([{"item_code": item, "custom_uom": "Pack", "custom_qty_after": 2, **forged}], self.warehouse)[0]
+		self.assertFalse(set(forged) & set(row))
+		payload = self._save_pack(item, 2, row=forged)
+		self._assert_count(payload["name"], item, 2, 24, 12)
+
+	def test_blind_count_no_ledger_or_rate_and_no_compute_row(self):
+		from unittest import mock
+
+		from pos_next.api.stock_opname import get_opname
+
+		item = self._pack_item()
+		_seed_stock(item, self.warehouse, 7)
+		frappe.db.commit()
+		hidden = {
+			"current_qty", "current_valuation_rate", "current_amount", "valuation_rate", "amount",
+			"quantity_difference", "amount_difference", "custom_qty_before", "custom_qty_difference_per_uom",
+			"custom_valuation_rate_per_uom", "custom_count_confirmation", "custom_conversion_factor",
+		}
+		with mock.patch(
+			"warehouse_app.warehouse_app.stock_reconciliation.compute_row", side_effect=AssertionError("compute_row")
+		) as compute_row:
+			payload = self._save_pack(item, 2, row={"valuation_rate": 999, "custom_valuation_rate_per_uom": 999})
+			self._cashier()
+			got = get_opname(self.profile, payload["name"])
+		compute_row.assert_not_called()
+		for body in (payload, got):
+			self.assertFalse(hidden & set(body), body.keys())
+			self.assertFalse(hidden & set(body["items"][0]), body["items"][0].keys())
+		_doc, row = self._assert_count(payload["name"], item, 2, 24, 12)
+		self.assertNotEqual(row.valuation_rate, 999)
+		self.assertNotEqual(row.custom_valuation_rate_per_uom, 999)
+
+	def _rejected(self, item, after):
+		"""Outlet submits, HQ rejects through the active workflow."""
+		name = self._submitted(item, after)
+		frappe.set_user(self.stock_manager)
+		apply_workflow(frappe.get_doc(DOCTYPE, name), "Reject")
+		frappe.db.commit()
+		self.assertEqual(frappe.db.get_value(DOCTYPE, name, "workflow_state"), STATE_REJECTED)
+		return name
+
+	def _revise_by_save(self, name, item, after):
+		from pos_next.api.stock_opname import get_opname, save_opname
+
+		self._cashier()
+		fresh = get_opname(self.profile, name)
+		return save_opname(
+			self.profile,
+			{"name": name, "modified": fresh["modified"], "items": [{"item_code": item, "custom_uom": "Pack", "custom_qty_after": after}]},
+		)
+
+	def test_revise_rejected_normal_still_works(self):
+		item = self._pack_item(12)
+		name = self._rejected(item, 2)
+		self.assertEqual(self._revise_by_save(name, item, 3)["workflow_state"], STATE_DRAFT)
+		self._assert_count(name, item, 3, 36, 12)
+
+	def test_revise_rejected_by_save_after_factor_change(self):
+		item = self._pack_item(6)
+		name = self._rejected(item, 2)
+		_set_pack_factor(item, 12)
+		self.assertEqual(self._revise_by_save(name, item, 2)["workflow_state"], STATE_DRAFT)
+		self._assert_count(name, item, 2, 24, 12)
+
+	def test_revise_rejected_by_import_after_factor_change(self):
+		from frappe.utils.xlsxutils import make_xlsx
+
+		from pos_next.api.stock_opname import TEMPLATE_HEADER, import_opname_template
+
+		item = self._pack_item(6)
+		name = self._rejected(item, 2)
+		_set_pack_factor(item, 12)
+		self._cashier()
+		url = frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": f"so-{uuid.uuid4().hex[:8]}.xlsx",
+				"content": make_xlsx([TEMPLATE_HEADER, [item, "", "Pack", "", "", 2]], "opname").getvalue(),
+				"is_private": 1,
+			}
+		).insert(ignore_permissions=True).file_url
+		result = import_opname_template(self.profile, url, name=name)
+		self.assertEqual((result["name"], result["errors"]), (name, []))
+		self.assertEqual(frappe.db.get_value(DOCTYPE, name, "workflow_state"), STATE_DRAFT)
+		self._assert_count(name, item, 2, 24, 12)
+
+	def test_revise_rejected_by_action_after_factor_change(self):
+		from pos_next.api.stock_opname import submit_opname
+
+		item = self._pack_item(6)
+		name = self._rejected(item, 2)
+		_set_pack_factor(item, 12)
+		self._cashier()
+		self.assertEqual(submit_opname(self.profile, name, action="Revise")["workflow_state"], STATE_DRAFT)
+		self._assert_count(name, item, 2, 24, 12)
+
+	def test_without_warehouse_app_native_rows_save_and_custom_uom_rejected(self):
+		from unittest import mock
+
+		item = self._pack_item()
+		apps = [a for a in frappe.get_installed_apps() if a != "warehouse_app"]
+		with (
+			mock.patch.object(frappe, "get_installed_apps", return_value=apps),
+			mock.patch("warehouse_app.sr_uom.confirm_count_rows", side_effect=AssertionError("confirm")) as confirm,
+		):
+			payload = self._save_pack(item, 3, row={"custom_uom": "Nos"})
+			with self.assertRaisesRegex(frappe.ValidationError, "warehouse_app UOM fields"):
+				self._save_pack(item, 2)
+		confirm.assert_not_called()
+		frappe.set_user(ADMIN)
+		row = frappe.get_doc(DOCTYPE, payload["name"]).items[0]
+		self.assertEqual((row.qty, row.custom_uom or None), (3, None))
 
 
 class TestStockOpnameSystemQty(_StockOpnameFixture):

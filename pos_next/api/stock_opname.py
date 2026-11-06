@@ -468,6 +468,22 @@ def _validated_rows(items, warehouse, doc_name=None):
 	return rows
 
 
+def _confirm_counts(doc):
+	"""Fingerprint custom-UOM rows for warehouse_app SR count protection.
+
+	Call last, right before save/insert: the token covers company, row
+	warehouse/batch, UOM, master factor and the posting context. Outlet paths
+	only; HQ approval and the final submit must never re-confirm.
+	"""
+	if "warehouse_app" not in frappe.get_installed_apps():
+		return
+	if not frappe.get_meta("Stock Reconciliation Item").has_field("custom_count_confirmation"):
+		return
+	from warehouse_app.sr_uom import confirm_count_rows
+
+	confirm_count_rows(doc)
+
+
 def _payload(doc):
 	wf = _workflow()
 	flags = _state_flags(doc, wf, frappe.get_roles())
@@ -727,6 +743,10 @@ def save_opname(pos_profile, data):
 				back = _back_transition(wf, doc.workflow_state, roles)
 				if not back:
 					frappe.throw(_("You cannot revise this count"), ValidationError)
+				# apply_workflow re-validates the stored rows; a factor changed while
+				# returned (or a tokenless legacy doc) would block the outlet's revise.
+				_confirm_counts(doc)
+				doc.save()
 				apply_workflow(doc, back)
 				doc.reload()
 				_assert_doc_warehouse(doc, warehouse)
@@ -737,6 +757,7 @@ def save_opname(pos_profile, data):
 				doc.posting_date = posting_date
 				doc.posting_time = posting_time
 				doc.set_posting_time = 1
+			_confirm_counts(doc)
 			doc.save()
 			_prune_row_photos(doc)
 		else:
@@ -752,6 +773,7 @@ def save_opname(pos_profile, data):
 				doc.posting_date = posting_date
 				doc.posting_time = posting_time
 				doc.set_posting_time = 1
+			_confirm_counts(doc)
 			doc.insert()
 		return _payload(doc)
 	except (ValidationError, frappe.PermissionError):
@@ -810,6 +832,10 @@ def submit_opname(pos_profile, name, action=None):
 				doc.posting_date = nowdate()
 				doc.posting_time = nowtime()
 			doc.set_posting_time = 1
+			_confirm_counts(doc)
+			doc.save()
+		elif doc.workflow_state in _returned_states(wf):
+			_confirm_counts(doc)  # see save_opname: unblock the revise re-validation
 			doc.save()
 		apply_workflow(doc, action)
 		doc.reload()
@@ -1370,6 +1396,7 @@ def import_opname_template(pos_profile, file_url, name=None):
 			doc.set_warehouse = warehouse
 			for row in merged:
 				doc.append("items", row)
+			_confirm_counts(doc)
 			doc.insert()
 		else:
 			wf = _workflow()
@@ -1378,12 +1405,15 @@ def import_opname_template(pos_profile, file_url, name=None):
 				back = _back_transition(wf, target.workflow_state, roles)
 				if not back:
 					frappe.throw(_("You cannot revise this count"), ValidationError)
+				_confirm_counts(target)  # see save_opname: unblock the revise re-validation
+				target.save()
 				apply_workflow(target, back)
 				target.reload()
 				_assert_doc_warehouse(target, warehouse)
 			target.set("items", [])
 			for row in merged:
 				target.append("items", row)
+			_confirm_counts(target)
 			target.save()
 			doc = target
 		return {"name": doc.name, "applied": applied, "skipped": skipped, "errors": errors}
