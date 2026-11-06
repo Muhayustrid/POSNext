@@ -207,7 +207,10 @@ describe("OutletMonitoringDialog", () => {
 			await flushPromises()
 		}
 
-		const submitBtn = wrapper.find('[data-testid="submit-report-btn"]')
+		// Actions sit top-right in the report header, like Stock Opname / PO.
+		const submitBtn = wrapper.find(
+			'[data-testid="report-header"] [data-testid="submit-report-btn"]',
+		)
 		expect(submitBtn.exists()).toBe(true)
 		expect(submitBtn.attributes("disabled")).toBeDefined()
 	})

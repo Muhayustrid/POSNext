@@ -195,7 +195,7 @@
 			<!-- DOC VIEW (REPORT DETAIL) -->
 			<div v-else-if="currentView === 'doc'" class="mx-auto flex w-full max-w-4xl flex-col gap-5">
 				<!-- Header info -->
-				<div class="flex items-center justify-between border-b border-gray-200 pb-3">
+				<div data-testid="report-header" class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3">
 					<div class="flex items-center gap-3">
 						<button
 							type="button"
@@ -231,6 +231,25 @@
 						>
 							{{ __(activeReport.status) }}
 						</span>
+						<template v-if="activeReport?.status === 'Draft'">
+							<button
+								type="button"
+								class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation"
+								@click="currentView = 'list'"
+							>
+								{{ __("Cancel") }}
+							</button>
+							<Button
+								data-testid="submit-report-btn"
+								variant="solid"
+								:disabled="!isSubmittable"
+								:loading="submitting"
+								class="min-h-[44px] md:min-h-[40px] px-5 text-sm font-medium touch-manipulation"
+								@click="submitReport"
+							>
+								{{ __("Submit Report") }}
+							</Button>
+						</template>
 					</div>
 				</div>
 
@@ -377,32 +396,6 @@
 						</div>
 					</div>
 				</div>
-			</div>
-		</template>
-
-		<template #actions>
-			<div
-				v-if="currentView === 'doc' && activeReport?.status === 'Draft'"
-				class="flex items-center justify-end gap-3"
-			>
-				<button
-					type="button"
-					class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation"
-					@click="currentView = 'list'"
-				>
-					{{ __("Cancel") }}
-				</button>
-
-				<Button
-					data-testid="submit-report-btn"
-					variant="solid"
-					:disabled="!isSubmittable"
-					:loading="submitting"
-					class="min-h-[44px] md:min-h-[40px] px-5 text-sm font-medium touch-manipulation"
-					@click="submitReport"
-				>
-					{{ __("Submit Report") }}
-				</Button>
 			</div>
 		</template>
 	</DialogHost>

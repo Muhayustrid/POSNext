@@ -1,7 +1,8 @@
 /* Outlet Monitoring Gallery styles */
 
+/* Same horizontal inset as the filter bar (.page-form) so cards don't touch the sidebar. */
 .outlet-monitoring-gallery-container {
-	padding: 15px 0;
+	padding: var(--padding-md, 15px);
 }
 
 .outlet-gallery-grid {
