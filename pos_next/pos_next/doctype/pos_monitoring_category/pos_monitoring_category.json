@@ -7,9 +7,8 @@
  "field_order": [
   "category_name",
   "description",
-  "pass_label",
-  "fail_label",
-  "na_label",
+  "labels",
+  "cashier_can_label",
   "disabled"
  ],
  "fields": [
@@ -27,20 +26,16 @@
    "label": "Description"
   },
   {
-   "default": "Sesuai SOP",
-   "fieldname": "pass_label",
-   "fieldtype": "Data",
-   "label": "Pass Label"
+   "fieldname": "labels",
+   "fieldtype": "Table",
+   "label": "Labels",
+   "options": "POS Monitoring Label Item"
   },
   {
-   "fieldname": "fail_label",
-   "fieldtype": "Data",
-   "label": "Fail Label"
-  },
-  {
-   "fieldname": "na_label",
-   "fieldtype": "Data",
-   "label": "N/A Label"
+   "default": "0",
+   "fieldname": "cashier_can_label",
+   "fieldtype": "Check",
+   "label": "Cashier Can Label"
   },
   {
    "default": "0",

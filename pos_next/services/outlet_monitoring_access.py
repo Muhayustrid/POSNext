@@ -121,6 +121,8 @@ def has_permission(doc, ptype=None, user=None) -> bool:
 			return bool(profile and profile in cashier_profiles(user))
 		elif cadence == "Per Hari":
 			return True
+		elif cadence == "Manual":
+			return bool(profile and profile in cashier_profiles(user))
 		return False
 
 	if ptype == "create":

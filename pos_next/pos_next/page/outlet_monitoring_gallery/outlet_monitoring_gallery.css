@@ -110,6 +110,21 @@
 	color: #475569;
 }
 
+.gallery-card-badge.badge-blue {
+	background: #dbeafe;
+	color: #1d4ed8;
+}
+
+.gallery-card-badge.badge-yellow {
+	background: #fef9c3;
+	color: #854d0e;
+}
+
+.gallery-card-badge.badge-purple {
+	background: #f3e8ff;
+	color: #6b21a8;
+}
+
 .gallery-card-body {
 	padding: 12px;
 	display: flex;

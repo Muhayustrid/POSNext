@@ -13,6 +13,7 @@
   "max_count",
   "reference_image",
   "video_max_seconds",
+  "labels",
   "disabled"
  ],
  "fields": [
@@ -74,6 +75,13 @@
    "fieldname": "video_max_seconds",
    "fieldtype": "Int",
    "label": "Video Max Seconds"
+  },
+  {
+   "description": "Leave empty to use Category labels",
+   "fieldname": "labels",
+   "fieldtype": "Table",
+   "label": "Labels",
+   "options": "POS Monitoring Label Item"
   },
   {
    "default": "0",

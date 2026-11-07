@@ -5,8 +5,19 @@ frappe.ui.form.on("POS Monitoring Report", {
 	refresh(frm) {
 		render_media_preview(frm);
 		setup_review_buttons(frm);
+		setup_label_query(frm);
 	},
 });
+
+function setup_label_query(frm) {
+	// Reviewer label choices come from the row snapshot via a server query,
+	// which still lists labels that were disabled after the snapshot was taken
+	// (the standard Link search hides disabled labels).
+	frm.set_query("label", "checkpoints", (doc, cdt, cdn) => ({
+		query: "pos_next.api.outlet_monitoring_review.label_options_query",
+		filters: { report: doc.name, checkpoint_row: cdn },
+	}));
+}
 
 function is_reviewer() {
 	if (frappe.session.user === "Administrator") return true;

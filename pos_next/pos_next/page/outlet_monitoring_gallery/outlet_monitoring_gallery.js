@@ -100,13 +100,25 @@ class OutletMonitoringGallery {
 			change: () => this.reload(),
 		});
 
-		this.assessment_field = this.page.add_field({
-			fieldname: "assessment",
-			label: __("Assessment"),
+		this.label_field = this.page.add_field({
+			fieldname: "label",
+			label: __("Label"),
 			fieldtype: "Select",
-			options: ["", "Pass", "Fail", "Pending", "N/A"],
+			options: [""],
 			change: () => this.reload(),
 		});
+
+		// Label filter options come from the master, including disabled labels
+		// (old reports may carry them in their snapshot). No extra endpoint needed.
+		frappe.db
+			.get_list("POS Monitoring Label", { fields: ["name"], limit: 0 })
+			.then((labels) => {
+				if (!this.label_field) return;
+				this.label_field.df.options = [""].concat(
+					(labels || []).map((row) => row.name)
+				);
+				this.label_field.refresh();
+			});
 
 		this.media_type_field = this.page.add_field({
 			fieldname: "media_type",
@@ -213,8 +225,8 @@ class OutletMonitoringGallery {
 		const checkpoint = this.checkpoint_field?.get_value();
 		if (checkpoint) filters.checkpoint = checkpoint;
 
-		const assessment = this.assessment_field?.get_value();
-		if (assessment) filters.assessment = assessment;
+		const label = this.label_field?.get_value();
+		if (label) filters.label = label;
 
 		const media_type = this.media_type_field?.get_value();
 		if (media_type) filters.media_type = media_type;
@@ -285,8 +297,10 @@ class OutletMonitoringGallery {
 		const operationalDate = GALLERY_UTILS.escapeHtml(item.operational_date || "");
 		const uploadedAt = GALLERY_UTILS.escapeHtml(item.uploaded_at || "");
 		const submittedBy = GALLERY_UTILS.escapeHtml(item.submitted_by || "");
-		const assessment = GALLERY_UTILS.escapeHtml(item.assessment || "Pending");
-		const tone = GALLERY_UTILS.assessmentTone(item.assessment);
+		const labelText = item.label
+			? GALLERY_UTILS.escapeHtml(item.label)
+			: __("Not assessed");
+		const badgeClass = GALLERY_UTILS.labelBadgeClass(item.color);
 		const fileUrl = GALLERY_UTILS.escapeHtml(item.file_url || "");
 
 		let mediaEl = "";
@@ -312,7 +326,7 @@ class OutletMonitoringGallery {
 				<div class="gallery-dialog-meta p-2" style="background: #fafbfc; border-radius: 6px;">
 					<div class="d-flex justify-content-between align-items-center mb-2">
 						<h5 class="mb-0">${checkpointName}</h5>
-						<span class="gallery-card-badge badge-${tone}">${assessment}</span>
+						<span class="gallery-card-badge ${badgeClass}">${labelText}</span>
 					</div>
 					<table class="table table-sm table-borderless mb-0">
 						<tbody>

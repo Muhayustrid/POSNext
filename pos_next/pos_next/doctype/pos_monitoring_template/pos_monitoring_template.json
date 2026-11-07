@@ -10,12 +10,18 @@
   "enabled",
   "due_minutes_after_open",
   "due_time",
+  "submit_within_hours",
+  "open_after_minutes",
+  "open_time",
   "checkpoints_section",
   "checkpoints",
   "targets_section",
+  "company_scope",
   "companies",
-  "shift_types",
-  "pos_profiles"
+  "profile_scope",
+  "pos_profiles",
+  "shift_type_scope",
+  "shift_types"
  ],
  "fields": [
   {
@@ -32,7 +38,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Cadence",
-   "options": "Per Shift\nPer Hari",
+   "options": "Per Shift\nPer Hari\nManual",
    "reqd": 1
   },
   {
@@ -56,6 +62,24 @@
    "label": "Due Time"
   },
   {
+   "depends_on": "eval:doc.cadence=='Manual'",
+   "fieldname": "submit_within_hours",
+   "fieldtype": "Int",
+   "label": "Submit Within Hours"
+  },
+  {
+   "depends_on": "eval:doc.cadence=='Per Shift'",
+   "fieldname": "open_after_minutes",
+   "fieldtype": "Int",
+   "label": "Open After Minutes"
+  },
+  {
+   "depends_on": "eval:doc.cadence=='Per Hari'",
+   "fieldname": "open_time",
+   "fieldtype": "Time",
+   "label": "Open Time"
+  },
+  {
    "fieldname": "checkpoints_section",
    "fieldtype": "Section Break",
    "label": "Checkpoints"
@@ -73,22 +97,45 @@
    "label": "Targets"
   },
   {
+   "fieldname": "company_scope",
+   "fieldtype": "Select",
+   "label": "Company Scope",
+   "options": "All\nSelected"
+  },
+  {
+   "depends_on": "eval:doc.company_scope=='Selected'",
    "fieldname": "companies",
    "fieldtype": "Table",
    "label": "Companies",
    "options": "POS Monitoring Template Company"
   },
   {
-   "fieldname": "shift_types",
-   "fieldtype": "Table",
-   "label": "Shift Types",
-   "options": "POS Monitoring Template Shift Type"
+   "depends_on": "eval:doc.cadence=='Per Shift'||doc.cadence=='Manual'",
+   "fieldname": "profile_scope",
+   "fieldtype": "Select",
+   "label": "Profile Scope",
+   "options": "All\nSelected"
   },
   {
+   "depends_on": "eval:doc.profile_scope=='Selected'&&(doc.cadence=='Per Shift'||doc.cadence=='Manual')",
    "fieldname": "pos_profiles",
    "fieldtype": "Table",
    "label": "POS Profiles",
    "options": "POS Monitoring Template POS Profile"
+  },
+  {
+   "depends_on": "eval:doc.cadence=='Per Shift'||doc.cadence=='Manual'",
+   "fieldname": "shift_type_scope",
+   "fieldtype": "Select",
+   "label": "Shift Type Scope",
+   "options": "All\nSelected"
+  },
+  {
+   "depends_on": "eval:doc.shift_type_scope=='Selected'&&(doc.cadence=='Per Shift'||doc.cadence=='Manual')",
+   "fieldname": "shift_types",
+   "fieldtype": "Table",
+   "label": "Shift Types",
+   "options": "POS Monitoring Template Shift Type"
   }
  ],
  "index_web_pages_for_search": 1,

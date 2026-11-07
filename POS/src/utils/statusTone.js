@@ -8,6 +8,28 @@ export const STATUS_TONES = {
 	amber: "bg-amber-50 text-amber-700 ring-amber-600/20",
 	green: "bg-green-50 text-green-700 ring-green-600/20",
 	gray: "bg-gray-50 text-gray-600 ring-gray-500/20",
+	yellow: "bg-yellow-50 text-yellow-700 ring-yellow-600/20",
+	purple: "bg-purple-50 text-purple-700 ring-purple-600/20",
+}
+
+// Maps the POS Monitoring Label palette (server `color` values) to a tone key.
+// Snapshot colors always come from this fixed palette.
+export const LABEL_COLOR_TONES = {
+	Green: "green",
+	Red: "red",
+	Yellow: "yellow",
+	Orange: "orange",
+	Blue: "blue",
+	Gray: "gray",
+	Purple: "purple",
+}
+
+export function labelTone(color) {
+	return LABEL_COLOR_TONES[color] || "gray"
+}
+
+export function labelToneClass(color) {
+	return STATUS_TONES[labelTone(color)] || STATUS_TONES.gray
 }
 
 export function getStatusTone(state, flags = {}) {

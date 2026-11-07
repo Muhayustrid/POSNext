@@ -13,11 +13,11 @@
   "max_count",
   "video_max_seconds",
   "required",
-  "pass_label",
-  "fail_label",
-  "na_label",
+  "label_options",
+  "cashier_can_label",
+  "cashier_label",
   "evidence_complete",
-  "assessment",
+  "label",
   "assessment_note"
  ],
  "fields": [
@@ -77,19 +77,25 @@
    "label": "Required"
   },
   {
-   "fieldname": "pass_label",
-   "fieldtype": "Data",
-   "label": "Pass Label"
+   "fieldname": "label_options",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "label": "Label Options",
+   "read_only": 1
   },
   {
-   "fieldname": "fail_label",
-   "fieldtype": "Data",
-   "label": "Fail Label"
+   "default": "0",
+   "fieldname": "cashier_can_label",
+   "fieldtype": "Check",
+   "label": "Cashier Can Label",
+   "read_only": 1
   },
   {
-   "fieldname": "na_label",
-   "fieldtype": "Data",
-   "label": "N/A Label"
+   "fieldname": "cashier_label",
+   "fieldtype": "Link",
+   "label": "Cashier Label",
+   "options": "POS Monitoring Label",
+   "read_only": 1
   },
   {
    "default": "0",
@@ -101,12 +107,11 @@
   },
   {
    "allow_on_submit": 1,
-   "default": "Pending",
-   "fieldname": "assessment",
-   "fieldtype": "Select",
+   "fieldname": "label",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Assessment",
-   "options": "Pending\nPass\nFail\nN/A",
+   "label": "Label",
+   "options": "POS Monitoring Label",
    "permlevel": 1
   },
   {

@@ -9,6 +9,11 @@ from frappe.utils import cint
 
 class POSMonitoringCheckpoint(Document):
 	def validate(self):
+		seen = set()
+		for row in self.get("labels") or []:
+			if row.label in seen:
+				frappe.throw(_("Duplicate label {0} found").format(row.label), frappe.ValidationError)
+			seen.add(row.label)
 		if cint(self.min_count) < 1:
 			frappe.throw(_("Min count must be at least 1"), frappe.ValidationError)
 		if cint(self.max_count) < cint(self.min_count):

@@ -1,6 +1,7 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import json
 import os
 
 import frappe
@@ -9,17 +10,28 @@ from frappe.utils import (
 	add_to_date,
 	cint,
 	get_datetime,
+	getdate,
 	now_datetime,
+	today,
 )
 
 from pos_next.api.packages import _assert_profile_access
 from pos_next.services.outlet_monitoring import (
+	assert_report_open,
+	build_report,
 	client_config,
 	ensure_obligations,
 	get_settings,
+	label_color,
 	recompute_evidence,
 )
 from pos_next.services.outlet_monitoring_access import cashier_profiles
+from pos_next.services.outlet_monitoring_manual import (
+	manual_obligation_key,
+	manual_template_matches,
+	reference_candidates,
+	shipment_key,
+)
 from pos_next.services.outlet_monitoring_media import validate_media_file
 
 
@@ -75,6 +87,20 @@ def get_my_tasks(pos_profile: str) -> dict:
 		)
 		reports.extend(revisions)
 
+	# 4. Draft Manual reports for this pos_profile
+	if pos_profile:
+		manuals = frappe.get_all(
+			"POS Monitoring Report",
+			filters={
+				"cadence": "Manual",
+				"pos_profile": pos_profile,
+				"docstatus": 0,
+				"status": "Draft",
+			},
+			pluck="name",
+		)
+		reports.extend(manuals)
+
 	# De-duplicate while preserving order
 	unique_names = list(dict.fromkeys(reports))
 	now_dt = now_datetime()
@@ -95,6 +121,9 @@ def get_my_tasks(pos_profile: str) -> dict:
 			"pos_profile": doc.pos_profile,
 			"operational_date": str(doc.operational_date),
 			"due_at": str(doc.due_at),
+			"opens_at": str(doc.opens_at) if doc.opens_at else None,
+			"reference_doctype": doc.reference_doctype,
+			"reference_name": doc.reference_name,
 			"late": is_late,
 			"required_total": req_total,
 			"required_done": req_done,
@@ -106,6 +135,9 @@ def get_my_tasks(pos_profile: str) -> dict:
 		"config": client_config(),
 		"count": len(tasks),
 		"tasks": tasks,
+		# Site-local clock anchor: the SPA compares opens_at against this
+		# instead of the device clock (device timezone/skew cancel out).
+		"server_now": str(now_datetime()),
 	}
 
 
@@ -136,7 +168,7 @@ def get_history(pos_profile: str, start: int = 0, page_length: int = 20) -> dict
 			"template": doc.template,
 			"cadence": doc.cadence,
 			"status": doc.status,
-			"review_result": doc.review_result,
+			"reference_name": doc.reference_name,
 			"correction_requested": doc.correction_requested,
 			"review_note": doc.review_note,
 			"revision": doc.revision,
@@ -159,6 +191,10 @@ def get_report(name: str) -> dict:
 
 	checkpoints = []
 	for cp in doc.checkpoints:
+		try:
+			options = json.loads(cp.label_options or "[]")
+		except ValueError:
+			options = []
 		row = {
 			"name": cp.name,
 			"checkpoint": cp.checkpoint,
@@ -170,13 +206,14 @@ def get_report(name: str) -> dict:
 			"max_count": cp.max_count,
 			"video_max_seconds": cp.video_max_seconds,
 			"required": cp.required,
-			"pass_label": cp.pass_label,
-			"fail_label": cp.fail_label,
-			"na_label": cp.na_label,
+			"label_options": options,
+			"cashier_can_label": cp.cashier_can_label,
+			"cashier_label": cp.cashier_label,
 			"evidence_complete": cp.evidence_complete,
 		}
 		if is_reviewed:
-			row["assessment"] = cp.assessment
+			row["label"] = cp.label
+			row["label_color"] = label_color(cp.label_options, cp.label)
 			row["assessment_note"] = cp.assessment_note
 		checkpoints.append(row)
 
@@ -197,12 +234,47 @@ def get_report(name: str) -> dict:
 	data["checkpoints"] = checkpoints
 	data["media"] = media
 	if not is_reviewed:
-		data.pop("review_result", None)
 		data.pop("review_note", None)
 		data.pop("reviewed_by", None)
 		data.pop("reviewed_at", None)
 
 	return data
+
+
+@frappe.whitelist(methods=["POST"])
+def set_cashier_label(report: str, checkpoint_row: str, label: str | None = None) -> dict:
+	"""Set or clear the cashier-proposed label on a Draft report checkpoint (§4.3)."""
+	_check_enabled()
+	frappe.db.get_value("POS Monitoring Report", report, "name", for_update=True)
+	doc = frappe.get_doc("POS Monitoring Report", report)
+	frappe.has_permission("POS Monitoring Report", doc=doc, ptype="write", throw=True)
+
+	if doc.docstatus != 0 or doc.status != "Draft":
+		frappe.throw(_("Cashier label can only be set on draft reports"), frappe.ValidationError)
+
+	matching = [r for r in doc.checkpoints if r.name == checkpoint_row]
+	if not matching:
+		frappe.throw(_("Checkpoint row not found in report"), frappe.ValidationError)
+	cp_row = matching[0]
+
+	assert_report_open(doc)
+
+	if not cp_row.cashier_can_label:
+		frappe.throw(_("Cashier labelling is not allowed for this checkpoint"), frappe.ValidationError)
+
+	if label:
+		try:
+			options = json.loads(cp_row.label_options or "[]")
+		except ValueError:
+			options = []
+		if not any(isinstance(o, dict) and o.get("label") == label for o in options):
+			frappe.throw(_("Label {0} is not available for this checkpoint").format(label), frappe.ValidationError)
+
+	cp_row.cashier_label = label or None
+	doc.flags.internal_cashier_label_change = True
+	doc.flags.ignore_permissions = True
+	doc.save()
+	return get_report(doc.name)
 
 
 def _safe_cleanup_file(fname: str | None, current_user: str, report_name: str) -> None:
@@ -260,6 +332,8 @@ def register_media(report: str, checkpoint_row: str, file_name: str, thumbnail_f
 
 	if doc.docstatus != 0 or doc.status != "Draft":
 		frappe.throw(_("Cannot register media to non-draft report"), frappe.ValidationError)
+
+	assert_report_open(doc)
 
 	matching = [r for r in doc.checkpoints if r.name == checkpoint_row or r.checkpoint == checkpoint_row]
 	if not matching:
@@ -388,11 +462,16 @@ def remove_orphan_file(file_name: str) -> None:
 def submit_report(name: str) -> dict:
 	"""Validate evidence and submit report."""
 	_check_enabled()
-	doc = frappe.get_doc("POS Monitoring Report", name)
+	# for_update: a concurrent set_cashier_label holds this row lock, and the
+	# locked load also re-reads the checkpoint rows, so the prefill below always
+	# sees the setter's committed label instead of a pre-setter snapshot.
+	doc = frappe.get_doc("POS Monitoring Report", name, for_update=True)
 	frappe.has_permission("POS Monitoring Report", doc=doc, ptype="write", throw=True)
 
 	if doc.docstatus != 0 or doc.status != "Draft":
 		frappe.throw(_("Report is already submitted or closed"), frappe.ValidationError)
+
+	assert_report_open(doc)
 
 	recompute_evidence(doc)
 	stored_checkpoints = frappe.get_all(
@@ -414,6 +493,23 @@ def submit_report(name: str) -> dict:
 	is_late = bool(doc.due_at and now_dt > get_datetime(doc.due_at))
 	if is_late and not settings.allow_late_submission:
 		frappe.throw(_("Late submission is not allowed"), frappe.ValidationError)
+
+	# Prefill the final label from the cashier proposal (§4.4), inside the
+	# same submit transaction. Stored rows are re-read so a concurrent
+	# setter that committed first wins.
+	stored_labels = {
+		r.name: r.cashier_label
+		for r in frappe.get_all(
+			"POS Monitoring Report Checkpoint",
+			filters={"parent": doc.name},
+			fields=["name", "cashier_label"],
+		)
+	}
+	for cp in doc.checkpoints:
+		proposed = stored_labels.get(cp.name)
+		if proposed and not cp.label:
+			cp.label = proposed
+			cp.cashier_label = proposed
 
 	doc.submitted_at = now_dt
 	doc.submitted_by = frappe.session.user
@@ -469,6 +565,9 @@ def create_revision(name: str) -> dict:
 	new_doc.correction_of = old_doc.name
 	new_doc.obligation_key = old_doc.obligation_key
 
+	new_doc.reference_doctype = old_doc.reference_doctype
+	new_doc.reference_name = old_doc.reference_name
+
 	for cp in old_doc.checkpoints:
 		new_doc.append("checkpoints", {
 			"checkpoint": cp.checkpoint,
@@ -480,21 +579,105 @@ def create_revision(name: str) -> dict:
 			"max_count": cp.max_count,
 			"video_max_seconds": cp.video_max_seconds,
 			"required": cp.required,
-			"pass_label": cp.pass_label,
-			"fail_label": cp.fail_label,
-			"na_label": cp.na_label,
+			"label_options": cp.label_options,
+			"cashier_can_label": cp.cashier_can_label,
+			"cashier_label": None,
+			"label": None,
 			"evidence_complete": 0,
-			"assessment": "Pending",
+			"assessment_note": None,
 		})
 
 	new_doc.flags.ignore_permissions = True
+	new_doc.flags.internal_report_build = True
 	new_doc.insert()
 	return get_report(new_doc.name)
 
 
 @frappe.whitelist(methods=["GET", "POST"])
+def get_manual_templates(pos_profile: str) -> list[dict]:
+	"""List active Manual templates in scope for this profile (§4.8)."""
+	_check_enabled()
+	_assert_profile_access(pos_profile)
+	out = []
+	for t_name in frappe.get_all(
+		"POS Monitoring Template",
+		filters={"cadence": "Manual", "enabled": 1},
+		pluck="name",
+	):
+		t_doc = frappe.get_doc("POS Monitoring Template", t_name)
+		if manual_template_matches(t_doc, pos_profile):
+			out.append({"name": t_doc.name, "template_name": t_doc.template_name})
+	return out
+
+
+@frappe.whitelist(methods=["GET", "POST"])
+def get_reference_candidates(pos_profile: str, template: str, txt: str | None = None) -> list[dict]:
+	"""List unreported PR/DN references for a Manual template (§4.8)."""
+	_check_enabled()
+	_assert_profile_access(pos_profile)
+	t_doc = frappe.get_doc("POS Monitoring Template", template)
+	if t_doc.cadence != "Manual" or not t_doc.enabled:
+		frappe.throw(_("Template is not an active Manual template"), frappe.ValidationError)
+	if not manual_template_matches(t_doc, pos_profile):
+		frappe.throw(_("Template is out of scope for this profile"), frappe.ValidationError)
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if isinstance(txt, str):
+		txt = txt.strip()
+	return reference_candidates(company, t_doc.name, txt or None)
+
+
+@frappe.whitelist(methods=["POST"])
+def start_manual_report(
+	pos_profile: str, template: str, reference_doctype: str, reference_name: str
+) -> dict:
+	"""Start a Draft Manual report for one shipment document (§4.8)."""
+	_check_enabled()
+	_assert_profile_access(pos_profile)
+	t_doc = frappe.get_doc("POS Monitoring Template", template)
+	if t_doc.cadence != "Manual" or not t_doc.enabled:
+		frappe.throw(_("Template is not an active Manual template"), frappe.ValidationError)
+	if not manual_template_matches(t_doc, pos_profile):
+		frappe.throw(_("Template is out of scope for this profile"), frappe.ValidationError)
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	key_doctype, key_name = shipment_key(reference_doctype, reference_name, company)
+	ob_key = manual_obligation_key(t_doc.name, key_doctype, key_name)
+	if frappe.db.exists("POS Monitoring Report", {"obligation_key": ob_key, "revision": 1}):
+		frappe.throw(_("This document has already been reported"), frappe.DuplicateEntryError)
+
+	open_shift = frappe.db.get_value(
+		"POS Opening Shift", {"pos_profile": pos_profile, "status": "Open"}, "name"
+	)
+	report = build_report(
+		t_doc,
+		"Manual",
+		company=company,
+		pos_profile=pos_profile,
+		opening_shift=open_shift,
+		operational_date=getdate(today()),
+		opens_at=None,
+		due_at=add_to_date(now_datetime(), hours=cint(t_doc.submit_within_hours)),
+		obligation_key=ob_key,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+	)
+	try:
+		report.insert(ignore_permissions=True)
+	except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
+		frappe.throw(_("This document has already been reported"), frappe.ValidationError)
+	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+		# Concurrent double-start colliding on the naming-series lock: if the
+		# winner already committed, report the same friendly duplicate
+		# message; otherwise re-raise the transient error for a retry.
+		frappe.db.rollback()
+		if frappe.db.exists("POS Monitoring Report", {"obligation_key": ob_key, "revision": 1}):
+			frappe.throw(_("This document has already been reported"), frappe.ValidationError)
+		raise
+	return get_report(report.name)
+
+
+@frappe.whitelist(methods=["GET", "POST"])
 def get_shift_tasks(opening_shift: str) -> dict:
-	"""Fetch pending Per Shift tasks for closing shift warning."""
+	"""Fetch pending tasks for closing shift warning (Manual drafts included)."""
 	_check_enabled()
 	shift = frappe.get_doc("POS Opening Shift", opening_shift)
 	user = frappe.session.user

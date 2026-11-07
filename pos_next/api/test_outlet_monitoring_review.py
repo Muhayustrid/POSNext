@@ -12,6 +12,15 @@ from pos_next.api import outlet_monitoring as cashier_api
 from pos_next.api import outlet_monitoring_review as review_api
 from pos_next.services.outlet_monitoring import ensure_obligations, get_settings, obligation_key
 from pos_next.services.outlet_monitoring_access import REVIEWER_ROLE
+from pos_next.tests.outlet_monitoring_test_utils import (
+	delete_owned_files,
+	delete_owned_fixtures,
+	insert_owned_user,
+	owned_file_names,
+	owned_fixtures,
+	restore_settings_state,
+	snapshot_settings_state,
+)
 
 TINY_JPEG = (
 	b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00"
@@ -22,9 +31,20 @@ TINY_JPEG = (
 	b"\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9"
 )
 
+TINY_MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2mp41\x00\x00\x00\x08free"
+
+_RUN_ID = uuid.uuid4().hex[:6]
+# Run-unique fixtures: this suite only ever mutates records it created.
+LABEL_A = f"{_RUN_ID} Rev Label A"
+LABEL_B = f"{_RUN_ID} Rev Label B"
+REV_CATEGORY = f"{_RUN_ID} Rev Category"
+REV_CP_1 = f"{_RUN_ID} Rev CP 1"
+REV_CP_2 = f"{_RUN_ID} Rev CP 2"
+REV_TEMPLATE = f"{_RUN_ID} Rev Template"
+
 
 def _create_user(role, prefix="review-test", company=None):
-	email = f"{prefix}-{uuid.uuid4().hex[:8]}@example.com"
+	email = f"{_RUN_ID}-{prefix}-{uuid.uuid4().hex[:8]}@example.com"
 	was_in_import = frappe.flags.in_import
 	frappe.flags.in_import = True
 	try:
@@ -36,17 +56,10 @@ def _create_user(role, prefix="review-test", company=None):
 			"send_welcome_email": 0,
 		})
 		user.flags.no_welcome_mail = True
-		user.insert(ignore_permissions=True)
+		insert_owned_user(user, _RUN_ID, role)
 	finally:
 		frappe.flags.in_import = was_in_import
 
-	frappe.get_doc({
-		"doctype": "Has Role",
-		"parent": email,
-		"parenttype": "User",
-		"parentfield": "roles",
-		"role": role,
-	}).insert(ignore_permissions=True)
 
 	frappe.clear_cache(user=email)
 
@@ -70,7 +83,7 @@ def _setup_profile(company):
 			"company": company,
 		}).insert(ignore_permissions=True).name
 
-	pname = f"Rev-Prof-{uuid.uuid4().hex[:6]}"
+	pname = f"{_RUN_ID}-Rev-Prof-{uuid.uuid4().hex[:6]}"
 	prof = frappe.get_doc({
 		"doctype": "POS Profile",
 		"name": pname,
@@ -101,25 +114,165 @@ def _get_second_db():
 	return db2
 
 
+# Fixture doctypes this suite creates, with child tables for
+# dependency-order deletion (parents last). Labels use DB-only deletes:
+# POSMonitoringLabel.on_trash always rejects.
+_FIXTURE_DOCTYPES = (
+	"POS Monitoring Report",
+	"POS Monitoring Template",
+	"POS Monitoring Checkpoint",
+	"POS Monitoring Category",
+	"POS Monitoring Label",
+	"POS Opening Shift",
+	"POS Closing Shift",
+	"POS Profile",
+	"User Permission",
+	"User",
+)
+_FIXTURE_CHILDREN = {
+	"POS Monitoring Report": ("POS Monitoring Report Checkpoint", "POS Monitoring Report Media"),
+	"POS Monitoring Template": (
+		"POS Monitoring Template Checkpoint",
+		"POS Monitoring Template Company",
+		"POS Monitoring Template POS Profile",
+		"POS Monitoring Template Shift Type",
+	),
+	"POS Monitoring Checkpoint": ("POS Monitoring Label Item",),
+	"POS Monitoring Category": ("POS Monitoring Label Item",),
+	"POS Opening Shift": ("POS Opening Shift Detail",),
+	"POS Closing Shift": (
+		"POS Closing Shift Spend",
+		"Sales Invoice Reference",
+		"POS Closing Shift Detail",
+		"POS Closing Shift Taxes",
+		"POS Payment Entry Reference",
+	),
+	"POS Profile": (
+		"POS Profile User",
+		"POS Payment Method",
+		"POS Item Group",
+		"POS Customer Group",
+	),
+	"User": ("Has Role",),
+}
+
+
+def _snapshot_fixtures():
+	return {dt: set(frappe.get_all(dt, pluck="name")) for dt in _FIXTURE_DOCTYPES}
+
+
+# This suite's own name namespaces; a snapshot diff alone is not ownership.
+_FIXTURE_PREFIXES = {
+	"POS Monitoring Category": (f"{_RUN_ID} Rev Category",),
+	"POS Monitoring Checkpoint": (f"{_RUN_ID} Rev CP",),
+	"POS Monitoring Label": (f"{_RUN_ID} Rev Label",),
+	"POS Monitoring Template": (
+		f"{_RUN_ID} Rev Template",
+		f"{_RUN_ID} Tmpl-Rev-",
+		f"{_RUN_ID} Tmpl-Day-",
+		f"{_RUN_ID} Tmpl-FakeMedia-",
+	),
+	"POS Profile": (f"{_RUN_ID}-Rev-Prof-",),
+	"User": (f"{_RUN_ID}-rev-",),
+}
+_FIXTURE_LINKS = {
+	# Shift names come from the site naming series, so they are claimed through
+	# the POS Profile this suite created rather than by name.
+	"POS Opening Shift": (("pos_profile", "POS Profile"),),
+	"POS Closing Shift": (("pos_profile", "POS Profile"),),
+	"POS Monitoring Report": (("template", "POS Monitoring Template"),),
+	"User Permission": (("user", "User"),),
+}
+# Created once per class, so absent from a per-test snapshot but still ours.
+_ANCHORS = {"POS Monitoring Template": (REV_TEMPLATE,)}
+
+
+def _delete_new_fixtures(initial):
+	"""Delete owned fixtures, innermost children first."""
+	owned = owned_fixtures(initial, _FIXTURE_PREFIXES, _FIXTURE_LINKS, _RUN_ID)
+	delete_owned_fixtures(owned, _FIXTURE_CHILDREN, _FIXTURE_DOCTYPES)
+
+
+def _restore_settings_exact(state):
+	# Exact restore: every column of every Settings child row and the exact
+	# tabSingles rows, not a partial name/label/idx rebuild.
+	restore_settings_state(state)
+
+
+
+
 class TestOutletMonitoringReview(FrappeTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls._suite_initial_reports = set(frappe.get_all("POS Monitoring Report", pluck="name"))
-		cls._suite_settings = frappe.db.get_singles_dict("POS Monitoring Settings")
+		cls._suite_initial = _snapshot_fixtures()
+		cls._suite_state = snapshot_settings_state()
+		for lbl, color in ((LABEL_A, "Blue"), (LABEL_B, "Green")):
+			if not frappe.db.exists("POS Monitoring Label", lbl):
+				frappe.get_doc({
+					"doctype": "POS Monitoring Label",
+					"label_name": lbl,
+					"color": color,
+				}).insert(ignore_permissions=True)
+		if not frappe.db.exists("POS Monitoring Category", REV_CATEGORY):
+			frappe.get_doc({
+				"doctype": "POS Monitoring Category",
+				"category_name": REV_CATEGORY,
+				"labels": [{"label": LABEL_A}, {"label": LABEL_B}],
+			}).insert(ignore_permissions=True)
+		else:
+			cat = frappe.get_doc("POS Monitoring Category", REV_CATEGORY)
+			existing = {r.label for r in cat.labels}
+			changed = False
+			for lbl in (LABEL_A, LABEL_B):
+				if lbl not in existing:
+					cat.append("labels", {"label": lbl})
+					changed = True
+			if changed:
+				cat.save(ignore_permissions=True)
+		for cp in (REV_CP_1, REV_CP_2):
+			if not frappe.db.exists("POS Monitoring Checkpoint", cp):
+				frappe.get_doc({
+					"doctype": "POS Monitoring Checkpoint",
+					"checkpoint_name": cp,
+					"category": REV_CATEGORY,
+					"media_type": "Photo",
+					"min_count": 1,
+					"max_count": 2,
+				}).insert(ignore_permissions=True)
+		if not frappe.db.exists("POS Monitoring Template", REV_TEMPLATE):
+			frappe.get_doc({
+				"doctype": "POS Monitoring Template",
+				"template_name": REV_TEMPLATE,
+				"cadence": "Per Shift",
+				"due_minutes_after_open": 30,
+				"checkpoints": [
+					{"checkpoint": REV_CP_1, "required": 1},
+					{"checkpoint": REV_CP_2, "required": 1},
+				],
+			}).insert(ignore_permissions=True)
+		cls.company = "_Test Company"
+		if not frappe.db.exists("Company", cls.company):
+			frappe.get_doc({
+				"doctype": "Company",
+				"company_name": cls.company,
+				"default_currency": "IDR",
+			}).insert(ignore_permissions=True)
+		cls.profile = _setup_profile(cls.company)
+		cls.cashier = _create_user("POSNext Cashier", "rev-cashier")
+		cls.reviewer = _create_user(REVIEWER_ROLE, "rev-reviewer", company=cls.company)
+		pdoc = frappe.get_doc("POS Profile", cls.profile)
+		pdoc.append("applicable_for_users", {"user": cls.cashier})
+		pdoc.save(ignore_permissions=True)
+		frappe.db.commit()
 
 	@classmethod
 	def tearDownClass(cls):
 		frappe.set_user("Administrator")
-		current_reports = set(frappe.get_all("POS Monitoring Report", pluck="name"))
-		suite_created = current_reports - getattr(cls, "_suite_initial_reports", set())
-		if suite_created:
-			frappe.db.delete("POS Monitoring Report Media", {"parent": ["in", list(suite_created)]})
-			frappe.db.delete("POS Monitoring Report Checkpoint", {"parent": ["in", list(suite_created)]})
-			frappe.db.delete("POS Monitoring Report", {"name": ["in", list(suite_created)]})
-
-		frappe.db.delete("Singles", {"doctype": "POS Monitoring Settings"})
-		frappe.db.set_single_value("POS Monitoring Settings", cls._suite_settings, update_modified=False)
+		# Full-suite safety net: catches everything the per-test snapshot
+		# teardown may have missed.
+		_delete_new_fixtures(getattr(cls, "_suite_initial", {}))
+		_restore_settings_exact(cls._suite_state)
 		frappe.db.commit()
 		super().tearDownClass()
 
@@ -134,98 +287,93 @@ class TestOutletMonitoringReview(FrappeTestCase):
 			frappe.local.session.data = frappe._dict()
 
 		frappe.set_user("Administrator")
-		self._original_settings = frappe.db.get_singles_dict("POS Monitoring Settings")
+		self._original_state = snapshot_settings_state()
 		self.addCleanup(self._restore_settings)
-		self._test_initial_reports = set(frappe.get_all("POS Monitoring Report", pluck="name"))
-		self._test_initial_files = set(frappe.get_all("File", pluck="name"))
-		self.company = "_Test Company"
-		if not frappe.db.exists("Company", self.company):
-			frappe.get_doc({
-				"doctype": "Company",
-				"company_name": self.company,
-				"default_currency": "IDR",
-			}).insert(ignore_permissions=True)
-
-		self.profile = _setup_profile(self.company)
-		self.cashier = _create_user("POSNext Cashier", "rev-cashier")
-		self.reviewer = _create_user(REVIEWER_ROLE, "rev-reviewer", company=self.company)
-
-		# Assign cashier to profile
-		pdoc = frappe.get_doc("POS Profile", self.profile)
-		pdoc.append("applicable_for_users", {"user": self.cashier})
-		pdoc.save(ignore_permissions=True)
-
-		# Setup checkpoints
-		if not frappe.db.exists("POS Monitoring Category", "Rev Category"):
-			frappe.get_doc({
-				"doctype": "POS Monitoring Category",
-				"category_name": "Rev Category",
-			}).insert(ignore_permissions=True)
-
-		if not frappe.db.exists("POS Monitoring Checkpoint", "Rev CP 1"):
-			frappe.get_doc({
-				"doctype": "POS Monitoring Checkpoint",
-				"checkpoint_name": "Rev CP 1",
-				"category": "Rev Category",
-				"media_type": "Photo",
-				"min_count": 1,
-				"max_count": 2,
-			}).insert(ignore_permissions=True)
-
-		if not frappe.db.exists("POS Monitoring Checkpoint", "Rev CP 2"):
-			frappe.get_doc({
-				"doctype": "POS Monitoring Checkpoint",
-				"checkpoint_name": "Rev CP 2",
-				"category": "Rev Category",
-				"media_type": "Photo",
-				"min_count": 1,
-				"max_count": 2,
-			}).insert(ignore_permissions=True)
+		self._test_initial = _snapshot_fixtures()
+		self.company = self.__class__.company
+		self.profile = self.__class__.profile
+		self.cashier = self.__class__.cashier
+		self.reviewer = self.__class__.reviewer
 
 		# Enable settings
 		s = frappe.get_single("POS Monitoring Settings")
 		s.enabled = 1
-		s.allow_na = 1
-		s.require_note_on_fail = 1
-		s.require_note_on_na = 1
 		s.prevent_self_review = 1
 		s.notify_reviewers_on_submit = 1
 		s.notify_reporter_on_review = 1
 		s.save(ignore_permissions=True)
 
 	def _restore_settings(self):
-		frappe.set_user("Administrator")
-		frappe.db.delete("Singles", {"doctype": "POS Monitoring Settings"})
-		frappe.db.set_single_value("POS Monitoring Settings", self._original_settings, update_modified=False)
+		_restore_settings_exact(self._original_state)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
-		current_reports = set(frappe.get_all("POS Monitoring Report", pluck="name"))
-		new_reports = current_reports - getattr(self, "_test_initial_reports", set())
-		if new_reports:
-			frappe.db.delete("POS Monitoring Report Media", {"parent": ["in", list(new_reports)]})
-			frappe.db.delete("POS Monitoring Report Checkpoint", {"parent": ["in", list(new_reports)]})
-			frappe.db.delete("POS Monitoring Report", {"name": ["in", list(new_reports)]})
-
-		current_files = set(frappe.get_all("File", pluck="name"))
-		new_files = current_files - getattr(self, "_test_initial_files", set())
-		for fn in new_files:
-			try:
-				frappe.flags.internal_monitoring_delete = True
-				frappe.delete_doc("File", fn, force=True, ignore_permissions=True)
-			except Exception:
-				pass
-			finally:
-				frappe.flags.internal_monitoring_delete = False
+		# Reports and their files are claimed through the templates this suite
+		# owns, so no other writer's rows can be swept up here.
+		owned = owned_fixtures(
+			getattr(self, "_test_initial", {}), _FIXTURE_PREFIXES, _FIXTURE_LINKS, _RUN_ID, _ANCHORS
+		)
+		# Reports first: a File still referenced by a report media row is
+		# protected by the monitoring File guard and would leak as an orphan.
+		delete_owned_fixtures(owned, _FIXTURE_CHILDREN, _FIXTURE_DOCTYPES)
+		delete_owned_files(owned_file_names(owned.get("POS Monitoring Report")))
 		self._restore_settings()
 		frappe.db.commit()
 		super().tearDown()
 
+	def _make_report(self, docstatus=0, status="Draft", label=None, submitted_by=None):
+		"""Light report with a real label snapshot, no media/submit machinery."""
+		import json
+
+		from pos_next.services.outlet_monitoring import resolve_label_options
+
+		cp = frappe.get_doc("POS Monitoring Checkpoint", REV_CP_1)
+		options = resolve_label_options(cp)
+		doc = frappe.get_doc({
+			"doctype": "POS Monitoring Report",
+			"template": REV_TEMPLATE,
+			"cadence": "Per Shift",
+			"company": self.company,
+			"pos_profile": self.profile,
+			"operational_date": today(),
+			"due_at": now_datetime(),
+			"obligation_key": f"rev-key-{uuid.uuid4().hex[:8]}",
+			"revision": 1,
+			"status": status,
+			"docstatus": docstatus,
+			"submitted_by": submitted_by,
+			"checkpoints": [
+				{
+					"checkpoint": REV_CP_1,
+					"checkpoint_name": REV_CP_1,
+					"category": REV_CATEGORY,
+					"media_type": "Photo",
+					"min_count": 1,
+					"max_count": 2,
+					"required": 1,
+					"label_options": json.dumps(options),
+					"cashier_can_label": 0,
+					"label": label,
+				}
+			],
+		})
+		doc.flags.internal_report_build = True
+		doc.insert(ignore_permissions=True)
+		return doc
+
+	def _label_all_rows(self, rep, label=LABEL_A):
+		frappe.set_user("Administrator")
+		rep.reload()
+		for cp_row in rep.checkpoints:
+			cp_row.label = label
+		rep.save()
+		rep.reload()
+
 	def _create_submitted_report(self, checkpoints=None, cadence="Per Shift", submitter=None, pos_profile=None):
-		cps = checkpoints or ["Rev CP 1"]
+		cps = checkpoints or [REV_CP_1]
 		t = frappe.get_doc({
 			"doctype": "POS Monitoring Template",
-			"template_name": f"Tmpl-Rev-{uuid.uuid4().hex[:6]}",
+			"template_name": f"{_RUN_ID} Tmpl-Rev-{uuid.uuid4().hex[:6]}",
 			"cadence": cadence,
 			"enabled": 1,
 			"due_minutes_after_open": 30,
@@ -278,18 +426,254 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		rep.reload()
 		return rep
 
-	def test_reviewer_json_roundtrip_assessment_save(self):
+	def test_reviewer_partial_label_save_on_submitted(self):
+		rep = self._make_report(docstatus=1, status="Submitted")
+
+		# Partial save: one label set, the other row untouched.
+		frappe.set_user(self.reviewer)
+		doc = frappe.get_doc("POS Monitoring Report", rep.name)
+		doc.checkpoints[0].label = LABEL_A
+		doc.save()
+		self.assertEqual(doc.status, "Submitted")
+		doc.reload()
+		self.assertEqual(doc.checkpoints[0].label, LABEL_A)
+
+		# Clearing the label again is allowed.
+		doc.checkpoints[0].label = None
+		doc.save()
+		doc.reload()
+		self.assertFalse(doc.checkpoints[0].label)
+		frappe.set_user("Administrator")
+
+	def test_label_outside_options_rejected(self):
+		rep = self._make_report(docstatus=1, status="Submitted")
+
+		# Native save with an existing label that is not in this row's
+		# snapshot must fail.
+		frappe.set_user(self.reviewer)
+		doc = frappe.get_doc("POS Monitoring Report", rep.name)
+		doc.checkpoints[0].label = "Sesuai SOP"
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()
+		frappe.set_user("Administrator")
+
+		# finalize_review must fail the same way when the stored label is
+		# outside the snapshot (e.g. edited directly in the database).
+		rep.reload()
+		frappe.db.set_value(
+			"POS Monitoring Report Checkpoint", rep.checkpoints[0].name, "label", "Sesuai SOP"
+		)
+		frappe.set_user(self.reviewer)
+		with self.assertRaises(frappe.ValidationError):
+			review_api.finalize_review(rep.name)
+		frappe.set_user("Administrator")
+
+	def test_reviewed_transition_requires_all_labels_native_and_finalize(self):
+		# finalize_review without labels.
+		rep = self._make_report(docstatus=1, status="Submitted")
+		frappe.set_user(self.reviewer)
+		with self.assertRaises(frappe.ValidationError):
+			review_api.finalize_review(rep.name)
+
+		# Native transition without labels.
+		doc = frappe.get_doc("POS Monitoring Report", rep.name)
+		doc.status = "Reviewed"
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()
+		frappe.set_user("Administrator")
+
+		# Both paths succeed once every row carries a label.
+		rep2 = self._make_report(docstatus=1, status="Submitted")
+		self._label_all_rows(rep2)
+		frappe.set_user(self.reviewer)
+		res = review_api.finalize_review(rep2.name)
+		self.assertEqual(res["status"], "Reviewed")
+		frappe.set_user("Administrator")
+
+		rep3 = self._make_report(docstatus=1, status="Submitted")
+		self._label_all_rows(rep3)
+		frappe.set_user(self.reviewer)
+		doc3 = frappe.get_doc("POS Monitoring Report", rep3.name)
+		doc3.status = "Reviewed"
+		doc3.save()
+		self.assertEqual(doc3.status, "Reviewed")
+		frappe.set_user("Administrator")
+
+	def test_reviewed_and_waived_lock_label(self):
+		for final_status in ("Reviewed", "Waived"):
+			with self.subTest(final_status=final_status):
+				if final_status == "Reviewed":
+					rep = self._make_report(docstatus=1, status="Submitted")
+					self._label_all_rows(rep)
+					frappe.set_user(self.reviewer)
+					review_api.finalize_review(rep.name)
+				else:
+					rep = self._make_report(docstatus=1, status="Submitted")
+					frappe.set_user(self.reviewer)
+					review_api.waive(rep.name, "Renovation")
+				rep.reload()
+				self.assertEqual(rep.status, final_status)
+
+				doc = frappe.get_doc("POS Monitoring Report", rep.name)
+				doc.checkpoints[0].label = LABEL_B
+				with self.assertRaises(frappe.PermissionError):
+					doc.save()
+				doc.reload()
+				doc.checkpoints[0].assessment_note = "Changed after finalize"
+				with self.assertRaises(frappe.PermissionError):
+					doc.save()
+				frappe.set_user("Administrator")
+				rep.reload()
+				self.assertNotEqual(rep.checkpoints[0].label, LABEL_B)
+
+	def test_disabled_label_in_snapshot_still_selectable(self):
+		rep = self._make_report(docstatus=1, status="Submitted")
+		row = rep.checkpoints[0].name
+
+		frappe.set_user("Administrator")
+		frappe.db.set_value("POS Monitoring Label", LABEL_A, "disabled", 1)
+		self.addCleanup(frappe.db.set_value, "POS Monitoring Label", LABEL_A, "disabled", 0)
+
+		# The custom Link query still returns the disabled snapshot label.
+		frappe.set_user(self.reviewer)
+		res = review_api.label_options_query(
+			"POS Monitoring Report Checkpoint",
+			"",
+			"label",
+			0,
+			20,
+			filters={"report": rep.name, "checkpoint_row": row},
+		)
+		labels = [r[0] for r in res]
+		self.assertIn(LABEL_A, labels)
+
+		# And a reviewer can still save it natively.
+		doc = frappe.get_doc("POS Monitoring Report", rep.name)
+		doc.checkpoints[0].label = LABEL_A
+		doc.save()
+		doc.reload()
+		self.assertEqual(doc.checkpoints[0].label, LABEL_A)
+		frappe.set_user("Administrator")
+
+	def test_label_options_query_auth(self):
+		rep = self._make_report(docstatus=1, status="Submitted")
+		other = self._make_report(docstatus=1, status="Submitted")
+		row = rep.checkpoints[0].name
+
+		# Cashier is not a reviewer.
+		frappe.set_user(self.cashier)
+		with self.assertRaises(frappe.PermissionError):
+			review_api.label_options_query(
+				"POS Monitoring Report Checkpoint",
+				"",
+				"label",
+				0,
+				20,
+				filters={"report": rep.name, "checkpoint_row": row},
+			)
+
+		# Reviewer scoped to another company cannot query this report.
+		other_company = "_Test Company 1"
+		reviewer_other = _create_user(REVIEWER_ROLE, "rev-other-q", company=other_company)
+		frappe.set_user(reviewer_other)
+		with self.assertRaises(frappe.PermissionError):
+			review_api.label_options_query(
+				"POS Monitoring Report Checkpoint",
+				"",
+				"label",
+				0,
+				20,
+				filters={"report": rep.name, "checkpoint_row": row},
+			)
+
+		# Row of another report.
+		frappe.set_user(self.reviewer)
+		self.assertEqual(
+			review_api.label_options_query(
+				"POS Monitoring Report Checkpoint",
+				"",
+				"label",
+				0,
+				20,
+				filters={"report": rep.name, "checkpoint_row": other.checkpoints[0].name},
+			),
+			[],
+		)
+
+		# Unsaved Desk row.
+		self.assertEqual(
+			review_api.label_options_query(
+				"POS Monitoring Report Checkpoint",
+				"",
+				"label",
+				0,
+				20,
+				filters={"report": rep.name, "checkpoint_row": "new-pos-monitoring-report-checkpoint-1"},
+			),
+			[],
+		)
+		frappe.set_user("Administrator")
+
+	def test_finalize_notification_subject_without_result(self):
+		rep = self._make_report(
+			docstatus=1, status="Submitted", submitted_by=self.cashier
+		)
+		self._label_all_rows(rep)
+		frappe.db.delete("Notification Log", {"document_name": rep.name})
+
+		frappe.set_user(self.reviewer)
+		review_api.finalize_review(rep.name)
+		frappe.set_user("Administrator")
+
+		logs = frappe.get_all(
+			"Notification Log",
+			filters={"for_user": self.cashier, "document_name": rep.name},
+			fields=["subject"],
+		)
+		self.assertTrue(logs)
+		for log in logs:
+			self.assertEqual(log.subject, f"POS Monitoring Report reviewed: {rep.name}")
+			self.assertNotIn("(", log.subject)
+
+	def test_gallery_label_filter_and_color(self):
+		rep = self._create_submitted_report([REV_CP_1, REV_CP_2])
+		frappe.set_user("Administrator")
+		rep.reload()
+		rep.checkpoints[0].label = LABEL_A
+		rep.save()
+		rep.reload()
+
+		frappe.set_user(self.reviewer)
+		res = review_api.get_gallery()
+		items = [i for i in res["items"] if i["report"] == rep.name]
+		self.assertTrue(items)
+		first = [i for i in items if i["checkpoint_name"] == REV_CP_1]
+		second = [i for i in items if i["checkpoint_name"] == REV_CP_2]
+		self.assertTrue(first and second)
+		self.assertEqual(first[0]["label"], LABEL_A)
+		self.assertEqual(first[0]["color"], "Blue")
+		self.assertIsNone(second[0]["label"])
+		self.assertIsNone(second[0]["color"])
+
+		# Label filter replaces the old assessment filter.
+		res_a = review_api.get_gallery(filters={"label": LABEL_A})
+		self.assertIn(rep.name, [i["report"] for i in res_a["items"]])
+		res_b = review_api.get_gallery(filters={"label": LABEL_B})
+		self.assertNotIn(rep.name, [i["report"] for i in res_b["items"]])
+		frappe.set_user("Administrator")
+
+	def test_reviewer_json_roundtrip_label_save(self):
 		from frappe.client import save
 
-		rep = self._create_submitted_report()
+		rep = self._make_report(docstatus=1, status="Submitted")
 		frappe.db.set_value(rep.doctype, rep.name, "operational_date", today())
 		rep.reload()
 		payload = rep.as_dict()
-		payload["checkpoints"][0]["assessment"] = "Pass"
+		payload["checkpoints"][0]["label"] = LABEL_A
 		frappe.set_user(self.reviewer)
 		save(frappe.as_json(payload))
 		rep.reload()
-		self.assertEqual(rep.checkpoints[0].assessment, "Pass")
+		self.assertEqual(rep.checkpoints[0].label, LABEL_A)
 		from frappe.desk.form.save import savedocs
 
 		payload = rep.as_dict()
@@ -297,19 +681,20 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		savedocs(frappe.as_json(payload), "Update")
 		rep.reload()
 		self.assertEqual(rep.checkpoints[0].assessment_note, "Saved through Desk")
+		frappe.set_user("Administrator")
 
 	def test_native_finalize_ignores_client_review_attribution(self):
 		from frappe.client import save
 
 		for status in ("Reviewed", "Waived"):
 			with self.subTest(status=status):
-				rep = self._create_submitted_report()
+				rep = self._make_report(docstatus=1, status="Submitted")
 				frappe.set_user("Administrator")
 				rep.reload()
 				payload = rep.as_dict()
 				payload["status"] = status
 				payload["waive_reason"] = "Renovation"
-				payload["checkpoints"][0]["assessment"] = "Pass"
+				payload["checkpoints"][0]["label"] = LABEL_A
 				payload["reviewed_by"] = "Administrator"
 				payload["reviewed_at"] = "2020-01-01 00:00:00"
 				frappe.set_user(self.reviewer)
@@ -321,143 +706,24 @@ class TestOutletMonitoringReview(FrappeTestCase):
 				self.assertNotEqual(str(rep.reviewed_at)[:4], "2020")
 
 	def test_waived_report_locks_all_review_fields(self):
-		rep = self._create_submitted_report()
+		rep = self._make_report(docstatus=1, status="Submitted")
 		frappe.set_user(self.reviewer)
 		review_api.waive(rep.name, "Renovation")
-		for field, value in (("review_result", "Fail"), ("review_note", "changed"), ("correction_requested", 1), ("assessment", "Fail"), ("assessment_note", "changed")):
+		for field, value in (("correction_requested", 1), ("review_note", "changed"), ("label", LABEL_A), ("assessment_note", "changed")):
 			with self.subTest(field=field):
-				rep.reload()
-				if field.startswith("assessment"):
-					rep.checkpoints[0].set(field, value)
+				# Fresh object: the insert-time object carries
+				# flags.internal_report_build / ignore_permissions.
+				doc = frappe.get_doc("POS Monitoring Report", rep.name)
+				if field in ("label", "assessment_note"):
+					doc.checkpoints[0].set(field, value)
 				else:
-					rep.set(field, value)
+					doc.set(field, value)
 				with self.assertRaises(frappe.PermissionError):
-					rep.save()
-
-	def test_finalize_rejects_pending(self):
-		rep = self._create_submitted_report(["Rev CP 1", "Rev CP 2"])
-		# Checkpoints are currently Pending assessment
-		frappe.set_user(self.reviewer)
-		with self.assertRaises(frappe.ValidationError):
-			review_api.finalize_review(rep.name)
-
-	def test_finalize_requires_note_for_fail_and_na(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Fail"
-		rep.checkpoints[0].assessment_note = ""  # empty note
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		# Fail with empty note should throw
-		with self.assertRaises(frappe.ValidationError):
-			review_api.finalize_review(rep.name)
-
-		# NA with empty note should throw
-		frappe.set_user("Administrator")
-		rep.reload()
-		rep.checkpoints[0].assessment = "N/A"
-		rep.checkpoints[0].assessment_note = ""
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		with self.assertRaises(frappe.ValidationError):
-			review_api.finalize_review(rep.name)
-
-		# Note provided -> succeeds
-		frappe.set_user("Administrator")
-		rep.reload()
-		rep.checkpoints[0].assessment = "Fail"
-		rep.checkpoints[0].assessment_note = "Item out of standard"
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		res = review_api.finalize_review(rep.name)
-		self.assertEqual(res["status"], "Reviewed")
-		self.assertEqual(res["review_result"], "Fail")
-
-	def test_finalize_rejects_na_when_disallowed(self):
-		frappe.set_user("Administrator")
-		s = frappe.get_single("POS Monitoring Settings")
-		orig_allow_na = s.allow_na
-		self.addCleanup(frappe.db.set_value, "POS Monitoring Settings", None, "allow_na", orig_allow_na)
-		s.allow_na = 0
-		s.save(ignore_permissions=True)
-
-		rep = self._create_submitted_report(["Rev CP 1"])
-		rep.checkpoints[0].assessment = "N/A"
-		rep.checkpoints[0].assessment_note = "Not applicable"
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		with self.assertRaises(frappe.ValidationError):
-			review_api.finalize_review(rep.name)
-
-	def test_finalize_result_fail_if_any_fail(self):
-		rep = self._create_submitted_report(["Rev CP 1", "Rev CP 2"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.checkpoints[1].assessment = "Fail"
-		rep.checkpoints[1].assessment_note = "Broken"
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		res = review_api.finalize_review(rep.name)
-		self.assertEqual(res["review_result"], "Fail")
-
-		# If both pass -> Pass
-		rep2 = self._create_submitted_report(["Rev CP 1", "Rev CP 2"])
-		frappe.set_user("Administrator")
-		rep2.checkpoints[0].assessment = "Pass"
-		rep2.checkpoints[1].assessment = "Pass"
-		rep2.save()
-
-		frappe.set_user(self.reviewer)
-		res2 = review_api.finalize_review(rep2.name)
-		self.assertEqual(res2["review_result"], "Pass")
-
-	def test_reviewed_report_is_locked_against_native_edits(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		review_api.finalize_review(rep.name)
-
-		# Now report is Reviewed. Attempting to change assessment to Fail via doc.save must fail!
-		doc = frappe.get_doc("POS Monitoring Report", rep.name)
-		doc.checkpoints[0].assessment = "Fail"
-		doc.checkpoints[0].assessment_note = "Changed after review"
-		with self.assertRaises(frappe.PermissionError):
-			doc.save()
-
-		# Changing review_result directly must fail
-		doc.reload()
-		doc.review_result = "Fail"
-		with self.assertRaises(frappe.PermissionError):
-			doc.save()
-
-	def test_prevent_self_review(self):
-		# Create submitted report where submitter is self.reviewer
-		pdoc = frappe.get_doc("POS Profile", self.profile)
-		pdoc.append("applicable_for_users", {"user": self.reviewer})
-		pdoc.save(ignore_permissions=True)
-
-		rep = self._create_submitted_report(["Rev CP 1"], submitter=self.reviewer)
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.save()
-
-		frappe.set_user(self.reviewer)
-		with self.assertRaises(frappe.PermissionError):
-			review_api.finalize_review(rep.name)
+					doc.save()
 
 	def test_finalize_twice_second_fails(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.save()
+		rep = self._make_report(docstatus=1, status="Submitted")
+		self._label_all_rows(rep)
 
 		frappe.set_user(self.reviewer)
 		review_api.finalize_review(rep.name)
@@ -467,10 +733,8 @@ class TestOutletMonitoringReview(FrappeTestCase):
 			review_api.finalize_review(rep.name)
 
 	def test_finalize_review_takes_row_lock(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.save()
+		rep = self._make_report(docstatus=1, status="Submitted")
+		self._label_all_rows(rep)
 
 		seen = []
 		orig_get_value = frappe.db.get_value
@@ -496,10 +760,8 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		from werkzeug.test import EnvironBuilder
 		from werkzeug.wrappers import Request
 
-		rep = self._create_submitted_report(["Rev CP 1"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.save()
+		rep = self._make_report(docstatus=1, status="Submitted")
+		self._label_all_rows(rep)
 		frappe.db.commit()
 
 		site = frappe.local.site
@@ -555,10 +817,10 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		# DB state is clean
 		rep.reload()
 		self.assertEqual(rep.status, "Reviewed")
-		self.assertEqual(rep.review_result, "Pass")
+		self.assertEqual(rep.checkpoints[0].label, LABEL_A)
 
 	def test_cashier_cannot_finalize_or_waive(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
+		rep = self._make_report(docstatus=1, status="Submitted")
 		frappe.set_user(self.cashier)
 		with self.assertRaises(frappe.PermissionError):
 			review_api.finalize_review(rep.name)
@@ -567,7 +829,7 @@ class TestOutletMonitoringReview(FrappeTestCase):
 			review_api.waive(rep.name, "test reason")
 
 	def test_waive_requires_reason_and_state(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
+		rep = self._make_report(docstatus=1, status="Submitted")
 		frappe.set_user(self.reviewer)
 
 		# Empty reason -> ValidationError
@@ -590,7 +852,7 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		# Clear past notification logs for these users
 		frappe.db.delete("Notification Log", {"for_user": ["in", [self.reviewer, reviewer_other]]})
 
-		rep = self._create_submitted_report(["Rev CP 1"])
+		rep = self._create_submitted_report([REV_CP_1])
 		# On submission, review_api.on_report_submitted was called
 		# self.reviewer has permission for self.company -> should have log
 		logs_self = frappe.get_all("Notification Log", filters={"for_user": self.reviewer, "document_name": rep.name})
@@ -606,11 +868,11 @@ class TestOutletMonitoringReview(FrappeTestCase):
 
 		t = frappe.get_doc({
 			"doctype": "POS Monitoring Template",
-			"template_name": f"Tmpl-Day-{uuid.uuid4().hex[:6]}",
+			"template_name": f"{_RUN_ID} Tmpl-Day-{uuid.uuid4().hex[:6]}",
 			"cadence": "Per Hari",
 			"enabled": 1,
 			"due_time": "18:00:00",
-			"checkpoints": [{"checkpoint": "Rev CP 1", "required": 1}],
+			"checkpoints": [{"checkpoint": REV_CP_1, "required": 1}],
 			"companies": [{"company": self.company}],
 		}).insert(ignore_permissions=True)
 
@@ -630,7 +892,7 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		other_company = "_Test Company 1"
 		reviewer_other = _create_user(REVIEWER_ROLE, "rev-other-gal", company=other_company)
 
-		rep = self._create_submitted_report(["Rev CP 1"])
+		rep = self._create_submitted_report([REV_CP_1])
 
 		# reviewer_other has scope on other_company -> cannot see items of self.company
 		frappe.set_user(reviewer_other)
@@ -648,7 +910,7 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		self.assertIn(rep.name, [i["report"] for i in res_self["items"]])
 
 	def test_gallery_pagination_has_more(self):
-		self._create_submitted_report(["Rev CP 1"])
+		self._create_submitted_report([REV_CP_1])
 		frappe.set_user(self.reviewer)
 		# Request with page_length 10
 		res = review_api.get_gallery(start=0, page_length=10)
@@ -656,7 +918,7 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		self.assertIn("items", res)
 
 	def test_gallery_skips_purged(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
+		rep = self._create_submitted_report([REV_CP_1])
 		frappe.set_user("Administrator")
 		# Mark media as purged
 		frappe.db.set_value("POS Monitoring Report Media", rep.media[0].name, "purged", 1)
@@ -671,11 +933,11 @@ class TestOutletMonitoringReview(FrappeTestCase):
 
 		t = frappe.get_doc({
 			"doctype": "POS Monitoring Template",
-			"template_name": f"Tmpl-FakeMedia-{uuid.uuid4().hex[:6]}",
+			"template_name": f"{_RUN_ID} Tmpl-FakeMedia-{uuid.uuid4().hex[:6]}",
 			"cadence": "Per Shift",
 			"enabled": 1,
 			"due_minutes_after_open": 30,
-			"checkpoints": [{"checkpoint": "Rev CP 1", "required": 1}],
+			"checkpoints": [{"checkpoint": REV_CP_1, "required": 1}],
 			"companies": [{"company": self.company}],
 		}).insert(ignore_permissions=True)
 
@@ -714,40 +976,27 @@ class TestOutletMonitoringReview(FrappeTestCase):
 			draft_rep.save()
 
 	def test_native_save_submitted_report_cannot_mark_reviewed(self):
-		rev_as_submitter = self.reviewer
-		rep = self._create_submitted_report(["Rev CP 1"], submitter=rev_as_submitter)
+		rep = self._create_submitted_report([REV_CP_1], submitter=self.cashier)
 		self.assertEqual(rep.status, "Submitted")
 
-		frappe.set_user(rev_as_submitter)
-		rep.reload()
-		rep.status = "Reviewed"
-		rep.review_result = "Pass"
-		with self.assertRaises(frappe.PermissionError):
-			rep.save()
-
-		rep.reload()
-		self.assertEqual(rep.status, "Submitted")
-		self.assertFalse(rep.review_result)
-
-	def test_native_save_cannot_bypass_pending_checkpoints(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
+		# Native transition without labels must fail review completeness,
+		# not silently succeed.
 		frappe.set_user(self.reviewer)
 		rep.reload()
-		self.assertEqual(rep.checkpoints[0].assessment, "Pending")
 		rep.status = "Reviewed"
-		with self.assertRaises(frappe.PermissionError):
+		with self.assertRaises(frappe.ValidationError):
 			rep.save()
 
+		rep.reload()
+		self.assertEqual(rep.status, "Submitted")
+
 	def test_native_save_reviewed_report_cannot_modify_review_decision_or_metadata(self):
-		rep = self._create_submitted_report(["Rev CP 1"])
-		frappe.set_user("Administrator")
-		rep.checkpoints[0].assessment = "Pass"
-		rep.save()
+		rep = self._make_report(docstatus=1, status="Submitted")
+		self._label_all_rows(rep)
 
 		frappe.set_user(self.reviewer)
 		res = review_api.finalize_review(rep.name)
 		self.assertEqual(res["status"], "Reviewed")
-		self.assertEqual(res["review_result"], "Pass")
 		self.assertEqual(res["correction_requested"], 0)
 
 		# Reviewer attempts native save to change correction_requested
@@ -774,14 +1023,27 @@ class TestOutletMonitoringReview(FrappeTestCase):
 		s.allow_correction = 0
 		s.save(ignore_permissions=True)
 
-		rep = self._create_submitted_report(["Rev CP 1"])
+		rep = self._create_submitted_report([REV_CP_1])
 		rep.reload()
 		payload = rep.as_dict()
 		payload["status"] = "Reviewed"
 		payload["correction_requested"] = 1
-		payload["checkpoints"][0]["assessment"] = "Pass"
+		payload["checkpoints"][0]["label"] = LABEL_A
 
 		frappe.set_user(self.reviewer)
 		with self.assertRaises(frappe.ValidationError) as cm:
 			frappe.client.save(payload)
 		self.assertIn("Correction is not allowed by settings", str(cm.exception))
+
+	def test_prevent_self_review(self):
+		# Create submitted report where submitter is self.reviewer
+		pdoc = frappe.get_doc("POS Profile", self.profile)
+		pdoc.append("applicable_for_users", {"user": self.reviewer})
+		pdoc.save(ignore_permissions=True)
+
+		rep = self._create_submitted_report([REV_CP_1], submitter=self.reviewer)
+		self._label_all_rows(rep)
+
+		frappe.set_user(self.reviewer)
+		with self.assertRaises(frappe.PermissionError):
+			review_api.finalize_review(rep.name)

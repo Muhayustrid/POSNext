@@ -1,6 +1,8 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+import json
+
 import frappe
 from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import make_notification_logs
@@ -11,7 +13,7 @@ from frappe.utils import (
 
 from pos_next.hq_scope import resolve_company_scope
 from pos_next.realtime_events import publish_to_profile
-from pos_next.services.outlet_monitoring import get_settings
+from pos_next.services.outlet_monitoring import get_settings, label_color
 from pos_next.services.outlet_monitoring_access import (
 	REVIEWER_ROLE,
 	is_reviewer,
@@ -73,7 +75,7 @@ def on_report_submitted(doc):
 
 @frappe.whitelist(methods=["POST"])
 def finalize_review(name: str) -> dict:
-	"""Finalize review assessments for submitted report."""
+	"""Finalize review labels for submitted report."""
 	_assert_reviewer_or_manager()
 
 	current_status = frappe.db.get_value("POS Monitoring Report", name, "status", for_update=True)
@@ -88,21 +90,15 @@ def finalize_review(name: str) -> dict:
 	if s.prevent_self_review and doc.submitted_by == user and user != "Administrator":
 		frappe.throw(_("Self-review is not allowed"), frappe.PermissionError)
 
-	for cp in doc.checkpoints:
-		if not cp.assessment or cp.assessment == "Pending":
-			frappe.throw(_("All checkpoints must be assessed before finalizing"), frappe.ValidationError)
-		if cp.assessment == "N/A" and not s.allow_na:
-			frappe.throw(_("N/A assessment is not allowed"), frappe.ValidationError)
-		if cp.assessment == "Fail" and s.require_note_on_fail and not (cp.assessment_note or "").strip():
-			frappe.throw(_("Note is required for Failed checkpoints"), frappe.ValidationError)
-		if cp.assessment == "N/A" and s.require_note_on_na and not (cp.assessment_note or "").strip():
-			frappe.throw(_("Note is required for N/A checkpoints"), frappe.ValidationError)
+	from pos_next.pos_next.doctype.pos_monitoring_report.pos_monitoring_report import (
+		assert_review_complete,
+	)
+
+	assert_review_complete(doc)
 
 	if doc.correction_requested and not s.allow_correction:
 		frappe.throw(_("Correction is not allowed by settings"), frappe.ValidationError)
 
-	has_fail = any(cp.assessment == "Fail" for cp in doc.checkpoints)
-	doc.review_result = "Fail" if has_fail else "Pass"
 	doc.reviewed_by = user
 	doc.reviewed_at = now_datetime()
 	doc.status = "Reviewed"
@@ -116,7 +112,7 @@ def finalize_review(name: str) -> dict:
 				"type": "Mention",
 				"document_type": "POS Monitoring Report",
 				"document_name": doc.name,
-				"subject": _("POS Monitoring Report reviewed: {0} ({1})").format(doc.name, doc.review_result),
+				"subject": _("POS Monitoring Report reviewed: {0}").format(doc.name),
 			}, [doc.submitted_by])
 		except Exception:
 			pass
@@ -199,9 +195,9 @@ def get_gallery(filters=None, start: int = 0, page_length: int | None = None) ->
 		conditions.append("c.checkpoint = %(checkpoint)s")
 		values["checkpoint"] = filters["checkpoint"]
 
-	if filters.get("assessment"):
-		conditions.append("c.assessment = %(assessment)s")
-		values["assessment"] = filters["assessment"]
+	if filters.get("label"):
+		conditions.append("c.label = %(label)s")
+		values["label"] = filters["label"]
 
 	if filters.get("media_type"):
 		conditions.append("m.media_type = %(media_type)s")
@@ -216,7 +212,8 @@ def get_gallery(filters=None, start: int = 0, page_length: int | None = None) ->
 			m.file_url,
 			m.thumbnail_url,
 			m.media_type,
-			c.assessment,
+			c.label,
+			c.label_options,
 			c.checkpoint_name,
 			c.category,
 			r.company,
@@ -239,5 +236,50 @@ def get_gallery(filters=None, start: int = 0, page_length: int | None = None) ->
 	for item in items:
 		item["operational_date"] = str(item.get("operational_date") or "")
 		item["uploaded_at"] = str(item.get("uploaded_at") or "")
+		label_options = item.pop("label_options", None)
+		item["color"] = label_color(label_options, item.get("label"))
 
 	return {"items": items, "has_more": has_more}
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def label_options_query(doctype, txt, searchfield, start, page_len, filters=None):
+	"""Link query returning the row's own snapshot options (§5).
+
+	Standard Link search hides `disabled = 1` labels, but a disabled label in
+	a stored snapshot must stay selectable, so the Desk form reads options
+	from the snapshot instead of the master.
+	"""
+	_assert_reviewer_or_manager()
+
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else dict(filters or {})
+	report = filters.get("report")
+	row = filters.get("checkpoint_row")
+	if not report or not row or str(row).startswith("new-"):
+		return []
+	try:
+		doc = frappe.get_doc("POS Monitoring Report", report)
+	except frappe.DoesNotExistError:
+		return []
+	frappe.has_permission("POS Monitoring Report", doc=doc, ptype="write", throw=True)
+
+	cp_row = next((cp for cp in doc.checkpoints if cp.name == row), None)
+	if cp_row is None:
+		return []
+	try:
+		options = json.loads(cp_row.label_options or "[]")
+	except ValueError:
+		return []
+
+	txt = (txt or "").strip().lower()
+	out = []
+	for opt in options or []:
+		if not isinstance(opt, dict) or not opt.get("label"):
+			continue
+		if txt and txt not in str(opt["label"]).lower():
+			continue
+		out.append([opt["label"], opt.get("color")])
+	start = cint(start) or 0
+	page_len = cint(page_len) or 20
+	return out[start:start + page_len]

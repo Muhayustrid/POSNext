@@ -12,6 +12,9 @@
   "opening_shift",
   "operational_date",
   "due_at",
+  "opens_at",
+  "reference_doctype",
+  "reference_name",
   "submitted_at",
   "submitted_by",
   "timeliness",
@@ -20,7 +23,6 @@
   "revision",
   "correction_of",
   "review_section",
-  "review_result",
   "correction_requested",
   "review_note",
   "reviewed_by",
@@ -47,7 +49,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Cadence",
-   "options": "Per Shift\nPer Hari",
+   "options": "Per Shift\nPer Hari\nManual",
    "reqd": 1
   },
   {
@@ -87,6 +89,26 @@
    "in_list_view": 1,
    "label": "Due At",
    "reqd": 1
+  },
+  {
+   "fieldname": "opens_at",
+   "fieldtype": "Datetime",
+   "label": "Opens At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Select",
+   "label": "Reference DocType",
+   "options": "\nPurchase Receipt\nDelivery Note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype",
+   "read_only": 1
   },
   {
    "fieldname": "submitted_at",
@@ -140,15 +162,6 @@
    "fieldname": "review_section",
    "fieldtype": "Section Break",
    "label": "Review"
-  },
-  {
-   "allow_on_submit": 1,
-   "fieldname": "review_result",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Review Result",
-   "options": "\nPass\nFail",
-   "permlevel": 1
   },
   {
    "allow_on_submit": 1,

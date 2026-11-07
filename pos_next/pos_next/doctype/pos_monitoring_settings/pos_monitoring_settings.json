@@ -6,12 +6,7 @@
  "field_order": [
   "enabled",
   "assessment_section",
-  "default_pass_label",
-  "default_fail_label",
-  "default_na_label",
-  "allow_na",
-  "require_note_on_fail",
-  "require_note_on_na",
+  "default_labels",
   "prevent_self_review",
   "allow_correction",
   "max_revisions",
@@ -52,40 +47,10 @@
    "label": "Assessment"
   },
   {
-   "default": "Sesuai SOP",
-   "fieldname": "default_pass_label",
-   "fieldtype": "Data",
-   "label": "Default Pass Label"
-  },
-  {
-   "default": "Tidak Sesuai SOP",
-   "fieldname": "default_fail_label",
-   "fieldtype": "Data",
-   "label": "Default Fail Label"
-  },
-  {
-   "default": "Tidak Berlaku",
-   "fieldname": "default_na_label",
-   "fieldtype": "Data",
-   "label": "Default N/A Label"
-  },
-  {
-   "default": "1",
-   "fieldname": "allow_na",
-   "fieldtype": "Check",
-   "label": "Allow N/A"
-  },
-  {
-   "default": "1",
-   "fieldname": "require_note_on_fail",
-   "fieldtype": "Check",
-   "label": "Require Note on Fail"
-  },
-  {
-   "default": "1",
-   "fieldname": "require_note_on_na",
-   "fieldtype": "Check",
-   "label": "Require Note on N/A"
+   "fieldname": "default_labels",
+   "fieldtype": "Table",
+   "label": "Default Labels",
+   "options": "POS Monitoring Label Item"
   },
   {
    "default": "1",

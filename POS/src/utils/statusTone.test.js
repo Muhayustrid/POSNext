@@ -58,6 +58,28 @@ describe("statusTone", () => {
 		expect(cancelledPill).toContain("bg-gray-50 text-gray-600 ring-gray-500/20")
 	})
 
+	it("has yellow and purple tones for the label palette", () => {
+		expect(STATUS_TONES.yellow).toContain("bg-yellow-50")
+		expect(STATUS_TONES.yellow).toContain("text-yellow-700")
+		expect(STATUS_TONES.purple).toContain("bg-purple-50")
+		expect(STATUS_TONES.purple).toContain("text-purple-700")
+	})
+
+	it("maps monitoring label palette colors to tones", async () => {
+		const { labelTone, labelToneClass } = await import("./statusTone")
+		expect(labelTone("Green")).toBe("green")
+		expect(labelTone("Red")).toBe("red")
+		expect(labelTone("Yellow")).toBe("yellow")
+		expect(labelTone("Orange")).toBe("orange")
+		expect(labelTone("Blue")).toBe("blue")
+		expect(labelTone("Gray")).toBe("gray")
+		expect(labelTone("Purple")).toBe("purple")
+		expect(labelTone("Magenta")).toBe("gray")
+		expect(labelToneClass("Yellow")).toContain(STATUS_TONES.yellow)
+		expect(labelToneClass("Purple")).toContain(STATUS_TONES.purple)
+		expect(labelToneClass(null)).toContain(STATUS_TONES.gray)
+	})
+
 	it("derives tones from payload flags", () => {
 		// docstatus: 1 -> green
 		expect(statusTone("", { docstatus: 1 })).toContain(STATUS_TONES.green)

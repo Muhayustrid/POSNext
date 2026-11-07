@@ -10,6 +10,22 @@ from frappe.utils import cint, flt
 
 class POSMonitoringSettings(Document):
 	def validate(self):
+		seen = set()
+		for row in self.get("default_labels") or []:
+			if row.label in seen:
+				frappe.throw(_("Duplicate label {0} found").format(row.label), frappe.ValidationError)
+			seen.add(row.label)
+
+		if cint(self.enabled):
+			active = [r.label for r in self.get("default_labels") or []]
+			has_active = any(
+				not cint(frappe.db.get_value("POS Monitoring Label", name, "disabled")) for name in active
+			)
+			if not has_active:
+				frappe.throw(
+					_("Enabled requires at least one active default label"), frappe.ValidationError
+				)
+
 		max_bytes = get_max_file_size()
 		if flt(self.video_max_mb) * 1024 * 1024 > max_bytes:
 			limit_mb = round(max_bytes / (1024 * 1024), 2)

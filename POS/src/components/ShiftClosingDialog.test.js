@@ -585,6 +585,8 @@ describe("ShiftClosingDialog autoClose mode", () => {
 				"1 outlet monitoring report(s) not submitted for this shift",
 			)
 			expect(warning.text()).toContain("Daily Opening Check")
+			// Copy is neutral (covers Draft Manual per cadence) — no "Per Shift" mention
+			expect(warning.text()).not.toContain("Per Shift")
 		})
 
 		it("close button stays enabled while the warning is shown", async () => {

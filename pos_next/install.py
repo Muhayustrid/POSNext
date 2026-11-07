@@ -537,16 +537,19 @@ def ensure_site_indexes():
 	new-site --install-app marks every patch applied in the Patch Log WITHOUT
 	running it (frappe.installer install_app, set_as_patched=True), so the
 	v2_12_0 DDL patches (FULLTEXT ft_item_pos_search on tabItem, index on
-	tabPayment Entry Reference) never run on sites created that way and
-	MATCH()-based item search errors out. Called from after_install for fresh
-	sites and after_migrate to heal sites installed before this was known.
-	The patches are guarded and idempotent; one failing DDL is logged, never
-	raised, so install/migrate still completes.
+	tabPayment Entry Reference) and v2_36_0 sweep index patches never run on sites
+	created that way and MATCH()-based item search or sweep queries error out.
+	Called from after_install for fresh sites and after_migrate to heal sites
+	installed before this was known. Provisions all five site indexes (including
+	the three monitoring sweep indexes). The patches are guarded and idempotent;
+	one failing DDL is logged, never raised, so install/migrate still completes.
 	"""
 	from pos_next.patches.v2_12_0.add_item_pos_search_index import execute as add_item_index
 	from pos_next.patches.v2_12_0.add_payment_entry_reference_index import execute as add_per_index
+	from pos_next.patches.v2_36_0.outlet_monitoring_sweep_day_index import execute as add_sweep_day_index
+	from pos_next.patches.v2_36_0.outlet_monitoring_sweep_indexes import execute as add_sweep_indexes
 
-	for patch in (add_item_index, add_per_index):
+	for patch in (add_item_index, add_per_index, add_sweep_indexes, add_sweep_day_index):
 		try:
 			patch()
 		except Exception:

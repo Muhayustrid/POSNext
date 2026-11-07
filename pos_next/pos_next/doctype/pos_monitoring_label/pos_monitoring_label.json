@@ -1,0 +1,68 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:label_name",
+ "creation": "2026-11-06 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "label_name",
+  "color",
+  "disabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "label_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Label Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "Gray",
+   "fieldname": "color",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Color",
+   "options": "Green\nRed\nYellow\nOrange\nBlue\nGray\nPurple",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Disabled"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "POS Monitoring Label",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "POSNext Monitoring Reviewer",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "All"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

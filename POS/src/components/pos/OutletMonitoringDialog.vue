@@ -45,6 +45,23 @@
 
 				<!-- TASKS TAB -->
 				<div v-if="currentTab === 'tasks'" class="flex flex-col gap-3">
+					<!-- No server clock anchor: time-gated tasks stay locked
+					     rather than trusting the device clock. -->
+					<div
+						v-if="!store.loading && hasTimeGatedTasks && !clockAnchored"
+						data-testid="clock-unavailable"
+						class="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+					>
+						<span>{{ __("Server time unavailable, so timed reports are locked.") }}</span>
+						<button
+							type="button"
+							data-testid="clock-retry-btn"
+							class="shrink-0 min-h-[36px] px-3 rounded-md border border-amber-300 bg-white font-medium hover:bg-amber-100"
+							@click="store.refresh(props.posProfile)"
+						>
+							{{ __("Retry") }}
+						</button>
+					</div>
 					<div
 						v-if="store.loading"
 						class="py-12 text-center text-sm text-gray-500"
@@ -97,14 +114,101 @@
 							</div>
 						</div>
 
+						<span
+							v-if="isTaskLocked(task)"
+							data-testid="starts-at-label"
+							class="text-xs font-medium text-amber-700"
+						>
+							{{ __("Starts {0}", [formatOpensAt(task.opens_at)]) }}
+						</span>
 						<button
 							type="button"
 							data-testid="fill-report-btn"
-							class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg bg-blue-600 text-white font-medium text-sm hover:bg-blue-700 active:scale-95 transition-all shrink-0 inline-flex items-center justify-center gap-1.5 touch-manipulation"
+							:disabled="isTaskLocked(task)"
+							:title="isTaskLocked(task) ? __('Starts {0}', [formatOpensAt(task.opens_at)]) : undefined"
+							class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg bg-blue-600 text-white font-medium text-sm hover:bg-blue-700 active:scale-95 transition-all shrink-0 inline-flex items-center justify-center gap-1.5 touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
 							@click="openReport(task.name)"
 						>
 							<FeatherIcon name="edit-3" class="w-4 h-4" />
 							<span>{{ __("Fill Report") }}</span>
+						</button>
+					</div>
+				</div>
+
+				<!-- Manual cadence: start a report from a reference document -->
+				<div
+					v-if="manualTemplates.length > 0"
+					class="flex justify-center pt-1"
+				>
+					<button
+						type="button"
+						data-testid="start-manual-btn"
+						class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg border border-blue-600 text-blue-700 font-medium text-sm hover:bg-blue-50 active:scale-95 transition-all inline-flex items-center justify-center gap-1.5 touch-manipulation"
+						@click="manualFlow.step = 'template'"
+					>
+						<FeatherIcon name="plus-circle" class="w-4 h-4" />
+						<span>{{ __("Start Report") }}</span>
+					</button>
+				</div>
+
+				<!-- Template picker -->
+				<div
+					v-if="manualFlow.step !== 'closed'"
+					class="flex flex-col gap-2 p-4 rounded-xl border border-gray-200 bg-white shadow-sm"
+				>
+					<div
+						v-if="manualFlow.step === 'template'"
+						class="flex flex-col gap-2"
+					>
+						<p class="text-sm font-semibold text-gray-900">
+							{{ __("Choose a report type") }}
+						</p>
+						<button
+							v-for="tpl in manualTemplates"
+							:key="tpl.name"
+							type="button"
+							data-testid="manual-template-btn"
+							class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg border border-gray-200 text-gray-800 font-medium text-sm text-start hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation"
+							@click="pickManualTemplate(tpl)"
+						>
+							{{ tpl.template_name || tpl.name }}
+						</button>
+					</div>
+
+					<!-- Reference document picker -->
+					<div
+						v-if="manualFlow.step === 'document'"
+						class="flex flex-col gap-2"
+					>
+						<p class="text-sm font-semibold text-gray-900">
+							{{ manualFlow.template?.template_name || manualFlow.template?.name }}
+						</p>
+						<input
+							v-model="manualFlow.search"
+							type="search"
+							data-testid="candidate-search"
+							:placeholder="__('Search documents...')"
+							class="min-h-[44px] md:min-h-[40px] px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+							@input="onCandidateSearch"
+						/>
+						<p
+							v-if="!candidatesLoading && referenceCandidates.length === 0"
+							class="text-xs text-gray-500"
+						>
+							{{ __("No documents found") }}
+						</p>
+						<button
+							v-for="cand in referenceCandidates"
+							:key="`${cand.doctype}:${cand.name}`"
+							type="button"
+							data-testid="candidate-btn"
+							class="min-h-[44px] md:min-h-[40px] px-4 py-2 rounded-lg border border-gray-200 text-gray-800 text-sm text-start hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation flex flex-col"
+							@click="startManual(cand)"
+						>
+							<span class="font-semibold tabular-nums">{{ cand.name }}</span>
+							<span class="text-xs text-gray-500">
+								{{ cand.sender }} · {{ cand.posting_date }} · {{ __("Items: {0}", [cand.item_count]) }}
+							</span>
 						</button>
 					</div>
 				</div>
@@ -291,16 +395,53 @@
 									<span>{{ __("Evidence complete") }}</span>
 								</span>
 
-								<!-- Checkpoint assessment badge after review -->
+								<!-- Label picker while Draft (cashier proposes), badge after review -->
+								<div
+									v-if="activeReport?.status === 'Draft' && cp.cashier_can_label && cp.label_options?.length"
+									class="flex flex-wrap items-center gap-1.5"
+									role="group"
+									:aria-label="__('Propose a label')"
+								>
+									<button
+										v-for="opt in cp.label_options"
+										:key="opt.label"
+										type="button"
+										data-testid="label-chip"
+										:aria-pressed="cp.cashier_label === opt.label"
+										:class="['min-h-[44px] md:min-h-[40px] inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all touch-manipulation cursor-pointer', labelChipClass(opt.color, cp.cashier_label === opt.label)]"
+										@click="toggleCashierLabel(cp, opt)"
+									>
+										<FeatherIcon
+											v-if="cp.cashier_label === opt.label"
+											name="check"
+											class="w-3.5 h-3.5"
+										/>
+										<span>{{ opt.label }}</span>
+									</button>
+								</div>
+
+								<!-- Final label badge after review -->
 								<span
-									v-if="activeReport?.status === 'Reviewed' && cp.assessment"
-									data-testid="checkpoint-assessment-badge"
+									v-if="activeReport?.status === 'Reviewed' && cp.label"
+									data-testid="checkpoint-label-badge"
 									:class="[
 										STATUS_PILL_BASE,
-										getCheckpointAssessmentTone(cp.assessment),
+										labelToneClass(cp.label_color),
 									]"
 								>
-									<span>{{ getCheckpointAssessmentLabel(cp) }}</span>
+									<span>{{ cp.label }}</span>
+								</span>
+
+								<!-- Cashier proposal shown while awaiting review -->
+								<span
+									v-else-if="activeReport?.status === 'Submitted' && cp.cashier_label"
+									data-testid="checkpoint-cashier-label-badge"
+									:class="[
+										STATUS_PILL_BASE,
+										labelToneClass(cashierLabelColor(cp)),
+									]"
+								>
+									<span>{{ cp.cashier_label }}</span>
 								</span>
 							</div>
 						</div>
@@ -313,12 +454,7 @@
 						<div
 							v-if="activeReport?.status === 'Reviewed' && cp.assessment_note"
 							data-testid="checkpoint-assessment-note"
-							class="text-xs rounded-lg p-2.5 border mt-1"
-							:class="
-								cp.assessment === 'Fail'
-									? 'bg-red-50 text-red-700 border-red-200'
-									: 'bg-gray-50 text-gray-700 border-gray-200'
-							"
+							class="text-xs rounded-lg p-2.5 border mt-1 bg-gray-50 text-gray-700 border-gray-200"
 						>
 							<span class="font-medium text-gray-900">{{ __("Notes") }}: </span>
 							<span>{{ cp.assessment_note }}</span>
@@ -489,7 +625,13 @@ import {
 	removeOrphanFile,
 	uploadPrivate,
 } from "@/utils/outletMonitoringMedia"
-import { STATUS_PILL_BASE, STATUS_TONES } from "@/utils/statusTone"
+import {
+	STATUS_PILL_BASE,
+	STATUS_TONES,
+	labelToneClass,
+} from "@/utils/statusTone"
+import { useFormatters } from "@/composables/useFormatters"
+import { parseServerDatetime } from "@/utils/shiftSchedule"
 import { Button, FeatherIcon } from "frappe-ui"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
@@ -505,6 +647,12 @@ const emit = defineEmits(["update:modelValue", "update:show"])
 
 const store = useOutletMonitoringStore()
 const toast = useToast()
+const { formatTime } = useFormatters()
+const referenceCandidates = computed(() => store.referenceCandidates || [])
+const candidatesLoading = ref(false)
+const manualFlow = ref({ step: "closed", template: null, search: "" })
+const manualTemplates = computed(() => store.manualTemplates || [])
+const labelSaving = ref(false)
 
 const dialogShow = computed({
 	get: () => props.show || props.modelValue,
@@ -538,15 +686,24 @@ function onGlobalKeydown(e) {
 	}
 }
 
+let lockTickTimer = null
+
 onMounted(() => {
 	if (typeof window !== "undefined") {
 		window.addEventListener("keydown", onGlobalKeydown)
 	}
+	lockTickTimer = setInterval(() => {
+		nowTick.value = Date.now()
+	}, 30_000)
 })
 
 onBeforeUnmount(() => {
 	if (typeof window !== "undefined") {
 		window.removeEventListener("keydown", onGlobalKeydown)
+	}
+	if (lockTickTimer) {
+		clearInterval(lockTickTimer)
+		lockTickTimer = null
 	}
 })
 
@@ -555,7 +712,9 @@ watch(
 	(isOpen) => {
 		if (isOpen) {
 			currentView.value = "list"
+			manualFlow.value = { step: "closed", template: null, search: "" }
 			store.refresh(props.posProfile)
+			loadManualTemplates()
 			if (currentTab.value === "history") {
 				loadHistory()
 			}
@@ -594,7 +753,68 @@ async function loadHistory() {
 async function openReport(reportName) {
 	activeReportName.value = reportName
 	currentView.value = "doc"
+	manualFlow.value = { step: "closed", template: null, search: "" }
 	await loadReport(reportName)
+}
+
+async function loadManualTemplates() {
+	if (!props.posProfile) return
+	try {
+		await store.loadManualTemplates(props.posProfile)
+	} catch {
+		// Manual start is optional; tasks remain usable when it fails
+	}
+}
+
+async function pickManualTemplate(tpl) {
+	manualFlow.value.template = tpl
+	manualFlow.value.search = ""
+	manualFlow.value.step = "document"
+	candidatesLoading.value = true
+	try {
+		await store.loadReferenceCandidates(props.posProfile, tpl.name, null)
+	} catch (err) {
+		toast.showError(err?.message || __("Failed to load documents"))
+	} finally {
+		candidatesLoading.value = false
+	}
+}
+
+let candidateSearchTimer = null
+
+async function onCandidateSearch() {
+	if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+	candidateSearchTimer = setTimeout(async () => {
+		candidatesLoading.value = true
+		try {
+			await store.loadReferenceCandidates(
+				props.posProfile,
+				manualFlow.value.template?.name,
+				manualFlow.value.search || null,
+			)
+		} catch (err) {
+			toast.showError(err?.message || __("Failed to load documents"))
+		} finally {
+			candidatesLoading.value = false
+		}
+	}, 300)
+}
+
+async function startManual(cand) {
+	try {
+		const res = await store.startManualReport(
+			props.posProfile,
+			manualFlow.value.template?.name,
+			cand.doctype,
+			cand.name,
+		)
+		if (res?.name) {
+			manualFlow.value = { step: "closed", template: null, search: "" }
+			await openReport(res.name)
+		}
+	} catch (err) {
+		toast.showError(err?.message || __("Failed to start report"))
+	}
 }
 
 async function loadReport(reportName) {
@@ -747,9 +967,8 @@ function getReportStatusTone(rep) {
 function getHistoryLabel(item) {
 	if (item.status === "Submitted") return "Pending Review"
 	if (item.status === "Reviewed") {
-		if (item.review_result === "Pass") return "Compliant"
 		if (item.correction_requested) return "Needs Correction"
-		return "Non-Compliant"
+		return "Reviewed"
 	}
 	if (item.status === "Missed") return "Missed"
 	if (item.status === "Waived") return "Waived"
@@ -759,27 +978,86 @@ function getHistoryLabel(item) {
 function getHistoryTone(item) {
 	if (item.status === "Submitted") return STATUS_TONES.blue
 	if (item.status === "Reviewed") {
-		if (item.review_result === "Pass") return STATUS_TONES.green
 		if (item.correction_requested) return STATUS_TONES.amber
-		return STATUS_TONES.red
+		return STATUS_TONES.green
 	}
 	if (item.status === "Missed") return STATUS_TONES.red
 	if (item.status === "Waived") return STATUS_TONES.gray
 	return STATUS_TONES.orange
 }
 
-function getCheckpointAssessmentLabel(cp) {
-	if (cp.assessment === "Pass") return cp.pass_label || __("Pass")
-	if (cp.assessment === "Fail") return cp.fail_label || __("Fail")
-	if (cp.assessment === "N/A") return cp.na_label || __("N/A")
-	return cp.assessment || ""
+function labelChipClass(color, selected) {
+	const tone = labelToneClass(color)
+	return selected
+		? [tone, "ring-2", "ring-offset-1", "ring-gray-900"]
+		: [tone, "opacity-90", "hover:opacity-100", "hover:shadow-sm"]
 }
 
-function getCheckpointAssessmentTone(assessment) {
-	if (assessment === "Pass") return STATUS_TONES.green
-	if (assessment === "Fail") return STATUS_TONES.red
-	if (assessment === "N/A") return STATUS_TONES.gray
-	return STATUS_TONES.blue
+function cashierLabelColor(cp) {
+	const opt = (cp.label_options || []).find((o) => o.label === cp.cashier_label)
+	return opt?.color || null
+}
+
+async function toggleCashierLabel(cp, opt) {
+	if (labelSaving.value) return
+	const next = cp.cashier_label === opt.label ? null : opt.label
+	labelSaving.value = true
+	try {
+		const res = await call("pos_next.api.outlet_monitoring.set_cashier_label", {
+			report: activeReport.value.name,
+			checkpoint_row: cp.name,
+			label: next,
+		})
+		if (res) activeReport.value = res
+	} catch (err) {
+		toast.showError(err?.message || __("Failed to save label choice"))
+	} finally {
+		labelSaving.value = false
+	}
+}
+
+// Reactive tick so an open dialog unlocks at the opens_at boundary without
+// being reopened. 30s is fine for a minute-granularity window.
+const nowTick = ref(Date.now())
+
+function serverNow() {
+	// Site-local now: server_now from get_my_tasks + locally elapsed time, so
+	// a device in another timezone (or with a skewed clock) still compares
+	// like with like against the site-local opens_at string. Returns null
+	// when no valid anchor has arrived: the device clock is never a fallback,
+	// it is the thing an unanchored comparison gets wrong.
+	if (store.serverNowMs && store.receivedAtMs) {
+		return store.serverNowMs + Math.max(0, nowTick.value - store.receivedAtMs)
+	}
+	return null
+}
+
+const clockAnchored = computed(() =>
+	Boolean(store.serverNowMs && store.receivedAtMs),
+)
+const hasTimeGatedTasks = computed(() =>
+	store.tasks.some((task) => task?.opens_at),
+)
+
+function isTaskLocked(task) {
+	const opensAtMs = parseServerDatetime(task?.opens_at)
+	if (opensAtMs == null) return false
+	const now = serverNow()
+	// Fail closed: without a server anchor a time-gated task stays locked.
+	if (now == null) return true
+	return opensAtMs > now
+}
+
+function formatOpensAt(opensAt) {
+	if (!opensAt) return ""
+	// Backend sends "YYYY-MM-DD HH:MM:SS" (site timezone, no offset) — an
+	// unanchored Date parse is unreliable on Safari, so take the HH:MM part.
+	if (typeof opensAt === "string" && opensAt.includes(" ")) {
+		const timePart = opensAt.slice(opensAt.lastIndexOf(" ") + 1)
+		const [h, m] = timePart.split(":")
+		if (h !== undefined && m !== undefined) return `${h}:${m}`
+	}
+	return formatTime(opensAt)
 }
 
 defineExpose({

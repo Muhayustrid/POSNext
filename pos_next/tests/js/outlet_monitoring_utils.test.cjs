@@ -53,7 +53,8 @@ test("galleryCardHtml never emits <video> and escapes names", () => {
 		file_url: "/private/files/test.mp4",
 		thumbnail_url: null,
 		media_type: "Video",
-		assessment: "Pass",
+		label: "Sesuai SOP",
+		color: "Green",
 		checkpoint_name: "<script>alert('xss')</script>",
 		category: "Kebersihan & Kerapian",
 		company: "Roti & Kopi",
@@ -67,6 +68,8 @@ test("galleryCardHtml never emits <video> and escapes names", () => {
 	assert.equal(html.includes("<script>"), false, "checkpoint_name must be escaped");
 	assert.equal(html.includes("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"), true);
 	assert.equal(html.includes("Roti &amp; Kopi"), true, "company must be escaped");
+	assert.equal(html.includes("Sesuai SOP"), true, "label text must be shown");
+	assert.equal(html.includes("badge-green"), true, "badge class must follow snapshot color");
 });
 
 test("galleryCardHtml video uses play placeholder", () => {
@@ -76,7 +79,8 @@ test("galleryCardHtml video uses play placeholder", () => {
 		file_url: "/private/files/sample.mp4",
 		thumbnail_url: null,
 		media_type: "Video",
-		assessment: "Pending",
+		label: null,
+		color: null,
 		checkpoint_name: "Grooming Kasir",
 		company: "Ropi Pusat",
 		operational_date: "2026-11-05",
@@ -84,6 +88,8 @@ test("galleryCardHtml video uses play placeholder", () => {
 	const html = utils.galleryCardHtml(videoItem);
 	assert.equal(html.includes("<svg"), true, "video card must include SVG play placeholder");
 	assert.equal(html.includes("play-icon") || html.includes("video-placeholder"), true);
+	assert.equal(html.includes("Not assessed"), true, "missing label shows Not assessed");
+	assert.equal(html.includes("badge-gray"), true, "missing label shows gray badge");
 
 	const photoItem = {
 		report: "OMR-261105-0003",
@@ -91,7 +97,8 @@ test("galleryCardHtml video uses play placeholder", () => {
 		file_url: "/private/files/sample.jpg",
 		thumbnail_url: "/private/files/sample-thumb.jpg",
 		media_type: "Photo",
-		assessment: "Pass",
+		label: "Sesuai SOP",
+		color: "Green",
 		checkpoint_name: "Display Roti",
 		company: "Ropi Pusat",
 		operational_date: "2026-11-05",
@@ -131,14 +138,16 @@ test("mediaPreviewHtml purged", () => {
 	assert.equal(html.includes("<video controls preload=\"metadata\""), true, "Active video must render video controls");
 });
 
-test("assessmentTone maps values accurately", () => {
-	assert.equal(utils.assessmentTone("Pass"), "green");
-	assert.equal(utils.assessmentTone("Sesuai SOP"), "green");
-	assert.equal(utils.assessmentTone("Fail"), "red");
-	assert.equal(utils.assessmentTone("Tidak Sesuai SOP"), "red");
-	assert.equal(utils.assessmentTone("N/A"), "gray");
-	assert.equal(utils.assessmentTone("Tidak Berlaku"), "gray");
-	assert.equal(utils.assessmentTone("Pending"), "orange");
-	assert.equal(utils.assessmentTone(null), "gray");
-	assert.equal(utils.assessmentTone(""), "gray");
+test("labelBadgeClass maps the seven palette colors", () => {
+	assert.equal(utils.labelBadgeClass("Green"), "badge-green");
+	assert.equal(utils.labelBadgeClass("Red"), "badge-red");
+	assert.equal(utils.labelBadgeClass("Yellow"), "badge-yellow");
+	assert.equal(utils.labelBadgeClass("Orange"), "badge-orange");
+	assert.equal(utils.labelBadgeClass("Blue"), "badge-blue");
+	assert.equal(utils.labelBadgeClass("Gray"), "badge-gray");
+	assert.equal(utils.labelBadgeClass("Purple"), "badge-purple");
+	assert.equal(utils.labelBadgeClass("green"), "badge-green");
+	assert.equal(utils.labelBadgeClass(null), "badge-gray");
+	assert.equal(utils.labelBadgeClass(""), "badge-gray");
+	assert.equal(utils.labelBadgeClass("Unknown"), "badge-gray");
 });

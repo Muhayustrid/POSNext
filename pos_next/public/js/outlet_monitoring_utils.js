@@ -87,16 +87,18 @@
 	}
 
 	/**
-	 * Maps an assessment or status label to a UI tone: green | red | gray | orange.
+	 * Maps a label snapshot color to a gallery badge class.
+	 * Null/unknown colors fall back to the gray "Not assessed" badge.
+	 * shortcut: tone comes straight from the label palette color, upgrade to
+	 * per-label custom hues only if HQ asks for non-palette colors.
 	 */
-	function assessmentTone(value) {
-		if (!value) return "gray";
-		const v = String(value).trim().toLowerCase();
-		if (v === "pass" || v === "sesuai sop") return "green";
-		if (v === "fail" || v === "tidak sesuai sop") return "red";
-		if (v === "pending" || v === "needs correction" || v === "perlu perbaikan" || v === "late") return "orange";
-		if (v === "n/a" || v === "tidak berlaku" || v === "waived" || v === "dikecualikan" || v === "missed" || v === "terlewat") return "gray";
-		return "gray";
+	function labelBadgeClass(color) {
+		if (!color) return "badge-gray";
+		const v = String(color).trim().toLowerCase();
+		if (["green", "red", "yellow", "orange", "blue", "gray", "purple"].includes(v)) {
+			return `badge-${v}`;
+		}
+		return "badge-gray";
 	}
 
 	/**
@@ -114,8 +116,14 @@
 		const uploadedAt = escapeHtml(item.uploaded_at || "");
 		const submittedBy = escapeHtml(item.submitted_by || "");
 		const category = escapeHtml(item.category || "");
-		const assessment = escapeHtml(item.assessment || "Pending");
-		const tone = assessmentTone(item.assessment);
+		// Label text and badge color come from the server-resolved snapshot
+		// (label/color); items without a label show a gray "Not assessed" badge.
+		const labelText = item.label
+			? escapeHtml(item.label)
+			: typeof __ === "function"
+				? __("Not assessed")
+				: "Not assessed";
+		const badgeClass = labelBadgeClass(item.color);
 		const isVideo = String(item.media_type || "").toLowerCase() === "video";
 
 		let mediaHtml = "";
@@ -146,7 +154,7 @@
 			<div class="outlet-gallery-card" data-report="${report}" data-media-row="${mediaRow}">
 				<div class="gallery-card-media">
 					${mediaHtml}
-					<span class="gallery-card-badge badge-${tone}">${assessment}</span>
+					<span class="gallery-card-badge ${badgeClass}">${labelText}</span>
 				</div>
 				<div class="gallery-card-body">
 					<div class="gallery-card-title" title="${checkpointName}">${checkpointName}</div>
@@ -209,7 +217,7 @@
 		parseDate,
 		formatDate,
 		resolvePeriod,
-		assessmentTone,
+		labelBadgeClass,
 		galleryCardHtml,
 		mediaPreviewHtml,
 	};
